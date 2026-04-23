@@ -96,6 +96,18 @@
     {
       "question": "Can I call `fgets` on files opened for writing only?",
       "answer": "No. The file must be opened with read permission (for example `'r'`, `'r+'`, or `'w+'`). Calling `fgets` on a write-only identifier raises an error."
+    },
+    {
+      "question": "Can `fgets` read from standard input with `fgets(0)`?",
+      "answer": "No. MATLAB disallows `fgets(0)` for the interactive stdin stream and RunMat follows the same convention. Use `input('prompt: ', 's')` for interactive prompts, or read a real file identifier returned by `fopen`."
+    },
+    {
+      "question": "How do I read a whole file line-by-line with `fgets`?",
+      "answer": "Open the file, loop while the return value is not `-1`, and close the handle when you are done. Pair the call with `feof` or compare against `-1` directly:\n\n```matlab\nfid = fopen('data.txt', 'r');\nwhile ~feof(fid)\n    line = fgets(fid);\n    if line == -1, break; end\n    fprintf('%s', line);\nend\nfclose(fid);\n```"
+    },
+    {
+      "question": "How do I reliably detect end-of-file with `fgets`?",
+      "answer": "Compare the return value to `-1` (`if line == -1`) or query `feof(fid)` before the next read. Do not use `ischar(line)`, because MATLAB's implicit numeric-to-char rules can report `true` for the sentinel value on some inputs."
     }
   ],
   "links": [
@@ -139,6 +151,18 @@
   "source": {
     "label": "crates/runmat-runtime/src/builtins/io/filetext/fgets.rs",
     "url": "crates/runmat-runtime/src/builtins/io/filetext/fgets.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "line = fgets(fileID)\nline = fgets(fileID, nchar)\n[line, ltout] = fgets(___)"
+    },
+    "points": [
+      "`fileID` is a file handle returned by `fopen`. The file must be opened with read permission (`'r'`, `'r+'`, `'w+'`, or `'a+'`).",
+      "`nchar` is an optional positive integer that caps the read at `nchar - 1` characters. The call still stops early when a newline is encountered first.",
+      "`line` is a character row vector **including** any trailing newline (`\\n` or `\\r\\n`). When the file position is already at end-of-file, `fgets` returns the numeric sentinel `-1`.",
+      "The optional second output `ltout` reports the line terminator as a row of numeric codes (`10` for `\\n`, `[13 10]` for `\\r\\n`, `[]` when the line has no terminator, and `-1` at end-of-file)."
+    ]
   },
   "gpu_behavior": [
     "`fgets` is a host-only operation. File identifiers live in the host registry created by `fopen`, so arguments that arrive as GPU-resident scalars are gathered back to the CPU before the read occurs. The returned line and optional terminator vector are regular host values; no GPU residency is tracked."

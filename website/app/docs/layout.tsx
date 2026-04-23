@@ -8,7 +8,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background overflow-visible">
-      <div className="container mx-auto px-4 md:px-6 py-8 overflow-visible">
+      <div className="container mx-auto py-8 overflow-visible">
         <ConditionalLayout>{children}</ConditionalLayout>
       </div>
     </div>
@@ -30,7 +30,7 @@ function ConditionalLayout({ children }: { children: React.ReactNode }) {
       <Suspense fallback={<div className="hidden lg:block" />}> 
         <Sidebar />
       </Suspense>
-      <main className="min-w-0 lg:pl-14 lg:border-l lg:border-border/60 overflow-visible">{children}</main>
+      <main className="min-w-0 lg:pl-8 lg:border-l lg:border-border/60 overflow-visible">{children}</main>
     </div>
   );
 }

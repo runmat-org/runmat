@@ -170,6 +170,13 @@ const nextConfig: NextConfig = {
         destination: '/docs/reference/builtins/:slug',
         permanent: true,
       },
+      // `profile` has no builtin JSON page yet; send to the function index
+      // instead of the catch-all below (which would 308 into a 404).
+      {
+        source: '/docs/reference/diagnostics/profile',
+        destination: '/docs/matlab-function-reference',
+        permanent: true,
+      },
       {
         source: '/docs/reference/diagnostics/:slug',
         destination: '/docs/reference/builtins/:slug',

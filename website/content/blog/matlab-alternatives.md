@@ -11,7 +11,6 @@ authors:
     url: "https://x.com/nabeelallana"
 slug: "free-matlab-alternatives"
 tags: ["MATLAB", "RunMat", "Octave", "Julia", "Python", "scientific computing", "open source"]
-collections: ["guides"]
 keywords: "Free MATLAB alternatives, free MATLAB, Octave comparison, Julia vs MATLAB, Python vs MATLAB, RunMat"
 excerpt: "We compare four leading MATLAB alternatives (RunMat, Octave, Julia, and Python) focusing on speed, compatibility, and real engineering workflows."
 image: "https://web.runmatstatic.com/free-matlab-alternatives-2026.png"
@@ -476,6 +475,14 @@ plot(t, x);
 - **GNU Octave** also prioritizes source compatibility, and most MATLAB scripts run with little or no modification. Its syntax and functions closely match MATLAB's, though some newer features or specialized toolboxes may be missing or require Octave Forge packages. Octave's `classdef` support is partial: events, metaclass queries, and some handle-class features are absent or incomplete, which matters for codebases that rely on MATLAB's OOP model. Octave handles most procedural engineering scripts reliably and can read/write .mat files, making it a practical choice for reusing MATLAB code. The main differences appear at the edges: specialized toolboxes and performance at scale.
 - **Python** cannot run MATLAB code directly. Tools like [SMOP](https://github.com/victorlei/smop) can auto-translate .m files, but results often require manual cleanup. Large codebases usually need to be rewritten by hand, which takes months for a non-trivial codebase. Many teams instead maintain MATLAB for legacy projects and start new development in Python. The upside is flexibility. Once translated, Python code benefits from its large library collection, but direct reuse of MATLAB code is not realistic.
 - **Julia**, like Python, requires rewriting MATLAB code. The transition is somewhat easier because Julia shares MATLAB’s 1-based indexing, column-major arrays, and many familiar function names. Numeric code often translates line by line, though plotting, specialized toolboxes, or GUI code require Julia equivalents. Rewriting in Julia can pay off with higher performance and cleaner code design, but reuse is limited to manual porting.
+
+## Can I trust the numerics?
+
+Bit-exact parity with MATLAB isn't a meaningful goal for any runtime. IEEE 754 arithmetic produces different least-significant bits depending on operation ordering, fused multiply-adds, SIMD width, and compiler flags — two MATLAB installs on different CPUs already disagree on the last bit. The useful question is whether you can audit the validation.
+
+MATLAB is a closed binary: the evidence chain stops at the vendor. NumPy/SciPy and Octave are open source and document their dependencies, but neither publishes a consolidated per-builtin coverage table. Julia is open source with strong test coverage in its standard library, but documenting *every* numerical backend is left to package authors.
+
+RunMat publishes a single [Correctness & Trust](/docs/correctness) page listing every numerical builtin, its implementation (external Rust crate, LAPACK routine, or in-repo solver), a live GitHub link to the parity test, and the enforced tolerance. Every GPU-accelerated path is tolerance-checked against its CPU reference; every parity test ships in the repository and runs with standard `cargo test` — no MATLAB license, no external data files. If a dependency version bump breaks a tolerance in CI, the bump doesn't ship.
 
 ## Version Control and Reproducibility
 

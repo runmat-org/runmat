@@ -19,7 +19,7 @@ export function CLITabContent() {
           <CardTitle className="text-lg font-semibold">Install</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <OSInstallCommand />
+          <OSInstallCommand variant="compact" />
           <Button asChild size="sm" variant="outline">
             <Link href="/download">
               <Download className="mr-2 h-4 w-4" />

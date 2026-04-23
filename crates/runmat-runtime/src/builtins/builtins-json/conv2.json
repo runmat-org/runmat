@@ -100,6 +100,18 @@
     {
       "question": "Will the result stay on the GPU?",
       "answer": "If the active provider exposes the `conv2d` hook the result stays device-resident. Otherwise RunMat falls back to the CPU path and returns a host tensor; this fallback is documented so providers can add native kernels without breaking compatibility."
+    },
+    {
+      "question": "What does `conv2` actually compute?",
+      "answer": "— Two-dimensional convolution. For every output pixel, `conv2` flips the kernel `B` across both axes and sums the element-wise product of `B` with the corresponding neighbourhood of `A`. If you want correlation (no flip), use `filter2` instead."
+    },
+    {
+      "question": "When is the separable form `conv2(u, v, A)` faster than `conv2(A, B)`?",
+      "answer": "— Whenever the kernel is rank-1, i.e. `B = u * v'` for a column vector `u` and a row vector `v`. The separable form runs a 1-D column pass followed by a 1-D row pass, costing roughly `O(n*(m+k))` operations instead of `O(n*m*k)` for the full 2-D kernel — a dramatic win for Gaussians, box filters, and Sobel components."
+    },
+    {
+      "question": "Should I use `conv2`, `filter2`, or `imfilter`?",
+      "answer": "— Use `conv2` for true convolution (the kernel is flipped); use `filter2` for correlation with the same kernel (no flip); use `imfilter` when you need the Image Processing Toolbox's extended boundary handling (`'replicate'`, `'symmetric'`, `'circular'`). All three produce the same result when the kernel is symmetric."
     }
   ],
   "links": [
@@ -138,5 +150,29 @@
   },
   "gpu_behavior": [
     "RunMat Accelerate keeps tensors on the GPU when the active provider implements a `conv2d` hook (the in-process provider uses the host implementation and returns a GPU handle; the WGPU backend will adopt a native kernel). When the hook is unavailable, RunMat gathers GPU inputs to the host, performs the convolution on the CPU, and returns a host tensor. Documentation and the GPU metadata make this fallback explicit so providers can add native implementations without changing this builtin."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "C = conv2(A, B)\nC = conv2(u, v, A)\nC = conv2(___, shape)"
+    },
+    "points": [
+      "`A` is the 2-D input matrix (real, complex, or logical; logicals are promoted to double).",
+      "`B` is the 2-D convolution kernel. It is flipped along both axes before the sum-of-products, which is what makes the operation true convolution rather than correlation.",
+      "`conv2(u, v, A)` is the separable form: `u` is a column vector applied down the rows of `A` and `v` is a row vector applied across the columns. This is equivalent to `conv2(u(:) * v(:).', A)` but runs as two 1-D passes, which is much faster whenever the effective kernel `u*v'` is rank-1 (box filters, Gaussians, Sobel components).",
+      "`shape` selects the output region: `'full'` (default) returns an array of size `size(A) + size(B) - 1`; `'same'` slices the central portion so the output matches `size(A)`; `'valid'` returns only the fully-overlapping region of size `size(A) - size(B) + 1` (empty when `B` is larger than `A` along any dimension)."
+    ]
+  },
+  "validation": {
+    "summary": "`conv2` uses an in-repo implementation for both the direct (`conv2(A, B)`) and separable (`conv2(u, v, A)`) forms. The module-level tests cover `'full'`, `'same'`, and `'valid'` shapes against reference outputs. The GPU path currently defers to the CPU implementation via the in-process provider and returns a GPU handle; a native WGPU `conv2d` kernel is tracked as follow-up.",
+    "implementation": {
+      "label": "crates/runmat-runtime/src/builtins/math/signal/conv2.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2.rs"
+    },
+    "parity_test": {
+      "label": "conv2 unit tests",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2.rs"
+    },
+    "tolerance": "1e-9 (f64), 1e-3 (f32)"
+  }
 }

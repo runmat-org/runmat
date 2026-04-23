@@ -100,6 +100,18 @@
     {
       "question": "Can `log1p` participate in fusion?",
       "answer": "Yes. The fusion planner recognizes `log1p` as an element-wise op. Providers that support fused kernels can materialize `log(1 + x)` directly in generated WGSL."
+    },
+    {
+      "question": "What's the inverse of `log1p`?",
+      "answer": "— Use `expm1(y)`, which computes `exp(y) - 1` accurately for small `y`. Together `log1p` and `expm1` are the numerically-stable pair for working with quantities near zero: `expm1(log1p(x)) == x` up to floating-point rounding."
+    },
+    {
+      "question": "What are typical applications of `log1p`?",
+      "answer": "— Anywhere you evaluate `log(1 + x)` for small `x`: compounding tiny financial returns (`log1p(r)` ≈ `r` but exact), log-probabilities that bump away from 1, physics corrections where `x` is a perturbation, entropy and softplus gradients, and computing `log(1 - p)` as `log1p(-p)` for `p` near zero."
+    },
+    {
+      "question": "How much more accurate is `log1p(x)` than `log(1 + x)` for tiny `x`?",
+      "answer": "— For `x = 1e-15`, `log(1 + x)` returns roughly `1.11e-16` (pure rounding noise from forming `1 + x`), while `log1p(x)` returns `1e-15` correctly. The relative error of `log(1 + x)` grows without bound as `x -> 0`; `log1p` stays accurate to the last bit."
     }
   ],
   "links": [
@@ -219,5 +231,16 @@
   "gpu_residency": "```matlab:runnable\nG = gpuArray(linspace(-0.5, 0.5, 5));\nout = log1p(G);\nrealResult = gather(out);\n```\n\nExpected output:\n\n```matlab\nrealResult = [-0.6931 -0.2877 0 0.2231 0.4055];\n```",
   "gpu_behavior": [
     "RunMat Accelerate keeps tensors resident on the GPU whenever the provider exposes the `unary_log1p` hook together with `reduce_min`. The runtime uses the device-side minimum to ensure that `1 + X` stays non-negative; when complex outputs are required or either hook is missing, RunMat automatically gathers the tensor, computes on the CPU using double precision, and returns the result with the expected MATLAB semantics."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "Y = log1p(X)"
+    },
+    "points": [
+      "`X` is a numeric array of any shape — scalars, vectors, matrices, or N-D tensors. Real and complex inputs are both supported; logical and character inputs are promoted to double before evaluation.",
+      "`Y` has the same shape as `X` and equals `log(1 + X)` computed element-wise with high accuracy for small `|X|`. For `X = -1` the result is `-Inf`; for real `X < -1` the output promotes to complex (principal branch).",
+      "Use `log1p` instead of `log(1 + x)` whenever `x` can be close to zero. Forming `1 + x` in double precision drops bits of `x` (catastrophic cancellation), so `log(1 + 1e-15)` is wrong by nearly 10%, while `log1p(1e-15)` is correct to the last bit."
+    ]
+  }
 }

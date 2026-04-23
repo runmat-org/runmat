@@ -100,6 +100,18 @@
     {
       "question": "What happens with non-numeric inputs?",
       "answer": "Passing structs, objects, handles, or text raises a MATLAB-compatible error. Convert the data to numeric form first or use `string` for rich text conversions."
+    },
+    {
+      "question": "What is `num2str` in MATLAB?",
+      "answer": "— `num2str(A)` converts a numeric value `A` (scalar, vector, or matrix) into a MATLAB `char` array so you can display, concatenate, or log it as text. Each row of `A` becomes one row of text, and values are rendered in MATLAB's short `g` style by default. RunMat implements the same signature so MATLAB code that builds labels with `num2str` runs unchanged."
+    },
+    {
+      "question": "How do I control the format or precision of `num2str`?",
+      "answer": "— Pass either a precision (the number of significant digits) or an explicit printf-style format string as the second argument. For example, `num2str(pi, 8)` returns `'3.1415927'`, `num2str(pi, '%.3f')` returns `'3.142'`, and `num2str(1234.5, '%10.2e')` right-aligns the value in scientific notation. Width and the `+`, `-`, and `0` flags are all honoured."
+    },
+    {
+      "question": "How do I convert a number to a string with `num2str`?",
+      "answer": "— Call `s = num2str(A)`. The result is a `char` array (MATLAB's classical string). If you need a modern `string` scalar, wrap the result with `string(...)`; for a round-trippable MATLAB literal, use `mat2str`; for full printf-style control over multiple variables, reach for `sprintf`."
     }
   ],
   "links": [
@@ -154,5 +166,17 @@
   },
   "gpu_behavior": [
     "When the input resides on the GPU, RunMat gathers the data back to host memory using the active RunMat Accelerate provider before applying the formatting logic. The formatted character array always lives on the CPU, so providers do not need to implement specialised kernels."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "s = num2str(A)\ns = num2str(A, precision)\ns = num2str(A, format)"
+    },
+    "points": [
+      "`A` is the numeric input: scalar, vector, or matrix. Complex and logical values are accepted; each row of `A` becomes one row of output text.",
+      "`precision` is an integer giving the maximum number of significant digits (default `5`, matching MATLAB's short format). Values between `0` and `52` are accepted. Use it when you want concise output without hand-writing a printf string.",
+      "`format` is a single-value printf-style format specifier such as `'%10.2f'`, `'%.3e'`, or `'%.5g'`. Width and the `+`, `-`, and `0` flags are supported; more elaborate formats belong to `sprintf`.",
+      "Returns `s`, a MATLAB `char` array aligned so that every row is the same width. Wrap the result with `string(s)` if you need a modern `string` scalar instead."
+    ]
+  }
 }

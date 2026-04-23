@@ -129,8 +129,8 @@ const faqItems: { question: string; answer: string; answerContent?: React.ReactN
   {
     question: "Does RunMat support plotting?",
     answer:
-      "Yes. RunMat supports 17+ interactive plot types including plot, scatter, hist, surf, contour, bar, pie, stem, quiver, area, and errorbar, all GPU-accelerated. 3D surface plots can be rotated, zoomed, and panned directly in the browser.",
-    answerContent: <>Yes. RunMat supports 17+ interactive plot types including plot, scatter, hist, surf, contour, bar, pie, stem, quiver, area, and errorbar, all GPU-accelerated. 3D surface plots can be rotated, zoomed, and panned directly in the browser. See the <Link href="/blog/matlab-plotting-guide" className="underline hover:text-foreground">plotting guide</Link> for runnable examples.</>,
+      "Yes. RunMat supports 20+ interactive plot types including plot, scatter, hist, histogram, surf, mesh, contour, contourf, imagesc, bar, pie, stem, quiver, area, errorbar, plot3, semilogx, semilogy, and loglog, all GPU-accelerated. 3D surface plots can be rotated, zoomed, and panned directly in the browser.",
+    answerContent: <>Yes. RunMat supports 20+ interactive plot types including plot, scatter, hist, histogram, surf, mesh, contour, contourf, imagesc, bar, pie, stem, quiver, area, errorbar, plot3, semilogx, semilogy, and loglog, all GPU-accelerated. 3D surface plots can be rotated, zoomed, and panned directly in the browser. See the <Link href="/blog/matlab-plotting-guide" className="underline hover:text-foreground">plotting guide</Link> for runnable examples.</>,
   },
 ];
 
@@ -178,7 +178,7 @@ const jsonLd = {
         "Execute MATLAB-syntax code instantly in your browser. Open-source runtime with automatic GPU acceleration. No install required—start coding now.",
       inLanguage: "en",
       datePublished: "2026-02-03T00:00:00Z",
-      dateModified: "2026-03-05T00:00:00Z",
+      dateModified: "2026-04-21T00:00:00Z",
       isPartOf: { "@id": "https://runmat.com/#website" },
       breadcrumb: { "@id": "https://runmat.com/matlab-online#breadcrumb" },
       author: { "@id": "https://runmat.com/#organization" },
@@ -440,6 +440,7 @@ export default function MatlabOnlinePage() {
                 <p className="text-[0.938rem] text-foreground mt-1">
                   Metal on Mac, Vulkan on Linux, DirectX 12 on Windows. WebGPU in the browser. No CUDA dependency.
                 </p>
+                <Link href="/blog/how-to-use-gpu-in-matlab" className="text-xs text-muted-foreground hover:text-foreground underline mt-2 inline-block">Learn more</Link>
               </div>
               <div className="rounded-lg border border-border bg-muted/40 p-6">
                 <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
@@ -581,26 +582,31 @@ export default function MatlabOnlinePage() {
 
       {/* Benchmarks */}
       <section className="w-full py-16 md:py-24 lg:py-32">
-        <div className="container mx-auto px-4 md:px-6 lg:px-8">
+        <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">The fastest runtime for your math</h2>
-            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              RunMat fuses sequential operations into fewer GPU steps and keeps arrays on-device between steps. Less memory traffic, fewer kernel launches, faster scripts.
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+              The fastest runtime for your math
+            </h2>
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-7">
+              RunMat runs math faster because of how the runtime is engineered. Fusion merges sequential operations into fewer GPU steps; residency keeps your arrays on-device between steps. That means less memory traffic, fewer program launches, and faster scripts.
             </p>
           </div>
-          <div className="mx-auto max-w-3xl mb-6">
+
+          <div className="mx-auto max-w-3xl mb-8">
             <BenchmarkShowcaseBlock />
           </div>
-          <p className="mx-auto max-w-3xl text-sm text-muted-foreground text-center">
-            Times shown are CLI results. The same benchmarks run in the sandbox; browser GPU throttling affects absolute times. No MATLAB comparison per MathWorks&apos; terms.
-          </p>
+
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
             <Link href="/docs/accelerate/fusion-intro" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               How fusion works
             </Link>
-            <span className="hidden sm:inline text-foreground/50">&middot;</span>
+            <span className="hidden sm:inline text-foreground/50">•</span>
             <Link href="/benchmarks" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
-              All benchmarks
+              See the benchmarks
+            </Link>
+            <span className="hidden sm:inline text-foreground/50">•</span>
+            <Link href="/docs/correctness" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
+              How GPU results are validated
             </Link>
           </div>
         </div>
@@ -800,11 +806,11 @@ export default function MatlabOnlinePage() {
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-600 dark:text-green-400">•</span>
-                  <p>300+ built-in functions</p>
+                  <p>400+ built-in functions</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-600 dark:text-green-400">•</span>
-                  <p>17+ plot types (plot, scatter, surf, contour, bar, pie, stem, quiver, and more) with GPU acceleration, subplots, figure handles, and interactive 3D camera</p>
+                  <p>20+ plot types (plot, scatter, surf, mesh, contour, contourf, imagesc, bar, pie, stem, quiver, area, errorbar, plot3, semilogx/semilogy/loglog, and more) with GPU acceleration, subplots, figure handles, and interactive 3D camera</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-600 dark:text-green-400">•</span>
@@ -875,6 +881,14 @@ export default function MatlabOnlinePage() {
             . For workflow guides, browse{" "}
             <Link href="/resources" className="underline">
               resources
+            </Link>{" "}
+            or read our deep dives on{" "}
+            <Link href="/blog/how-to-use-gpu-in-matlab" className="underline">
+              GPU acceleration
+            </Link>{" "}
+            and the{" "}
+            <Link href="/blog/matlab-fft-guide" className="underline">
+              FFT family in RunMat
             </Link>
             .
           </p>

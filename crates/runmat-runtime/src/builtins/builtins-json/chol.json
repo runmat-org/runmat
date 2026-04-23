@@ -111,6 +111,14 @@
     {
       "question": "How should I choose between `chol` and `lu`/`qr`?",
       "answer": "Use `chol` when the matrix is Hermitian positive definite—its triangular factors are cheaper to compute and exploit symmetry. Use `lu` or `qr` for more general matrices."
+    },
+    {
+      "question": "What does `chol` compute?",
+      "answer": "— The Cholesky factorization of a Hermitian positive-definite matrix `A`: a triangular factor whose product with its conjugate transpose reconstructs `A`. The default form returns an upper-triangular `R` with `R' * R = A`; the `'lower'` form returns `L` with `L * L' = A`. It is roughly twice as fast as `lu` and preferred whenever symmetry and positive-definiteness are guaranteed."
+    },
+    {
+      "question": "How do I use `chol` to test whether a matrix is positive definite?",
+      "answer": "— Call the two-output form and check the flag: `[~, p] = chol(A); isPD = (p == 0);`. This avoids the error that the single-output form throws on indefinite inputs, and it is substantially faster than computing all eigenvalues with `eig`."
     }
   ],
   "links": [
@@ -145,5 +153,29 @@
   },
   "gpu_behavior": [
     "When RunMat Accelerate is active, the planner keeps `gpuArray` inputs on device and asks the registered provider for a `chol` factorization. Providers that implement the hook (the WGPU and in-process backends included) return the MATLAB-compatible flag `p` while leaving the triangular factor resident on the GPU. If the provider lacks that hook or the matrix uses an unsupported precision/type, RunMat gathers the data, executes the CPU implementation, and re-uploads the factor when a provider is present. The flag output is always materialised as a host scalar."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "R = chol(A)\nR = chol(A, triangle)\n[R, flag] = chol(___)\n[R, flag, P] = chol(A, ___)"
+    },
+    "points": [
+      "`A` is a square Hermitian (or real symmetric) matrix that is expected to be positive definite. Logical and integer inputs are promoted to double; complex inputs must satisfy `A == A'`.",
+      "`triangle` is `'upper'` (the default) or `'lower'`. `chol(A, 'upper')` returns an upper-triangular `R` with `R' * R = A`; `chol(A, 'lower')` returns a lower-triangular `L` with `L * L' = A`. Both encode the same factorization.",
+      "`flag` is the optional second output. It equals `0` when the factorization succeeds; otherwise it is the index of the first leading principal minor that failed the positive-definiteness test, and only the leading `flag - 1` columns of the factor are valid. Using the two-output form suppresses the error that the single-output form raises.",
+      "`P` is the optional third output returned when `A` is sparse — a permutation matrix such that `R' * R = P' * A * P`. Sparse Cholesky is not yet implemented in RunMat, but the dense signatures above match MATLAB exactly."
+    ]
+  },
+  "validation": {
+    "summary": "`chol` delegates to LAPACK's `dpotrf`/`zpotrf` when the `lapack-backed-linalg` feature is enabled and falls back to an in-repo Cholesky implementation otherwise. Both paths share the same test suite. The GPU provider hook reuploads the CPU-computed factor so device residency is preserved without a separate GPU Cholesky kernel.",
+    "implementation": {
+      "label": "crates/runmat-runtime/src/builtins/math/linalg/factor/chol.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/factor/chol.rs"
+    },
+    "parity_test": {
+      "label": "chol unit tests",
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/factor/chol.rs"
+    },
+    "tolerance": "CPU-only validated; GPU path reuploads host-computed factors"
+  }
 }

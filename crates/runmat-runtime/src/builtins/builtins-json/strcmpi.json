@@ -96,6 +96,18 @@
     {
       "question": "What is returned when both inputs are scalars?",
       "answer": "A logical scalar is returned (`true` or `false`). For non-scalar shapes, a logical array that mirrors the broadcast dimensions is produced."
+    },
+    {
+      "question": "What is `strcmpi` in MATLAB?",
+      "answer": "— `strcmpi(s1, s2)` compares two text values for equality while ignoring letter case. It returns `true` when the strings match case-insensitively and `false` otherwise. The `i` stands for *insensitive*. Use `strcmp` when you do want case to matter, and `strncmpi` when you only want to compare the first `n` characters."
+    },
+    {
+      "question": "How does `strcmpi` behave with cell arrays or string arrays?",
+      "answer": "— When one operand is a cell array or string array and the other is a scalar, `strcmpi` broadcasts the scalar elementwise and returns a logical array of the same shape. For example:\n\n```matlab\nstrcmpi({'apple','Banana','CHERRY'}, 'banana')\n% ans =  1x3 logical array\n%   0   1   0\n```\n\nWhen both operands are arrays of the same shape, they are compared element-by-element. This matches MATLAB's implicit-expansion rules."
+    },
+    {
+      "question": "Does `strcmpi` work across mixed char/string inputs?",
+      "answer": "— Yes. Character vectors (`'Hello'`), string scalars (`\"Hello\"`), and cells of character vectors all interoperate, so `strcmpi('hello', \"Hello\")` returns `true`. Note that `strcmpi` only tests **exact equality** (ignoring case). For case-insensitive *substring* matching, use `contains(str, pattern, 'IgnoreCase', true)` or `regexpi`."
     }
   ],
   "links": [
@@ -167,5 +179,17 @@
   "gpu_residency": "You rarely need to call `gpuArray` manually. When inputs already live on the GPU, RunMat gathers them before calling `strcmpi`, then returns a logical result on the host. This matches MATLAB’s behaviour while keeping the runtime simple. Subsequent GPU-aware code can explicitly transfer results back if needed.",
   "gpu_behavior": [
     "`strcmpi` is registered as an acceleration sink. When either operand resides on the GPU, RunMat gathers both to host memory before comparing them. This keeps behaviour identical to MATLAB and avoids requiring backend-specific kernels. The logical result is produced on the CPU and never remains GPU-resident."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "tf = strcmpi(s1, s2)"
+    },
+    "points": [
+      "`s1` and `s2` are the text values to compare. Accepted types: character vector (`'abc'`), character matrix (`char(...)`), string scalar or array (`\"abc\"`, `[\"a\" \"b\"]`), or cell array of character vectors (`{'a','b'}`). Types can be mixed — `strcmpi('hello', \"Hello\")` returns `true`.",
+      "When one operand is a scalar (a single string or `1×1` cell/string) and the other is an array/cell of strings, MATLAB broadcasts the scalar elementwise across the array. For same-shape arrays, comparison is elementwise.",
+      "Returns `tf`, a logical scalar when both inputs are scalars, or a logical array whose shape matches the broadcast result. `missing` string values always compare unequal, mirroring MATLAB.",
+      "For exact (case-sensitive) equality use `strcmp`. For case-insensitive *substring* matching (rather than full equality), use `contains(s, pattern, 'IgnoreCase', true)` or `regexpi`."
+    ]
+  }
 }

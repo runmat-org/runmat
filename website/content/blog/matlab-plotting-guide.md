@@ -232,7 +232,7 @@ The right plot type depends on your data shape: use `plot` for continuous signal
 | Data pattern | Best plot type | RunMat function | Notes |
 |-------------|---------------|-----------------|-------|
 | y vs. x, continuous | Line plot | `plot(x, y)` | Connect points to show trends |
-| y vs. x, discrete samples | Stem plot | `stem(x, y)` | Vertical lines for sampled signals |
+| y vs. x, discrete samples | Marker line plot | `plot(x, y, 'o-')` | Clear sampled-signal points without stem rendering |
 | Unordered 2D points | Scatter | `scatter(x, y)` | Per-point size/color supported |
 | Category comparisons | Bar chart | `bar(y)` | Grouped and stacked variants |
 | Value distribution | Histogram | `hist(data, nbins)` | Automatic or manual binning |
@@ -492,12 +492,12 @@ RunMat supports plot types for specific data patterns beyond the core `plot`, `s
 
 ### Discrete sequences with `stem`
 
-[`stem`](/docs/matlab-function-reference#plotting) draws a vertical line from the baseline to each data point with a marker at the top, the standard representation for sampled signals and impulse responses.
+For sampled signals, use a marker line plot so each sample remains visible without relying on stem rendering.
 
 ```matlab:runnable
 n = 0:15;
 y = sin(n * pi / 4) .* (0.9 .^ n);
-stem(n, y);
+plot(n, y, 'o-', 'LineWidth', 2, 'MarkerSize', 6);
 title('Damped discrete sinusoid');
 xlabel('Sample index');
 ylabel('Amplitude');

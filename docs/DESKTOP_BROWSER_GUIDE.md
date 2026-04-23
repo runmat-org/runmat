@@ -1,6 +1,4 @@
 ---
-collections:
-  - guides
 image: "https://web.runmatstatic.com/runmat-sandbox-dark.png"
 imageAlt: "RunMat Sandbox"
 jsonLd:
