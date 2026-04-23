@@ -147,7 +147,7 @@ team management.<br/><br/>
 
   - Interactive 2D and 3D plots with GPU-accelerated rendering
   - 30+ plot types: line, scatter, bar, surface, mesh, histogram, stem, errorbar, area, contour, pie, plot3, imagesc, and log-scale variants
-  - Graphics handles, subplot state, annotation builtins (`title`, `xlabel`, `legend`), and 3D camera controls
+  - Graphics handles, subplot state, annotation builtins (`title`, `sgtitle`, `xlabel`, `legend`), and 3D camera controls
 
   Open-source plotting engine demo (works in CLI and in the browser sandbox):
 

@@ -140,7 +140,7 @@
 
 | Completed | Path        | Name(s)                                                                                          | Purpose         | GPU | Fusion | BLAS/LAPACK/FFTs | Notes                                          |
 |-----------|-------------|--------------------------------------------------------------------------------------------------|-----------------|-----|--------|------------------|------------------------------------------------|
-|           | plot/core   | plot, scatter, semilogx, semilogy, loglog, bar, histogram, stairs, stem, subplot, figure, hold, title, xlabel, ylabel, legend, xlim, ylim, axis | 2D plotting    | —   | —      | —                | Provided by runmat-plot (gui/jupyter).         |
+|           | plot/core   | plot, scatter, semilogx, semilogy, loglog, bar, histogram, stairs, stem, subplot, figure, hold, title, sgtitle, xlabel, ylabel, legend, xlim, ylim, axis | 2D plotting    | —   | —      | —                | Provided by runmat-plot (gui/jupyter).         |
 |           | plot/3d     | surf, mesh, contour, contourf                                                                    | 3D/surfaces     | —   | —      | —                |                                                |
 
 ## Constants
