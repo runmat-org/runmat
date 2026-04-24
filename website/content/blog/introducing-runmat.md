@@ -133,7 +133,7 @@ If you've written MATLAB code, you know the trade-offs:
 - GNU Octave is free and compatible with lots of code, but startup and hot-path performance can be limiting.
 - Moving to a new language means rewriting and - perhaps most importantly - **retraining**.
 
-RunMat aims for a fourth path: keep the MATLAB language you know, but put it on a modern engine with a smaller core, clean semantics, and open extensibility.
+RunMat aims for a fourth path: keep the MATLAB language you know, but put it on a modern engine with a smaller core, clean semantics, and open extensibility. If you want a short background explainer, see this [guide](/resources/guides/what-is-matlab).
 
 ---
 

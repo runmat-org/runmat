@@ -23,6 +23,7 @@ import { SandboxCta } from '@/components/SandboxCta';
 
 
 export const dynamic = 'force-static';
+export const dynamicParams = false;
 
 export async function generateStaticParams() {
   const builtins = loadBuiltins();
@@ -38,9 +39,9 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
   const { slug } = await params;
   const builtins = loadBuiltins();
   const b = builtins.find(x => x.slug === slug);
-  if (!b) return notFound();
+  if (!b) notFound();
   const doc = getBuiltinDocBySlug(slug);
-  if (!doc) return notFound();
+  if (!doc) notFound();
   const blocks = renderBuiltinDocBlocks(doc);
   const toc = extractHeadingsFromBlocks(blocks);
   const metadata = getBuiltinMetadata(b);

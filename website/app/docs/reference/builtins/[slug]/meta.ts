@@ -62,16 +62,47 @@ export function builtinJsonLD(slug: string): string {
     const examples = builtin?.examples ?? [];
     const faqs = builtin?.faqs ?? [];
     const heroImage = builtin?.hero_image || "https://web.runmatstatic.com/runmat-sandbox-dark.png";
+    const sourceUrl = builtin?.source?.url?.trim();
 
-    const mainEntityRefs: Record<string, string>[] = [{"@id": "#source-code"}];
-    if (examples.length > 0) mainEntityRefs.push({"@id": "#how-to-guide"});
-    if (faqs.length > 0) mainEntityRefs.push({"@id": "#faq"});
+    const pageUrl = `https://runmat.com/docs/reference/builtins/${slug}`;
+    const articleId = `${pageUrl}#article`;
+    const breadcrumbId = `${pageUrl}#breadcrumbs`;
+    const sourceCodeId = `${pageUrl}#source-code`;
+    const howToId = `${pageUrl}#how-to-guide`;
+    const faqId = `${pageUrl}#faq`;
+
+    const mainEntityRefs: Record<string, string>[] = [];
+    if (sourceUrl) mainEntityRefs.push({ "@id": sourceCodeId });
+    if (examples.length > 0) mainEntityRefs.push({ "@id": howToId });
+    if (faqs.length > 0) mainEntityRefs.push({ "@id": faqId });
+
+    const apiReference: Record<string, unknown> = {
+        "@type": "APIReference",
+        "@id": articleId,
+        "headline": `${title} in MATLAB — runnable examples + source (RunMat)`,
+        "description": `Run ${title} in your browser. Open-source, JIT-compiled MATLAB-compatible documentation for ${stripMarkdown(builtin?.description ?? '')}`.slice(0, 300),
+        "image": heroImage,
+        "programmingLanguage": {"@type": "ComputerLanguage", "name": "MATLAB", "alternateName": "RunMat"},
+        "author": {"@id": "https://runmat.com/#organization"},
+        "publisher": {"@id": "https://runmat.com/#organization"},
+        "about": {
+            "@type": "DefinedTerm",
+            "name": title,
+            "description": stripMarkdown(builtin?.description ?? ''),
+            "inDefinedTermSet": {
+                "@type": "DefinedTermSet",
+                "name": "RunMat Builtin Functions",
+                "url": "https://runmat.com/docs/matlab-function-reference"
+            }
+        },
+    };
+    if (mainEntityRefs.length > 0) apiReference.mainEntity = mainEntityRefs;
 
     const graph: Record<string, unknown>[] = [
         {
             "@type": "WebPage",
-            "@id": `https://runmat.com/docs/reference/builtins/${slug}`,
-            "url": `https://runmat.com/docs/reference/builtins/${slug}`,
+            "@id": pageUrl,
+            "url": pageUrl,
             "name": `${title} - RunMat Reference`,
             "isPartOf": {"@id": "https://runmat.com/#website"},
             "author": {"@id": "https://runmat.com/#organization"},
@@ -80,47 +111,25 @@ export function builtinJsonLD(slug: string): string {
                 "@type": "ImageObject",
                 "url": heroImage
             },
-            "breadcrumb": {"@id": `https://runmat.com/docs/reference/builtins/${slug}#breadcrumbs`},
-            "mainEntity": {"@id": "#article"}
+            "breadcrumb": {"@id": breadcrumbId},
+            "mainEntity": {"@id": articleId}
         },
         {
             "@type": "BreadcrumbList",
-            "@id": `https://runmat.com/docs/reference/builtins/${slug}#breadcrumbs`,
+            "@id": breadcrumbId,
             "itemListElement": [
                 {"@type": "ListItem", "position": 1, "name": "Docs", "item": "https://runmat.com/docs"},
                 {"@type": "ListItem", "position": 2, "name": "Reference", "item": "https://runmat.com/docs/matlab-function-reference"},
-                {"@type": "ListItem", "position": 3, "name": title, "item": `https://runmat.com/docs/reference/builtins/${slug}`}
+                {"@type": "ListItem", "position": 3, "name": title, "item": pageUrl}
             ]
         },
-        {
-            "@type": "APIReference",
-            "@id": `https://runmat.com/docs/reference/builtins/${slug}#article`,
-            "headline": `${title} in MATLAB — runnable examples + source (RunMat)`,
-            "alternativeHeadline": `${title} Function Reference`,
-            "description": `Run ${title} in your browser. Open-source, JIT-compiled MATLAB-compatible documentation for ${stripMarkdown(builtin?.description ?? '')}`.slice(0, 300),
-            "image": heroImage,
-            "proficiencyLevel": "Beginner",
-            "programmingModel": "Procedural",
-            "assemblyVersion": "RunMat 0.1.0",
-            "dateModified": new Date().toISOString().split('T')[0],
-            "programmingLanguage": {"@type": "ComputerLanguage", "name": "MATLAB", "alternateName": "RunMat"},
-            "author": {"@id": "https://runmat.com/#organization"},
-            "publisher": {"@id": "https://runmat.com/#organization"},
-            "about": {
-                "@type": "DefinedTerm",
-                "name": title,
-                "description": stripMarkdown(builtin?.description ?? ''),
-                "inDefinedTermSet": {
-                    "@type": "DefinedTermSet",
-                    "name": "RunMat Builtin Functions",
-                    "url": "https://runmat.com/docs/matlab-function-reference"
-                }
-            },
-            "mainEntity": mainEntityRefs
-        },
-        {
+        apiReference,
+    ];
+
+    if (sourceUrl) {
+        graph.push({
             "@type": "SoftwareSourceCode",
-            "@id": "#source-code",
+            "@id": sourceCodeId,
             "name": `${title}.rs`,
             "description": `The Rust implementation of the ${title} function, compatible with all RunMat targets.`,
             "codeRepository": "https://github.com/runmat-org/runmat",
@@ -129,14 +138,14 @@ export function builtinJsonLD(slug: string): string {
             "targetProduct": {"@type": "SoftwareApplication", "name": "RunMat"},
             "license": "https://opensource.org/licenses/MIT",
             "runtimePlatform": ["RunMat Web (WASM)", "RunMat Desktop", "RunMat CLI"],
-            "url": builtin?.source?.url
-        },
-    ];
+            "url": sourceUrl,
+        });
+    }
 
     if (examples.length > 0) {
         graph.push({
             "@type": "HowTo",
-            "@id": "#how-to-guide",
+            "@id": howToId,
             "name": `How to use ${title} in RunMat`,
             "description": `Runnable examples showing how to use ${title} in RunMat. Each example runs in the browser with no setup.`,
             "image": heroImage,
@@ -147,9 +156,8 @@ export function builtinJsonLD(slug: string): string {
                 const step: Record<string, unknown> = {
                     "@type": "HowToStep",
                     "name": description,
-                    "url": `https://runmat.com/docs/reference/builtins/${slug}#${anchor}`,
+                    "url": `${pageUrl}#${anchor}`,
                     "text": example.input,
-                    "itemListElement": {"@type": "HowToDirection", "text": example.input}
                 };
                 if (stepImage) step.image = stepImage;
                 return step;
@@ -160,7 +168,7 @@ export function builtinJsonLD(slug: string): string {
     if (faqs.length > 0) {
         graph.push({
             "@type": "FAQPage",
-            "@id": "#faq",
+            "@id": faqId,
             "mainEntity": faqs.map(faq => ({
                 "@type": "Question",
                 "name": faq.question,

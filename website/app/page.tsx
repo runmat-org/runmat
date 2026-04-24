@@ -185,6 +185,20 @@ export const metadata: Metadata = {
 export default function HomePage() {
   return (
     <div className="flex flex-col min-h-screen home-page">
+      <link
+        rel="preload"
+        as="image"
+        href="https://web.runmatstatic.com/video/posters/runmat-wave-simulation-720.webp"
+        fetchPriority="high"
+        media="(max-width: 768px)"
+      />
+      <link
+        rel="preload"
+        as="image"
+        href="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp"
+        fetchPriority="high"
+        media="(min-width: 769px)"
+      />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
