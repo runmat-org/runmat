@@ -83,6 +83,14 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
 
+      // HIR docs — crate README was removed during the HIR refactor and replacement is
+      // pending. Temporary redirect to /docs/architecture so the indexed URL stops 404ing.
+      {
+        source: '/docs/internals/hir',
+        destination: '/docs/architecture',
+        permanent: false,
+      },
+
       // Raw .md file URLs -> correct doc routes
       {
         source: '/CLI.md',

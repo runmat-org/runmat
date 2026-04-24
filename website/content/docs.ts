@@ -205,7 +205,8 @@ export const docsTree: DocsNode[] = [
       },
       // Lexer entry removed pending compiler docs rewrite; crate README was deleted in fbd1d97f (lexer crate split).
       { title: "Parser", slug: ["internals", "parser"], file: "crates/runmat-parser/README.md", seo: { description: "Precedence-based parser for MATLAB/Octave with statements, OOP, and command-form.", keywords: ["parser", "AST", "MATLAB", "Octave"] } },
-      { title: "HIR", slug: ["internals", "hir"], file: "crates/runmat-hir/README.md", seo: { description: "High-level IR with flow-sensitive inference and class/import validations.", keywords: ["HIR", "type inference", "SSA", "MATLAB"] } },
+      // HIR entry removed pending compiler docs rewrite; crate README was deleted during the HIR refactor.
+      // /docs/internals/hir redirects to /docs/architecture in next.config.ts.
       // Additional VM internals pages can be added here when dedicated docs are promoted.
       { title: "Garbage Collector", slug: ["internals", "garbage-collector"], file: "crates/runmat-gc/README.md", seo: { description: "Generational mark-and-sweep GC with handles, barriers, and promotion.", keywords: ["garbage collector", "GC", "generational", "write barrier"] } },
     ],

@@ -50,6 +50,13 @@
     "tailwindcss": "^4.1.11",
     "tailwindcss-animate": "^1.0.7"
   },
+  "browserslist": [
+    "chrome >= 108",
+    "edge >= 108",
+    "firefox >= 108",
+    "safari >= 16",
+    "not dead"
+  ],
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@types/node": "^20",
