@@ -75,20 +75,7 @@ export default function RootLayout({
       <head>
         <link rel="preconnect" href="https://web.runmatstatic.com" crossOrigin="" />
         <link rel="dns-prefetch" href="https://web.runmatstatic.com" />
-        <link
-          rel="preload"
-          as="image"
-          href="https://web.runmatstatic.com/video/posters/runmat-wave-simulation-720.webp"
-          fetchPriority="high"
-          media="(max-width: 768px)"
-        />
-        <link
-          rel="preload"
-          as="image"
-          href="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp"
-          fetchPriority="high"
-          media="(min-width: 769px)"
-        />
+
         <link rel="icon" href="/favicon.ico" sizes="32x32" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
