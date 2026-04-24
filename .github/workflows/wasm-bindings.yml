@@ -136,14 +136,6 @@ jobs:
           WASM_BINDGEN_TEST_TIMEOUT: "300"
         run: scripts/test-wasm-headless.sh
 
-      - name: Build bindings package
-        working-directory: bindings/ts
-        run: npm run build
-
-      - name: Lint bindings package
-        working-directory: bindings/ts
-        run: npm run lint
-
       - name: Determine publish settings
         id: publish_settings
         shell: bash
@@ -283,4 +275,8 @@ jobs:
         working-directory: bindings/ts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm dist-tag add runmat@${{ steps.package_version.outputs.version }} latest
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_name="$(node -p 'require("./package.json").name')"
+          npm dist-tag add "${package_name}@${{ steps.package_version.outputs.version }}" latest
