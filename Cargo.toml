@@ -61,27 +61,27 @@ tower-lsp = "0.20"
 once_cell = "1"
 
 # Internal workspace crates
-runmat-lexer = { version = "=0.4.1", path = "crates/runmat-lexer" }
-runmat-parser = { version = "=0.4.1", path = "crates/runmat-parser" }
-runmat-hir = { version = "=0.4.1", path = "crates/runmat-hir" }
-runmat-vm = { version = "=0.4.1", path = "crates/runmat-vm" }
-runmat-async = { version = "=0.4.1", path = "crates/runmat-async" }
-runmat-telemetry = { version = "=0.4.1", path = "crates/runmat-telemetry" }
-runmat-core = { version = "=0.4.1", path = "crates/runmat-core", default-features = false }
-runmat-plot = { version = "=0.4.1", path = "crates/runmat-plot", default-features = false }
-runmat-macros = { version = "=0.4.1", path = "crates/runmat-macros" }
-runmat-builtins = { version = "=0.4.1", path = "crates/runmat-builtins" }
-runmat-runtime = { version = "=0.4.1", path = "crates/runmat-runtime", default-features = false }
-runmat-time = { path = "crates/runmat-time", version = "=0.4.1" }
-runmat-kernel = { version = "=0.4.1", path = "crates/runmat-kernel" }
-runmat-turbine = { version = "=0.4.1", path = "crates/runmat-turbine" }
-runmat-gc = { version = "=0.4.1", path = "crates/runmat-gc" }
-runmat-snapshot = { version = "=0.4.1", path = "crates/runmat-snapshot", default-features = false }
-runmat-filesystem = { version = "=0.4.1", path = "crates/runmat-filesystem" }
-runmat-config = { version = "=0.4.1", path = "crates/runmat-config" }
-runmat-static-analysis = { version = "=0.4.1", path = "crates/runmat-static-analysis" }
-runmat-server-client = { version = "=0.4.1", path = "crates/runmat-server-client" }
-runmat-accelerate = { version = "=0.4.1", path = "crates/runmat-accelerate" }
-runmat-accelerate-api = { version = "=0.4.1", path = "crates/runmat-accelerate-api" }
-runmat-gc-api = { version = "=0.4.1", path = "crates/runmat-gc-api" }
-runmat-thread-local = { version = "=0.4.1", path = "crates/runmat-thread-local" }
+runmat-lexer = { version = "=0.4.4", path = "crates/runmat-lexer" }
+runmat-parser = { version = "=0.4.4", path = "crates/runmat-parser" }
+runmat-hir = { version = "=0.4.4", path = "crates/runmat-hir" }
+runmat-vm = { version = "=0.4.4", path = "crates/runmat-vm" }
+runmat-async = { version = "=0.4.4", path = "crates/runmat-async" }
+runmat-telemetry = { version = "=0.4.4", path = "crates/runmat-telemetry" }
+runmat-core = { version = "=0.4.4", path = "crates/runmat-core", default-features = false }
+runmat-plot = { version = "=0.4.4", path = "crates/runmat-plot", default-features = false }
+runmat-macros = { version = "=0.4.4", path = "crates/runmat-macros" }
+runmat-builtins = { version = "=0.4.4", path = "crates/runmat-builtins" }
+runmat-runtime = { version = "=0.4.4", path = "crates/runmat-runtime", default-features = false }
+runmat-time = { path = "crates/runmat-time", version = "=0.4.4" }
+runmat-kernel = { version = "=0.4.4", path = "crates/runmat-kernel" }
+runmat-turbine = { version = "=0.4.4", path = "crates/runmat-turbine" }
+runmat-gc = { version = "=0.4.4", path = "crates/runmat-gc" }
+runmat-snapshot = { version = "=0.4.4", path = "crates/runmat-snapshot", default-features = false }
+runmat-filesystem = { version = "=0.4.4", path = "crates/runmat-filesystem" }
+runmat-config = { version = "=0.4.4", path = "crates/runmat-config" }
+runmat-static-analysis = { version = "=0.4.4", path = "crates/runmat-static-analysis" }
+runmat-server-client = { version = "=0.4.4", path = "crates/runmat-server-client" }
+runmat-accelerate = { version = "=0.4.4", path = "crates/runmat-accelerate" }
+runmat-accelerate-api = { version = "=0.4.4", path = "crates/runmat-accelerate-api" }
+runmat-gc-api = { version = "=0.4.4", path = "crates/runmat-gc-api" }
+runmat-thread-local = { version = "=0.4.4", path = "crates/runmat-thread-local" }
