@@ -74,6 +74,15 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
 
+      // Lexer docs — crate README was deleted in the lexer crate split (fbd1d97f) and
+      // replacement is pending the compiler docs rewrite. Temporary so Google re-crawls
+      // once the canonical destination exists.
+      {
+        source: '/docs/internals/lexer',
+        destination: '/docs/architecture',
+        permanent: false,
+      },
+
       // Raw .md file URLs -> correct doc routes
       {
         source: '/CLI.md',
@@ -159,6 +168,13 @@ const nextConfig: NextConfig = {
       {
         source: '/docs/reference/introspection/:slug',
         destination: '/docs/reference/builtins/:slug',
+        permanent: true,
+      },
+      // `profile` has no builtin JSON page yet; send to the function index
+      // instead of the catch-all below (which would 308 into a 404).
+      {
+        source: '/docs/reference/diagnostics/profile',
+        destination: '/docs/matlab-function-reference',
         permanent: true,
       },
       {

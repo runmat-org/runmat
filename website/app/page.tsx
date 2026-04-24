@@ -297,6 +297,10 @@ export default function HomePage() {
             <Link href="/benchmarks" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               See the benchmarks
             </Link>
+            <span className="hidden sm:inline text-foreground/50">•</span>
+            <Link href="/docs/correctness" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
+              How GPU results are validated
+            </Link>
           </div>
         </div>
       </section>
@@ -462,7 +466,11 @@ export default function HomePage() {
                   <Link href="https://github.com/runmat-org/runmat" className="underline text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80" target="_blank" rel="noreferrer">
                     GitHub
                   </Link>
-                  {" "}and actively maintained.
+                  {" "}and actively maintained. See{" "}
+                  <Link href="/docs/correctness" className="underline text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80">
+                    how we validate every numerical path
+                  </Link>
+                  .
                 </p>
               </CardContent>
             </Card>

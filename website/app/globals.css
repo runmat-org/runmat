@@ -274,11 +274,11 @@
     white-space: normal;
     overflow-wrap: break-word;
     word-break: break-word;
-    min-width: 10rem;
+    min-width: 7rem;
   }
   .table-mobile-wrap td:first-child,
   .table-mobile-wrap th:first-child {
-    min-width: 12rem;
+    min-width: 9rem;
   }
   @media (min-width: 640px) {
     .table-mobile-wrap td,

@@ -104,6 +104,15 @@ export interface FigureSnapshot {
   plots: FigurePlotDescriptor[];
 }
 
+export interface FigureTextStyle {
+  colorRgba?: [number, number, number, number];
+  fontSize?: number;
+  fontWeight?: string;
+  fontAngle?: string;
+  interpreter?: string;
+  visible: boolean;
+}
+
 export interface FigureLayout {
   axesRows: number;
   axesCols: number;
@@ -112,6 +121,8 @@ export interface FigureLayout {
 
 export interface FigureMetadata {
   title?: string;
+  sgTitle?: string;
+  sgTitleStyle?: FigureTextStyle;
   xLabel?: string;
   yLabel?: string;
   gridEnabled: boolean;

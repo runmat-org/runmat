@@ -122,6 +122,14 @@
     {
       "question": "Can cellfun return non-uniform outputs?",
       "answer": "Yes. Set `'UniformOutput'` to `false` to collect results into a cell array when the function returns different sizes or types across cells."
+    },
+    {
+      "question": "Which built-in function names can I pass as strings to `cellfun`?",
+      "answer": "— MATLAB's classic shorthand strings are all supported: `'isempty'`, `'islogical'`, `'isreal'`, `'length'`, `'ndims'`, `'prodofsize'`, and `'size'`. RunMat also maps `'isclass'` to the `class` builtin so you can write `cellfun('isclass', C, 'double')` just like in MATLAB."
+    },
+    {
+      "question": "When should I use `cellfun` vs `arrayfun` vs a plain `for` loop?",
+      "answer": "— Use `cellfun` for cell arrays (variable-size or heterogeneous contents), `arrayfun` for numeric/logical arrays where each element is a scalar input, and a plain `for` loop whenever the body is non-trivial or you need side effects. A loop is often clearer and not meaningfully slower than `cellfun` — especially with `'UniformOutput', false`, where both do element-by-element packing."
     }
   ],
   "links": [
@@ -156,5 +164,17 @@
   },
   "gpu_behavior": [
     "`cellfun` itself is a host operation. RunMat gathers GPU-resident inputs before calling the callback and stores the outputs on the host. This guarantees deterministic behaviour even when the callback returns GPU arrays. Future acceleration hooks can elide the gather step when providers support nested callbacks, but no provider work is required for correctness today."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "A = cellfun(func, C)\nA = cellfun(func, C1, ..., CN)\n[A1, ..., AM] = cellfun(func, C, ...)\nA = cellfun(func, C, ..., 'UniformOutput', tf)\nA = cellfun(func, C, ..., 'ErrorHandler', errfunc)"
+    },
+    "points": [
+      "`func` is a function handle (`@sin`, `@(x) x.^2`) or one of MATLAB's short string identifiers (`'isempty'`, `'islogical'`, `'isreal'`, `'length'`, `'ndims'`, `'prodofsize'`, `'size'`, `'isclass'`).",
+      "`C`, `C1`, ..., `CN` are cell arrays that must all share the same size. `func` is called once per linear index with one input per cell array. Non-cell trailing arguments are broadcast as constants to every call.",
+      "`'UniformOutput', tf` controls result collection. With `tf = true` (the default) every call must return a scalar of the same class; RunMat packs the results into a numeric/logical/complex array that mirrors the cell shape. Set `tf = false` when calls return non-scalar, variable-size, or mixed-type values — the result becomes a cell array of the same shape.",
+      "`'ErrorHandler', errfunc` intercepts callback failures. `errfunc` is called as `errfunc(errStruct, cellValue1, ..., extraArg1, ...)` where `errStruct` has fields `identifier`, `message`, `index`, and `indices`; its return value is inserted into the result, letting you substitute defaults instead of aborting the map."
+    ]
+  }
 }

@@ -9,7 +9,6 @@ authors:
 readTime: "7 min read"
 slug: "version-control-for-engineers-who-dont-use-git"
 tags: ["version control", "MATLAB", "RunMat Cloud", "scientific computing", "collaboration", "git alternative", "electrical engineering", "engineering workflows"]
-collections: ["guides"]
 keywords: "version control for engineers, version control without git, git alternative for engineers, version control for engineers building hardware, engineering file versioning, version control MATLAB, automatic version control, version control for non-developers, simulation version control, FEA version control, reproducibility scientific computing, RunMat versioning"
 visibility: public
 excerpt: "Engineers shouldn't need a CS degree to have a history of their work. RunMat versions every save automatically — no staging, no commits, no git required."

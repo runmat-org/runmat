@@ -338,6 +338,12 @@ impl FigureScene {
             figure.y_label = self.metadata.y_label;
             figure.legend_enabled = self.metadata.legend_enabled;
         }
+        figure.sg_title = self.metadata.sg_title;
+        figure.sg_title_style = self
+            .metadata
+            .sg_title_style
+            .map(TextStyle::from)
+            .unwrap_or_default();
         figure.grid_enabled = self.metadata.grid_enabled;
         figure.z_limits = self.metadata.z_limits.map(|[lo, hi]| (lo, hi));
         figure.colorbar_enabled = self.metadata.colorbar_enabled;
@@ -376,6 +382,10 @@ pub struct FigureMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub sg_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sg_title_style: Option<SerializedTextStyle>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub x_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub y_label: Option<String>,
@@ -407,6 +417,11 @@ impl FigureMetadata {
 
         Self {
             title: figure.title.clone(),
+            sg_title: figure.sg_title.clone(),
+            sg_title_style: figure
+                .sg_title
+                .as_ref()
+                .map(|_| figure.sg_title_style.clone().into()),
             x_label: figure.x_label.clone(),
             y_label: figure.y_label.clone(),
             grid_enabled: figure.grid_enabled,
@@ -1572,6 +1587,7 @@ mod tests {
     fn capture_snapshot_reflects_layout_and_metadata() {
         let mut figure = Figure::new()
             .with_title("Demo")
+            .with_sg_title("Overview")
             .with_labels("X", "Y")
             .with_grid(false)
             .with_subplot_grid(1, 2);
@@ -1582,10 +1598,27 @@ mod tests {
         assert_eq!(snapshot.layout.axes_rows, 1);
         assert_eq!(snapshot.layout.axes_cols, 2);
         assert_eq!(snapshot.metadata.title.as_deref(), Some("Demo"));
+        assert_eq!(snapshot.metadata.sg_title.as_deref(), Some("Overview"));
         assert_eq!(snapshot.metadata.legend_entries.len(), 0);
         assert_eq!(snapshot.plots.len(), 1);
         assert_eq!(snapshot.plots[0].axes_index, 1);
         assert!(!snapshot.metadata.grid_enabled);
+    }
+
+    #[test]
+    fn sg_title_style_omitted_when_sg_title_absent() {
+        let figure = Figure::new().with_title("Only regular title");
+        let snapshot = FigureSnapshot::capture(&figure);
+        assert!(snapshot.metadata.sg_title.is_none());
+        assert!(
+            snapshot.metadata.sg_title_style.is_none(),
+            "sgTitleStyle must be None when sgTitle is absent"
+        );
+        let json = serde_json::to_string(&snapshot.metadata).unwrap();
+        assert!(
+            !json.contains("sgTitleStyle"),
+            "sgTitleStyle must not appear in serialized JSON when sgTitle is absent"
+        );
     }
 
     #[test]
@@ -1945,6 +1978,12 @@ mod tests {
     #[test]
     fn figure_scene_roundtrip_preserves_axes_local_annotation_metadata() {
         let mut figure = Figure::new().with_subplot_grid(1, 2);
+        figure.set_sg_title("All Panels");
+        figure.set_sg_title_style(TextStyle {
+            font_weight: Some("bold".into()),
+            font_size: Some(20.0),
+            ..Default::default()
+        });
         figure.set_active_axes_index(0);
         figure.set_axes_title(0, "Left");
         figure.set_axes_xlabel(0, "LX");
@@ -1974,6 +2013,9 @@ mod tests {
             .expect("scene restore should succeed");
 
         assert_eq!(rebuilt.active_axes_index, 1);
+        assert_eq!(rebuilt.sg_title.as_deref(), Some("All Panels"));
+        assert_eq!(rebuilt.sg_title_style.font_weight.as_deref(), Some("bold"));
+        assert_eq!(rebuilt.sg_title_style.font_size, Some(20.0));
         assert_eq!(
             rebuilt.axes_metadata(0).and_then(|m| m.title.as_deref()),
             Some("Left")

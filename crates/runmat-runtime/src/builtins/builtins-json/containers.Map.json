@@ -106,6 +106,22 @@
     {
       "question": "What happens if I pass a non-scalar key?",
       "answer": "Keys must be scalar. Passing vectors, matrices, or nested cell arrays of keys raises a descriptive error pointing to the offending argument."
+    },
+    {
+      "question": "How do I create an empty `containers.Map`?",
+      "answer": "— Call the constructor with no arguments: `m = containers.Map()`. This yields an empty map with the default `'char'` KeyType and `'any'` ValueType. To pin the types up front (so the first insertion can't change them), supply them explicitly: `m = containers.Map('KeyType', 'char', 'ValueType', 'double')`. Either form gives you a map you can populate via `m(key) = value`."
+    },
+    {
+      "question": "What is the default KeyType and ValueType?",
+      "answer": "— The default `KeyType` is `'char'` and the default `ValueType` is `'any'`. That is why `containers.Map()` with no arguments accepts character-vector keys and arbitrary values. To use numeric keys (for example `double` or `int32`) or to restrict values to a specific class, set `'KeyType'`/`'ValueType'` at construction time — they become read-only properties afterwards."
+    },
+    {
+      "question": "Can I use MATLAB `string` values as `containers.Map` keys?",
+      "answer": "— MATLAB's `containers.Map` only accepts scalar character vectors (or scalar numerics / logicals) as keys, not `string` scalars. Convert first with `char(str)` when you use a `'char'` KeyType, e.g. `m(char(\"apple\")) = 1`. RunMat additionally accepts `'string'` as a `KeyType` alias that stores keys as character vectors internally, so either `m = containers.Map('KeyType','char','ValueType','any')` followed by `m(char(s)) = v` or constructing from cell arrays of char vectors works reliably across both runtimes."
+    },
+    {
+      "question": "Is `containers.Map` a handle class?",
+      "answer": "— Yes. `containers.Map` inherits from `handle`, so maps have **reference semantics**: if you assign `m2 = m1`, both variables point to the same underlying map and mutations through either handle are visible through the other. To get an independent copy, rebuild the map from `keys(m1)` and `values(m1)` (for example, `m2 = containers.Map(keys(m1), values(m1))`). MATLAB does not expose a public `copy` method on `containers.Map`."
     }
   ],
   "links": [
@@ -120,5 +136,18 @@
   },
   "gpu_behavior": [
     "The data structure itself resides on the CPU. When you construct a map with GPU arrays, RunMat first downloads the inputs so it can perform MATLAB-compatible validation and coercion. Maps never retain device buffers internally, so the GPU provider does not need to implement special hooks for this builtin."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "m = containers.Map()\nm = containers.Map(keys, values)\nm = containers.Map(keys, values, 'UniformValues', tf)\nm = containers.Map('KeyType', ktype, 'ValueType', vtype)"
+    },
+    "points": [
+      "`keys` is a cell vector (or string array) of scalar keys. Every element must share the same `KeyType`; mixing classes raises an error.",
+      "`values` is a matched cell vector of the values to store, one per key. When `'UniformValues'` is `true`, every value must share the same MATLAB class.",
+      "`ktype` (the `'KeyType'` Name-Value pair) selects the key class. Supported values are `'char'` (default), `'double'`, `'single'`, `'int32'`, `'uint32'`, `'int64'`, `'uint64'`, and `'logical'`. RunMat additionally accepts `'string'`, storing keys as char vectors internally for MATLAB compatibility.",
+      "`vtype` (the `'ValueType'` Name-Value pair) restricts the values. The default `'any'` stores arbitrary MATLAB objects; pass a class name (e.g. `'double'`) to reject mismatched inserts.",
+      "Returns `m`, a handle to a `containers.Map` object. Because it is a handle class, assigning `m2 = m` produces two references to the same map."
+    ]
+  }
 }

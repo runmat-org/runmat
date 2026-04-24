@@ -9,7 +9,8 @@ import 'prismjs/components/prism-matlab';
 export type BuiltinDocInlineNode =
   | { type: 'text'; value: string }
   | { type: 'code'; value: string }
-  | { type: 'link'; label: BuiltinDocInlineNode[]; href: string };
+  | { type: 'link'; label: BuiltinDocInlineNode[]; href: string }
+  | { type: 'strong'; content: BuiltinDocInlineNode[] };
 
 export type BuiltinDocBlock =
   | { type: 'heading'; level: 1 | 2 | 3 | 4 | 5 | 6; text: BuiltinDocInlineNode[]; id?: string }
@@ -233,6 +234,12 @@ function renderInlineNodes(nodes: BuiltinDocInlineNode[]): React.ReactNode[] {
             {renderInlineNodes(node.label)}
           </a>
         );
+      case 'strong':
+        return (
+          <strong key={index} className="font-semibold">
+            {renderInlineNodes(node.content)}
+          </strong>
+        );
       default:
         return null;
     }
@@ -243,6 +250,7 @@ function inlineToPlainText(nodes: BuiltinDocInlineNode[]): string {
   return nodes.map((node) => {
     if (node.type === 'text' || node.type === 'code') return node.value;
     if (node.type === 'link') return inlineToPlainText(node.label);
+    if (node.type === 'strong') return inlineToPlainText(node.content);
     return '';
   }).join('');
 }

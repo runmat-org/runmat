@@ -21,6 +21,7 @@ pub struct Figure {
 
     /// Figure-level settings
     pub title: Option<String>,
+    pub sg_title: Option<String>,
     pub x_label: Option<String>,
     pub y_label: Option<String>,
     pub z_label: Option<String>,
@@ -63,6 +64,7 @@ pub struct Figure {
 
     /// Per-axes metadata used for subplot-correct annotations and legend state.
     pub axes_metadata: Vec<AxesMetadata>,
+    pub sg_title_style: TextStyle,
 }
 
 #[derive(Debug, Clone)]
@@ -210,6 +212,7 @@ impl Figure {
         Self {
             plots: Vec::new(),
             title: None,
+            sg_title: None,
             x_label: None,
             y_label: None,
             z_label: None,
@@ -245,6 +248,7 @@ impl Figure {
                 color_limits: None,
                 ..Default::default()
             }],
+            sg_title_style: TextStyle::default(),
         }
     }
 
@@ -301,6 +305,36 @@ impl Figure {
 
     pub fn active_axes_metadata(&self) -> Option<&AxesMetadata> {
         self.axes_metadata(self.active_axes_index)
+    }
+
+    pub fn with_sg_title<S: Into<String>>(mut self, title: S) -> Self {
+        self.set_sg_title(title);
+        self
+    }
+
+    pub fn set_sg_title<S: Into<String>>(&mut self, title: S) {
+        self.sg_title = Some(title.into());
+        self.dirty = true;
+    }
+
+    pub fn clear_sg_title(&mut self) {
+        self.sg_title = None;
+        self.dirty = true;
+    }
+
+    pub fn set_sg_title_style(&mut self, style: TextStyle) {
+        self.sg_title_style = style;
+        self.dirty = true;
+    }
+
+    pub fn has_any_titles(&self) -> bool {
+        let non_empty = |s: Option<&str>| s.map(str::trim).is_some_and(|t| !t.is_empty());
+        non_empty(self.sg_title.as_deref())
+            || non_empty(self.title.as_deref())
+            || self
+                .axes_metadata
+                .iter()
+                .any(|meta| non_empty(meta.title.as_deref()))
     }
 
     /// Set the figure title
@@ -1602,15 +1636,32 @@ mod tests {
     fn test_figure_styling() {
         let figure = Figure::new()
             .with_title("Test Figure")
+            .with_sg_title("Overview")
             .with_labels("X Axis", "Y Axis")
             .with_legend(false)
             .with_grid(false);
 
         assert_eq!(figure.title, Some("Test Figure".to_string()));
+        assert_eq!(figure.sg_title, Some("Overview".to_string()));
         assert_eq!(figure.x_label, Some("X Axis".to_string()));
         assert_eq!(figure.y_label, Some("Y Axis".to_string()));
         assert!(!figure.legend_enabled);
         assert!(!figure.grid_enabled);
+    }
+
+    #[test]
+    fn test_has_any_titles_tracks_super_and_axes_titles() {
+        let mut figure = Figure::new();
+        assert!(!figure.has_any_titles());
+
+        figure.set_sg_title("Summary");
+        assert!(figure.has_any_titles());
+
+        figure.clear_sg_title();
+        assert!(!figure.has_any_titles());
+
+        figure.set_axes_title(0, "Panel");
+        assert!(figure.has_any_titles());
     }
 
     #[test]

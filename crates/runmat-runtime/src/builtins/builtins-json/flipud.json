@@ -101,6 +101,18 @@
     {
       "question": "Is `flipud` numerically stable?",
       "answer": "Yes. The function only reorders elements; values are never modified, so it is numerically stable."
+    },
+    {
+      "question": "What does `flipud` do in MATLAB?",
+      "answer": "— `B = flipud(A)` returns `A` with the order of its rows reversed, so `B(i, :) = A(end - i + 1, :)`. The number of columns and every higher-dimension page stays exactly the same."
+    },
+    {
+      "question": "What's the difference between `flipud`, `fliplr`, and `flip`?",
+      "answer": "— `flipud` reverses dimension&nbsp;1 (rows), `fliplr` reverses dimension&nbsp;2 (columns), and `flip(A, dim)` reverses any dimension you pick. Modern MATLAB code tends to use `flip(A, dim)` directly; `flipud` and `fliplr` are convenience wrappers kept for readability."
+    },
+    {
+      "question": "How do I reverse a column vector?",
+      "answer": "— For a column vector, `flipud(v)` returns the reversed vector. A dimension-agnostic idiom that works for row or column vectors is `v(end:-1:1)`."
     }
   ],
   "links": [
@@ -184,5 +196,16 @@
   "gpu_residency": "You typically do not need to call `gpuArray` directly. RunMat’s auto-offload planner keeps tensors on the GPU when profitable and only gathers when a provider lacks the flip hook. Even in that fallback, `flipud` uploads the flipped result back to the device so subsequent operations remain gpu-resident.",
   "gpu_behavior": [
     "RunMat first tries to execute `flipud` on the GPU by delegating to the provider’s generic `flip` implementation with axis `0` (zero-based). If the provider does not implement this hook, RunMat transparently gathers the tensor, performs the vertical flip on the host, and uploads the result back to the device so residency is preserved."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "B = flipud(A)"
+    },
+    "points": [
+      "`A` is a scalar, vector, matrix, or N-D array. It may hold any MATLAB class: numeric, logical, complex, character, string, or cell. `gpuArray` inputs are supported and stay device-resident when the provider offers a `flip` hook.",
+      "`B` is the same size and class as `A` with its first dimension reversed: `B(i, :, ...) = A(end - i + 1, :, ...)`. All other dimensions are preserved. For arrays with more than two dimensions, higher pages are treated independently.",
+      "`flipud(A)` is equivalent to `flip(A, 1)`. Use `fliplr(A)` to reverse columns instead, or `flip(A, dim)` when you need a dimension other than 1 or 2."
+    ]
+  }
 }

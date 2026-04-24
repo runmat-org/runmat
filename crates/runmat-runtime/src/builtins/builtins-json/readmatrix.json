@@ -153,6 +153,18 @@
     {
       "question": "Can readmatrix skip header rows?",
       "answer": "Yes. Use the `'NumHeaderLines'` option: `readmatrix('file.csv', 'NumHeaderLines', 1)` skips the first row. RunMat supports this same option."
+    },
+    {
+      "question": "How do I customise import options for `readmatrix` with `detectImportOptions`?",
+      "answer": "— Call `detectImportOptions` first, tweak the returned struct, then pass it to `readmatrix` as the second argument. For example: `opts = detectImportOptions('data.csv'); opts.DataLines = [4 Inf]; opts.Delimiter = ','; A = readmatrix('data.csv', opts);`. This is the MATLAB-recommended workflow when the file needs more than a couple of overrides, and RunMat accepts the same option struct directly."
+    },
+    {
+      "question": "How do I read a UTF-8 CSV file that starts with a byte-order mark?",
+      "answer": "— `readmatrix` reads UTF-8 by default and silently strips a leading UTF-8 BOM (`EF BB BF`), so no extra option is needed. In MATLAB you can also make the encoding explicit with `readmatrix('data.csv', 'Encoding', 'UTF-8')`. For other encodings, convert the file to UTF-8 up front (for example with `iconv`) or read it via `fileread` and parse the result manually."
+    },
+    {
+      "question": "Which MATLAB release introduced `readmatrix`?",
+      "answer": "— MATLAB introduced `readmatrix` in **R2019a** as the modern replacement for `csvread`/`dlmread`. RunMat supports it today with no release gate, so you can call `readmatrix` regardless of the MATLAB version you normally target."
     }
   ],
   "links": [
@@ -199,5 +211,17 @@
   },
   "gpu_behavior": [
     "`readmatrix` always executes on the host CPU. If the file name or option arguments are GPU-resident scalars, RunMat gathers them automatically before accessing the filesystem. The resulting matrix is created in host memory unless you pass `'Like', gpuPrototype`, in which case the parsed tensor is uploaded to the same provider so subsequent operations remain on the device. Acceleration providers do not need bespoke hooks for this builtin."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "A = readmatrix(filename)\nA = readmatrix(filename, opts)\nA = readmatrix(filename, Name, Value)\n[A, delimiter] = readmatrix(___)"
+    },
+    "points": [
+      "`filename` is a character vector or string scalar pointing at the data file. Text (`.csv`, `.tsv`, `.txt`, `.dat`) is fully supported; spreadsheet formats (`.xls`, `.xlsx`) follow MATLAB's signature where available.",
+      "`opts` is an import-options struct (typically produced by `detectImportOptions`) that captures delimiter, header, type, and range settings in one place.",
+      "Common Name-Value pairs include `'NumHeaderLines'` (skip leading non-data rows), `'Delimiter'` (explicit column separator), `'Range'` (`\"B2:E10\"` or `[rowStart colStart rowEnd colEnd]`), `'Sheet'` (for spreadsheets), `'FileType'` (override detection), and `'Encoding'` (e.g. `'UTF-8'`).",
+      "Returns `A`, a double-precision matrix. MATLAB also offers an optional `delimiter` second output so you can discover the delimiter that was inferred from the file."
+    ]
+  }
 }

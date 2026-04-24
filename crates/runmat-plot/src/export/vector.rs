@@ -112,18 +112,52 @@ impl VectorExporter {
             ).map_err(|e| format!("SVG write error: {e}"))?;
         }
 
-        // Figure title (if any)
-        if let Some(title) = &figure.title {
-            let fs = 18;
+        let sg_title_band = if figure
+            .sg_title
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|text| !text.is_empty())
+        {
+            let fs = figure
+                .sg_title_style
+                .font_size
+                .map(|size| size.max(12.0))
+                .unwrap_or(18.0);
+            let fill = figure
+                .sg_title_style
+                .color
+                .map(|color| self.color_to_hex(&color.to_array()))
+                .unwrap_or_else(|| "#000000".to_string());
+            let weight = if figure
+                .sg_title_style
+                .font_weight
+                .as_deref()
+                .map(|weight| weight.eq_ignore_ascii_case("bold"))
+                .unwrap_or(false)
+            {
+                " font-weight=\"bold\""
+            } else {
+                ""
+            };
+            // Scale the band height and baseline with the font size so that
+            // large FontSize values don't overflow into subplot content.
+            let padding = (fs * 0.4).max(8.0f32);
+            let text_y = (fs + padding).round() as i32;
+            let band_height = text_y as f32 + padding;
             writeln!(
                 &mut svg,
-                "  <text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-size=\"{}\" fill=\"#000000\" font-family=\"sans-serif\">{}</text>",
+                "  <text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-size=\"{}\" fill=\"{}\" font-family=\"sans-serif\"{}>{}</text>",
                 self.settings.width * 0.5,
-                24,
+                text_y,
                 fs,
-                xml_escape(title)
+                fill,
+                weight,
+                xml_escape(figure.sg_title.as_deref().unwrap_or_default())
             ).map_err(|e| format!("SVG write error: {e}"))?;
-        }
+            band_height
+        } else {
+            0.0f32
+        };
 
         // Render each plot element grouped by axes (subplots)
         let (rows, cols) = figure.axes_grid();
@@ -132,20 +166,62 @@ impl VectorExporter {
         let total_hgap = hgap * (cols.saturating_sub(1) as f32);
         let total_vgap = vgap * (rows.saturating_sub(1) as f32);
         let cell_w = (self.settings.width - total_hgap).max(1.0) / (cols.max(1) as f32);
-        let cell_h = (self.settings.height - total_vgap).max(1.0) / (rows.max(1) as f32);
+        let cell_h =
+            (self.settings.height - total_vgap - sg_title_band).max(1.0) / (rows.max(1) as f32);
 
         let axes_vps: Vec<(f32, f32, f32, f32)> = (0..rows)
             .flat_map(|r| {
                 (0..cols).map(move |c| {
                     (
                         c as f32 * (cell_w + hgap),
-                        r as f32 * (cell_h + vgap),
+                        sg_title_band + r as f32 * (cell_h + vgap),
                         cell_w,
                         cell_h,
                     )
                 })
             })
             .collect();
+
+        // Render per-axes titles from AxesMetadata (set by title(), not sgtitle()).
+        // This must happen before the plot elements loop to avoid duplicate rendering.
+        for (ax, vp) in axes_vps.iter().copied().enumerate().take(rows * cols) {
+            if let Some(meta) = figure.axes_metadata.get(ax) {
+                let title_text = meta
+                    .title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty());
+                if let Some(title) = title_text {
+                    let style = &meta.title_style;
+                    let fs = style.font_size.map(|s| s.max(10.0)).unwrap_or(14.0);
+                    let fill = style
+                        .color
+                        .map(|c| self.color_to_hex(&c.to_array()))
+                        .unwrap_or_else(|| "#000000".to_string());
+                    let weight = if style
+                        .font_weight
+                        .as_deref()
+                        .map(|w| w.eq_ignore_ascii_case("bold"))
+                        .unwrap_or(false)
+                    {
+                        " font-weight=\"bold\""
+                    } else {
+                        ""
+                    };
+                    writeln!(
+                        &mut svg,
+                        "  <text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-size=\"{}\" fill=\"{}\" font-family=\"sans-serif\"{}>{}</text>",
+                        vp.0 + vp.2 * 0.5,
+                        vp.1 + fs + 2.0,
+                        fs,
+                        fill,
+                        weight,
+                        xml_escape(title)
+                    )
+                    .map_err(|e| format!("SVG write error: {e}"))?;
+                }
+            }
+        }
 
         let axes_map = figure.plot_axes_indices().to_vec();
         let rds = figure.render_data();

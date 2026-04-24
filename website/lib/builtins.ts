@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, realpathSync } from 'fs';
 import { join } from 'path';
 import type { BuiltinBadge } from './badge-utils';
 import { builtinHasGpuSupport, getBuiltinBadges } from './badge-utils';
+// touched to invalidate the in-memory builtin docs cache when JSON content changes
 
 export type BuiltinSignature = {
   in: string[];
@@ -58,6 +59,14 @@ export type BuiltinDocJsonEncodeOption = {
   description: string;
 };
 
+export type BuiltinDocValidation = {
+  summary: string;
+  implementation?: BuiltinDocLink;
+  parity_test?: BuiltinDocLink;
+  tolerance?: string;
+  limitations?: string;
+};
+
 export type BuiltinDoc = {
   title: string;
   category: string;
@@ -80,6 +89,7 @@ export type BuiltinDoc = {
   fusion?: Record<string, unknown>;
   requires_feature?: string | null;
   tested?: Record<string, string | string[]>;
+  validation?: BuiltinDocValidation;
 };
 
 export type BuiltinDocEntry = BuiltinDoc & { slug: string };

@@ -4,7 +4,8 @@ use runmat_plot::plots::{LegendStyle, TextStyle};
 use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
     current_axes_handle_for_figure, decode_axes_handle, decode_plot_object_handle,
-    figure_handle_exists, legend_entries_snapshot, select_axes_for_figure, set_legend_for_axes,
+    figure_handle_exists, figure_has_sg_title, legend_entries_snapshot, select_axes_for_figure,
+    set_legend_for_axes, set_sg_title_properties_for_figure,
     set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
     PlotObjectKind,
 };
@@ -105,15 +106,26 @@ pub fn set_properties(
         }
         PlotHandle::Text(handle, axes_index, kind) => {
             let mut text: Option<String> = None;
-            let mut style = axes_metadata_snapshot(handle, axes_index)
-                .map_err(|err| map_figure_error(builtin, err))?
-                .text_style_for(kind);
+            let mut style = if matches!(kind, PlotObjectKind::SuperTitle) {
+                super::state::clone_figure(handle)
+                    .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?
+                    .sg_title_style
+            } else {
+                axes_metadata_snapshot(handle, axes_index)
+                    .map_err(|err| map_figure_error(builtin, err))?
+                    .text_style_for(kind)
+            };
             for pair in args.chunks_exact(2) {
                 let key = property_name(&pair[0], builtin)?;
                 apply_text_property(&mut text, &mut style, &key, &pair[1], builtin)?;
             }
-            set_text_properties_for_axes(handle, axes_index, kind, text, Some(style))
-                .map_err(|err| map_figure_error(builtin, err))?;
+            if matches!(kind, PlotObjectKind::SuperTitle) {
+                set_sg_title_properties_for_figure(handle, text, Some(style))
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            } else {
+                set_text_properties_for_axes(handle, axes_index, kind, text, Some(style))
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            }
             Ok(())
         }
         PlotHandle::Legend(handle, axes_index) => {
@@ -224,6 +236,9 @@ fn get_figure_property(
     let axes = axes_handles_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
     let current_axes =
         current_axes_handle_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
+    let sg_title_handle =
+        super::state::encode_plot_object_handle(handle, 0, PlotObjectKind::SuperTitle);
+    let has_sg_title = figure_has_sg_title(handle);
     match property.map(canonical_property_name) {
         None => {
             let mut st = StructValue::new();
@@ -231,17 +246,29 @@ fn get_figure_property(
             st.insert("Number", Value::Num(handle.as_u32() as f64));
             st.insert("Type", Value::String("figure".into()));
             st.insert("CurrentAxes", Value::Num(current_axes));
-            st.insert("Children", handles_value(axes));
+            let mut children = axes;
+            if has_sg_title {
+                children.push(sg_title_handle);
+            }
+            st.insert("Children", handles_value(children));
             st.insert("Parent", Value::Num(f64::NAN));
             st.insert("Name", Value::String(format!("Figure {}", handle.as_u32())));
+            st.insert("SGTitle", Value::Num(sg_title_handle));
             Ok(Value::Struct(st))
         }
         Some("number") => Ok(Value::Num(handle.as_u32() as f64)),
         Some("type") => Ok(Value::String("figure".into())),
         Some("currentaxes") => Ok(Value::Num(current_axes)),
-        Some("children") => Ok(handles_value(axes)),
+        Some("children") => Ok(handles_value({
+            let mut children = axes;
+            if has_sg_title {
+                children.push(sg_title_handle);
+            }
+            children
+        })),
         Some("parent") => Ok(Value::Num(f64::NAN)),
         Some("name") => Ok(Value::String(format!("Figure {}", handle.as_u32()))),
+        Some("sgtitle") => Ok(Value::Num(sg_title_handle)),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported figure property `{other}`"),
@@ -442,23 +469,38 @@ fn get_text_property(
     property: Option<&str>,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    let meta =
-        axes_metadata_snapshot(handle, axes_index).map_err(|err| map_figure_error(builtin, err))?;
     let (text, style) = match kind {
-        PlotObjectKind::Title => (meta.title, meta.title_style),
-        PlotObjectKind::XLabel => (meta.x_label, meta.x_label_style),
-        PlotObjectKind::YLabel => (meta.y_label, meta.y_label_style),
-        PlotObjectKind::ZLabel => (meta.z_label, meta.z_label_style),
+        PlotObjectKind::SuperTitle => {
+            let figure = super::state::clone_figure(handle)
+                .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?;
+            (figure.sg_title, figure.sg_title_style)
+        }
+        PlotObjectKind::Title
+        | PlotObjectKind::XLabel
+        | PlotObjectKind::YLabel
+        | PlotObjectKind::ZLabel => {
+            let meta = axes_metadata_snapshot(handle, axes_index)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            match kind {
+                PlotObjectKind::Title => (meta.title, meta.title_style),
+                PlotObjectKind::XLabel => (meta.x_label, meta.x_label_style),
+                PlotObjectKind::YLabel => (meta.y_label, meta.y_label_style),
+                PlotObjectKind::ZLabel => (meta.z_label, meta.z_label_style),
+                PlotObjectKind::Legend | PlotObjectKind::SuperTitle => unreachable!(),
+            }
+        }
         PlotObjectKind::Legend => unreachable!(),
+    };
+    let parent = if matches!(kind, PlotObjectKind::SuperTitle) {
+        Value::Num(handle.as_u32() as f64)
+    } else {
+        Value::Num(super::state::encode_axes_handle(handle, axes_index))
     };
     match property.map(canonical_property_name) {
         None => {
             let mut st = StructValue::new();
             st.insert("Type", Value::String("text".into()));
-            st.insert(
-                "Parent",
-                Value::Num(super::state::encode_axes_handle(handle, axes_index)),
-            );
+            st.insert("Parent", parent.clone());
             st.insert("Children", handles_value(Vec::new()));
             st.insert("String", text_value(text));
             st.insert("Visible", Value::Bool(style.visible));
@@ -479,6 +521,9 @@ fn get_text_property(
             }
             Ok(Value::Struct(st))
         }
+        Some("type") => Ok(Value::String("text".into())),
+        Some("parent") => Ok(parent),
+        Some("children") => Ok(handles_value(Vec::new())),
         Some("string") => Ok(text_value(text)),
         Some("visible") => Ok(Value::Bool(style.visible)),
         Some("fontsize") => Ok(style
@@ -660,6 +705,7 @@ fn canonical_property_name(name: &str) -> &str {
         "xscale" => "xscale",
         "yscale" => "yscale",
         "currentaxes" => "currentaxes",
+        "sgtitle" | "supertitle" => "sgtitle",
         "children" => "children",
         "parent" => "parent",
         "type" => "type",
@@ -981,6 +1027,9 @@ fn apply_figure_property(
             select_axes_for_figure(figure_handle, axes_index)
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
+        }
+        "sgtitle" => {
+            apply_figure_text_alias(figure_handle, PlotObjectKind::SuperTitle, value, builtin)
         }
         other => Err(plotting_error(
             builtin,
@@ -2750,8 +2799,50 @@ fn apply_axes_text_alias(
         PlotObjectKind::YLabel => (meta.y_label, meta.y_label_style),
         PlotObjectKind::ZLabel => (meta.z_label, meta.z_label_style),
         PlotObjectKind::Legend => unreachable!(),
+        PlotObjectKind::SuperTitle => unreachable!(),
     };
     set_text_properties_for_axes(handle, axes_index, kind, text, Some(style))
+        .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_figure_text_alias(
+    handle: FigureHandle,
+    kind: PlotObjectKind,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if let Some(text) = value_as_text_string(value) {
+        match kind {
+            PlotObjectKind::SuperTitle => {
+                set_sg_title_properties_for_figure(handle, Some(text), None)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            }
+            _ => unreachable!(),
+        }
+        return Ok(());
+    }
+
+    let scalar = handle_scalar(value, builtin)?;
+    let (src_handle, _src_axes, src_kind) =
+        decode_plot_object_handle(scalar).map_err(|err| map_figure_error(builtin, err))?;
+    if src_kind != kind {
+        return Err(plotting_error(
+            builtin,
+            format!(
+                "{builtin}: expected a matching text handle for `{}`",
+                key_name(kind)
+            ),
+        ));
+    }
+
+    let figure = super::state::clone_figure(src_handle)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure handle")))?;
+    let (text, style) = match kind {
+        PlotObjectKind::SuperTitle => (figure.sg_title, figure.sg_title_style),
+        _ => unreachable!(),
+    };
+    set_sg_title_properties_for_figure(handle, text, Some(style))
         .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
@@ -3104,6 +3195,7 @@ fn key_name(kind: PlotObjectKind) -> &'static str {
         PlotObjectKind::YLabel => "YLabel",
         PlotObjectKind::ZLabel => "ZLabel",
         PlotObjectKind::Legend => "Legend",
+        PlotObjectKind::SuperTitle => "SGTitle",
     }
 }
 
@@ -3119,6 +3211,7 @@ impl AxesMetadataExt for runmat_plot::plots::AxesMetadata {
             PlotObjectKind::YLabel => self.y_label_style.clone(),
             PlotObjectKind::ZLabel => self.z_label_style.clone(),
             PlotObjectKind::Legend => TextStyle::default(),
+            PlotObjectKind::SuperTitle => TextStyle::default(),
         }
     }
 }

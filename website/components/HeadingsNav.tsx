@@ -1,6 +1,3 @@
-"use client";
-
-import { useMemo } from "react";
 import { slugifyHeading } from "@/lib/utils";
 import { OnThisPageNav, type TocHeading } from "@/components/OnThisPageNav";
 
@@ -25,11 +22,12 @@ function extractHeadings(md: string): TocHeading[] {
   return out;
 }
 
+// Server component: extract headings from the raw markdown source on the server,
+// then pass the (small) headings array down to the client-side scroll-spy nav.
+// This avoids shipping the full markdown text in the RSC payload and avoids
+// re-running the regex extraction in the browser.
 export function HeadingsNav({ source, maxDepth }: { source: string; maxDepth?: number }) {
-  const headings = useMemo(() => {
-    const all = extractHeadings(source);
-    return maxDepth ? all.filter((h) => h.depth <= maxDepth) : all;
-  }, [source, maxDepth]);
+  const all = extractHeadings(source);
+  const headings = maxDepth ? all.filter((h) => h.depth <= maxDepth) : all;
   return <OnThisPageNav headings={headings} />;
 }
-

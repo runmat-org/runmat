@@ -114,6 +114,18 @@
     {
       "question": "Does isnan support GPU acceleration in RunMat?",
       "answer": "Yes. `isnan` runs on the GPU with elementwise fusion, meaning it can be combined with other operations without extra memory round-trips."
+    },
+    {
+      "question": "What's the difference between `isnan`, `isinf`, and `isfinite`?",
+      "answer": "`isnan(x)` is true only for `NaN` values, `isinf(x)` is true only for `Inf` and `-Inf`, and `isfinite(x)` is true for everything else (neither `NaN` nor infinite). For any numeric `x`, exactly one of `isnan(x)`, `isinf(x)`, or `isfinite(x)` is `true`."
+    },
+    {
+      "question": "How do I check for NaN without calling `isnan`?",
+      "answer": "`NaN` is the only IEEE value that is not equal to itself, so `x ~= x` is `true` exactly when `x` is `NaN`. This trick works on scalars and arrays, but `isnan` is clearer, matches MATLAB idioms, and is what you should reach for in production code."
+    },
+    {
+      "question": "How do I filter NaN values out of a vector?",
+      "answer": "Index with the negated mask: `A(~isnan(A))` keeps only the finite entries. For matrices, use row-wise logic such as `A(~any(isnan(A), 2), :)` to keep rows with no `NaN`."
     }
   ],
   "links": [
@@ -153,6 +165,17 @@
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/logical/tests/isnan.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/tests/isnan.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "tf = isnan(A)"
+    },
+    "points": [
+      "`A` is a numeric scalar or array (real, complex, or `gpuArray`). Logical, character, and string inputs are accepted and map to `false`, matching MATLAB.",
+      "For complex inputs, `isnan` returns `true` whenever either the real or imaginary component is `NaN`.",
+      "`tf` is a logical array the same size as `A`, with `true` where the corresponding element is `NaN` and `false` otherwise."
+    ]
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly. RunMat's auto-offload planner keeps tensors on the GPU across fused expressions when that improves performance. You can still seed residency manually with `gpuArray` for compatibility with MATLAB scripts or when you want fine-grained control over data movement.",
   "gpu_behavior": [

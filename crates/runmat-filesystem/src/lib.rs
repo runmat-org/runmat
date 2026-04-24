@@ -416,7 +416,7 @@ fn resolve_path(path: &Path) -> PathBuf {
         if let Ok(base) = current_dir() {
             return base.join(path);
         }
-        return PathBuf::from("/").join(path);
+        PathBuf::from("/").join(path)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -495,7 +495,7 @@ pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
             .write()
             .expect("filesystem current dir lock poisoned");
         *guard = canonical;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

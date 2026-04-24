@@ -22,6 +22,7 @@ export const docsTree: DocsNode[] = [
   {
     title: "Overview",
     children: [
+      { title: "Install", externalHref: "/download" },
       { title: "Getting Started", externalHref: "/docs/getting-started" },
       {
         title: "Browser Guide",
@@ -67,6 +68,11 @@ export const docsTree: DocsNode[] = [
           ogDescription: "Why RunMat focuses on a minimal core and a powerful package system.",
         },
       },
+      {
+        title: "Correctness & Trust",
+        slug: ["correctness"],
+        file: "docs/CORRECTNESS.md",
+      },
       { title: "How It Works", externalHref: "/docs/how-it-works" },
       { title: "Roadmap", slug: ["roadmap"], file: "docs/ROADMAP.md", seo: { description: "RunMat's development roadmap and progress.", keywords: ["roadmap", "development", "progress"] } },
     ],
@@ -76,17 +82,6 @@ export const docsTree: DocsNode[] = [
     children: [
       { title: "Builtin Function Reference", externalHref: "/docs/matlab-function-reference" },
       { title: "Library Reference", slug: ["library"], file: "docs/LIBRARY.md", seo: { description: "How RunMat's built-in MATLAB functions are implemented and organized.", keywords: ["standard library", "builtins", "MATLAB functions"] } },
-      {
-        title: "Package Manager",
-        slug: ["package-manager"],
-        file: "docs/PACKAGE_MANAGER.md",
-        seo: {
-          description: "Draft design for the RunMat package system: registries, semver, native (Rust) and source (MATLAB) packages.",
-          keywords: ["package manager", "registry", "Rust", "MATLAB", "builtins"],
-          ogTitle: "RunMat Package Manager (Draft)",
-          ogDescription: "How native and source packages will work in RunMat.",
-        },
-      },
       { title: "CLI Reference", slug: ["cli"], file: "docs/CLI.md", seo: { description: "RunMat CLI commands, flags, environment variables, and examples.", keywords: ["RunMat CLI", "command line", "flags"] } },
       { title: "Configuration", slug: ["configuration"], file: "docs/CONFIG.md", seo: { description: "Configure RunMat: files, environment overrides, and precedence.", keywords: ["RunMat config", "configuration", "YAML", "TOML", "JSON"] } },
       {
@@ -162,7 +157,7 @@ export const docsTree: DocsNode[] = [
         slug: ["compatibility"],
         file: "docs/COMPATIBILITY.md",
         seo: {
-          description: "RunMat MATLAB compatibility: language coverage, 300+ built-in functions, plotting, toolbox status, and known limitations.",
+          description: "RunMat MATLAB compatibility: language coverage, 400+ built-in functions, plotting, toolbox status, and known limitations.",
           keywords: ["MATLAB compatibility", "MATLAB alternative", "RunMat compatibility", "Octave alternative", "MATLAB migration"],
           ogTitle: "MATLAB Compatibility",
           ogDescription: "How compatible is RunMat with MATLAB? Language coverage, function reference, toolbox status, and GPU acceleration.",
@@ -208,7 +203,7 @@ export const docsTree: DocsNode[] = [
           ogDescription: "How RunMat unifies filesystem access across native and browser runtimes.",
         },
       },
-      { title: "Lexer", slug: ["internals", "lexer"], file: "crates/runmat-lexer/README.md", seo: { description: "Tokenizer for MATLAB/Octave with contextual apostrophe and section markers.", keywords: ["lexer", "tokens", "logos", "MATLAB"] } },
+      // Lexer entry removed pending compiler docs rewrite; crate README was deleted in fbd1d97f (lexer crate split).
       { title: "Parser", slug: ["internals", "parser"], file: "crates/runmat-parser/README.md", seo: { description: "Precedence-based parser for MATLAB/Octave with statements, OOP, and command-form.", keywords: ["parser", "AST", "MATLAB", "Octave"] } },
       { title: "HIR", slug: ["internals", "hir"], file: "crates/runmat-hir/README.md", seo: { description: "High-level IR with flow-sensitive inference and class/import validations.", keywords: ["HIR", "type inference", "SSA", "MATLAB"] } },
       // Additional VM internals pages can be added here when dedicated docs are promoted.

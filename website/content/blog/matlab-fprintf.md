@@ -1,6 +1,6 @@
 ---
 title: "The Worst Debugging Tool in MATLAB Is the One You Use Every Day"
-description: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. Here's what it's actually for, what it costs you as a debugger, and what to use instead."
+description: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. The guide covers what it's actually for, what it costs you as a debugger, and what to use instead."
 date: "2026-03-20"
 authors:
   - name: "Fin Watterson"
@@ -8,16 +8,15 @@ authors:
 readTime: "16 min read"
 slug: "matlab-fprintf"
 tags: ["MATLAB", "fprintf", "debugging", "RunMat", "scientific computing"]
-collections: ["guides"]
 keywords: "fprintf MATLAB, MATLAB fprintf format specifiers, MATLAB print to file, MATLAB fprintf examples, MATLAB debugging, MATLAB fprintf vs disp, fprintf vs disp MATLAB, MATLAB vs Python debugging, MATLAB fprintf newline, MATLAB fprintf repeats array, MATLAB fprintf column major, MATLAB fprintf no loop, MATLAB fprintf GPU"
-excerpt: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. Here's what it's actually for, and what to use instead."
+excerpt: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. The guide covers what it's actually for, and what to use instead."
 image: "https://web.runmatstatic.com/blog-images/matlab-fprintf.png"
 ogType: "article"
 ogTitle: "The Worst Debugging Tool in MATLAB Is the One You Use Every Day"
-ogDescription: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. Here's what it's actually for, and what to use instead."
+ogDescription: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. The guide covers what it's actually for, and what to use instead."
 twitterCard: "summary_large_image"
 twitterTitle: "The Worst Debugging Tool in MATLAB Is the One You Use Every Day"
-twitterDescription: "fprintf is a formatting function that got conscripted into debugging. Here's what it's actually for, and what to use instead."
+twitterDescription: "fprintf is a formatting function that got conscripted into debugging. The guide covers what it's actually for, and what to use instead."
 canonical: "https://runmat.com/blog/matlab-fprintf"
 jsonLd:
   "@context": "https://schema.org"
@@ -41,7 +40,7 @@ jsonLd:
       "@id": "https://runmat.com/blog/matlab-fprintf#article"
       headline: "The Worst Debugging Tool in MATLAB Is the One You Use Every Day"
       alternativeHeadline: "fprintf in MATLAB: format specifiers, file I/O, and why it fails as a debugger"
-      description: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. Here's what it's actually for, what it costs you as a debugger, and what to use instead."
+      description: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. The guide covers what it's actually for, what it costs you as a debugger, and what to use instead."
       image: "https://web.runmatstatic.com/blog-images/matlab-fprintf.png"
       datePublished: "2026-03-20T00:00:00Z"
       author:
@@ -133,7 +132,7 @@ jsonLd:
 
 `fprintf` is C's [`printf`](https://en.cppreference.com/w/c/io/fprintf) with a file descriptor, a function designed in 1972 for writing formatted text to streams. Fifty-four years later, it is still the primary debugging tool for engineers writing MATLAB.
 
-You know the workflow. A thermal simulation diverges somewhere in a 5,000-iteration convergence loop. You add `fprintf('iter %d: T_max = %.4f\n', k, max(T(:)))` inside the loop, run the script, scroll through thousands of lines of output, and find the NaN at iteration 3,847. You remove the fprintf. Then you realize you also need to check the boundary condition array. You add another fprintf. You run again. You scroll again. You remove it again.
+You know the workflow. A thermal simulation diverges somewhere in a 5,000-iteration convergence loop. You add `fprintf('iter %d: T_max = %.4f\n', k, max(T(:)))` inside the loop, run the script, scroll through thousands of lines of output, and find the NaN at iteration 3,847. The fprintf comes out. Then you realize the boundary condition array also needs a check. Another fprintf goes in. Another full run, another scroll, another deletion.
 
 fprintf is a formatting function. It writes formatted text to files and to stdout. The fact that it became MATLAB's de facto debugger says more about MATLAB's tooling than it does about fprintf. If you just need the syntax and format specifiers, [skip to the reference](#fprintf-syntax-and-reference).
 
@@ -143,13 +142,13 @@ fprintf is a formatting function. It writes formatted text to files and to stdou
 
 You modify the script to observe it. Every debugging session is an edit-run-read-delete cycle. You are changing the thing you are trying to understand, and you have to undo those changes before the code is clean again.
 
-The output is unstructured -- raw text in the Command Window. No severity levels, no timestamps, no filtering. Ten thousand iterations produce ten thousand lines, and your only search tool is your eyes. Any language with a `logging` module can filter by severity, grep by keyword, and route output to files. MATLAB's fprintf gives you a text stream and nothing else.
+The output is unstructured: raw text in the Command Window without severity levels, timestamps, or anything to filter on. Ten thousand iterations produce ten thousand lines, and your only search tool is your eyes. Any language with a `logging` module can filter by severity and route output to files; grep handles the rest. MATLAB's fprintf gives you a text stream and nothing else.
 
 The debugging work is also disposable. You delete your fprintf calls when you clean up the code. Next week, a different variable diverges in the same loop. You add them all back.
 
 Worse, `fprintf('x = %f\n', x)` shows you one scalar view of one variable. You cannot see dimensions, type, sparsity, or the other 47 workspace variables that might be relevant. You have to decide what to print before you know which variable is causing the problem.
 
-And if you are working with [GPU arrays](/blog/how-to-use-gpu-in-matlab), MATLAB has no implicit gather mechanism. You have to call `gather` yourself to bring data from GPU to CPU before fprintf can format it. Every debugging fprintf inside a GPU loop means an extra `gather` call -- a synchronous transfer that blocks until the GPU finishes all pending work:
+And if you are working with [GPU arrays](/blog/how-to-use-gpu-in-matlab), MATLAB has no implicit gather mechanism. You have to call `gather` yourself to bring data from GPU to CPU before fprintf can format it. Every debugging fprintf inside a GPU loop means an extra `gather` call: a synchronous transfer that blocks until the GPU finishes all pending work.
 
 ```matlab
 x = gpuArray(rand(1e7, 1, 'single'));
@@ -167,15 +166,15 @@ This is the workflow every MATLAB engineer runs on repeat:
 
 ```mermaid
 flowchart TD
-    A["🔍 Suspect a bug"] --> B["✏️ Add fprintf calls"]
-    B --> C["▶️ Run script"]
-    C --> D["📜 Scroll through output"]
+    A["Suspect a bug"] --> B["Add fprintf calls"]
+    B --> C["Run script"]
+    C --> D["Scroll through output"]
     D --> E{"Found it?"}
-    E -- "No" --> F["✏️ Add MORE fprintf calls"]
+    E -- "No" --> F["Add more fprintf calls"]
     F --> C
-    E -- "Yes" --> G["🔧 Fix the bug"]
-    G --> H["🧹 Delete all fprintf calls"]
-    H --> I["✅ Clean code again"]
+    E -- "Yes" --> G["Fix the bug"]
+    G --> H["Delete all fprintf calls"]
+    H --> I["Clean code again"]
     I -.-> |"Next week, new bug"| A
 ```
 
@@ -183,23 +182,23 @@ Compare that with what a structured debugging environment gives you:
 
 ```mermaid
 flowchart TD
-    A["🔍 Suspect a bug"] --> B["▶️ Run script"]
-    B --> C["📊 Inspect variables in workspace"]
-    C --> D["🔧 Fix the bug"]
-    D --> E["✅ Done — no cleanup needed"]
+    A["Suspect a bug"] --> B["Run script"]
+    B --> C["Inspect variables in workspace"]
+    C --> D["Fix the bug"]
+    D --> E["Done, no cleanup needed"]
 ```
 
-The first diagram has a cycle. The second does not. That is the entire argument.
+The first diagram has a cycle. The second does not.
 
-### Every other scientific computing language fixed this already
+### How other languages handle print debugging
 
-Python shipped a [`logging`](https://docs.python.org/3/library/logging.html) module in its standard library in 2002 and added [`breakpoint()`](https://docs.python.org/3/library/functions.html#breakpoint) as a built-in in 2018. The community consensus shifted years ago: print debugging is a last resort, not a first instinct. Julia, which targets the same scientific computing audience as MATLAB, built [`@show`](https://docs.julialang.org/en/v1/stdlib/InteractiveUtils/#Base.@show) into the language as an explicit admission that print debugging will happen but should at least show the expression alongside the value (`@show x` prints `x = 5` without a manual format string). Julia also ships a [`Logging`](https://docs.julialang.org/en/v1/stdlib/Logging/) stdlib with `@info`, `@warn`, and `@debug` that produce timestamped, leveled, filterable records.
+Python shipped a [`logging`](https://docs.python.org/3/library/logging.html) module in its standard library in 2002 and added [`breakpoint()`](https://docs.python.org/3/library/functions.html#breakpoint) as a built-in in 2018. The community consensus shifted years ago: print debugging is a last resort rather than a first instinct. Julia, which targets the same scientific computing audience as MATLAB, built [`@show`](https://docs.julialang.org/en/v1/stdlib/InteractiveUtils/#Base.@show) into the language as an explicit admission that print debugging will happen and should at least show the expression alongside the value (`@show x` prints `x = 5` without a manual format string). Julia also ships a [`Logging`](https://docs.julialang.org/en/v1/stdlib/Logging/) stdlib with `@info`, `@warn`, and `@debug` that produce timestamped, leveled, filterable records.
 
 Both communities moved on from print-as-debugger. MATLAB has a built-in debugger and a workspace browser, but the community default stayed with fprintf because those tools never became the path of least resistance the way `logging` and `breakpoint()` did in Python.
 
 ## fprintf gotchas
 
-Three behaviors of fprintf catch engineers off guard: column-major traversal of matrices, silent format-string repetition over arrays, and the absence of an automatic newline.
+A few behaviors of fprintf catch engineers off guard. Matrices are read in column-major order. The format string repeats silently over arrays. And there is no automatic newline.
 
 ### Column-major traversal
 
@@ -232,9 +231,9 @@ v = [10 20 30 40 50];
 fprintf('val = %d\n', v)
 ```
 
-This prints five lines. The format string repeats until every element in `v` has been consumed. No loop required -- fprintf handles the iteration internally.
+This prints five lines. The format string repeats until every element in `v` has been consumed. No loop required; fprintf handles the iteration internally.
 
-The repetition follows the same column-major flattening described above. For a matrix, the format string walks through every element in column-first order, repeating as many times as needed. If the number of elements is not evenly divisible by the number of conversion specifiers in the format string, the last repetition still runs -- it just consumes fewer arguments, and leftover specifiers produce no output.
+The repetition follows the same column-major flattening described above. For a matrix, the format string walks through every element in column-first order, repeating as many times as needed. If the number of elements is not evenly divisible by the number of conversion specifiers in the format string, the last repetition still runs. It just consumes fewer arguments, and any leftover specifiers produce no output.
 
 This is useful once you understand it, but it catches people off guard because no other language's printf family works this way. C's `printf` prints exactly once. Python's `print` does not repeat its format. MATLAB's fprintf is unique in treating the format string as a template that loops over its arguments.
 
@@ -247,13 +246,13 @@ fprintf('hello')
 fprintf(' world')
 ```
 
-This prints `hello world` on a single line with no trailing newline. `disp` automatically appends a newline after its output. fprintf writes exactly what you tell it to -- if you want a newline, you have to include `\n` in the format string.
+This prints `hello world` on a single line with no trailing newline. `disp` automatically appends a newline after its output. fprintf writes exactly what you tell it to. If you want a newline, you have to include `\n` in the format string.
 
 This matters when you mix fprintf and disp in the same script, or when you call fprintf in a function and the next output appears concatenated on the same line. The fix is simple (`fprintf('hello\n')`), but the confusion is real if you have not seen it before.
 
 ## What debugging actually looks like
 
-A variable explorer eliminates the edit-run-scroll-delete cycle that fprintf debugging imposes. Return to the thermal simulation from the opening. The convergence loop diverges somewhere in 5,000 iterations. Here is how each approach plays out.
+A variable explorer eliminates the edit-run-scroll-delete cycle that fprintf debugging imposes. Return to the thermal simulation from the opening. The convergence loop diverges somewhere in 5,000 iterations.
 
 ### The fprintf approach
 
@@ -266,7 +265,7 @@ for k = 1:5000
 end
 ```
 
-You run the script. Five thousand lines scroll past. You find the NaN at iteration 3,847. But you still do not know why -- was it the boundary array? The diffusivity coefficient? The time step? You cannot tell from a single printed scalar. So you add more fprintf calls:
+You run the script. Five thousand lines scroll past. You find the NaN at iteration 3,847. But you still do not know why. Was it the boundary array? The diffusivity coefficient or the time step? You cannot tell from a single printed scalar. So you add more fprintf calls:
 
 ```matlab
 for k = 1:5000
@@ -283,30 +282,30 @@ You run again. Now you have 5,000 lines with four columns each. You scroll to it
 You run the same script, unmodified. No fprintf calls added.
 
 <a href="/sandbox" data-ph-capture-attribute-destination="sandbox" data-ph-capture-attribute-source="blog-matlab-fprintf" data-ph-capture-attribute-cta="debugging-video">
-  <video autoPlay loop muted playsInline poster="https://web.runmatstatic.com/video/posters/runmat-debugging.png" className="my-6 w-full rounded-lg cursor-pointer">
+  <video autoPlay loop muted playsInline preload="metadata" poster="https://web.runmatstatic.com/video/posters/runmat-debugging.png" className="my-6 w-full rounded-lg cursor-pointer">
     <source src="https://web.runmatstatic.com/video/runmat-debugging.mp4" type="video/mp4" />
   </video>
 </a>
 
-In the workspace panel, you click `T` and see its full state at the current iteration: 200x200 double, min -4.2e3, max Inf. You click `BC` and see it went negative. You click the execution trace and see the exact iteration where the values diverged. You found the same bug without editing the script, without re-running, and without scrolling through any output.
+In the workspace panel, you click `T` and see its full state at the current iteration: 200x200 double with min -4.2e3 and max Inf. Clicking `BC` shows it went negative. The execution trace pinpoints the iteration where the values diverged. You found the same bug without editing the script, without re-running, and without scrolling through any output.
 
 The script stays clean. The diagnostic information is in the tool, not in the code.
 
 ### What RunMat ships
 
-[RunMat](/blog/introducing-runmat) is a modern runtime for MATLAB syntax -- a from-scratch engine built in Rust that runs your `.m` files with over 300 compatible functions, [automatic GPU acceleration](/blog/how-to-use-gpu-in-matlab), structured logging, and built-in tooling that MATLAB never provided. Your existing fprintf calls run unchanged -- same syntax, same column-major behavior, same file I/O. The difference is what else ships alongside it.
+[RunMat](/blog/introducing-runmat) is a modern runtime for MATLAB syntax: a from-scratch engine built in Rust that runs your `.m` files with over 300 compatible functions, [automatic GPU acceleration](/blog/how-to-use-gpu-in-matlab), structured logging, and built-in tooling that MATLAB never provided. Your existing fprintf calls run unchanged, with the same syntax, the same column-major behavior, and the same file I/O. The difference is what else ships alongside it.
 
-The variable explorer lets you click any variable and see its full state: type, dimensions, values. No code required, no format string to write, no cleanup afterward.
+The variable explorer lets you click any variable and see its full state, including type, dimensions, and values. No code required, no format string to write, and no cleanup afterward.
 
-The runtime also emits structured log records with timestamps and severity levels. These records are filterable, searchable, and persistent across sessions. A debug log stays in the codebase as a permanent diagnostic, not a temporary fprintf that gets deleted during cleanup.
+The runtime also emits structured log records with timestamps and severity levels. These records are filterable and searchable, and they persist across sessions. A debug log stays in the codebase as a permanent diagnostic instead of a temporary fprintf that gets deleted during cleanup.
 
 For performance work, [Chrome Trace-format](https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview) events with span durations show execution flow and per-operation timing. You can see which functions ran, how long they took, and where GPU dispatches happened, without wrapping sections in `tic`/`toc` calls or inserting fprintf timestamps by hand.
 
-Every save also creates an immutable [version record](/blog/version-control-for-engineers-who-dont-use-git). The debugging fprintf calls you added, found useful, and then deleted during cleanup still exist in the file's version history. Restore them in one click instead of rewriting them from memory.
+Every save also creates an immutable [version record](/blog/version-control-for-engineers-who-dont-use-git). The debugging fprintf calls you added during a session and later removed during cleanup still exist in the file's version history. Restore them in one click instead of rewriting them from memory.
 
 ### Where fprintf still belongs
 
-Use fprintf for what it was built for: writing formatted output to files and streams. A report, a CSV export, a summary line at the end of a computation:
+Use fprintf for what it was built for: writing formatted output to files and streams. A report, a CSV export, or a summary line at the end of a computation:
 
 ```matlab:runnable
 fs = 48000;
@@ -324,11 +323,11 @@ fprintf('Peak frequency: %.1f Hz (magnitude: %.1f dB)\n', f(peak_idx), 20*log10(
 
 That fprintf belongs there. It is writing a result.
 
-[Try it in RunMat's browser sandbox](https://runmat.com/sandbox) and see the variable explorer, logging, and tracing alongside your code.
+[Try it in RunMat's browser sandbox](https://runmat.com/sandbox) and see the variable explorer and execution tracing alongside your code.
 
 ## fprintf syntax and reference
 
-You are still going to use fprintf. It is a good function -- just not a debugging tool. Here is the complete reference.
+You are still going to use fprintf. It is for formatted output, not for debugging. The complete reference follows.
 
 ### Basic syntax
 
@@ -391,56 +390,65 @@ end
 fclose(fid);
 ```
 
-Use `'w'` to overwrite, `'a'` to append. One encoding edge case worth knowing: if you open a file with ASCII encoding (`fopen('f.txt','w','native','ascii')`), fprintf raises an error on any character outside the 0-127 range. The default encoding is UTF-8, which handles everything.
+Use `'w'` to overwrite, `'a'` to append. One encoding edge case: if you open a file with ASCII encoding (`fopen('f.txt','w','native','ascii')`), fprintf raises an error on any character outside the 0-127 range. The default encoding is UTF-8, which handles everything.
 
 ### sprintf vs fprintf
 
-`sprintf` returns the formatted string instead of writing it. Same format specifiers, same column-major traversal. Use sprintf when you need the string as a variable (for titles, labels, or further processing), fprintf when you want to write directly to a stream or file.
+`sprintf` returns the formatted string instead of writing it. Same format specifiers, same column-major traversal. Use sprintf when you need the string as a variable (for titles, labels, or any further processing); use fprintf when you want to write directly to a stream or file.
 
 ### fprintf vs disp
 
-`disp` prints a value with an automatic newline and no format control. `fprintf` gives you full control over formatting but requires explicit `\n` characters and a format string. Use `disp` for quick console output during development. Use `fprintf` for structured output to files, reports, or anywhere you need column alignment and specific number formatting. For debugging, neither is the right tool -- a variable explorer shows you every variable's state without modifying your code.
+`disp` prints a value with an automatic newline and no format control. `fprintf` gives you full control over formatting but requires explicit `\n` characters and a format string. Use `disp` for quick console output during development. Use `fprintf` for structured output to files, reports, or anywhere you need column alignment and specific number formatting. For debugging, neither is the right tool. A variable explorer shows you every variable's state without modifying your code.
 
 ## Frequently asked questions
 
-**Does fprintf return the number of characters or bytes?**
+### Does fprintf return the number of characters or bytes?
+
 Bytes. The return value is the number of bytes written, which may differ from the character count when using multi-byte encodings like UTF-8.
 
-**How does fprintf handle matrices?**
+### How does fprintf handle matrices?
+
 It flattens them in column-major order and substitutes elements into the format string one at a time. The format string repeats until every element has been consumed. See the [column-major section](#column-major-traversal) above for examples.
 
-**Can I use fprintf with GPU arrays?**
-Not directly. MATLAB has no implicit gather mechanism -- you must explicitly call `gather()` to bring gpuArray data to the CPU before fprintf can format it. In a loop, each gather call is a synchronous transfer that serializes GPU work and can cost you a 10-50x slowdown. Use fprintf for final output after computation, not for mid-loop observation.
+### Can I use fprintf with GPU arrays?
 
-**What is the difference between fprintf and sprintf?**
-fprintf writes formatted text to a file or stdout. sprintf returns the formatted text as a character vector without writing it anywhere. Same format specifiers, same column-major traversal, different destination.
+Not directly. MATLAB has no implicit gather mechanism, so you must explicitly call `gather()` to bring gpuArray data to the CPU before fprintf can format it. In a loop, each gather call is a synchronous transfer that serializes GPU work and can cost you a 10-50x slowdown. Use fprintf for final output after computation, not for mid-loop observation.
 
-**How do I write to stderr in MATLAB?**
+### What is the difference between fprintf and sprintf?
+
+fprintf writes formatted text to a file or stdout. sprintf returns the formatted text as a character vector without writing it anywhere. Same format specifiers, same column-major traversal, with a different destination.
+
+### How do I write to stderr in MATLAB?
+
 Use `fprintf(2, formatSpec, ...)` or `fprintf('stderr', formatSpec, ...)`. File identifier 2 and the string `'stderr'` both route output to the standard error stream.
 
-**Why is fprintf slow in a loop?**
-Two factors. Each call involves I/O overhead from flushing output to the Command Window or file buffer. If you are debugging GPU code, each fprintf also requires an explicit `gather()` call to bring data to the CPU -- a synchronous transfer that serializes GPU work and is the bigger cost by far.
+### Why is fprintf slow in a loop?
 
-**Why does fprintf print my entire array without a loop?**
-The format string repeats automatically until every element has been consumed. `fprintf('%d\n', [1 2 3])` prints three lines because fprintf cycles the format string three times. This is unique to MATLAB -- C's printf and Python's print do not repeat. See [the format string repeat section](#the-format-string-repeats-silently) for details.
+Two factors. Each call involves I/O overhead from flushing output to the Command Window or file buffer. If you are debugging GPU code, each fprintf also requires an explicit `gather()` call to bring data to the CPU. That gather is a synchronous transfer that serializes GPU work, and it is the bigger cost by far.
 
-**Why does fprintf not add a newline?**
+### Why does fprintf print my entire array without a loop?
+
+The format string repeats automatically until every element has been consumed. `fprintf('%d\n', [1 2 3])` prints three lines because fprintf cycles the format string three times. This is unique to MATLAB; C's printf and Python's print do not repeat. See [the format string repeat section](#the-format-string-repeats-silently) for details.
+
+### Why does fprintf not add a newline?
+
 Unlike `disp`, fprintf writes exactly what you specify. If you want a newline, include `\n` in the format string. `fprintf('hello\n')` prints `hello` followed by a newline. `fprintf('hello')` does not.
 
-**Is there a better alternative to fprintf for debugging MATLAB code?**
+### Is there a better alternative to fprintf for debugging MATLAB code?
+
 Yes. A variable explorer lets you inspect any variable's type, dimensions, and values without modifying code. Structured logging with severity levels and timestamps gives you filterable, persistent diagnostic records. [RunMat](/blog/introducing-runmat) ships both alongside a fully compatible fprintf for formatted output. [Try it in the browser](https://runmat.com/sandbox).
 
 ## Sources
 
 1. Kernighan, B.W. & Ritchie, D.M. [*The C Programming Language*](https://en.wikipedia.org/wiki/The_C_Programming_Language), 1st ed. (Prentice Hall, 1978). The original specification of `printf` and its format string syntax, which MATLAB's `fprintf` inherits directly.
 
-2. MathWorks. ["fprintf — Write data to text file."](https://www.mathworks.com/help/matlab/ref/fprintf.html) MATLAB Documentation. Covers format specifiers, column-major traversal, and file I/O behavior.
+2. MathWorks. ["fprintf: Write data to text file."](https://www.mathworks.com/help/matlab/ref/fprintf.html) MATLAB Documentation. Covers format specifiers, column-major traversal, and file I/O behavior.
 
 3. MathWorks. ["GPU Computing in MATLAB."](https://www.mathworks.com/help/parallel-computing/gpu-computing-in-matlab.html) Parallel Computing Toolbox Documentation. Documents the explicit `gpuArray`/`gather` workflow and the absence of implicit GPU-to-CPU transfers.
 
-4. Van Rossum, G. ["PEP 282 — A Logging System."](https://peps.python.org/pep-0282/) Python Enhancement Proposal, 2002. The proposal that added `logging` to Python's standard library, establishing leveled, filterable log output as a language-level primitive.
+4. Van Rossum, G. ["PEP 282: A Logging System."](https://peps.python.org/pep-0282/) Python Enhancement Proposal, 2002. The proposal that added `logging` to Python's standard library, establishing leveled, filterable log output as a language-level primitive.
 
-5. Cannon, B. ["PEP 553 — Built-in breakpoint()."](https://peps.python.org/pep-0553/) Python Enhancement Proposal, 2017. Added `breakpoint()` as a built-in, making interactive debugging a first-class workflow rather than a library import.
+5. Cannon, B. ["PEP 553: Built-in breakpoint()."](https://peps.python.org/pep-0553/) Python Enhancement Proposal, 2017. Added `breakpoint()` as a built-in, making interactive debugging a first-class workflow rather than a library import.
 
 6. Bezanson, J., Edelman, A., Karpinski, S., & Shah, V.B. ["Julia: A Fresh Approach to Numerical Computing."](https://julialang.org/research/julia-fresh-approach-BEKS.pdf) *SIAM Review* 59(1), 65–98, 2017. The language design paper for Julia, which ships `@show` and structured `Logging` as part of its stance that scientific computing needs better introspection than print statements.
 

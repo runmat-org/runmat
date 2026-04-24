@@ -23,37 +23,42 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
   useEffect(() => {
     if (!mounted) return;
 
+    // Guard against races: if `chart`, `theme`, or `mounted` change while a
+    // previous async render is still in flight, the stale invocation must not
+    // overwrite the DOM or component state with results computed for the old
+    // inputs (e.g. flashing a diagram rendered with the previous theme).
+    let cancelled = false;
+
     const renderChart = async () => {
-      // Early return if ref is not available
       if (!ref.current) {
         console.warn('MermaidDiagram: ref.current is not available');
         return;
       }
 
-      // Check if chart content is valid
       if (!chart || chart.trim().length === 0) {
         console.warn('MermaidDiagram: chart content is empty');
+        if (cancelled) return;
         setError('Mermaid chart content is empty');
         setIsLoading(false);
         return;
       }
 
-      // Dynamically import mermaid only on client side
       let mermaid;
       try {
         mermaid = (await import('mermaid')).default;
       } catch (err) {
         console.error('Failed to load mermaid:', err);
+        if (cancelled) return;
         setError('Failed to load Mermaid library');
         setIsLoading(false);
         return;
       }
+      if (cancelled) return;
 
       setIsLoading(true);
       setError(null);
 
       try {
-        // Initialize mermaid with theme. Keep securityLevel default (strict) for safety.
         mermaid.initialize({
           startOnLoad: true,
           theme: theme === 'dark' ? 'dark' : 'default',
@@ -78,34 +83,33 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
           },
         });
 
-        // Double-check ref is still available before rendering
-        if (ref.current) {
-          const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
-          const { svg } = await mermaid.render(id, chart);
-          
-          // Triple-check ref is still available before setting innerHTML
-          if (ref.current) {
-            ref.current.innerHTML = svg;
-            setIsLoading(false);
-          }
-        }
+        if (cancelled || !ref.current) return;
+
+        const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+        const { svg } = await mermaid.render(id, chart);
+
+        if (cancelled || !ref.current) return;
+
+        ref.current.innerHTML = svg;
+        setIsLoading(false);
       } catch (error) {
         console.error('Mermaid rendering error:', error);
+        if (cancelled) return;
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         setError(errorMsg);
         setIsLoading(false);
-        
-        // Fallback: show the raw chart text if rendering fails
+
         if (ref.current) {
           ref.current.innerHTML = `<pre style="color: red; padding: 1rem; border: 1px solid red; border-radius: 4px;">Mermaid diagram failed to render: ${errorMsg}</pre>`;
         }
       }
     };
 
-    // Add a small delay to ensure DOM is ready
-    const timeoutId = setTimeout(renderChart, 100);
-    
-    return () => clearTimeout(timeoutId);
+    void renderChart();
+
+    return () => {
+      cancelled = true;
+    };
   }, [chart, theme, mounted]);
 
   // Don't render anything during SSR

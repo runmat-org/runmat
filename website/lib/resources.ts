@@ -414,6 +414,11 @@ export function getAvailableResourceTypes(): ResourceType[] {
   for (const item of all) {
     if (item.type) seen.add(item.type)
   }
+  // Guides are aggregated from multiple sources (including blog/doc collections),
+  // so they may exist even when no native resource is explicitly typed as "guides".
+  if (getGuidesCollection().length > 0) {
+    seen.add('guides')
+  }
   return RESOURCE_TYPES.filter(t => seen.has(t))
 }
 

@@ -10,6 +10,7 @@ pub mod fft;
 pub mod filter;
 pub mod find;
 pub mod flip;
+pub mod gradient;
 pub mod image_normalize;
 pub mod imfilter;
 pub mod ind2sub;

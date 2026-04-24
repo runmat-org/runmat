@@ -1,0 +1,120 @@
+{
+  "title": "cross",
+  "category": "math/linalg/ops",
+  "keywords": [
+    "cross",
+    "cross product",
+    "vector product",
+    "3d vector",
+    "gpu"
+  ],
+  "summary": "Compute the vector cross product of matching 3-element vectors along a chosen dimension.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/cross.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Providers may implement the `cross` hook to keep real-valued inputs on the device. Complex outputs currently fall back to the host path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::linalg::ops::cross::tests",
+    "integration": "builtins::math::linalg::ops::cross::tests::cross_gpu_roundtrip",
+    "gpu": "builtins::math::linalg::ops::cross::tests::cross_wgpu_matches_cpu"
+  },
+  "description": "`cross(A, B)` computes the vector cross product for matching 3-element vectors. When `A` and `B` are matrices or higher-rank tensors, `cross` operates along the first dimension whose length is `3`, unless you supply an explicit dimension.",
+  "behaviors": [
+    "Inputs `A` and `B` must be the same size.",
+    "With no dimension argument, `cross` uses the first dimension whose extent is exactly `3`.",
+    "`cross(A, B, dim)` requires `dim` to be a valid array dimension and `size(A, dim) == 3`.",
+    "The output has the same shape as the inputs because each input 3-vector produces one output 3-vector.",
+    "Logical and integer inputs are promoted to double precision before evaluation.",
+    "Real `gpuArray` inputs remain GPU-resident when the active provider implements the `cross` hook; otherwise RunMat gathers, evaluates on the host, and re-uploads the real result."
+  ],
+  "examples": [
+    {
+      "description": "Computing the cross product of row vectors",
+      "input": "a = [1 0 0];\nb = [0 1 0];\nc = cross(a, b)",
+      "output": "c =\n     0     0     1"
+    },
+    {
+      "description": "Computing the cross product of column vectors",
+      "input": "u = [1; 0; 0];\nv = [0; 1; 0];\nw = cross(u, v)",
+      "output": "w =\n     0\n     0\n     1"
+    },
+    {
+      "description": "Applying `cross` row-wise across a matrix",
+      "input": "A = [1 0 0; 0 1 0];\nB = [0 1 0; 0 0 1];\nC = cross(A, B, 2)",
+      "output": "C =\n     0     0     1\n     1     0     0"
+    },
+    {
+      "description": "Evaluating `cross` on GPU-resident tensors",
+      "input": "G1 = gpuArray([1 0 0]);\nG2 = gpuArray([0 1 0]);\nG = cross(G1, G2);\nresult = gather(G)",
+      "output": "result =\n     0     0     1"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `cross` require vectors of length 3?",
+      "answer": "Yes. The operating dimension must have extent `3`, whether the vectors are stored as rows, columns, or slices of a higher-rank tensor."
+    },
+    {
+      "question": "How is the default dimension chosen?",
+      "answer": "RunMat follows MATLAB semantics and picks the first dimension whose size is exactly `3`."
+    },
+    {
+      "question": "What happens if I pass `dim` explicitly?",
+      "answer": "The dimension must exist and must have length `3`; otherwise `cross` raises a descriptive error."
+    },
+    {
+      "question": "Can I use complex inputs?",
+      "answer": "Yes. Complex host inputs use the standard bilinear cross-product formula without conjugation."
+    },
+    {
+      "question": "Does the result stay on the GPU?",
+      "answer": "For real-valued gpuArray inputs, yes when the provider implements `cross`. Complex results currently remain on the host because GPU complex tensor support is not yet wired through this builtin."
+    }
+  ],
+  "links": [
+    {
+      "label": "dot",
+      "url": "./dot"
+    },
+    {
+      "label": "kron",
+      "url": "./kron"
+    },
+    {
+      "label": "mtimes",
+      "url": "./mtimes"
+    },
+    {
+      "label": "norm",
+      "url": "./norm"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/linalg/ops/cross.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/ops/cross.rs"
+  },
+  "gpu_residency": "You usually do not need to call `gpuArray` explicitly for `cross`. RunMat keeps real-valued tensors on the GPU whenever the active provider supports the operation, and otherwise falls back to a gather -> host compute -> re-upload path automatically.",
+  "gpu_behavior": [
+    "The WGPU provider computes real-valued `cross` products by gathering the three vector components into temporary device tensors, applying multiply/subtract kernels on-device, and scattering the results back into the output tensor. Providers that do not implement `cross` fall back to the host reference path."
+  ]
+}
