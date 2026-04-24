@@ -14,6 +14,7 @@ excerpt: "An engineering retrospective on what MATLAB compatibility costs to bui
 ogType: "article"
 ogTitle: "MATLAB vs Octave: 30 Years of Compatibility and What Changed in 2026"
 ogDescription: "MATLAB compatibility is a bigger engineering problem than it looks. Octave figured out most of it over 30+ years. What that work entails, and what is different in 2026."
+image: "https://web.runmatstatic.com/blog-images/MATLAB-v-Octave.png"
 twitterCard: "summary_large_image"
 twitterTitle: "MATLAB vs Octave: 30 Years of Compatibility and What Changed"
 twitterDescription: "An engineering retrospective on what MATLAB compatibility costs to build, what Octave got right, and what changed in 2026."

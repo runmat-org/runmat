@@ -82,7 +82,6 @@ export function builtinJsonLD(slug: string): string {
         "headline": `${title} in MATLAB — runnable examples + source (RunMat)`,
         "description": `Run ${title} in your browser. Open-source, JIT-compiled MATLAB-compatible documentation for ${stripMarkdown(builtin?.description ?? '')}`.slice(0, 300),
         "image": heroImage,
-        "dateModified": new Date().toISOString(),
         "programmingLanguage": {"@type": "ComputerLanguage", "name": "MATLAB", "alternateName": "RunMat"},
         "author": {"@id": "https://runmat.com/#organization"},
         "publisher": {"@id": "https://runmat.com/#organization"},

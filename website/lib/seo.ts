@@ -26,9 +26,7 @@ export type PageSeoOptions = {
 export function buildPageMetadata(opts: PageSeoOptions): Metadata {
   const canonical = toAbsoluteUrl(opts.canonicalPath);
   const ogImagePath = opts.ogImagePath ?? DEFAULT_OG_IMAGE_PATH;
-  const ogImageAlt = opts.ogImagePath
-    ? opts.ogImageAlt
-    : (opts.ogImageAlt ?? DEFAULT_OG_IMAGE_ALT);
+  const ogImageAlt = opts.ogImageAlt ?? DEFAULT_OG_IMAGE_ALT;
   const ogImage = toAbsoluteUrl(ogImagePath);
   const ogType = opts.ogType ?? "website";
   const ogImageEntry = [{ url: ogImage, ...(ogImageAlt ? { alt: ogImageAlt } : {}) }];
