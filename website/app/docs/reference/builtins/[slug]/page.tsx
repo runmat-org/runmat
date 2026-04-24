@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { permanentRedirect } from 'next/navigation';
+import { redirect } from 'next/navigation';
 import {
   getBuiltinDocBySlug,
   getBuiltinMetadata,
@@ -38,9 +38,9 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
   const { slug } = await params;
   const builtins = loadBuiltins();
   const b = builtins.find(x => x.slug === slug);
-  if (!b) permanentRedirect('/docs/matlab-function-reference');
+  if (!b) redirect('/docs/matlab-function-reference');
   const doc = getBuiltinDocBySlug(slug);
-  if (!doc) permanentRedirect('/docs/matlab-function-reference');
+  if (!doc) redirect('/docs/matlab-function-reference');
   const blocks = renderBuiltinDocBlocks(doc);
   const toc = extractHeadingsFromBlocks(blocks);
   const metadata = getBuiltinMetadata(b);
