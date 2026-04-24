@@ -37,21 +37,7 @@ _April 24, 2026_
 ### Cloud
 
 #### Changed
-- Rework the CLI around task-oriented command modules for script execution, REPL, Jupyter kernels, snapshots, configuration, acceleration diagnostics, remote projects, remote files, and telemetry transport
 - Update remote-project CLI documentation around authentication, project selection, filesystem history, snapshots, git sync, retention policies, and `remote run`
-
-### Docs
-
-#### Added
-- Add a numerical correctness guide covering tolerance choices, CPU/GPU parity, FFT validation, builtin coverage, and reproducibility expectations
-- Add builtin reference pages for `cross`, `gradient`, `trapz`, `cumtrapz`, and `sgtitle`
-- Add an alphabetical builtin index to the website reference
-- Add a MATLAB FFT guide blog post
-
-#### Changed
-- Expand builtin reference metadata and examples for plotting, numerical, string, I/O, and OOP builtins
-- Refresh download, MATLAB Online, MATLAB alternatives, GPU, plotting, and CLI documentation
-- Improve website navigation, card layouts, heading styles, markdown rendering, Mermaid rendering reliability, image preload behavior, and SEO metadata
 
 ---
 
