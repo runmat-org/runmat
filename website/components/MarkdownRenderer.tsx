@@ -17,6 +17,10 @@ type MarkdownRendererProps = {
 
 // Server component to render Markdown/MDX content with shared components
 export async function MarkdownRenderer({ source, components = {} }: MarkdownRendererProps) {
+  // Track image order so the first <img> can opt into eager loading + high fetch priority.
+  // This is important for LCP on long-form posts where the hero image appears early in the markdown.
+  let imageRenderIndex = 0;
+
   function toPlainText(node: React.ReactNode): string {
     if (node == null) return "";
     if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -318,15 +322,22 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const inlineClassName = mergeClassNames("markdown-inline-code", className);
       return <code className={inlineClassName} {...props}>{children}</code>;
     },
-    img: ({ src, alt, ...props }: { src?: string; alt?: string } & Record<string, unknown>) => (
-      <img 
-        src={src} 
-        alt={alt} 
-        className="my-5 max-w-full h-auto rounded-lg" 
-        loading="lazy"
-        {...props} 
-      />
-    ),
+    img: ({ src, alt, ...props }: { src?: string; alt?: string } & Record<string, unknown>) => {
+      const isFirst = imageRenderIndex === 0;
+      imageRenderIndex += 1;
+      const loadingProps = isFirst
+        ? { loading: 'eager' as const, fetchPriority: 'high' as const, decoding: 'async' as const }
+        : { loading: 'lazy' as const, decoding: 'async' as const };
+      return (
+        <img
+          src={src}
+          alt={alt}
+          className="my-5 max-w-full h-auto rounded-lg"
+          {...loadingProps}
+          {...props}
+        />
+      );
+    },
     MermaidDiagram: (props: { chart?: string } & Record<string, unknown>) => (
       <div className="my-12 flex justify-center">
         <div className="max-w-full overflow-x-auto">

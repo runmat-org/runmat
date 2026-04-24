@@ -1,6 +1,6 @@
 ---
-title: "MATLAB For Loops Are Slow, But Not for the Reason You Think"
-description: "MATLAB for loops are slow because of interpreter overhead, not because iteration is inherently expensive. Here's what actually causes the slowdown, what vectorization costs you, and how a compiled runtime changes the tradeoff."
+title: "MATLAB For Loops Are Slow Because of Interpreter Overhead"
+description: "MATLAB for loops carry interpreter overhead that makes them 10-60x slower than vectorized builtins. This guide covers the source of that overhead, the cost of forced vectorization, and how a compiled runtime narrows the gap."
 date: "2026-03-19"
 authors:
   - name: "Fin Watterson"
@@ -9,13 +9,13 @@ readTime: "18 min read"
 slug: "matlab-for-loop-performance"
 tags: ["MATLAB", "performance", "vectorization", "loops", "RunMat", "GPU"]
 keywords: "MATLAB for loop slow, MATLAB vectorization, speed up MATLAB code, MATLAB for loop vs vectorized, MATLAB performance optimization, MATLAB loop performance, preallocation MATLAB, why are MATLAB loops slow, MATLAB for loop alternative, MATLAB JIT compiler, MATLAB parfor vs for, MATLAB for loop speed, MATLAB loop optimization"
-excerpt: "MATLAB for loops are slow because of interpreter overhead, not because iteration is inherently expensive. Here's what actually causes the slowdown, what vectorization costs you, and how a compiled runtime changes the tradeoff."
+excerpt: "MATLAB for loops carry interpreter overhead that makes them 10-60x slower than vectorized builtins. This guide covers the source of that overhead, the cost of forced vectorization, and how a compiled runtime narrows the gap."
 image: "https://web.runmatstatic.com/blog-images/matlab-for-loop-performance.png"
 ogType: "article"
-ogTitle: "MATLAB For Loops Are Slow, But Not for the Reason You Think"
+ogTitle: "MATLAB For Loops Are Slow Because of Interpreter Overhead"
 ogDescription: "MATLAB for loops carry interpreter overhead that makes them 10-60x slower than vectorized builtins. A compiled runtime eliminates that overhead."
 twitterCard: "summary_large_image"
-twitterTitle: "MATLAB For Loops Are Slow, But Not for the Reason You Think"
+twitterTitle: "MATLAB For Loops Are Slow Because of Interpreter Overhead"
 twitterDescription: "MATLAB for loops carry interpreter overhead that makes them 10-60x slower than vectorized builtins. A compiled runtime eliminates that overhead."
 canonical: "https://runmat.com/blog/matlab-for-loop-performance"
 jsonLd:
@@ -38,9 +38,9 @@ jsonLd:
 
     - "@type": "TechArticle"
       "@id": "https://runmat.com/blog/matlab-for-loop-performance#article"
-      headline: "MATLAB For Loops Are Slow, But Not for the Reason You Think"
+      headline: "MATLAB For Loops Are Slow Because of Interpreter Overhead"
       alternativeHeadline: "MATLAB loop performance: interpreter overhead, vectorization tradeoffs, and compiled alternatives"
-      description: "MATLAB for loops are slow because of interpreter overhead, not because iteration is inherently expensive. Here's what actually causes the slowdown, what vectorization costs you, and how a compiled runtime changes the tradeoff."
+      description: "MATLAB for loops carry interpreter overhead that makes them 10-60x slower than vectorized builtins. This guide covers the source of that overhead, the cost of forced vectorization, and how a compiled runtime narrows the gap."
       image: "https://web.runmatstatic.com/blog-images/matlab-for-loop-performance.png"
       datePublished: "2026-03-19T00:00:00Z"
       author:
@@ -113,9 +113,7 @@ jsonLd:
 
 Every MATLAB performance guide opens the same way: replace your for loops with vectorized operations. MathWorks' [own vectorization documentation](https://www.mathworks.com/help/matlab/matlab_prog/vectorization.html) treats it as the primary optimization technique. StackOverflow answers repeat it. Senior engineers repeat it to junior engineers.
 
-The advice works. In practice, a for loop summing a million elements can run 10-60x slower than `sum()`, depending on MATLAB version and JIT warmup. Engineers learn to rewrite readable loop code into dense vectorized expressions, accepting the readability cost as the price of speed.
-
-But vectorize-everything conflates two separate claims: that some operations have faster builtins (true, and useful) and that for loops are inherently slow (false). The overhead is consistent with properties of MATLAB's execution model: dynamic type resolution, interpreter-level per-iteration processing, and the cost of dispatching into compiled builtins one element at a time. A runtime that doesn't interpret user code through that layer avoids most of the per-iteration cost. The loop runs faster, and you pick whichever form is more readable.
+The standard MATLAB advice (vectorize everything) conflates two separate claims: that some operations have faster builtins (true, and useful) and that for loops are inherently slow (false). A for loop summing a million elements can run 10-60x slower than `sum()`, depending on MATLAB version and JIT warmup, so the advice does buy real speed. But the cost is paid in readability, and the underlying claim about loops is wrong. The overhead is consistent with properties of MATLAB's execution model: dynamic type resolution, interpreter-level per-iteration processing, and the cost of dispatching into compiled builtins one element at a time. A runtime that doesn't interpret user code through that layer avoids most of the per-iteration cost. The loop runs faster, and you pick whichever form is more readable.
 
 ![From tangled interpreter overhead to compiled speed](https://web.runmatstatic.com/blog-images/matlab-for-loop-performance.png)
 
@@ -125,11 +123,11 @@ MATLAB is a dynamically typed, interpreted language. The observable performance 
 
 Dynamic typing means user code types must be resolved at execution time. An expression like `x(i) + 1` involves determining the class of `x`, validating the index `i`, and selecting the correct arithmetic implementation for that combination. In a language where these decisions are resolved ahead of time, the cost is paid once. In MATLAB, the evidence suggests they're paid on every iteration.
 
-MathWorks' older acceleration documentation (MATLAB 6.5 era) is explicit about one mechanism: "Whenever MATLAB encounters an unsupported element, it interrupts accelerated processing to handle the instruction through the non-accelerated interpreter." In other words, loop bodies that include function calls to M-files, unsupported data types, or other non-acceleratable constructs fall back to a slower path on every iteration. The [MATLAB Execution Engine](https://www.mathworks.com/products/matlab/matlab-execution-engine.html) rewrite in R2015b [improved this substantially](https://blogs.mathworks.com/loren/2016/02/12/run-code-faster-with-the-new-matlab-execution-engine/), but MathWorks' own optimization guides still recommend vectorization as the primary technique, suggesting that per-iteration overhead remains significant for complex loop bodies.
+MathWorks' older acceleration documentation (MATLAB 6.5 era) is explicit about one mechanism: "Whenever MATLAB encounters an unsupported element, it interrupts accelerated processing to handle the instruction through the non-accelerated interpreter." Loop bodies that call into M-files or use unsupported data types fall back to a slower path on every iteration. The [MATLAB Execution Engine](https://www.mathworks.com/products/matlab/matlab-execution-engine.html) rewrite in R2015b [improved this substantially](https://blogs.mathworks.com/loren/2016/02/12/run-code-faster-with-the-new-matlab-execution-engine/), but MathWorks' own optimization guides still recommend vectorization as the primary technique, suggesting that per-iteration overhead remains significant for complex loop bodies.
 
-The contrast with vectorized builtins reinforces this. A call to `sum(x)` dispatches once to a compiled C or Fortran reduction that processes the entire array. A for loop doing the same work makes N trips through the interpreted layer, each doing a small amount of arithmetic. The per-iteration overhead — whatever its exact composition — dominates the actual computation.
+The contrast with vectorized builtins reinforces this. A call to `sum(x)` dispatches once to a compiled C or Fortran reduction that processes the entire array. A for loop doing the same work makes N trips through the interpreted layer, each doing a small amount of arithmetic. The per-iteration overhead, whatever its exact composition, dominates the actual computation.
 
-Here is a direct comparison you can run:
+Run this comparison yourself:
 
 ```matlab:runnable
 N = 100000;
@@ -151,15 +149,15 @@ fprintf('Vectorized sum: %.6f s\n', vec_time);
 fprintf('Ratio:          %.1fx\n', loop_time / vec_time);
 ```
 
-In MATLAB, that ratio can be 10-60x or more depending on MATLAB version, hardware, and JIT warmup. Run the same code above in RunMat and compare: user code operations map directly to compiled implementations without an interpreter layer, so per-iteration overhead drops sharply.
+In MATLAB, that ratio can be 10-60x or more depending on the version of MATLAB and the hardware. Run the same code in RunMat and compare: user code operations map directly to compiled implementations without an interpreter layer, so per-iteration overhead drops sharply.
 
 ### What other languages do about this
 
-Python has the same split. CPython loops are slow; NumPy vectorization is fast. The Python community gives identical advice: avoid loops, use array operations. The same interpreter overhead, the same workaround.
+Python has the same split. CPython loops are slow; NumPy vectorization is fast. The Python community gives identical advice for the same reason: interpreter overhead makes loops expensive, so use array operations instead.
 
 Julia took a different path. Julia's compiler generates native machine code for loop bodies, so a Julia for loop runs at C speed. The Julia community doesn't tell you to avoid loops. They tell you to write type-stable code and let the compiler handle the rest.
 
-[RunMat](/blog/introducing-runmat) takes a similar approach. User code operations execute directly against compiled Rust implementations — locally with a JIT compiler (Cranelift) for hot paths, and in the browser as compiled WebAssembly. There's no interpreter layer between the user's loop body and the arithmetic.
+[RunMat](/blog/introducing-runmat) takes a similar approach. User code operations execute directly against compiled Rust implementations: locally with a JIT compiler (Cranelift) for hot paths, and in the browser as compiled WebAssembly. There's no interpreter layer between the user's loop body and the arithmetic.
 
 | Language | Loop speed | Array op speed | Advice |
 |----------|-----------|---------------|--------|
@@ -168,7 +166,7 @@ Julia took a different path. Julia's compiler generates native machine code for 
 | Julia | Fast (JIT-compiled) | Fast (BLAS/LAPACK) | Write natural code |
 | RunMat | Fast (compiled) | Fast (GPU auto-offload) | Write natural code |
 
-## The vectorization tax
+## What vectorization costs you
 
 Vectorization has costs that MATLAB's performance guides don't mention.
 
@@ -301,7 +299,7 @@ end
 
 [RunMat](/blog/introducing-runmat) is a MATLAB-syntax runtime built in Rust. It supports [300+ functions](/docs/matlab-function-reference) across linear algebra, statistics, signal processing, and file I/O. Locally, hot code paths get JIT-compiled to native machine code via Cranelift. In the browser, the runtime runs as compiled WebAssembly.
 
-The key difference from MATLAB isn't implementation language — MATLAB is also written in a compiled language (C/C++). The difference is in how user code is executed. In MATLAB, `.m` code passes through an interpreter that adds per-iteration overhead. In RunMat, user code operations map directly to compiled implementations. The 10-60x gap between loops and vectorized builtins in MATLAB narrows because that interpreter layer is absent.
+MATLAB is also written in a compiled language (C/C++). The performance gap comes from how each runtime handles user code. In MATLAB, `.m` code passes through an interpreter that adds per-iteration overhead. In RunMat, user code operations map directly to compiled implementations. The 10-60x gap between loops and vectorized builtins in MATLAB narrows because that interpreter layer is absent.
 
 The same sum benchmark, running in RunMat:
 
@@ -431,15 +429,15 @@ This is [Welford's online algorithm](https://en.wikipedia.org/wiki/Algorithms_fo
 
 ### Why are MATLAB for loops slow?
 
-MATLAB is dynamically typed and interpreted. Observable benchmarks show that for loops carry significant per-iteration overhead compared to vectorized builtins — consistent with runtime type resolution, interpreter processing, and the cost of dispatching into compiled code one element at a time. For simple operations like scalar addition, this overhead dominates the actual computation.
+MATLAB is dynamically typed and interpreted, so each iteration pays runtime costs that a compiled language pays once. Observable benchmarks show that for loops carry significant per-iteration overhead compared to vectorized builtins. For simple operations like scalar addition, that overhead dominates the actual computation.
 
 ### Does MATLAB's JIT compiler fix loop performance?
 
-Partially. The MATLAB Execution Engine recognizes common patterns and generates faster code paths. Simple arithmetic loops are measurably faster than they were before R2015b. But MathWorks' own optimization guides still recommend vectorization as the primary technique, suggesting per-iteration overhead remains significant for complex loop bodies with conditionals, function calls, and mixed types.
+Partially. The MATLAB Execution Engine recognizes common patterns and generates faster code paths. Simple arithmetic loops are measurably faster than they were before R2015b. But MathWorks' own optimization guides still recommend vectorization as the primary technique, suggesting per-iteration overhead remains significant for complex loop bodies that mix conditionals, function calls, and several types.
 
 ### When should I use parfor instead of for?
 
-When three conditions hold: iterations are independent (no shared mutable state), each iteration does enough work to justify the communication overhead (at least milliseconds per iteration), and you have the [Parallel Computing Toolbox](https://www.mathworks.com/products/parallel-computing.html) license. If per-iteration work is trivial, worker communication costs exceed the parallelism benefit. `parfor` also doesn't help when iterations have dependencies, since it can only distribute independent work.
+When iterations are independent (no shared mutable state) and each iteration does enough work to justify the communication overhead (at least milliseconds per iteration). You also need the [Parallel Computing Toolbox](https://www.mathworks.com/products/parallel-computing.html) license. If per-iteration work is trivial, worker communication costs exceed the parallelism benefit. `parfor` also can't help when iterations have dependencies, since it can only distribute independent work.
 
 ### Is vectorized code always faster than loops?
 
@@ -451,7 +449,7 @@ Call `zeros(1, N)`, `ones(1, N)`, or `NaN(1, N)` before the loop to allocate the
 
 ### What is the fastest way to iterate in MATLAB?
 
-Preallocate output arrays, keep the loop body minimal, inline simple expressions instead of calling functions, iterate in [column-major order](#indexing) for matrix operations, and use linear indexing when possible. If the operation maps directly to a vectorized builtin like `sum` or `mean`, use that. In RunMat, there's no interpreter layer, so the focus shifts from syntactic tricks to choosing the right algorithm.
+Preallocate output arrays and keep the loop body minimal. Inline simple expressions instead of calling functions. Iterate in [column-major order](#indexing) for matrix operations, and use linear indexing when possible. If the operation maps directly to a vectorized builtin like `sum` or `mean`, use that. In RunMat, there's no interpreter layer, so the focus shifts from syntactic tricks to choosing the right algorithm.
 
 ### Can I run MATLAB loops on the GPU?
 
@@ -459,16 +457,16 @@ MATLAB's `gpuArray` supports element-wise operations on GPU arrays, but doesn't 
 
 ## Sources and further reading
 
-1. MathWorks, [Vectorization](https://www.mathworks.com/help/matlab/matlab_prog/vectorization.html) -- official documentation on replacing loops with array operations.
-2. MathWorks, [Techniques to Improve Performance](https://www.mathworks.com/help/matlab/matlab_prog/techniques-for-improving-performance.html) -- full list of MATLAB optimization practices, including preallocation and vectorization.
-3. MathWorks, [Preallocating Arrays](https://www.mathworks.com/help/matlab/matlab_prog/preallocating-arrays.html) -- documentation and benchmarks showing 25x speedup from preallocation.
-4. Loren Shure, MathWorks blog, [Run Code Faster With the New MATLAB Execution Engine](https://blogs.mathworks.com/loren/2016/02/12/run-code-faster-with-the-new-matlab-execution-engine/) (2016) -- details on the R2015b JIT rewrite and its performance impact.
-5. Yair Altman, [Preallocation Performance](https://undocumentedmatlab.com/articles/preallocation-performance/) -- independent benchmarks showing preallocation gains and how R2011a improved dynamic array growth.
-6. MathWorks, [Programming Patterns: Maximizing Code Performance by Optimizing Memory Access](https://www.mathworks.com/company/technical-articles/programming-patterns-maximizing-code-performance-by-optimizing-memory-access.html) -- column-major memory layout and cache-efficient loop ordering.
-7. MathWorks Answers, [For-loops are now faster than some of the simplest vectorized statements](https://www.mathworks.com/matlabcentral/answers/1584289-for-loops-are-now-faster-than-some-of-the-simplest-vectorized-statements-why-do-we-still-need-so-mu) -- community discussion on cases where loops outperform vectorized code due to intermediate array allocation.
-8. André Gaul, [Function call overhead benchmarks with MATLAB, Octave, Python, Cython and C](https://arxiv.org/abs/1202.2736) (2012) -- quantifies per-call overhead in interpreted languages including MATLAB.
-9. Julia Documentation, [Performance Tips](https://docs.julialang.org/en/v1/manual/performance-tips/) -- Julia's approach to loop compilation and type-stable code.
-10. NumPy Documentation, [What is NumPy?](https://numpy.org/doc/stable/user/whatisnumpy.html) -- Python's vectorization model and why CPython loops are slow.
-11. Wikipedia, [LAPACK](https://en.wikipedia.org/wiki/LAPACK) -- the optimized Fortran library that MATLAB's vectorized matrix operations dispatch to.
-12. RunMat, [MATLAB Function Reference](/docs/matlab-function-reference) -- searchable list of 300+ MATLAB-compatible builtins implemented in RunMat.
-13. RunMat, [Introducing RunMat](/blog/introducing-runmat) -- architecture overview of the Rust-based MATLAB-syntax runtime.
+1. MathWorks, [Vectorization](https://www.mathworks.com/help/matlab/matlab_prog/vectorization.html). Official documentation on replacing loops with array operations.
+2. MathWorks, [Techniques to Improve Performance](https://www.mathworks.com/help/matlab/matlab_prog/techniques-for-improving-performance.html). Full list of MATLAB optimization practices, including preallocation and vectorization.
+3. MathWorks, [Preallocating Arrays](https://www.mathworks.com/help/matlab/matlab_prog/preallocating-arrays.html). Documentation and benchmarks showing 25x speedup from preallocation.
+4. Loren Shure, MathWorks blog, [Run Code Faster With the New MATLAB Execution Engine](https://blogs.mathworks.com/loren/2016/02/12/run-code-faster-with-the-new-matlab-execution-engine/) (2016). Details on the R2015b JIT rewrite and its performance impact.
+5. Yair Altman, [Preallocation Performance](https://undocumentedmatlab.com/articles/preallocation-performance/). Independent benchmarks showing preallocation gains and how R2011a improved dynamic array growth.
+6. MathWorks, [Programming Patterns: Maximizing Code Performance by Optimizing Memory Access](https://www.mathworks.com/company/technical-articles/programming-patterns-maximizing-code-performance-by-optimizing-memory-access.html). Column-major memory layout and cache-efficient loop ordering.
+7. MathWorks Answers, [For-loops are now faster than some of the simplest vectorized statements](https://www.mathworks.com/matlabcentral/answers/1584289-for-loops-are-now-faster-than-some-of-the-simplest-vectorized-statements-why-do-we-still-need-so-mu). Community discussion on cases where loops outperform vectorized code due to intermediate array allocation.
+8. André Gaul, [Function call overhead benchmarks with MATLAB, Octave, Python, Cython and C](https://arxiv.org/abs/1202.2736) (2012). Quantifies per-call overhead in interpreted languages including MATLAB.
+9. Julia Documentation, [Performance Tips](https://docs.julialang.org/en/v1/manual/performance-tips/). Julia's approach to loop compilation and type-stable code.
+10. NumPy Documentation, [What is NumPy?](https://numpy.org/doc/stable/user/whatisnumpy.html). Python's vectorization model and why CPython loops are slow.
+11. Wikipedia, [LAPACK](https://en.wikipedia.org/wiki/LAPACK). The optimized Fortran library that MATLAB's vectorized matrix operations dispatch to.
+12. RunMat, [MATLAB Function Reference](/docs/matlab-function-reference). Searchable list of 300+ MATLAB-compatible builtins implemented in RunMat.
+13. RunMat, [Introducing RunMat](/blog/introducing-runmat). Architecture overview of the Rust-based MATLAB-syntax runtime.

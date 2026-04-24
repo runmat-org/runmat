@@ -119,9 +119,9 @@ jsonLd:
 
 **TL;DR:** RunMat supports 20+ plot types (`plot`, `scatter`, `surf`, `contour`, `bar`, `hist`, `subplot`, and more) with MATLAB-compatible syntax, all GPU-rendered in the browser via WebGPU. Every code example on this page is runnable in the [sandbox](https://runmat.com/sandbox) with no install. Scroll to [2D plots](#start-simple-your-first-plot), [3D surfaces](#go-3d-surfaces-and-meshes), [animation](#animate-with-drawnow), or [the FAQ](#frequently-asked-questions).
 
-## The plot is how you verify your math
+## Plotting as verification
 
-RunMat renders MATLAB-compatible plots in the browser using WebGPU. You write `plot(x, y)`, `surf(X, Y, Z)`, or any of the 20+ supported plot types with the same syntax you already know, and the GPU renders the result. No install, no server, no Java figure system. When computation also runs on the GPU, data can go from calculation to visible frame without a CPU round-trip.
+RunMat renders MATLAB-compatible plots in the browser using WebGPU. You write `plot(x, y)`, `surf(X, Y, Z)`, or any of the 20+ supported plot types with the same syntax you already know, and the GPU renders the result. There is no install or server, and no Java figure system in the loop. When computation also runs on the GPU, data can go from calculation to visible frame without a CPU round-trip.
 
 Every code example on this page runs live in the [RunMat sandbox](https://runmat.com/sandbox). Click any example and modify it. No install, no account required.
 
@@ -177,7 +177,7 @@ x = linspace(-10, 10, N);
 y = linspace(-10, 10, N);
 [X, Y] = meshgrid(single(x), single(y));
 
-% Gaussian envelope — smoothly damps the surface toward the edges
+% Gaussian envelope to smoothly damp the surface toward the edges
 envelope = exp(-(X.^2 + Y.^2) / 25);
 
 for t = 1:80
@@ -202,7 +202,7 @@ end
 ```
 
 <a href="/sandbox">
-  <video autoPlay loop muted playsInline className="my-6 w-full rounded-lg cursor-pointer">
+  <video autoPlay loop muted playsInline preload="metadata" poster="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp" className="my-6 w-full rounded-lg cursor-pointer">
     <source src="https://web.runmatstatic.com/video/runmat-wave-simulation.mp4" type="video/mp4" />
   </video>
 </a>
@@ -223,11 +223,11 @@ RunMat renders plots on the GPU via WebGPU with MATLAB-compatible syntax. MATLAB
 | Figure persistence | Scene state, replayable | `.fig` (proprietary) | Pickle (version-dependent) | JSON |
 | Syntax | MATLAB-compatible | Native MATLAB | Python API | Python/JS API |
 
-One honest limitation: RunMat covers around 20 plot-producing functions and another 15+ annotation and styling commands today. MATLAB has accumulated specialized chart types across dozens of toolboxes over 40 years. If you need something very specific (say, `polarplot` or `geobubble`), it may not exist in RunMat yet. The coverage grows with each release.
+RunMat currently covers around 20 plot-producing functions and 15+ annotation and styling commands. MATLAB has accumulated specialized chart types across dozens of toolboxes over 40 years. If you need something very specific (say, `polarplot` or `geobubble`), it may not exist in RunMat yet. The coverage grows with each release.
 
 ## Choosing the right plot type
 
-The right plot type depends on your data shape: use `plot` for continuous signals, `scatter` for unordered 2D points, `surf` or `contourf` for scalar fields over a grid, `bar` for category comparisons, and `hist` for distributions. The table below maps 13 common data patterns to the right RunMat function:
+The right plot type depends on your data shape. Continuous signals call for `plot`. Unordered 2D points are clearer with `scatter`, scalar fields over a grid use `surf` or `contourf`, category comparisons use `bar`, and distributions go in a `hist`. The table below maps 13 common data patterns to the right RunMat function:
 
 | Data pattern | Best plot type | RunMat function | Notes |
 |-------------|---------------|-----------------|-------|
@@ -264,7 +264,7 @@ ylabel('sin(x)');
 grid on;
 ```
 
-That is the entire workflow: create data, call [`plot`](/docs/matlab-function-reference#plotting), add labels. Everything below builds on this pattern.
+Create data, call [`plot`](/docs/matlab-function-reference#plotting), and add labels. Everything below builds on this pattern.
 
 
 ## Overlay and compare data
@@ -322,12 +322,12 @@ ylim([-1.3 1.3]);
 | `hold on`, `hold off` | Overlay or replace plots | `hold on` |
 | `shading` | Surface shading mode | `shading interp` |
 
-For the full styling model (coordinating plot objects, axes state, and multi-series palettes), see [Styling Plots and Axes](/docs/plotting/styling-plots-and-axes).
+For the full styling model (coordinating plot objects with axes state and multi-series palettes), see [Styling Plots and Axes](/docs/plotting/styling-plots-and-axes).
 
 
 ## Build multi-panel layouts with `subplot`
 
-[`subplot(m, n, p)`](/docs/matlab-function-reference#plotting) divides a figure into an m-by-n grid and activates the p-th panel. Each subplot has its own axes state, so labels, limits, and grid apply only to the active panel. This is how engineers present related views of the same data side by side.
+[`subplot(m, n, p)`](/docs/matlab-function-reference#plotting) divides a figure into an m-by-n grid and activates the p-th panel. Each subplot has its own axes state, so labels and limits and the grid setting apply only to the active panel. This is how engineers present related views of the same data side by side.
 
 ```matlab:runnable
 subplot(2, 2, 1);
@@ -443,7 +443,7 @@ ylabel('Row');
 
 ### 3D trajectories and point clouds
 
-[`plot3`](/docs/matlab-function-reference#plotting) draws a 3D line through coordinate triples. [`scatter3`](/docs/matlab-function-reference#plotting) plots unconnected markers with optional per-point color. The 3D camera supports orbit, pan, and zoom-to-cursor.
+[`plot3`](/docs/matlab-function-reference#plotting) draws a 3D line through coordinate triples. [`scatter3`](/docs/matlab-function-reference#plotting) plots unconnected markers with optional per-point color. The 3D camera supports orbit and pan, plus zoom-to-cursor.
 
 ```matlab:runnable
 t = linspace(0, 6*pi, 500);
@@ -576,7 +576,7 @@ flowchart TD
 
 This is how the wave interference animation runs smoothly in the browser: the compute and render pipelines share the same GPU context, so data stays close to where it is drawn.
 
-Every figure in RunMat is a structured scene (plot objects, axes state, view configuration, annotations), not a raster image. Figures can be replayed from their scene state, and exported as visual output.
+Every figure in RunMat is a structured scene rather than a raster image, with plot objects, axes state, view configuration, and annotations preserved separately. Figures can be replayed from their scene state and exported as visual output.
 
 For scene persistence and replay, see [Plot Replay and Export](/docs/plotting/plot-replay-and-export). For GPU residency details, see [GPU Plotting and Residency](/docs/accelerate/gpu-behavior).
 
@@ -603,26 +603,34 @@ For more depth, read the [plotting documentation](/docs/plotting), explore the [
 
 ## Frequently asked questions
 
-**Is RunMat plotting compatible with MATLAB syntax?**
+### Is RunMat plotting compatible with MATLAB syntax?
+
 Yes. RunMat supports `plot`, `scatter`, `surf`, `subplot`, `bar`, `hist`, `contour`, `imagesc`, `plot3`, `scatter3`, and more with MATLAB-compatible syntax. Plotting code written for MATLAB generally works in RunMat without changes.
 
-**How do I make a 3D surface plot?**
+### How do I make a 3D surface plot?
+
 Use `surf(X, Y, Z)` where `X` and `Y` are coordinate vectors and `Z` is a height matrix. Add `colormap`, `shading interp`, and `view` to control appearance and camera angle.
 
-**How do I plot multiple lines on the same figure?**
+### How do I plot multiple lines on the same figure?
+
 Call `hold on` after your first plot command, then call `plot` again for each additional line. Use `legend` to label each series.
 
-**What is the difference between scatter and plot?**
-`plot` connects points with lines, emphasizing continuity and trends. `scatter` draws individual markers at each point, emphasizing position and clustering. `scatter` also supports per-point size and color vectors.
+### What is the difference between scatter and plot?
 
-**Can I plot in the browser without installing anything?**
-Yes. RunMat's sandbox runs plotting through WebGPU entirely in your browser. No install, no account, no server round-trip. Every code example in this guide is runnable directly in the [sandbox](https://runmat.com/sandbox).
+`plot` connects points with lines, which emphasizes continuity and trends. `scatter` draws individual markers at each point, emphasizing position and clustering. `scatter` also supports per-point size and color vectors.
 
-**How do I add a title, axis labels, and legend?**
-Use `title('text')`, `xlabel('text')`, `ylabel('text')` after your plot command. Call `legend('series1', 'series2')` to label multiple series.
+### Can I plot in the browser without installing anything?
 
-**How do I save or export a plot?**
+Yes. RunMat's sandbox runs plotting through WebGPU entirely in your browser. No install or account is needed, and there is no server round-trip. Every code example in this guide is runnable directly in the [sandbox](https://runmat.com/sandbox).
+
+### How do I add a title, axis labels, and legend?
+
+Use `title('text')`, `xlabel('text')`, and `ylabel('text')` after your plot command. Call `legend('series1', 'series2')` to label multiple series.
+
+### How do I save or export a plot?
+
 RunMat supports screenshot export from the figure window. Figures are stored as structured scene state that supports replay and export.
 
-**What plot types does RunMat support?**
+### What plot types does RunMat support?
+
 RunMat supports around 20 plot-producing functions including `plot`, `scatter`, `bar`, `hist`, `surf`, `mesh`, `contour`, `contourf`, `imagesc`, `quiver`, `plot3`, `scatter3`, `stem`, `errorbar`, `area`, `pie`, and `stairs`, plus 15+ annotation and styling commands.
