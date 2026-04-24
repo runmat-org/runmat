@@ -26,10 +26,15 @@ export default function LazyVideo({
   ...props
 }: VideoProps) {
   const ref = useRef<HTMLVideoElement>(null);
-  const [activePoster, setActivePoster] = useState<string | undefined>(poster);
+  // Start with no poster to avoid SSR baking the desktop URL into HTML,
+  // which would cause mobile browsers to fetch it before the effect swaps
+  // to mobilePoster — downloading both images.
+  const [activePoster, setActivePoster] = useState<string | undefined>(
+    mobilePoster ? undefined : poster,
+  );
 
   useEffect(() => {
-    if (!mobilePoster || typeof window === "undefined") return;
+    if (!mobilePoster) return;
     const media = window.matchMedia(mobileMediaQuery);
     const update = () => setActivePoster(media.matches ? mobilePoster : poster);
     update();
