@@ -10,8 +10,7 @@ cargo build
 
 - `crates/` - all library and binary crates
 - `docs/` - design documents like `ARCHITECTURE.md`
-- `examples/` - small `.m` and Rust examples (coming later)
-- `tests/` - language and performance test suites (coming later)
+- `tests/` - language and performance test suites
 
 ## Running the REPL
 
