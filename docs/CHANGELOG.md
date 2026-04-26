@@ -4,6 +4,43 @@ _What's new across the RunMat runtime, cloud, and sandbox. For technical runtime
 
 ---
 
+## [v0.4.4](https://github.com/runmat-org/runmat/compare/v0.4.1...v0.4.4)
+
+_April 24, 2026_
+
+### Runtime
+
+#### Added
+- Add `cross` — MATLAB-compatible vector cross products across row vectors, column vectors, matrices, and higher-rank tensors, with GPU-resident execution for real-valued inputs when the active provider supports it
+- Add `gradient` — numerical gradients with MATLAB-compatible matrix output ordering, scalar spacing support, complex host support, and WGPU-backed GPU residency for scalar-spacing gradients
+- Add `trapz` and `cumtrapz` — trapezoidal and cumulative trapezoidal integration with scalar spacing, coordinate-vector spacing, explicit dimension selection, complex inputs, and GPU input fallback that re-uploads real-valued outputs for downstream GPU work
+- Add `sgtitle` — figure-level titles for subplot layouts with text styling, explicit figure-handle targeting, `get`/`set` support, scene replay, and vector/native export support
+- Add CLI artifact capture for script runs — `--artifacts-dir`, `--artifacts-manifest`, `--capture-figures`, `--figure-size`, and `--max-figures`
+
+#### Changed
+- Rename `runmat-ignition` to `runmat-vm` and split the VM, compiler, interpreter dispatch, indexing, runtime state, and acceleration paths into smaller modules
+- Refactor the lexer, parser, HIR, core session, WASM runtime, and CLI layers for maintainability without changing their public behavior
+- Expand TypeScript/WASM figure metadata to include `sgTitle` and `sgTitleStyle`, matching the new figure-level title support
+
+#### Fixed
+- Fix WGPU provider cleanup for intermediate GPU tensor handles so error paths release temporary device resources correctly
+- Fix `gradient` shape handling for empty tensors and align WGPU gradient parameters for the backend layout
+- Fix SVG/vector-export text positioning so subplot titles and figure-level titles scale correctly with font size
+- Fix `sgtitle` serialization and child enumeration, and allow numeric values to be used as title text
+
+### Sandbox
+
+#### Changed
+- Reorganize the browser/WASM runtime into dedicated API, plotting, session, stream, filesystem, GPU, snapshot, state, and wire-format modules
+- Improve replay smoke coverage and GPU gradient coverage for the WASM target
+
+### Cloud
+
+#### Changed
+- Update remote-project CLI documentation around authentication, project selection, filesystem history, snapshots, git sync, retention policies, and `remote run`
+
+---
+
 ## [v0.4.1](https://github.com/runmat-org/runmat/compare/v0.4.0...v0.4.1)
 
 _April 15, 2026_

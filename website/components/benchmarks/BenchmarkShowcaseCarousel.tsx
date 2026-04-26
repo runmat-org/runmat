@@ -1,11 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import type { BenchmarkChartData, BenchmarkShowcaseSlide } from "@/lib/marketing-benchmarks";
 import { cn } from "@/lib/utils";
 
-import BenchmarkBarChart from "./charts/BenchmarkBarChart";
-import BenchmarkLineChart from "./charts/BenchmarkLineChart";
+const ChartFallback = () => <div className="w-full" style={{ height: 320 }} />;
+
+const BenchmarkBarChart = dynamic(() => import("./charts/BenchmarkBarChart"), {
+  ssr: false,
+  loading: ChartFallback,
+});
+const BenchmarkLineChart = dynamic(() => import("./charts/BenchmarkLineChart"), {
+  ssr: false,
+  loading: ChartFallback,
+});
 
 interface BenchmarkShowcaseCarouselProps {
   slides: BenchmarkShowcaseSlide[];

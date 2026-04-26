@@ -1,4 +1,4 @@
-## Language Compatibility Modes
+# RunMat Language Compatibility Modes
 
 Philosophy: RunMat's input language surface is compatible with MATLAB syntax so the language you already know works here — no new language to learn. The goal is not to replicate a legacy runtime function-for-function, but to give engineers a modern, high-performance environment for math and physics that feels immediately familiar. Where MATLAB conventions conflict with clarity or performance, RunMat offers explicit opt-in/opt-out controls via compatibility modes.
 

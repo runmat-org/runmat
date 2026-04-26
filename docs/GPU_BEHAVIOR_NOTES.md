@@ -1,4 +1,4 @@
-## GPU Residency & Precision Guide
+# GPU Residency & Precision Guide
 
 RunMat keeps tensors on the GPU whenever that offers a measurable win, but it
 never changes numeric precision behind the user’s back. This document walks
