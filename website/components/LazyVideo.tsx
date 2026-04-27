@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ComponentProps } from "react";
 type VideoProps = Omit<ComponentProps<"video">, "autoPlay" | "preload"> & {
   mobilePoster?: string;
   mobileMediaQuery?: string;
+  initialPosterVariant?: "none" | "poster" | "mobilePoster";
 };
 
 /**
@@ -22,16 +23,20 @@ type VideoProps = Omit<ComponentProps<"video">, "autoPlay" | "preload"> & {
 export default function LazyVideo({
   mobilePoster,
   mobileMediaQuery = "(max-width: 768px)",
+  initialPosterVariant = "none",
   poster,
   ...props
 }: VideoProps) {
   const ref = useRef<HTMLVideoElement>(null);
-  // Start with no poster to avoid SSR baking the desktop URL into HTML,
-  // which would cause mobile browsers to fetch it before the effect swaps
-  // to mobilePoster — downloading both images.
-  const [activePoster, setActivePoster] = useState<string | undefined>(
-    mobilePoster ? undefined : poster,
-  );
+  const [activePoster, setActivePoster] = useState<string | undefined>(() => {
+    if (!mobilePoster) return poster;
+    if (initialPosterVariant === "poster") return poster;
+    if (initialPosterVariant === "mobilePoster") return mobilePoster;
+
+    // Default: no initial poster to avoid SSR baking the desktop URL into HTML,
+    // which can cause mobile browsers to fetch both desktop and mobile posters.
+    return undefined;
+  });
 
   useEffect(() => {
     if (!mobilePoster) return;

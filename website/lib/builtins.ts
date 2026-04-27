@@ -2,7 +2,6 @@ import { readFileSync, readdirSync, realpathSync } from 'fs';
 import { join } from 'path';
 import type { BuiltinBadge } from './badge-utils';
 import { builtinHasGpuSupport, getBuiltinBadges } from './badge-utils';
-// touched to invalidate the in-memory builtin docs cache when JSON content changes
 
 export type BuiltinSignature = {
   in: string[];
@@ -75,6 +74,8 @@ export type BuiltinDoc = {
   references: string[];
   description?: string;
   hero_image?: string;
+  seo_title?: string;
+  seo_description?: string;
   behaviors?: string[];
   examples?: BuiltinDocExample[];
   faqs?: BuiltinDocFAQ[];

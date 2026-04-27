@@ -186,9 +186,9 @@ export default function HowItWorksPage() {
           </div>
         </section>
 
-        {/* HIR & AST: acceleration and tooling */}
+        {/* HIR & AST: foundation for acceleration & tooling */}
         <section className="mb-12">
-          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">HIR & AST: foundation for acceleration and tooling</h2>
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">HIR & AST: foundation for acceleration & tooling</h2>
           <p className="text-[0.938rem] text-foreground mb-6">
             RunMat lowers source to a high-level, typed IR (HIR) with flow-sensitive inference. A stable AST→HIR pipeline
             gives the engine precise structure and types, which unlocks acceleration and first-class editor tooling.
@@ -574,7 +574,7 @@ export default function HowItWorksPage() {
             for maximum performance, or source (MATLAB) for portability.
           </p>
           <p className="text-[0.938rem] text-foreground mb-4">
-            See the draft <Link href="/docs/package-manager" className="underline">Package Manager design</Link> for how registries, semver, and native/source packages will work.
+            The package manager — covering registries, semver, and native/source packages — is coming soon.
           </p>
           
           <div className="space-y-6">

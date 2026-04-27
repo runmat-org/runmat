@@ -110,6 +110,19 @@
     ]
   },
   {
+    "title": "area",
+    "slug": "area",
+    "summary": "Create filled area plots for cumulative totals, stacked series, and MATLAB `area` workflows.",
+    "keywords": [
+      "area",
+      "area plot",
+      "filled area chart",
+      "stacked area chart",
+      "matlab area",
+      "cumulative area visualization"
+    ]
+  },
+  {
     "title": "argsort",
     "slug": "argsort",
     "summary": "Return the permutation indices that would sort tensors along a dimension.",
@@ -207,6 +220,18 @@
     ]
   },
   {
+    "title": "axis",
+    "slug": "axis",
+    "summary": "Control axis limits, aspect behavior, and automatic fitting with MATLAB `axis` semantics.",
+    "keywords": [
+      "axis",
+      "axis limits",
+      "axis equal",
+      "axis tight",
+      "matlab axis"
+    ]
+  },
+  {
     "title": "bandwidth",
     "slug": "bandwidth",
     "summary": "Compute the lower and upper bandwidth of a matrix, optionally returning a single side.",
@@ -228,6 +253,30 @@
       "bar chart",
       "categories",
       "gpuArray"
+    ]
+  },
+  {
+    "title": "blackman",
+    "slug": "blackman",
+    "summary": "Generate a Blackman window as an N-by-1 real column vector.",
+    "keywords": [
+      "blackman",
+      "window",
+      "signal processing",
+      "dsp",
+      "fft"
+    ]
+  },
+  {
+    "title": "box",
+    "slug": "box",
+    "summary": "Toggle axes box outlines for chart framing, presentation, and MATLAB `box on` / `box off` workflows.",
+    "keywords": [
+      "box",
+      "axes box",
+      "box on",
+      "box off",
+      "matlab box"
     ]
   },
   {
@@ -367,6 +416,30 @@
     ]
   },
   {
+    "title": "clc",
+    "slug": "clc",
+    "summary": "Request that the host clear the visible Command Window or console display.",
+    "keywords": [
+      "clc",
+      "clear console",
+      "command window",
+      "console",
+      "screen"
+    ]
+  },
+  {
+    "title": "clear",
+    "slug": "clear",
+    "summary": "Clear variables from the active workspace.",
+    "keywords": [
+      "clear",
+      "workspace",
+      "variables",
+      "clear all",
+      "command window"
+    ]
+  },
+  {
     "title": "close",
     "slug": "close",
     "summary": "Close TCP clients or servers that were created by tcpclient, tcpserver, or accept.",
@@ -388,6 +461,30 @@
       "range",
       "step",
       "gpu"
+    ]
+  },
+  {
+    "title": "colorbar",
+    "slug": "colorbar",
+    "summary": "Show or hide colorbars for images, surfaces, contours, and MATLAB `colorbar` workflows.",
+    "keywords": [
+      "colorbar",
+      "color scale",
+      "image colorbar",
+      "surface colorbar",
+      "matlab colorbar"
+    ]
+  },
+  {
+    "title": "colormap",
+    "slug": "colormap",
+    "summary": "Set colormaps for images, surfaces, contours, and MATLAB `colormap` workflows.",
+    "keywords": [
+      "colormap",
+      "color palette",
+      "heatmap palette",
+      "surface palette",
+      "matlab colormap"
     ]
   },
   {
@@ -565,6 +662,18 @@
     ]
   },
   {
+    "title": "cross",
+    "slug": "cross",
+    "summary": "Compute the vector cross product of matching 3-element vectors along a chosen dimension.",
+    "keywords": [
+      "cross",
+      "cross product",
+      "vector product",
+      "3d vector",
+      "gpu"
+    ]
+  },
+  {
     "title": "csvread",
     "slug": "csvread",
     "summary": "Read numeric data from a comma-separated text file with MATLAB-compatible zero-based ranges.",
@@ -655,6 +764,32 @@
       "reverse",
       "omitnan",
       "gpu"
+    ]
+  },
+  {
+    "title": "cumtrapz",
+    "slug": "cumtrapz",
+    "summary": "Cumulative trapezoidal numerical integration of sampled data.",
+    "keywords": [
+      "cumtrapz",
+      "cumulative trapezoidal integration",
+      "numerical integration",
+      "discrete integration",
+      "gpu"
+    ]
+  },
+  {
+    "title": "datetime",
+    "slug": "datetime",
+    "summary": "Create MATLAB-compatible datetime arrays from components, text, or serial date numbers.",
+    "keywords": [
+      "datetime",
+      "date",
+      "time",
+      "serial date number",
+      "datenum",
+      "Format",
+      "MATLAB compatibility"
     ]
   },
   {
@@ -794,6 +929,18 @@
     ]
   },
   {
+    "title": "duration",
+    "slug": "duration",
+    "summary": "Create MATLAB-compatible duration arrays from hour, minute, and second components.",
+    "keywords": [
+      "duration",
+      "elapsed time",
+      "time span",
+      "Format",
+      "MATLAB compatibility"
+    ]
+  },
+  {
     "title": "eig",
     "slug": "eig",
     "summary": "Eigenvalue decomposition with MATLAB-compatible multi-output forms.",
@@ -864,6 +1011,18 @@
       "throw",
       "diagnostics",
       "message"
+    ]
+  },
+  {
+    "title": "errorbar",
+    "slug": "errorbar",
+    "summary": "Plot data with symmetric or asymmetric error bars for uncertainty, intervals, and MATLAB `errorbar` workflows.",
+    "keywords": [
+      "errorbar",
+      "error bars",
+      "uncertainty plot",
+      "confidence interval plot",
+      "matlab errorbar"
     ]
   },
   {
@@ -1316,6 +1475,18 @@
     ]
   },
   {
+    "title": "get",
+    "slug": "get",
+    "summary": "Inspect figure, axes, and plot-object properties through RunMat\u2019s graphics handles and MATLAB-style `get` workflows.",
+    "keywords": [
+      "get",
+      "graphics handle",
+      "plot properties",
+      "matlab get",
+      "inspect plotting state"
+    ]
+  },
+  {
     "title": "getenv",
     "slug": "getenv",
     "summary": "Query environment variables as character vectors, strings, or structures.",
@@ -1379,6 +1550,30 @@
     ]
   },
   {
+    "title": "gradient",
+    "slug": "gradient",
+    "summary": "Numerical gradients using central differences with MATLAB-compatible output ordering.",
+    "keywords": [
+      "gradient",
+      "numerical gradient",
+      "finite difference",
+      "derivative",
+      "gpu"
+    ]
+  },
+  {
+    "title": "grid",
+    "slug": "grid",
+    "summary": "Toggle grid lines for charts, subplots, and MATLAB `grid on` / `grid off` workflows.",
+    "keywords": [
+      "grid",
+      "grid on",
+      "grid off",
+      "chart grid lines",
+      "matlab grid"
+    ]
+  },
+  {
     "title": "gt",
     "slug": "gt",
     "summary": "Element-wise greater-than comparison for scalars, arrays, strings, and gpuArray inputs.",
@@ -1388,6 +1583,30 @@
       "greater than",
       "logical comparison",
       "gpuArray greater-than"
+    ]
+  },
+  {
+    "title": "hamming",
+    "slug": "hamming",
+    "summary": "Generate a Hamming window as an N-by-1 real column vector.",
+    "keywords": [
+      "hamming",
+      "window",
+      "signal processing",
+      "dsp",
+      "fft"
+    ]
+  },
+  {
+    "title": "hann",
+    "slug": "hann",
+    "summary": "Generate a Hann window as an N-by-1 real column vector.",
+    "keywords": [
+      "hann",
+      "window",
+      "signal processing",
+      "dsp",
+      "fft"
     ]
   },
   {
@@ -1426,6 +1645,19 @@
       "binning",
       "probability",
       "gpu"
+    ]
+  },
+  {
+    "title": "histogram",
+    "slug": "histogram",
+    "summary": "Create histogram objects with bin-edge semantics, normalization controls, and MATLAB `histogram` workflows.",
+    "keywords": [
+      "histogram",
+      "histogram object",
+      "bin edges",
+      "normalized histogram",
+      "matlab histogram",
+      "distribution analysis"
     ]
   },
   {
@@ -1497,6 +1729,32 @@
       "complex",
       "elementwise",
       "gpu"
+    ]
+  },
+  {
+    "title": "image",
+    "slug": "image",
+    "summary": "Display indexed or truecolor images as graphics objects with MATLAB `image` semantics and GPU-backed rendering paths.",
+    "keywords": [
+      "image",
+      "image display",
+      "truecolor image",
+      "indexed image",
+      "matlab image",
+      "imshow style image"
+    ]
+  },
+  {
+    "title": "imagesc",
+    "slug": "imagesc",
+    "summary": "Display scaled matrix images for heatmaps, colormaps, and MATLAB `imagesc` style visualization.",
+    "keywords": [
+      "imagesc",
+      "scaled image",
+      "heatmap",
+      "matrix visualization",
+      "matlab imagesc",
+      "colormap image"
     ]
   },
   {
@@ -1674,7 +1932,7 @@
   {
     "title": "isinf",
     "slug": "isinf",
-    "summary": "Return a logical mask indicating which elements of the input are ±Inf.",
+    "summary": "Return a logical mask indicating which elements of the input are \u00b1Inf.",
     "keywords": [
       "isinf",
       "infinite mask",
@@ -1894,6 +2152,18 @@
     ]
   },
   {
+    "title": "legend",
+    "slug": "legend",
+    "summary": "Show and configure plot legends for labeled series, display names, and MATLAB `legend` workflows.",
+    "keywords": [
+      "legend",
+      "chart legend",
+      "display names",
+      "matlab legend",
+      "series labels"
+    ]
+  },
+  {
     "title": "length",
     "slug": "length",
     "summary": "Return the length of the largest dimension of scalars, vectors, matrices, and N-D arrays.",
@@ -2001,6 +2271,18 @@
       "truth mask",
       "gpuArray",
       "mask array"
+    ]
+  },
+  {
+    "title": "loglog",
+    "slug": "loglog",
+    "summary": "Plot data on logarithmic x and y axes for power laws, scaling analysis, and MATLAB `loglog` comparisons.",
+    "keywords": [
+      "loglog",
+      "log-log plot",
+      "power law plot",
+      "matlab loglog",
+      "scaling analysis"
     ]
   },
   {
@@ -2301,6 +2583,18 @@
     ]
   },
   {
+    "title": "nextpow2",
+    "slug": "nextpow2",
+    "summary": "Return the exponent p such that 2^p is the next power of two greater than or equal to abs(n).",
+    "keywords": [
+      "nextpow2",
+      "power of two",
+      "fft",
+      "zero padding",
+      "gpu"
+    ]
+  },
+  {
     "title": "nnz",
     "slug": "nnz",
     "summary": "Count the number of nonzero elements in an array with MATLAB-compatible semantics.",
@@ -2449,6 +2743,19 @@
     ]
   },
   {
+    "title": "peaks",
+    "slug": "peaks",
+    "summary": "Sample data: 3-D test surface on an n-by-n grid.",
+    "keywords": [
+      "peaks",
+      "sample data",
+      "test surface",
+      "demo",
+      "3d",
+      "surface"
+    ]
+  },
+  {
     "title": "permute",
     "slug": "permute",
     "summary": "Reorder the dimensions of arrays, tensors, logical masks, and gpuArray values.",
@@ -2460,9 +2767,21 @@
     ]
   },
   {
+    "title": "pie",
+    "slug": "pie",
+    "summary": "Create pie charts for part-to-whole comparisons, exploded slices, and MATLAB `pie` workflows.",
+    "keywords": [
+      "pie",
+      "pie chart",
+      "exploded pie chart",
+      "slice labels",
+      "matlab pie"
+    ]
+  },
+  {
     "title": "pinv",
     "slug": "pinv",
-    "summary": "Compute the Moore–Penrose pseudoinverse of a matrix using SVD with MATLAB-compatible tolerance handling.",
+    "summary": "Compute the Moore\u2013Penrose pseudoinverse of a matrix using SVD with MATLAB-compatible tolerance handling.",
     "keywords": [
       "pinv",
       "pseudoinverse",
@@ -2481,6 +2800,19 @@
       "2D",
       "visualization",
       "gpuArray"
+    ]
+  },
+  {
+    "title": "plot3",
+    "slug": "plot3",
+    "summary": "Create 3-D line plots for trajectories, parametric curves, and spatial paths with MATLAB `plot3` semantics.",
+    "keywords": [
+      "plot3",
+      "3-D line plot",
+      "trajectory plot",
+      "parametric curve",
+      "matlab plot3",
+      "spatial path"
     ]
   },
   {
@@ -2599,6 +2931,19 @@
       "decomposition",
       "householder",
       "pivoting"
+    ]
+  },
+  {
+    "title": "quiver",
+    "slug": "quiver",
+    "summary": "Visualize 2-D vector fields with scalable arrows, GPU-aware execution, and MATLAB `quiver` call forms.",
+    "keywords": [
+      "quiver",
+      "vector field",
+      "arrow plot",
+      "flow field",
+      "matlab quiver",
+      "direction field"
     ]
   },
   {
@@ -2972,6 +3317,42 @@
     ]
   },
   {
+    "title": "semilogx",
+    "slug": "semilogx",
+    "summary": "Plot data with a logarithmic x-axis for response curves, scaling analysis, and MATLAB `semilogx` workflows.",
+    "keywords": [
+      "semilogx",
+      "logarithmic x-axis",
+      "semilog plot",
+      "matlab semilogx",
+      "response curve"
+    ]
+  },
+  {
+    "title": "semilogy",
+    "slug": "semilogy",
+    "summary": "Plot data with a logarithmic y-axis for exponential trends, decay curves, and MATLAB `semilogy` workflows.",
+    "keywords": [
+      "semilogy",
+      "logarithmic y-axis",
+      "semilog plot",
+      "matlab semilogy",
+      "exponential plot"
+    ]
+  },
+  {
+    "title": "set",
+    "slug": "set",
+    "summary": "Update figure, axes, and plot-object properties through RunMat\u2019s graphics handles and MATLAB-style `set` workflows.",
+    "keywords": [
+      "set",
+      "graphics handle",
+      "plot properties",
+      "matlab set",
+      "update plotting state"
+    ]
+  },
+  {
     "title": "setdiff",
     "slug": "setdiff",
     "summary": "Return values that appear in the first input but not the second, matching MATLAB ordering rules.",
@@ -3006,6 +3387,30 @@
       "assignment",
       "struct array",
       "object property"
+    ]
+  },
+  {
+    "title": "sgtitle",
+    "slug": "sgtitle",
+    "summary": "Set a title centered above the entire figure, especially for multi-subplot layouts.",
+    "keywords": [
+      "sgtitle",
+      "super title",
+      "subplot title",
+      "figure title",
+      "matlab sgtitle"
+    ]
+  },
+  {
+    "title": "shading",
+    "slug": "shading",
+    "summary": "Control flat, interpolated, or faceted surface shading with MATLAB `shading` workflows.",
+    "keywords": [
+      "shading",
+      "surface shading",
+      "shading interp",
+      "shading flat",
+      "matlab shading"
     ]
   },
   {
@@ -3179,6 +3584,18 @@
     ]
   },
   {
+    "title": "stem",
+    "slug": "stem",
+    "summary": "Create stem plots for discrete signals, sequence visualization, and MATLAB `stem` workflows.",
+    "keywords": [
+      "stem",
+      "stem plot",
+      "discrete signal plot",
+      "sequence visualization",
+      "matlab stem"
+    ]
+  },
+  {
     "title": "str2double",
     "slug": "str2double",
     "summary": "Convert strings, character arrays, or cell arrays of text into double-precision numbers with MATLAB-compatible rules.",
@@ -3239,6 +3656,18 @@
     ]
   },
   {
+    "title": "string",
+    "slug": "string",
+    "summary": "Convert numeric, logical, character, and text inputs into MATLAB string arrays, with optional format-spec composition.",
+    "keywords": [
+      "string",
+      "convert",
+      "text",
+      "char",
+      "gpu"
+    ]
+  },
+  {
     "title": "string.empty",
     "slug": "string.empty",
     "summary": "Construct empty string arrays with MATLAB-compatible dimension semantics and 'like' prototypes.",
@@ -3249,18 +3678,6 @@
       "size vector",
       "0-by-N",
       "'like'"
-    ]
-  },
-  {
-    "title": "string",
-    "slug": "string",
-    "summary": "Convert numeric, logical, character, and text inputs into MATLAB string arrays, with optional format-spec composition.",
-    "keywords": [
-      "string",
-      "convert",
-      "text",
-      "char",
-      "gpu"
     ]
   },
   {
@@ -3361,6 +3778,18 @@
       "column major",
       "gpu indexing",
       "nd indexing"
+    ]
+  },
+  {
+    "title": "subplot",
+    "slug": "subplot",
+    "summary": "Split a figure into subplot grids for multi-panel charts, side-by-side comparisons, and MATLAB `subplot` workflows.",
+    "keywords": [
+      "subplot",
+      "subplot grid",
+      "multi-panel chart",
+      "matlab subplot",
+      "figure layout"
     ]
   },
   {
@@ -3567,6 +3996,18 @@
     ]
   },
   {
+    "title": "trapz",
+    "slug": "trapz",
+    "summary": "Trapezoidal numerical integration of sampled data.",
+    "keywords": [
+      "trapz",
+      "trapezoidal integration",
+      "numerical integration",
+      "discrete integration",
+      "gpu"
+    ]
+  },
+  {
     "title": "tril",
     "slug": "tril",
     "summary": "Extract the lower triangular portion of a matrix (optionally including super-diagonals).",
@@ -3665,6 +4106,18 @@
       "stack rows",
       "square brackets",
       "gpu"
+    ]
+  },
+  {
+    "title": "view",
+    "slug": "view",
+    "summary": "Control 3-D camera angles for surfaces and spatial plots using azimuth/elevation views and MATLAB `view` semantics.",
+    "keywords": [
+      "view",
+      "3-D camera",
+      "azimuth elevation",
+      "matlab view",
+      "rotate 3-D plot"
     ]
   },
   {
@@ -3802,6 +4255,18 @@
       "logical",
       "gpu",
       "like"
+    ]
+  },
+  {
+    "title": "zlabel",
+    "slug": "zlabel",
+    "summary": "Set z-axis labels for 3-D plots, surfaces, and MATLAB `zlabel` workflows.",
+    "keywords": [
+      "zlabel",
+      "z-axis label",
+      "3-D axis label",
+      "matlab zlabel",
+      "surface axis labeling"
     ]
   }
 ]

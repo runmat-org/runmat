@@ -39,6 +39,7 @@ export default function Hero() {
               playsInline
               poster="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp"
               mobilePoster="https://web.runmatstatic.com/video/posters/runmat-wave-simulation-720.webp"
+              initialPosterVariant="mobilePoster"
               aria-label="RunMat wave simulation demo"
             >
               <source src="https://web.runmatstatic.com/video/runmat-wave-simulation.mp4" type="video/mp4" />
