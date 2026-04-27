@@ -64,7 +64,11 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
             <span aria-hidden="true">&larr;</span> All functions
           </Link>
         </p>
-        <BuiltinMetadataChips metadata={metadata} categoryAnchor={categoryAnchor} functionSlug={slug} />
+        <BuiltinMetadataChips
+          metadata={metadata}
+          categoryAnchor={categoryAnchor}
+          gpuSectionAnchor={doc.gpu_behavior && doc.gpu_behavior.length > 0 ? `#how-runmat-runs-${slug}-on-the-gpu` : undefined}
+        />
       </div>
       <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_220px] pb-8">
         <div className="min-w-0">

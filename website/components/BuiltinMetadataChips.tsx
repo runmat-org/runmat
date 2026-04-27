@@ -6,19 +6,15 @@ import { Layers, Zap } from 'lucide-react';
 interface BuiltinMetadataChipsProps {
   metadata: BuiltinMetadata;
   categoryAnchor?: string;
-  /** Used to build the same-page anchor for the GPU section */
-  functionSlug?: string;
+  /** Same-page anchor for the GPU section (only set when the heading exists) */
+  gpuSectionAnchor?: string;
 }
 
-export function BuiltinMetadataChips({ metadata, categoryAnchor, functionSlug }: BuiltinMetadataChipsProps) {
+export function BuiltinMetadataChips({ metadata, categoryAnchor, gpuSectionAnchor }: BuiltinMetadataChipsProps) {
   const otherBadges = metadata.badges.filter((badge) => badge !== 'GPU');
   const categoryHref = categoryAnchor
     ? `/docs/matlab-function-reference#${categoryAnchor}`
     : '/docs/matlab-function-reference';
-
-  const gpuSectionAnchor = functionSlug
-    ? `#how-runmat-runs-${functionSlug}-on-the-gpu`
-    : undefined;
 
   return (
     <div className="flex flex-wrap items-center gap-3 mb-6">
