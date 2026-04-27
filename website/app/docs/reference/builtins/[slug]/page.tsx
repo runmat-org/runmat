@@ -578,7 +578,6 @@ type RelatedGroup = { label: string | null; fns: { name: string; slug: string }[
 function getCategoryParent(rawCat: string): string {
   const parts = rawCat.split('/');
   if (parts.length <= 1) return rawCat;
-  if (parts.length === 2) return parts[0];
   return parts.slice(0, -1).join('/');
 }
 
