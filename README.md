@@ -179,7 +179,7 @@ team management.<br/><br/>
 ## Documentation
 
 <details>
-<summary><strong>Relevant docs</strong> — see <a href="https://runmat.com/docs">runmat.com/docs</a> for the full list</summary>
+<summary><strong>Relevant docs</strong> — see <a href="docs/">docs/</a> for the full list</summary>
 
 - **Getting started**
   - [Installation](https://runmat.com/docs/getting-started)
