@@ -113,13 +113,13 @@ export const docsTree: DocsNode[] = [
             },
           },
           {
-            title: "Styling Plots and Axes",
+            title: "Styling Plots & Axes",
             slug: ["plotting", "styling-plots-and-axes"],
             file: "docs/plotting/STYLING_PLOTS_AND_AXES.md",
             seo: {
               description: "Labels, limits, legends, colormaps, grids, and view configuration for readable RunMat figures.",
               keywords: ["plot styling", "labels", "legend", "colormap", "axis limits", "MATLAB figure styling"],
-              ogTitle: "Styling Plots and Axes",
+              ogTitle: "Styling Plots & Axes",
               ogDescription: "Make figures readable with labels, legends, colormaps, and coordinated styling across plot objects and axes.",
             },
           },
@@ -130,18 +130,18 @@ export const docsTree: DocsNode[] = [
             seo: {
               description: "How RunMat's graphics object model works: figures, axes, plot objects, handles, get/set, and subplot state.",
               keywords: ["graphics handles", "get", "set", "gcf", "gca", "figure handle", "MATLAB graphics objects"],
-              ogTitle: "Graphics Handles and Plot Objects",
+              ogTitle: "Graphics Handles & Plot Objects",
               ogDescription: "Inspect and update plot objects with handles. Understand figures, axes, legends, and the stateful graphics system.",
             },
           },
           {
-            title: "Plot Replay and Export",
+            title: "Plot Replay & Export",
             slug: ["plotting", "plot-replay-and-export"],
             file: "docs/plotting/PLOT_REPLAY_AND_EXPORT.md",
             seo: {
               description: "How RunMat figures persist as scene state, how replay differs from recomputation, and how to export figures.",
               keywords: ["plot export", "figure replay", "scene state", "save figure", "MATLAB figure export"],
-              ogTitle: "Plot Replay and Export",
+              ogTitle: "Plot Replay & Export",
               ogDescription: "Persist, replay, and export RunMat figures. Understand the difference between scene state and rendered output.",
             },
           },

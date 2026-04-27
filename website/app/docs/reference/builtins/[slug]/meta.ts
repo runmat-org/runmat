@@ -79,7 +79,7 @@ export function builtinJsonLD(slug: string): string {
     if (faqs.length > 0) mainEntityRefs.push({ "@id": faqId });
 
     const apiReference: Record<string, unknown> = {
-        "@type": "APIReference",
+        "@type": "TechArticle",
         "@id": articleId,
         "headline": `${title} in MATLAB — runnable examples + source (RunMat)`,
         "description": `Run ${title} in your browser. Open-source, JIT-compiled MATLAB-compatible documentation for ${stripMarkdown(builtin?.description ?? '')}`.slice(0, 300),
