@@ -8,9 +8,6 @@
     "window selection"
   ],
   "summary": "Create a new figure or select an existing figure handle.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/figure.html"
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
