@@ -19,11 +19,13 @@ export function builtinMetadataForSlug(slug: string): Metadata {
     }
 
     const summary = (builtin.summary || '').trim();
-    const description = summary
-      ? `${summary} Try ${builtin.title}() live — edit code, see output instantly. No MATLAB license needed.`
-      : (builtin.description || FALLBACK_DESCRIPTION).trim();
+    const description = builtin.seo_description
+      ? builtin.seo_description
+      : summary
+        ? `${summary} Try ${builtin.title}() live — edit code, see output instantly. No MATLAB license needed.`
+        : (builtin.description || FALLBACK_DESCRIPTION).trim();
 
-    const title = `${builtin.title} — MATLAB Function Reference | Run Examples Live`;
+    const title = builtin.seo_title || `${builtin.title} — MATLAB Function Reference | Run Examples Live`;
     const ogImagePath = builtin.hero_image || `/docs/reference/builtins/${slug}/opengraph-image`;
     const ogImageAlt = summary
       ? `${builtin.title} in RunMat — ${summary}`

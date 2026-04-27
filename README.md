@@ -1,6 +1,4 @@
-<p align="center">
-  <strong><h1 align="center">RunMat</h1></strong>
-</p>
+<h1 align="center">RunMat</h1>
 
 <p align="center">
   <strong>Open-source runtime for math. MATLAB syntax. CPU + GPU. No license fees.</strong>
@@ -17,13 +15,21 @@
   <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-MIT%20with%20Attribution-blue.svg" alt="License"></a>
   <a href="https://crates.io/crates/runmat"><img src="https://img.shields.io/crates/v/runmat.svg" alt="Crates.io"></a>
   <a href="https://crates.io/crates/runmat"><img src="https://img.shields.io/crates/d/runmat.svg" alt="Downloads"></a>
+  <a href="https://github.com/runmat-org/runmat/stargazers"><img src="https://img.shields.io/github/stars/runmat-org/runmat" alt="GitHub Stars"></a>
+  <a href="https://github.com/runmat-org/runmat/commits/main"><img src="https://img.shields.io/github/last-commit/runmat-org/runmat" alt="Last Commit"></a>
 </p>
 
 <p align="center">
-  <a href="https://runmat.com/sandbox"><strong>Try it now — no install needed</strong></a> · <a href="https://runmat.com/docs">Docs</a> · <a href="https://runmat.com/blog">Blog</a> · <a href="https://runmat.com">Website</a>
+  <a href="https://runmat.com/sandbox"><strong>Try it now — no install needed</strong></a> · <a href="https://runmat.com/docs">Docs</a> · <a href="https://runmat.com/blog">Blog</a> · <a href="docs/CHANGELOG.md">Changelog</a> · <a href="https://runmat.com">Website</a>
 </p>
 
-<p align="center"><em>Status: Pre-release (v0.4) — core runtime and GPU engine pass thousands of tests. Expect a few rough edges.</em></p>
+```bash
+curl -fsSL https://runmat.com/install.sh | sh    # Linux / macOS
+iwr https://runmat.com/install.ps1 | iex         # Windows PowerShell
+```
+
+> [!NOTE]
+> **Pre-release (v0.4)** — core runtime and GPU engine pass thousands of tests. Expect a few rough edges.
 
 ---
 
@@ -162,6 +168,57 @@ team management.<br/><br/>
   - The full runtime, GPU engine, JIT, GC, and plotting — everything in this repo — is MIT licensed  
   - Small binary, CLI-first design  
 
+---
+
+## 📚 Documentation
+
+<details>
+<summary><strong>Full docs index</strong></summary>
+
+- **Getting started**
+  - [Installation](https://runmat.com/docs/getting-started)
+  - [Browser sandbox](https://runmat.com/sandbox)
+  - [CLI reference](docs/CLI.md)
+  - [Configuration](docs/CONFIG.md)
+
+- **Language & runtime**
+  - [MATLAB compatibility](docs/COMPATIBILITY.md)
+  - [Language reference](docs/LANGUAGE.md)
+  - [Language coverage](docs/LANGUAGE_COVERAGE.md)
+  - [Built-in function library](docs/LIBRARY.md)
+  - [Design philosophy](docs/DESIGN_PHILOSOPHY.md)
+
+- **GPU acceleration**
+  - [Introduction to RunMat GPU](docs/INTRODUCTION_TO_RUNMAT_GPU.md)
+  - [GPU behavior notes](docs/GPU_BEHAVIOR_NOTES.md)
+  - [Fusion & auto-offload](https://runmat.com/docs/accelerate/fusion-intro)
+
+- **Plotting**
+  - [Plotting guide](docs/PLOTTING.md)
+
+- **Runtime architecture**
+  - [Architecture overview](docs/ARCHITECTURE.md)
+  - [Async design](docs/ARCH_ASYNC.md)
+  - [Filesystem](docs/FILESYSTEM.md)
+  - [Roadmap](docs/ROADMAP.md)
+
+- **Embedding & integration**
+  - [NPM package (`runmat`)](bindings/ts/README.md)
+  - [Browser sandbox guide](docs/DESKTOP_BROWSER_GUIDE.md)
+
+- **Contributing**
+  - [Contributing guide](docs/CONTRIBUTING.md)
+  - [Developer setup](docs/DEVELOPING.md)
+
+- **Blog**
+  - [Introducing RunMat](https://runmat.com/blog/introducing-runmat)
+  - [Why Rust](https://runmat.com/blog/why-rust)
+  - [MATLAB Alternatives 2026](https://runmat.com/blog/matlab-alternatives)
+  - [How to Use GPUs in MATLAB](https://runmat.com/blog/how-to-use-gpu-in-matlab)
+  - [In Defense of MATLAB Whiteboard-Style Code](https://runmat.com/blog/in-defense-of-matlab-whiteboard-style-code)
+
+</details>
+
 --- 
 
 ## 📊 Performance
@@ -223,7 +280,8 @@ On smaller arrays Fusion keeps work on CPU so you still get low overhead and a f
 
 ---
 
-## 🎯 Quick Start
+<details>
+<summary><strong>🎯 Quick Start — all install methods, CLI features, and Jupyter integration</strong></summary>
 
 ### Installation
 
@@ -294,9 +352,10 @@ runmat --install-kernel
 jupyter lab
 ```
 
----
+</details>
 
-## 🧱 Architecture: CPU+GPU performance
+<details>
+<summary><strong>🧱 Architecture: CPU+GPU performance</strong></summary>
 
 RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks CPU or GPU for each chunk of math. All of the components below are open source and live in this repository.
 
@@ -312,8 +371,7 @@ RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks C
 | 🎨 runmat-plot       | Plotting layer                           | Interactive 2D/3D plots; some advanced plot types still in progress |
 | 🌐 runmat-wasm       | WebAssembly build of the runtime         | Runs in any browser; powers the sandbox at runmat.com               |
 | 📸 runmat-snapshot   | Fast startup snapshots                   | Binary blob serialization / restore                                 |
-| 🧰 runmat-runtime    | Core runtime + 330+ builtin functions    | BLAS/LAPACK integration and other CPU/GPU-accelerated operations    |
-
+| 🧰 runmat-runtime    | Core runtime + 400+ builtin functions    | BLAS/LAPACK integration and other CPU/GPU-accelerated operations    |
 
 ### Why this matters
 
@@ -321,36 +379,23 @@ RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks C
 - **Fusion engine** removes most manual device management and kernel tuning.  
 - **GPU backend** runs on NVIDIA, AMD, Apple Silicon, and Intel through Metal / DirectX 12 / Vulkan, with no vendor lock-in.
 
----
+</details>
 
-## 🚀 GPU Acceleration: Fusion & Auto-Offload
+<details>
+<summary><strong>🚀 GPU Acceleration: Fusion & Auto-Offload</strong></summary>
 
 RunMat automatically accelerates your MATLAB code on GPUs without requiring kernel code or rewrites. The system works through four stages:
 
-### 1. Capture the Math
-RunMat builds an "acceleration graph" that captures the intent of your operations—shapes, operation categories, dependencies, and constants. This graph provides a complete view of what your script computes.
+**1. Capture the Math** — RunMat builds an "acceleration graph" that captures the intent of your operations—shapes, operation categories, dependencies, and constants.
 
-### 2. Decide What Should Run on GPU
-The fusion engine detects long chains of elementwise operations and linked reductions, planning to execute them as combined GPU programs. The auto-offload planner estimates break-even points and routes work intelligently:
+**2. Decide What Should Run on GPU** — The fusion engine detects long chains of elementwise operations and linked reductions, planning to execute them as combined GPU programs. The auto-offload planner estimates break-even points and routes work intelligently:
 - **Fusion detection**: Combines multiple operations into single GPU dispatches
 - **Auto-offload heuristics**: Considers element counts, reduction sizes, and matrix multiply saturation
 - **Residency awareness**: Keeps tensors on device once they're worth it
 
-### 3. Generate GPU Kernels
-RunMat generates portable WGSL (WebGPU Shading Language) kernels that work across platforms:
-- **Metal** on macOS
-- **DirectX 12** on Windows  
-- **Vulkan** on Linux
+**3. Generate GPU Kernels** — RunMat generates portable WGSL (WebGPU Shading Language) kernels that work across Metal (macOS), DirectX 12 (Windows), and Vulkan (Linux). Kernels are compiled once and cached.
 
-Kernels are compiled once and cached for subsequent runs, eliminating recompilation overhead.
-
-### 4. Execute Efficiently
-The runtime minimizes host↔device transfers by:
-- Uploading tensors once and keeping them resident
-- Executing fused kernels directly on GPU memory
-- Only gathering results when needed (e.g., for `fprintf` or display)
-
-### Example: Automatic GPU Fusion
+**4. Execute Efficiently** — The runtime minimizes host↔device transfers by uploading tensors once, executing fused kernels directly on GPU memory, and only gathering results when needed.
 
 ```matlab
 x = rand(1024, 1, 'single');
@@ -359,18 +404,17 @@ m = mean(y, 'all');            % Reduction stays on GPU
 fprintf('m=%.6f\n', double(m)); % Single download at sink
 ```
 
-RunMat detects the elementwise chain (`sin`, `.*`, `+`), fuses them into one GPU dispatch, keeps `y` resident on GPU, and only downloads `m` when needed for output.
-
 For more details, see [Introduction to RunMat GPU](https://runmat.com/docs/accelerate/fusion-intro).
 
----
+</details>
 
-## 💡 Design Philosophy
+<details>
+<summary><strong>💡 Design Philosophy</strong></summary>
 
 RunMat follows a **fast-by-default runtime, open extension model** philosophy:
 
 - **High-fidelity language coverage**: Core MATLAB syntax, operators, control flow, OOP, and indexing — not a subset, not a new language
-- **Extensive built-ins**: 330+ functions covering core MATLAB built-ins, with more added continuously
+- **Extensive built-ins**: 400+ functions covering core MATLAB built-ins, with more added continuously
 - **Tiered execution**: VM interpreter for fast startup, Turbine JIT for hot code
 - **GPU-first math**: Fusion engine automatically turns MATLAB code into fast GPU workloads
 - **Single portable binary**: One static binary includes the runtime, GPU engine, and plotting — fast startup, modern CLI, Jupyter kernel support
@@ -380,7 +424,7 @@ The runtime intentionally ships GPU acceleration, fusion, JIT, and plotting as f
 
 See [Design Philosophy](https://runmat.com/docs/design-philosophy) for the complete design rationale.
 
----
+</details>
 
 ## 🌍 Who Uses RunMat?
 
@@ -410,52 +454,6 @@ MATLAB background, need faster runs on laptops or clusters
 </div>
 
 If you write math in MATLAB and hit performance walls on CPU, RunMat is built for you.
-
----
-
-## 📚 Quick links
-
-- **Getting started**
-  - [Installation](https://runmat.com/docs/getting-started)
-  - [Browser sandbox](https://runmat.com/sandbox)
-  - [CLI reference](docs/CLI.md)
-  - [Configuration](docs/CONFIG.md)
-
-- **Language & runtime**
-  - [MATLAB compatibility](docs/COMPATIBILITY.md)
-  - [Language reference](docs/LANGUAGE.md)
-  - [Language coverage](docs/LANGUAGE_COVERAGE.md)
-  - [Built-in function library](docs/LIBRARY.md)
-  - [Design philosophy](docs/DESIGN_PHILOSOPHY.md)
-
-- **GPU acceleration**
-  - [Introduction to RunMat GPU](docs/INTRODUCTION_TO_RUNMAT_GPU.md)
-  - [GPU behavior notes](docs/GPU_BEHAVIOR_NOTES.md)
-  - [Fusion & auto-offload](https://runmat.com/docs/accelerate/fusion-intro)
-
-- **Plotting**
-  - [Plotting guide](docs/PLOTTING.md)
-
-- **Runtime architecture**
-  - [Architecture overview](docs/ARCHITECTURE.md)
-  - [Async design](docs/ARCH_ASYNC.md)
-  - [Filesystem](docs/FILESYSTEM.md)
-  - [Roadmap](docs/ROADMAP.md)
-
-- **Embedding & integration**
-  - [NPM package (`runmat`)](bindings/ts/README.md)
-  - [Browser sandbox guide](docs/DESKTOP_BROWSER_GUIDE.md)
-
-- **Contributing**
-  - [Contributing guide](docs/CONTRIBUTING.md)
-  - [Developer setup](docs/DEVELOPING.md)
-
-- **Blog**
-  - [Introducing RunMat](https://runmat.com/blog/introducing-runmat)
-  - [Why Rust](https://runmat.com/blog/why-rust)
-  - [MATLAB Alternatives 2026](https://runmat.com/blog/matlab-alternatives)
-  - [How to Use GPUs in MATLAB](https://runmat.com/blog/how-to-use-gpu-in-matlab)
-  - [In Defense of MATLAB Whiteboard-Style Code](https://runmat.com/blog/in-defense-of-matlab-whiteboard-style-code)
 
 ---
 
@@ -530,7 +528,7 @@ See [LICENSE.md](LICENSE.md) for complete terms or visit [runmat.com/license](ht
 
 ⭐ **Star us on GitHub** if RunMat is useful to you.
 
-[**🚀 Get Started**](https://runmat.com/docs/getting-started) • [**📖 Docs**](https://runmat.com/docs) • [**📝 Blog**](https://runmat.com/blog) • [**💰 Pricing**](https://runmat.com/pricing) • [**𝕏 @runmat_com**](https://x.com/runmat_com) • [**LinkedIn**](https://www.linkedin.com/company/runmat)
+[**𝕏 @runmat_com**](https://x.com/runmat_com) • [**LinkedIn**](https://www.linkedin.com/company/runmat) • [**GitHub Discussions**](https://github.com/runmat-org/runmat/discussions) • [**Pricing**](https://runmat.com/pricing)
 
 ---
 

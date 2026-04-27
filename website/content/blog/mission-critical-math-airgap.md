@@ -1,6 +1,6 @@
 ---
-title: "Mission-Critical Math: The Full Platform Inside Your Airgap"
-description: "RunMat brings modern scientific computing to airgapped environments. A single binary with GPU acceleration, real-time collaboration, AI-assisted analysis, and ITAR-aligned compliance -- all running offline."
+title: "MATLAB Alternative for Airgapped & ITAR Environments — No License Server"
+description: "A single-binary MATLAB alternative built for airgapped, ITAR, and classified environments. GPU-accelerated computation, real-time collaboration, and audit trails — all running fully offline with zero license infrastructure."
 date: "2026-02-19"
 dateModified: "2026-03-10"
 authors:
@@ -16,11 +16,11 @@ excerpt: "The airgap shouldn't mean going back in time. RunMat proves you can ha
 image: "https://web.runmatstatic.com/blog-images/runmat-airgap-blog.png"
 imageAlt: "RunMat platform architecture inside an airgapped environment"
 ogType: "article"
-ogTitle: "Mission-Critical Math: The Full Platform Inside Your Airgap"
-ogDescription: "RunMat brings modern scientific computing to airgapped environments. Single binary, GPU acceleration, real-time collaboration, and compliance -- all offline."
+ogTitle: "MATLAB Alternative for Airgapped & ITAR Environments — No License Server"
+ogDescription: "A single-binary MATLAB alternative built for airgapped, ITAR, and classified environments. GPU-accelerated computation, real-time collaboration, and audit trails — all running fully offline."
 twitterCard: "summary_large_image"
-twitterTitle: "Mission-Critical Math: Built for the Airgap"
-twitterDescription: "RunMat is the airgap-native platform for scientific computing. Single binary, no license servers, GPU accelerated, compliance-ready."
+twitterTitle: "MATLAB Alternative for Airgapped & ITAR Environments"
+twitterDescription: "A single-binary MATLAB alternative for airgapped and classified environments. GPU-accelerated, real-time collaboration, audit trails — fully offline, zero license infrastructure."
 canonical: "https://runmat.com/blog/mission-critical-math-airgap"
 
 jsonLd:

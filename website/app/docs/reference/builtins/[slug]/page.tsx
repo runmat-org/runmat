@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import {
+  formatCategoryLabel,
   getBuiltinDocBySlug,
   getBuiltinMetadata,
   loadBuiltins,
@@ -42,7 +43,10 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
   if (!b) notFound();
   const doc = getBuiltinDocBySlug(slug);
   if (!doc) notFound();
-  const blocks = renderBuiltinDocBlocks(doc);
+  const siblings = builtins
+    .filter(x => x.slug !== slug)
+    .sort((a, c) => a.name.localeCompare(c.name));
+  const blocks = renderBuiltinDocBlocks(doc, siblings);
   const toc = extractHeadingsFromBlocks(blocks);
   const metadata = getBuiltinMetadata(b);
   const allDisplayCategories = [...new Set(builtins.map(x => getDisplayCategory(x)))];
@@ -60,7 +64,7 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
             <span aria-hidden="true">&larr;</span> All functions
           </Link>
         </p>
-        <BuiltinMetadataChips metadata={metadata} categoryAnchor={categoryAnchor} />
+        <BuiltinMetadataChips metadata={metadata} categoryAnchor={categoryAnchor} functionSlug={slug} />
       </div>
       <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_220px] pb-8">
         <div className="min-w-0">
@@ -84,7 +88,7 @@ type FenceInfo = {
   runnable?: boolean;
 };
 
-function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
+function renderBuiltinDocBlocks(doc: BuiltinDocEntry, allSiblings: { name: string; slug: string; category: string[] }[]): BuiltinDocBlock[] {
   const blocks: BuiltinDocBlock[] = [];
   const title = doc.title.trim();
   const descriptionHeader = doc.summary?.trim()
@@ -148,39 +152,46 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
     blocks.push(...renderFaqs(doc.faqs));
   }
 
-  if (doc.links && doc.links.length > 0) {
+  {
     const isGuideLink = (url: string) => url.startsWith('/docs/') || url.startsWith('/blog/');
-    const functionLinks = doc.links.filter(l => l.url?.trim() && l.label?.trim() && !isGuideLink(l.url.trim()));
-    const guideLinks = doc.links.filter(l => l.url?.trim() && l.label?.trim() && isGuideLink(l.url.trim()));
+    const guideLinks = (doc.links ?? []).filter(l => l.url?.trim() && l.label?.trim() && isGuideLink(l.url.trim()));
 
-    if (functionLinks.length > 0) {
-      const hasThumbnails = functionLinks.some(link => link.thumbnail);
-      blocks.push(createHeading(2, parseInline('Related functions to explore')));
-      blocks.push({
-        type: 'paragraph',
-        content: parseInline(
-          `These functions work well alongside \`${title}\`. Each page has runnable examples you can try in the browser.`
-        ),
-      });
-      if (hasThumbnails) {
-        blocks.push({
-          type: 'link-grid',
-          items: functionLinks.map(link => ({
-            label: link.label.trim(),
-            href: link.url.trim(),
-            thumbnail: link.thumbnail,
-          })),
-        });
-      } else {
-        const linkInline = renderSeeAlsoLinks(functionLinks);
-        if (linkInline.length > 0) {
-          blocks.push({ type: 'paragraph', content: linkInline });
+    const rawCat = doc.category ?? '';
+    const parentCat = getCategoryParent(rawCat);
+    const groups = groupSiblingsBySubcategory(rawCat, allSiblings);
+
+    if (groups.length > 0) {
+      const parentLabel = formatCategoryPart(parentCat);
+      blocks.push(createHeading(2, parseInline(`Related ${parentLabel} functions`)));
+
+      const groupBlocks: BuiltinDocBlock[][] = [];
+      for (const group of groups) {
+        const col: BuiltinDocBlock[] = [];
+        if (groups.length > 1 && group.label) {
+          col.push(createHeading(4, parseInline(group.label)));
         }
+        const linkNodes: BuiltinDocInlineNode[] = [];
+        group.fns.forEach((fn, i) => {
+          if (i > 0) linkNodes.push(textNode(' · '));
+          linkNodes.push({ type: 'link', label: [textNode(fn.name)], href: `/docs/reference/builtins/${fn.slug}` });
+        });
+        col.push({ type: 'paragraph', content: linkNodes });
+        groupBlocks.push(col);
       }
+
+      const innerChildren: BuiltinDocBlock[] = [];
+      if (groupBlocks.length > 1) {
+        innerChildren.push({ type: 'columns', cols: groupBlocks });
+      } else {
+        for (const col of groupBlocks) innerChildren.push(...col);
+      }
+
+      blocks.push({ type: 'section', children: innerChildren, className: 'my-4 rounded-lg border border-border bg-muted/40 px-5 py-4' });
     }
 
     if (guideLinks.length > 0) {
-      blocks.push(createHeading(2, parseInline('More plotting resources')));
+      const guideHeading = rawCat === 'plotting' ? 'More plotting resources' : 'Related guides';
+      blocks.push(createHeading(2, parseInline(guideHeading)));
       blocks.push({
         type: 'list',
         ordered: false,
@@ -541,9 +552,108 @@ function hasText(value?: string | null): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+
+
+const PLOTTING_SUBGROUPS: Record<string, string> = {
+  plot: '2D Charts', bar: '2D Charts', scatter: '2D Charts', histogram: '2D Charts',
+  hist: '2D Charts', pie: '2D Charts', stairs: '2D Charts', stem: '2D Charts',
+  area: '2D Charts', errorbar: '2D Charts', loglog: '2D Charts',
+  semilogx: '2D Charts', semilogy: '2D Charts',
+  surf: '3D & Surface', surfc: '3D & Surface', mesh: '3D & Surface',
+  meshc: '3D & Surface', plot3: '3D & Surface', scatter3: '3D & Surface',
+  contour: '3D & Surface', contourf: '3D & Surface', quiver: '3D & Surface',
+  image: 'Images', imagesc: 'Images',
+  axis: 'Axes & Layout', subplot: 'Axes & Layout', grid: 'Axes & Layout',
+  box: 'Axes & Layout', view: 'Axes & Layout', sgtitle: 'Axes & Layout', zlabel: 'Axes & Layout',
+  colormap: 'Appearance', colorbar: 'Appearance', shading: 'Appearance', legend: 'Appearance',
+  get: 'Handle Access', set: 'Handle Access',
+};
+
+type RelatedGroup = { label: string | null; fns: { name: string; slug: string }[] };
+
+function getCategoryParent(rawCat: string): string {
+  const parts = rawCat.split('/');
+  if (parts.length <= 1) return rawCat;
+  if (parts.length === 2) return parts[0];
+  return parts.slice(0, -1).join('/');
+}
+
+function getCategorySub(rawCat: string): string {
+  const parts = rawCat.split('/');
+  return parts.length > 1 ? parts[parts.length - 1] : '';
+}
+
+function formatCategoryPart(part: string): string {
+  const last = part.includes('/') ? part.split('/').pop()! : part;
+  return last
+    .split(/[-_]/)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function groupSiblingsBySubcategory(
+  rawCat: string,
+  allSiblings: { name: string; slug: string; category: string[] }[],
+): RelatedGroup[] {
+  const parent = getCategoryParent(rawCat);
+  const ownSub = getCategorySub(rawCat);
+
+  if (rawCat === 'plotting') {
+    const plotFns = allSiblings.filter(s => s.category[0] === 'plotting');
+    const grouped = new Map<string, { name: string; slug: string }[]>();
+    for (const fn of plotFns) {
+      const sub = PLOTTING_SUBGROUPS[fn.slug] ?? 'Other';
+      if (!grouped.has(sub)) grouped.set(sub, []);
+      grouped.get(sub)!.push(fn);
+    }
+    const order = ['2D Charts', '3D & Surface', 'Images', 'Axes & Layout', 'Appearance', 'Handle Access', 'Other'];
+    return order
+      .filter(label => grouped.has(label))
+      .map(label => ({ label, fns: grouped.get(label)! }));
+  }
+
+  const siblings = allSiblings.filter(s => {
+    const sCat = s.category[0] ?? '';
+    return sCat.startsWith(parent + '/') || sCat === parent;
+  });
+
+  if (siblings.length === 0) return [];
+
+  const grouped = new Map<string, { name: string; slug: string }[]>();
+  for (const fn of siblings) {
+    const fnCat = fn.category[0] ?? '';
+    const sub = getCategorySub(fnCat) || parent;
+    if (!grouped.has(sub)) grouped.set(sub, []);
+    grouped.get(sub)!.push(fn);
+  }
+
+  if (grouped.size <= 1) {
+    const fns = [...grouped.values()][0] ?? [];
+    return fns.length > 0 ? [{ label: null, fns }] : [];
+  }
+
+  const groups: RelatedGroup[] = [];
+  if (ownSub && grouped.has(ownSub)) {
+    groups.push({ label: formatCategoryPart(ownSub), fns: grouped.get(ownSub)! });
+  }
+  for (const [sub, fns] of grouped) {
+    if (sub === ownSub) continue;
+    groups.push({ label: formatCategoryPart(sub), fns });
+  }
+  return groups;
+}
+
 function extractHeadingsFromBlocks(blocks: BuiltinDocBlock[]): TocEntry[] {
   const out: TocEntry[] = [];
   for (const block of blocks) {
+    if (block.type === 'section') {
+      out.push(...extractHeadingsFromBlocks(block.children));
+      continue;
+    }
+    if (block.type === 'columns') {
+      for (const col of block.cols) out.push(...extractHeadingsFromBlocks(col));
+      continue;
+    }
     if (block.type !== 'heading') continue;
     if (block.level < 2 || block.level > 6) continue;
     const text = inlineToPlainText(block.text).replace(/`/g, '');
@@ -662,6 +772,8 @@ const GPU_TERM_LINKS: { term: string; href: string }[] = [
 function linkKnownTerms(blocks: BuiltinDocBlock[]): BuiltinDocBlock[] {
   const linked = new Set<string>();
   return blocks.map((block) => {
+    if (block.type === 'section') return { ...block, children: linkKnownTerms(block.children) };
+    if (block.type === 'columns') return { ...block, cols: block.cols.map(col => linkKnownTerms(col)) };
     if (block.type !== 'paragraph') return block;
     return { ...block, content: linkInlineNodes(block.content, linked) };
   });

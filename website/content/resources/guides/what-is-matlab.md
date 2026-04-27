@@ -277,7 +277,7 @@ If you’d like to learn more about RunMat, please visit Runmat.org, or read the
 - **Why the project is structured this way**: [Design Philosophy](/docs/design-philosophy)
 - **How GPU acceleration works**: [Introduction to RunMat GPU/Fusion](/docs/accelerate/fusion-intro)
 - **How to run/benchmark/configure RunMat**: [CLI](/docs/cli)
-- **Toolboxes-as-packages direction**: [Package Manager (design)](/docs/package-manager)
+- **Toolboxes-as-packages direction**: Package Manager (coming soon)
 
 ---
 

@@ -223,7 +223,7 @@ Two ways to add capabilities:
 - **Native (Rust) packages**: implement built-ins with `#[runtime_builtin]`, get strong typing and speed, and ship as a dynamic library.
 - **Source (MATLAB) packages**: ship `.m` files; RunMat interprets or compiles them.
 
-Documentation is generated from runtime metadata, so everything you add shows up in the reference automatically. See the [Package Manager](/docs/package-manager) doc for the full design and examples.
+Documentation is generated from runtime metadata, so everything you add shows up in the reference automatically.
 
 ---
 
