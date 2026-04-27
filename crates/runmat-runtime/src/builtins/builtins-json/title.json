@@ -1,0 +1,117 @@
+{
+  "title": "title",
+  "category": "plotting",
+  "keywords": [
+    "title",
+    "axes title",
+    "plot title",
+    "label",
+    "matlab title"
+  ],
+  "summary": "Set the title of the current axes or a specified axes handle.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::title::tests"
+  },
+  "description": "`title` attaches a text label to the top of the current axes. It returns a text handle that participates in the shared plotting property system used by `get` and `set`. Unlike `sgtitle`, which is figure-scoped, `title` is axes-scoped: in a subplot layout, each panel gets its own independent title.",
+  "behaviors": [
+    "The returned value is a text handle that can be inspected or updated through `get` and `set`.",
+    "With no explicit target, `title` attaches text to the current axes as returned by `gca`.",
+    "Passing an axes handle as the first argument targets that specific axes, which is useful in subplot layouts.",
+    "String scalars, char arrays, string arrays, and cell arrays are all accepted. String arrays and cell arrays produce multiline titles, with elements joined by newlines.",
+    "Text styling properties — `FontSize`, `FontWeight`, `FontAngle`, `Color`, `Interpreter`, and `Visible` — use the shared plotting text-property system.",
+    "Passing an unrecognized property name raises an error. Passing a non-numeric value for `FontSize` raises an error."
+  ],
+  "examples": [
+    {
+      "description": "Add a title to the current axes",
+      "input": "plot(0:0.1:2*pi, sin(0:0.1:2*pi));\ntitle('Sine Wave');",
+      "output": "% title is rendered above the axes"
+    },
+    {
+      "description": "Style the title and inspect its handle",
+      "input": "plot(1:10, rand(1, 10));\nh = title('Random Signal', 'FontSize', 16, 'FontWeight', 'bold');\nget(h, 'Type')",
+      "output": "ans =\n    'text'"
+    },
+    {
+      "description": "Set an independent title on each subplot panel",
+      "input": "subplot(1, 2, 1);\nplot(0:0.1:pi, sin(0:0.1:pi));\ntitle('Sine');\nsubplot(1, 2, 2);\nplot(0:0.1:pi, cos(0:0.1:pi));\ntitle('Cosine');",
+      "output": "% Each panel has its own title; the figure has none"
+    },
+    {
+      "description": "Target a specific axes using an explicit handle",
+      "input": "ax1 = subplot(1, 2, 1);\nplot(ax1, 1:5, 1:5);\nax2 = subplot(1, 2, 2);\nplot(ax2, 1:5, (1:5).^2);\ntitle(ax1, 'Linear');\ntitle(ax2, 'Quadratic');",
+      "output": "% Titles are attached to their respective axes regardless of which is currently selected"
+    },
+    {
+      "description": "Create a multiline title from a string array",
+      "input": "plot(1:5, [2 4 1 3 5]);\ntitle([\"Top line\"; \"Bottom line\"]);",
+      "output": "% Both strings appear, stacked above the axes"
+    },
+    {
+      "description": "Update a title after plotting using set",
+      "input": "plot(1:10, rand(1, 10));\nh = title('Draft');\nset(h, 'String', 'Final Title', 'FontSize', 14);",
+      "output": "% The axes title is updated in place"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `title` different from `sgtitle`?",
+      "answer": "`title` is axes-scoped: it attaches to one panel. `sgtitle` is figure-scoped and is drawn once above all subplot panels. Use `title` for per-panel labels and `sgtitle` for an overall figure heading."
+    },
+    {
+      "question": "How do I create a multiline title?",
+      "answer": "Pass a string array or cell array. RunMat joins the elements with newlines.\n\n```matlab\ntitle({'First line', 'Second line'});\n```"
+    },
+    {
+      "question": "Can I update the title after the plot is created?",
+      "answer": "Yes. `title` returns a text handle, so you can update it at any time with `set`.\n\n```matlab\nh = title('Initial');\nset(h, 'String', 'Updated', 'Color', 'r');\n```"
+    },
+    {
+      "question": "How do I set titles on specific subplots without changing the active axes?",
+      "answer": "Pass the axes handle returned by `subplot` or `gca` as the first argument.\n\n```matlab\nax = subplot(2, 1, 1);\ntitle(ax, 'Top Panel');\n```"
+    }
+  ],
+  "links": [
+    {
+      "label": "sgtitle",
+      "url": "./sgtitle"
+    },
+    {
+      "label": "xlabel",
+      "url": "./xlabel"
+    },
+    {
+      "label": "ylabel",
+      "url": "./ylabel"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/title.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/title.rs"
+  }
+}
