@@ -515,25 +515,6 @@ function splitListItemContent(content: string, shouldSplit?: boolean): string[] 
   return [trimmed];
 }
 
-function renderSeeAlsoLinks(links: BuiltinDocLink[]): BuiltinDocInlineNode[] {
-  const nodes: BuiltinDocInlineNode[] = [];
-  const entries = links
-    .map((link) => {
-      const url = link.url?.trim();
-      const label = link.label?.trim() || url;
-      if (!url || !label) return null;
-      return { url, label };
-    })
-    .filter((entry): entry is { url: string; label: string } => Boolean(entry));
-
-  entries.forEach((entry, index) => {
-    if (index > 0) nodes.push(textNode(', '));
-    nodes.push({ type: 'link', label: parseInline(entry.label), href: entry.url });
-  });
-
-  return nodes;
-}
-
 function resolveSourceUrl(url: string): string {
   const trimmed = url.trim();
   if (!trimmed) return '';
