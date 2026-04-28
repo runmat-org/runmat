@@ -1,0 +1,53 @@
+{
+  "title": "fsolve",
+  "category": "math/optim",
+  "keywords": ["fsolve", "nonlinear solve", "root finding", "Jacobian", "Levenberg-Marquardt"],
+  "summary": "Solve scalar or vector nonlinear equation systems using finite-difference Levenberg-Marquardt iterations.",
+  "references": ["https://www.mathworks.com/help/optim/ug/fsolve.html"],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "The nonlinear solver runs on the host. Callback functions may still call GPU-aware builtins."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::fsolve::tests",
+    "integration": "runmat-vm/tests/closures.rs::fsolve_accepts_anonymous_vector_function"
+  },
+  "description": "`x = fsolve(fun, x0)` solves `fun(x) = 0` starting from `x0`. Scalar guesses return scalars; vector and matrix guesses return a result with the same shape as `x0`.",
+  "behaviors": [
+    "The function handle must return a finite real scalar or vector.",
+    "Jacobians are estimated with forward finite differences.",
+    "The step is chosen with a Levenberg-Marquardt damping parameter and accepted only when it reduces the residual norm.",
+    "Options are supplied as a struct, usually created with `optimset`. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, and `Display` are accepted."
+  ],
+  "examples": [
+    {
+      "description": "Solve a two-variable nonlinear system",
+      "input": "F = @(x) [x(1)^2 + x(2)^2 - 4; x(1)*x(2) - 1];\nx = fsolve(F, [1; 1])",
+      "output": "x =\n    1.9319\n    0.5176"
+    },
+    {
+      "description": "Solve a scalar equation",
+      "input": "x = fsolve(@sin, 3)",
+      "output": "x =\n    3.1416"
+    }
+  ],
+  "links": [
+    { "label": "fzero", "url": "./fzero" },
+    { "label": "optimset", "url": "./optimset" },
+    { "label": "linsolve", "url": "./linsolve" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/fsolve.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/fsolve.rs"
+  }
+}
