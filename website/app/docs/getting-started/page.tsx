@@ -109,17 +109,17 @@ export default function GettingStartedPage() {
         
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-4xl lg:text-5xl font-bold mb-6">
+          <h1 className="text-2xl sm:text-3xl font-bold mb-4">
             Getting Started with RunMat
           </h1>
-          <p className="text-xl text-muted-foreground leading-relaxed mb-6">
+          <p className="text-base text-foreground leading-relaxed mb-6">
             Get up and running in minutes. Try RunMat in your browser with no installation, or install the CLI for the terminal and local scripts.
           </p>
           {/* Try RunMat Now — primary CTA */}
           <Button
             asChild
             size="lg"
-            className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200 hover:from-blue-600 hover:to-purple-700"
+            className="h-12 px-8 text-base font-semibold rounded-none bg-[hsl(var(--brand))] text-white hover:bg-[hsl(var(--brand))]/90 border-0 transition-opacity duration-200 shadow-none"
           >
             <Link
               href="/sandbox"
@@ -134,14 +134,14 @@ export default function GettingStartedPage() {
               <ExternalLink className="ml-2 h-4 w-4" aria-hidden="true" />
             </Link>
           </Button>
-          <p className="text-sm text-muted-foreground mt-2">
+          <p className="text-sm text-foreground/70 mt-2">
             No installation required. Works in Chrome, Edge, Firefox, and Safari.
           </p>
         </div>
 
         {/* Getting Started Tabs: Browser | CLI | Jupyter */}
         <section id="getting-started-tabs" className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">
+          <h2 className="text-xl sm:text-2xl font-semibold mb-4 text-foreground">
             Choose your path
           </h2>
           <GettingStartedTabs />
@@ -149,29 +149,28 @@ export default function GettingStartedPage() {
 
         {/* Feature comparison */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">
+          <h2 className="text-xl sm:text-2xl font-semibold mb-4 text-foreground">
             Compare surfaces
           </h2>
-          <div className="rounded-xl border border-border/60 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[540px] text-sm">
-                <thead>
-                  <tr className="border-b border-border/40">
-                    <th className="text-left py-4 px-5 text-sm font-medium text-muted-foreground w-[34%]">Feature</th>
-                    <th className="text-center py-4 px-3 w-[22%]">
-                      <div className="text-sm font-semibold text-foreground">CLI</div>
+          <div className="overflow-x-auto">
+              <table className="w-full min-w-[540px] caption-bottom text-sm">
+                <thead className="[&_tr]:border-b">
+                  <tr className="border-b border-border transition-colors">
+                    <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground w-[34%]">Feature</th>
+                    <th className="text-center py-3 px-4 w-[22%]">
+                      <div className="text-sm font-medium text-muted-foreground">CLI</div>
                     </th>
-                    <th className="text-center py-4 px-3 w-[22%]">
-                      <div className="text-sm font-semibold text-foreground">Sandbox</div>
-                      <div className="text-xs font-normal text-muted-foreground mt-0.5">No account</div>
+                    <th className="text-center py-3 px-4 w-[22%]">
+                      <div className="text-sm font-medium text-muted-foreground">Sandbox</div>
+                      <div className="text-xs font-normal text-muted-foreground/70 mt-0.5">No account</div>
                     </th>
-                    <th className="text-center py-4 px-3 w-[22%]">
-                      <div className="text-sm font-semibold text-foreground">Sandbox + Cloud</div>
-                      <div className="text-xs font-normal text-muted-foreground mt-0.5">Signed in</div>
+                    <th className="text-center py-3 px-4 w-[22%]">
+                      <div className="text-sm font-medium text-muted-foreground">Sandbox + Cloud</div>
+                      <div className="text-xs font-normal text-muted-foreground/70 mt-0.5">Signed in</div>
                     </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="[&_tr:last-child]:border-0">
                   {([
                     ["Works without install", "no", "yes", "yes"],
                     ["Account required", "no", "no", "yes-text:Yes (free)"],
@@ -185,21 +184,21 @@ export default function GettingStartedPage() {
                     ["Jupyter support", "yes", "no", "no"],
                     ["Offline support", "yes", "no", "no"],
                   ] as [string, string, string, string][]).map(([feature, cli, sandbox, cloud]) => (
-                    <tr key={feature} className="border-b border-border/30">
-                      <td className="py-3 px-5 text-muted-foreground">{feature}</td>
+                    <tr key={feature} className="border-b border-border transition-colors">
+                      <td className="py-3 px-4 text-foreground">{feature}</td>
                       {[cli, sandbox, cloud].map((cell, i) => (
-                        <td key={`${feature}-${i}`} className="py-3 px-3 text-center">
+                        <td key={`${feature}-${i}`} className="py-3 px-4 text-center">
                           {cell === "yes" ? (
                             <Check className="inline-block h-4 w-4 text-green-500" aria-label="Yes" />
                           ) : cell === "no" ? (
                             <X className="inline-block h-4 w-4 text-muted-foreground/40" aria-label="No" />
                           ) : cell.startsWith("yes-text:") ? (
-                            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <span className="inline-flex items-center gap-1.5 text-xs text-foreground">
                               <Check className="h-4 w-4 text-green-500 shrink-0" aria-hidden />
                               {cell.replace("yes-text:", "")}
                             </span>
                           ) : (
-                            <span className="text-xs text-muted-foreground">{cell.replace("text:", "")}</span>
+                            <span className="text-xs text-foreground">{cell.replace("text:", "")}</span>
                           )}
                         </td>
                       ))}
@@ -207,18 +206,17 @@ export default function GettingStartedPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
           </div>
         </section>
 
         {/* Next Steps */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">
+          <h2 className="text-xl sm:text-2xl font-semibold mb-4 text-foreground">
             Next steps
           </h2>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <Card className="hover:shadow-lg transition-shadow">
+            <Card className="">
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <Download className="h-5 w-5 mr-2 text-foreground" />
@@ -226,7 +224,7 @@ export default function GettingStartedPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-muted-foreground mb-4">
+                <p className="text-foreground mb-4">
                   Install the CLI for native GPU performance and local file access.
                 </p>
                 <Button variant="outline" className="w-full" asChild>
@@ -238,15 +236,15 @@ export default function GettingStartedPage() {
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-lg transition-shadow">
+            <Card className="">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <BarChart3 className="h-5 w-5 mr-2 text-blue-600" />
+                  <BarChart3 className="h-5 w-5 mr-2 text-[hsl(var(--brand))]" />
                   Plotting &amp; diagnostics
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-muted-foreground mb-4">
+                <p className="text-foreground mb-4">
                   Interactive 2D and 3D plots, real-time shape tracking, and dimension mismatch warnings — all built into the editor.
                 </p>
                 <Button variant="outline" className="w-full" asChild>
@@ -258,15 +256,15 @@ export default function GettingStartedPage() {
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-lg transition-shadow">
+            <Card className="">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <FileText className="h-5 w-5 mr-2 text-blue-600" />
+                  <FileText className="h-5 w-5 mr-2 text-[hsl(var(--brand))]" />
                   Learn the fundamentals
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-muted-foreground mb-4">
+                <p className="text-foreground mb-4">
                   Dive deeper into how RunMat compiles and accelerates your code.
                 </p>
                 <Button variant="outline" className="w-full" asChild>
@@ -278,7 +276,7 @@ export default function GettingStartedPage() {
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-lg transition-shadow">
+            <Card className="">
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <Terminal className="h-5 w-5 mr-2 text-green-600 dark:text-green-400" />
@@ -286,7 +284,7 @@ export default function GettingStartedPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-muted-foreground mb-4">
+                <p className="text-foreground mb-4">
                   See RunMat in action with real-world examples.
                 </p>
                 <Button variant="outline" className="w-full" asChild>
@@ -298,7 +296,7 @@ export default function GettingStartedPage() {
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-lg transition-shadow">
+            <Card className="">
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <Zap className="h-5 w-5 mr-2 text-orange-600" />
@@ -306,7 +304,7 @@ export default function GettingStartedPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-muted-foreground mb-4">
+                <p className="text-foreground mb-4">
                   How RunMat turns MATLAB scripts into GPU-accelerated workloads
                 </p>
                 <Button variant="outline" className="w-full" asChild>
@@ -318,15 +316,15 @@ export default function GettingStartedPage() {
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-lg transition-shadow">
+            <Card className="">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Zap className="h-5 w-5 mr-2 text-purple-600" />
+                  <Zap className="h-5 w-5 mr-2 text-[hsl(var(--brand))]" />
                   Understand the design
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-muted-foreground mb-4">
+                <p className="text-foreground mb-4">
                   Learn why RunMat keeps a slim core and package-first model.
                 </p>
                 <Button variant="outline" className="w-full" asChild>
@@ -342,12 +340,12 @@ export default function GettingStartedPage() {
 
         {/* Help */}
         <section>
-          <Card className="bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
+          <Card className="bg-card border-border">
             <CardContent className="p-6">
               <h3 className="text-lg font-semibold mb-3 text-foreground">
                 Need help?
               </h3>
-              <p className="text-muted-foreground mb-4">
+              <p className="text-foreground mb-4">
                 Join our community and get support from other RunMat users and developers.
               </p>
               <div className="flex flex-col sm:flex-row gap-3">

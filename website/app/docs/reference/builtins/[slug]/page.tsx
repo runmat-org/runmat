@@ -10,6 +10,7 @@ import {
   type BuiltinDocLink,
   type BuiltinDocFAQ,
   type BuiltinDocJsonEncodeOption,
+  type BuiltinDocValidation,
 } from '@/lib/builtins';
 import { BuiltinDocRenderer, type BuiltinDocBlock, type BuiltinDocInlineNode } from '@/components/BuiltinDocRenderer';
 import { slugifyHeading } from '@/lib/utils';
@@ -22,6 +23,7 @@ import { SandboxCta } from '@/components/SandboxCta';
 
 
 export const dynamic = 'force-static';
+export const dynamicParams = false;
 
 export async function generateStaticParams() {
   const builtins = loadBuiltins();
@@ -37,9 +39,9 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
   const { slug } = await params;
   const builtins = loadBuiltins();
   const b = builtins.find(x => x.slug === slug);
-  if (!b) return notFound();
+  if (!b) notFound();
   const doc = getBuiltinDocBySlug(slug);
-  if (!doc) return notFound();
+  if (!doc) notFound();
   const blocks = renderBuiltinDocBlocks(doc);
   const toc = extractHeadingsFromBlocks(blocks);
   const metadata = getBuiltinMetadata(b);
@@ -52,7 +54,7 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: builtinJsonLD(slug) }}
     />
-      <div className="container mx-auto px-4 md:px-6 pt-8">
+      <div className="pt-8">
         <p className="mb-4 text-sm text-muted-foreground leading-relaxed break-words">
           <Link href="/docs/matlab-function-reference" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
             <span aria-hidden="true">&larr;</span> All functions
@@ -60,17 +62,17 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
         </p>
         <BuiltinMetadataChips metadata={metadata} categoryAnchor={categoryAnchor} />
       </div>
-      <div className="container mx-auto px-4 md:px-6 pb-8">
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_220px]">
-        <article className="prose dark:prose-invert max-w-none min-w-0 prose-headings:font-semibold prose-h2:mt-8 prose-h2:mb-3 prose-h3:mt-6 prose-h3:mb-2 prose-pre:bg-muted prose-pre:border prose-pre:rounded-md prose-code:bg-muted prose-code:border prose-code:rounded-sm">
-          <BuiltinDocRenderer blocks={blocks} />
-        </article>
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_220px] pb-8">
+        <div className="min-w-0">
+          <article className="prose dark:prose-invert max-w-3xl min-w-0 prose-headings:font-semibold prose-h2:mt-8 prose-h2:mb-3 prose-h3:mt-6 prose-h3:mb-2 prose-pre:bg-muted prose-pre:border prose-pre:rounded-md prose-code:bg-muted prose-code:border prose-code:rounded-sm">
+            <BuiltinDocRenderer blocks={blocks} />
+          </article>
+          <div className="mt-12 not-prose max-w-3xl">
+            <SandboxCta source={`builtin-docs-${slug}`} />
+          </div>
+        </div>
         <BuiltinsHeadingsNav toc={toc} />
       </div>
-      <div className="mt-12 not-prose">
-        <SandboxCta source={`builtin-docs-${slug}`} />
-      </div>
-    </div>
     </>
   );
 }
@@ -88,7 +90,7 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
   const descriptionHeader = doc.summary?.trim()
     ? `\`${title}\` — ${doc.summary.trim()}`
     : `\`${title}\``;
-  const behaviorHeader = `How \`${title}\` works in RunMat`;
+  const behaviorHeader = `How \`${title}\` works`;
   const examplesHeader = doc.examples && doc.examples.length === 1
     ? 'Example'
     : 'Examples';
@@ -123,7 +125,7 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
   }
 
   if (doc.gpu_behavior && doc.gpu_behavior.length > 0) {
-    blocks.push(createHeading(2, parseInline(`How \`${title}\` runs on the GPU`)));
+    blocks.push(createHeading(2, parseInline(`How RunMat runs \`${title}\` on the GPU`)));
     blocks.push(...linkKnownTerms(renderParagraphBlocks(doc.gpu_behavior)));
   }
 
@@ -137,14 +139,22 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
     blocks.push(...renderExamples(doc.examples));
   }
 
+  if (doc.validation) {
+    blocks.push(...renderValidation(doc.validation, title));
+  }
+
   if (doc.faqs && doc.faqs.length > 0) {
     blocks.push(createHeading(2, parseInline('FAQ')));
     blocks.push(...renderFaqs(doc.faqs));
   }
 
   if (doc.links && doc.links.length > 0) {
-    const linkInline = renderSeeAlsoLinks(doc.links);
-    if (linkInline.length > 0) {
+    const isGuideLink = (url: string) => url.startsWith('/docs/') || url.startsWith('/blog/');
+    const functionLinks = doc.links.filter(l => l.url?.trim() && l.label?.trim() && !isGuideLink(l.url.trim()));
+    const guideLinks = doc.links.filter(l => l.url?.trim() && l.label?.trim() && isGuideLink(l.url.trim()));
+
+    if (functionLinks.length > 0) {
+      const hasThumbnails = functionLinks.some(link => link.thumbnail);
       blocks.push(createHeading(2, parseInline('Related functions to explore')));
       blocks.push({
         type: 'paragraph',
@@ -152,7 +162,32 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
           `These functions work well alongside \`${title}\`. Each page has runnable examples you can try in the browser.`
         ),
       });
-      blocks.push({ type: 'paragraph', content: linkInline });
+      if (hasThumbnails) {
+        blocks.push({
+          type: 'link-grid',
+          items: functionLinks.map(link => ({
+            label: link.label.trim(),
+            href: link.url.trim(),
+            thumbnail: link.thumbnail,
+          })),
+        });
+      } else {
+        const linkInline = renderSeeAlsoLinks(functionLinks);
+        if (linkInline.length > 0) {
+          blocks.push({ type: 'paragraph', content: linkInline });
+        }
+      }
+    }
+
+    if (guideLinks.length > 0) {
+      blocks.push(createHeading(2, parseInline('More plotting resources')));
+      blocks.push({
+        type: 'list',
+        ordered: false,
+        items: guideLinks.map(link => [
+          { type: 'link' as const, label: parseInline(link.label.trim()), href: link.url.trim() },
+        ]),
+      });
     }
   }
 
@@ -216,7 +251,63 @@ function renderExamples(examples: BuiltinDocExample[]): BuiltinDocBlock[] {
       blocks.push({ type: 'paragraph', content: [textNode('Expected output:')] });
       blocks.push(createCodeBlock(example.output, { language: 'matlab' }));
     }
+    const exampleImage = example.image_webp || example.image;
+    if (exampleImage) {
+      blocks.push({
+        type: 'image',
+        src: exampleImage,
+        alt: description || 'Example output',
+        caption: 'Expected output:',
+      });
+    }
   }
+  return blocks;
+}
+
+function renderValidation(validation: BuiltinDocValidation, title: string): BuiltinDocBlock[] {
+  const blocks: BuiltinDocBlock[] = [];
+  blocks.push(createHeading(2, parseInline(`How RunMat validates \`${title}\``)));
+  if (hasText(validation.summary)) {
+    blocks.push(...parseMarkdownBlocks(validation.summary));
+  }
+  const listItems: BuiltinDocInlineNode[][] = [];
+  if (validation.implementation?.url && validation.implementation?.label) {
+    listItems.push([
+      textNode('Implementation: '),
+      {
+        type: 'link',
+        label: [textNode(validation.implementation.label)],
+        href: validation.implementation.url,
+      },
+    ]);
+  }
+  if (validation.parity_test?.url && validation.parity_test?.label) {
+    listItems.push([
+      textNode('Parity test: '),
+      {
+        type: 'link',
+        label: [textNode(validation.parity_test.label)],
+        href: validation.parity_test.url,
+      },
+    ]);
+  }
+  if (hasText(validation.tolerance)) {
+    listItems.push([textNode(`Tolerance: ${validation.tolerance}`)]);
+  }
+  if (listItems.length > 0) {
+    blocks.push({ type: 'list', ordered: false, items: listItems });
+  }
+  if (hasText(validation.limitations)) {
+    blocks.push(...parseMarkdownBlocks(validation.limitations));
+  }
+  blocks.push({
+    type: 'paragraph',
+    content: [
+      textNode('See '),
+      { type: 'link', label: [textNode('Correctness & Trust')], href: '/docs/correctness' },
+      textNode(' for the full methodology and coverage table.'),
+    ],
+  });
   return blocks;
 }
 
@@ -494,6 +585,16 @@ function parseInline(text: string): BuiltinDocInlineNode[] {
       }
     }
 
+    if (char === '*' && text[index + 1] === '*') {
+      const end = text.indexOf('**', index + 2);
+      if (end !== -1 && end > index + 2) {
+        const inner = text.slice(index + 2, end);
+        nodes.push({ type: 'strong', content: parseInline(inner) });
+        index = end + 2;
+        continue;
+      }
+    }
+
     if (char === '[') {
       const closeBracket = text.indexOf(']', index + 1);
       const openParen = closeBracket !== -1 ? text.indexOf('(', closeBracket + 1) : -1;
@@ -509,9 +610,11 @@ function parseInline(text: string): BuiltinDocInlineNode[] {
 
     const nextBacktick = text.indexOf('`', index);
     const nextLink = text.indexOf('[', index);
+    const nextBold = text.indexOf('**', index);
     let nextIndex = text.length;
     if (nextBacktick !== -1) nextIndex = Math.min(nextIndex, nextBacktick);
     if (nextLink !== -1) nextIndex = Math.min(nextIndex, nextLink);
+    if (nextBold !== -1) nextIndex = Math.min(nextIndex, nextBold);
     if (nextIndex === index) {
       nodes.push(textNode(text[index]));
       index += 1;
@@ -529,6 +632,7 @@ function inlineToPlainText(nodes: BuiltinDocInlineNode[]): string {
   return nodes.map((node) => {
     if (node.type === 'text' || node.type === 'code') return node.value;
     if (node.type === 'link') return inlineToPlainText(node.label);
+    if (node.type === 'strong') return inlineToPlainText(node.content);
     return '';
   }).join('');
 }

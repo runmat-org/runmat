@@ -79,6 +79,14 @@ impl PackedI32 {
     }
 }
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable, Default)]
+pub struct PackedU32(pub [u32; 4]);
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable, Default)]
+pub struct PackedF32(pub [f32; 4]);
+
 pub const PERMUTE_MAX_RANK: usize = 128;
 
 #[repr(C)]
@@ -149,6 +157,26 @@ pub struct DiffParams {
     pub total_out: u32,
     pub total_in: u32,
     pub _pad: u32,
+}
+
+#[repr(C, align(16))]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct GradientParamsF64 {
+    pub stride_before: u32,
+    pub segment_len: u32,
+    pub block: u32,
+    pub total: u32,
+    pub spacing: f64,
+    pub _pad0: f64,
+    pub _pad1: f64,
+    pub _pad2: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct GradientParamsF32 {
+    pub meta0: PackedU32,
+    pub meta1: PackedF32,
 }
 
 #[repr(C)]

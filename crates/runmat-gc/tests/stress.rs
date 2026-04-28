@@ -115,8 +115,8 @@ fn test_gc_with_interpreter_integration() {
         // Test GC under interpreter load
         use futures::executor::block_on;
         use runmat_hir::{HirProgram, LoweringContext, SemanticError};
-        use runmat_ignition::execute;
         use runmat_parser::parse;
+        use runmat_vm::execute;
 
         // Program that creates many temporary values
         let program = r#"

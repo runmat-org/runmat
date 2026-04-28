@@ -207,6 +207,8 @@ mod tests {
             panic!("expected numeric parent");
         };
         assert!(v.is_nan());
+        let sgtitle = get_builtin(vec![Value::Num(fig), Value::String("SGTitle".into())]).unwrap();
+        assert!(matches!(sgtitle, Value::Num(_)));
     }
 
     #[test]

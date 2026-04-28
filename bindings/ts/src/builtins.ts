@@ -2,6 +2,9 @@ export type BuiltinDocExample = {
   description: string;
   input: string;
   output?: string;
+  image?: string;
+  image_webp?: string;
+  matlab_script?: string;
 };
 
 export type BuiltinDocFAQ = {
@@ -12,6 +15,7 @@ export type BuiltinDocFAQ = {
 export type BuiltinDocLink = {
   label: string;
   url: string;
+  thumbnail?: string;
 };
 
 export type BuiltinDocSyntax = {
@@ -19,11 +23,19 @@ export type BuiltinDocSyntax = {
   points: string[];
 };
 
+
 export type BuiltinDocJsonEncodeOption = {
   name: string;
   type: string;
   default: string;
   description: string;
+};
+
+export type BuiltinDocValidation = {
+  summary: string;
+  implementation?: BuiltinDocLink;
+  parity_test?: BuiltinDocLink;
+  tolerance?: string;
 };
 
 export type BuiltinDoc = {
@@ -35,6 +47,7 @@ export type BuiltinDoc = {
   categoryPath: string[];
   keywords: string[];
   summary: string;
+  hero_image?: string;
   references?: string[];
   description?: string;
   behaviors?: string[];
@@ -51,6 +64,7 @@ export type BuiltinDoc = {
   fusion?: Record<string, unknown>;
   requires_feature?: string | null;
   tested?: Record<string, string | string[] | null>;
+  validation?: BuiltinDocValidation;
 };
 
 export type BuiltinManifestEntry = Pick<

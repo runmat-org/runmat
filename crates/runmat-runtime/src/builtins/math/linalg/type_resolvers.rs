@@ -134,6 +134,34 @@ pub fn dot_type(args: &[Type], ctx: &ResolveContext) -> Type {
     numeric_tensor_from_shape(out_shape)
 }
 
+pub fn cross_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    let Some(input) = args.first() else {
+        return Type::Unknown;
+    };
+    let shape = match input {
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => shape,
+        Type::Tensor { shape: None } | Type::Logical { shape: None } => return Type::tensor(),
+        Type::Unknown => return Type::Unknown,
+        _ => return Type::Unknown,
+    };
+
+    if let Some(dim) = ctx.numeric_dims_from(2).first().and_then(|value| *value) {
+        if dim == 0 || dim > shape.len() {
+            return Type::Unknown;
+        }
+        if !matches!(shape[dim - 1], Some(3)) {
+            return Type::Unknown;
+        }
+        return numeric_tensor_from_shape(shape.to_vec());
+    }
+
+    if shape.iter().any(|dim| matches!(dim, Some(3))) {
+        return numeric_tensor_from_shape(shape.to_vec());
+    }
+
+    Type::Unknown
+}
+
 pub fn pinv_type(args: &[Type], _context: &ResolveContext) -> Type {
     let Some(input) = args.first() else {
         return Type::Unknown;
@@ -334,5 +362,27 @@ mod tests {
         ]);
         let out = dot_type(&[vec_type.clone(), vec_type, Type::Num], &ctx);
         assert_eq!(out, Type::Num);
+    }
+
+    #[test]
+    fn cross_type_preserves_shape_when_dimension_has_length_three() {
+        let lhs = Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        };
+        let rhs = Type::Tensor {
+            shape: Some(vec![Some(2), Some(3)]),
+        };
+        let ctx = ResolveContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Number(2.0),
+        ]);
+        let out = cross_type(&[lhs, rhs, Type::Num], &ctx);
+        assert_eq!(
+            out,
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)])
+            }
+        );
     }
 }

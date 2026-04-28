@@ -27,8 +27,8 @@ graph TD
     A[MATLAB Code String] -->|runmat-lexer| B(Token Stream);
     B -->|runmat-parser| C(Abstract Syntax Tree - AST);
     C -->|runmat-hir| D(High-level IR - HIR);
-    D -->|runmat-ignition| E(Bytecode);
-    E -->|Ignition Interpreter| F[Execution & Profiling];
+    D -->|runmat-vm| E(Bytecode);
+    E -->|VM Interpreter| F[Execution & Profiling];
     F -->|Hot Code via runmat-turbine| G(Cranelift IR);
     G -->|Turbine JIT Compiler| H[Native Machine Code];
     H -->|JIT Execution| I[Optimized Execution];
@@ -45,7 +45,7 @@ graph TD
         D
     end
 
-    subgraph "3. Tier-1: Ignition (Interpreter)"
+    subgraph "3. Tier-1: VM Interpreter"
         E
         F
     end
@@ -68,16 +68,16 @@ The AST is "lowered" into a **High-level Intermediate Representation (HIR)**. Th
 -   **Variable Resolution**: The `runmat-hir` crate walks the AST and resolves all variable identifiers. It builds and manages scopes (global, function, loop), replacing string-based names with unique `VarId`s. This ensures that every variable access is unambiguous from this point forward.
 -   **Basic Type Inference**: While the system is dynamic, the HIR pass performs a preliminary type inference, annotating expressions with types like `Scalar` or `Matrix`. This provides early information for later optimization stages.
 
-### 3. Tier-1 Execution: Ignition (`runmat-ignition`)
+### 3. Tier-1 Execution: VM (`runmat-vm`)
 
-Ignition is the baseline execution engine. It serves two roles:
+The VM is the baseline execution engine. It serves two roles:
 -   **Compiler**: It takes the HIR and compiles it into a simple, portable **Bytecode**.
--   **Interpreter**: It can directly execute this bytecode. All code begins its life running in the Ignition interpreter. The interpreter is designed for fast startup and low overhead.
+-   **Interpreter**: It can directly execute this bytecode. All code begins its life running in the VM interpreter. The interpreter is designed for fast startup and low overhead.
 
 ### 4. Tier-2 Execution: Turbine (`runmat-turbine`)
 
 Turbine is the optimizing JIT (Just-In-Time) compiler, forming the top performance tier.
--   **Hotspot Profiling**: As code runs in Ignition, the `HotspotProfiler` in Turbine tracks the execution frequency of bytecode sequences.
+-   **Hotspot Profiling**: As code runs in the VM, the `HotspotProfiler` in Turbine tracks the execution frequency of bytecode sequences.
 -   **JIT Compilation**: When a function or loop is identified as "hot" (i.e., executed many times), Turbine's `BytecodeCompiler` takes over. It translates the hot bytecode into **Cranelift IR**, a machine-independent representation.
 -   **Optimization & Code Generation**: Cranelift performs numerous optimizations on this IR before compiling it down to native machine code for the host architecture (e.g., x86-64, AArch64).
 -   **Optimized Execution**: The resulting native code is cached. Subsequent calls to the hot function will bypass the interpreter entirely and execute the highly-optimized machine code directly, yielding significant performance gains. This tiered approach ensures that RunMat spends time optimizing only the code that matters most.
@@ -129,7 +129,7 @@ Numerical hot paths are accelerated by the `runmat-accelerate` crate, which prov
 
 -   **Fusion**: Sequences of elementwise and reduction operations (e.g. `sin(x) .* exp(x)`, `mean(y,'all')`) are fused into minimal GPU kernels, reducing memory traffic and launch overhead.
 -   **Backends**: The primary backend is **WGPU**, giving cross-platform GPU support (NVIDIA, AMD, Intel, Apple). The runtime chooses CPU vs GPU transparently based on data size and op support.
--   **Integration**: `runmat-ignition` and `runmat-runtime` call into `runmat-accelerate-api`; the actual implementations live in `runmat-accelerate`. Plotting uses `runmat-plot` and its own wgpu pipelines; computation-side acceleration is handled here.
+-   **Integration**: `runmat-vm` and `runmat-runtime` call into `runmat-accelerate-api`; the actual implementations live in `runmat-accelerate`. Plotting uses `runmat-plot` and its own wgpu pipelines; computation-side acceleration is handled here.
 
 For more on fusion and tuning, see [Introduction to RunMat GPU](/docs/accelerate/fusion-intro).
 
@@ -137,7 +137,7 @@ For more on fusion and tuning, see [Introduction to RunMat GPU](/docs/accelerate
 
 To make the CLI, tests, LSP, and browser/WASM host share the same interpreter stack, the project routes all frontend + execution orchestration through the `runmat-core` crate.
 
--   **Purpose**: `runmat-core` packages the lexer, parser, HIR lowering, Ignition interpreter, optional Turbine JIT, GC configuration, snapshot loading, and builtin dispatch into a single embeddable `RunMatSession`.
+-   **Purpose**: `runmat-core` packages the lexer, parser, HIR lowering, the VM interpreter, optional Turbine JIT, GC configuration, snapshot loading, and builtin dispatch into a single embeddable `RunMatSession`.
 -   **Feature gating**: The crate exposes a `jit` feature (on by default). Desktop builds keep Turbine enabled, while wasm targets or lightweight embeds can disable it and run interpreter-only without dragging in Cranelift.
 -   **Embedding surface**: `RunMatSession` provides ergonomic helpers (`execute`, `reset_stats`, `show_system_info`, etc.) so consumers can drive the runtime without depending on CLI plumbing or OS-specific services (filesystems, sockets, threads).
 -   **Reuse across binaries**: The `runmat` CLI (including REPL mode), the **LSP** (`runmat-lsp`, used by the VS Code/Cursor extension), the Jupyter kernel, integration tests, and **browser/WASM** bindings (`runmat-wasm`) all depend on `runmat-core`, ensuring that fixes to execution semantics immediately benefit every host environment.
@@ -185,7 +185,7 @@ The modular architecture is designed to make contributions straightforward. Here
 
 -   **Improving the JIT Compiler**:
     1.  The core logic is in `crates/runmat-turbine/src/compiler.rs`.
-    2.  Focus on the `compile_instructions` function, which translates `runmat_ignition::Instr` into Cranelift IR.
+    2.  Focus on the `compile_instructions` function, which translates `runmat_vm::Instr` into Cranelift IR.
     3.  You can add new instruction handlers or optimize existing ones by emitting more efficient Cranelift IR sequences. For example, recognizing patterns that can be mapped to specific machine instructions (e.g., fused multiply-add).
 
 -   **Adding a New Plot Type**:

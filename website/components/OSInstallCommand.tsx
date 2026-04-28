@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Terminal, Monitor, Copy, Check } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Terminal, Monitor, Copy, Check, ExternalLink } from "lucide-react";
 import { trackWebsiteEvent } from "@/components/GoogleAnalytics";
 
-type OS = 'windows' | 'mac' | 'linux' | 'unknown';
+type OS = 'mac' | 'linux' | 'windows';
 
-function CopyableCommand({ command, bgColor }: { command: string; bgColor: string }) {
+function CopyableCommand({ command, ariaLabel }: { command: string; ariaLabel: string }) {
   const [copied, setCopied] = useState(false);
 
   const copyToClipboard = async () => {
@@ -16,13 +16,11 @@ function CopyableCommand({ command, bgColor }: { command: string; bgColor: strin
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
 
-      // Track the copy event
       trackWebsiteEvent("website.install.command_copied", {
         category: "installation",
         label: command.includes("curl") ? "unix" : "windows",
       });
     } catch {
-      // Fallback for browsers that don't support clipboard API
       const textArea = document.createElement('textarea');
       textArea.value = command;
       document.body.appendChild(textArea);
@@ -32,7 +30,6 @@ function CopyableCommand({ command, bgColor }: { command: string; bgColor: strin
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
 
-      // Track the copy event
       trackWebsiteEvent("website.install.command_copied", {
         category: "installation",
         label: command.includes("curl") ? "unix" : "windows",
@@ -41,42 +38,53 @@ function CopyableCommand({ command, bgColor }: { command: string; bgColor: strin
   };
 
   return (
-    <div className={`${bgColor} rounded-md p-4 font-mono text-sm text-white relative group cursor-pointer`} onClick={copyToClipboard}>
-      <div className="flex items-center justify-center min-w-0">
-        <span className="select-all whitespace-nowrap overflow-hidden text-ellipsis text-center max-w-full">{command}</span>
+    <div
+      className="bg-[var(--editor-background)] rounded-md px-4 py-4 sm:px-5 sm:py-5 font-mono text-white relative group cursor-pointer"
+      onClick={copyToClipboard}
+      role="button"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          copyToClipboard();
+        }
+      }}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        <span className="select-all text-sm sm:text-base md:text-lg whitespace-nowrap overflow-hidden text-ellipsis flex-1 text-left">
+          <span className="text-white/40 select-none">$ </span>
+          {command}
+        </span>
         <button
-          className="ml-3 p-1 opacity-70 hover:opacity-100 transition-opacity bg-white/10 hover:bg-white/20 rounded flex-shrink-0"
+          type="button"
+          aria-label={copied ? "Copied" : "Copy install command"}
+          className="p-1.5 opacity-70 group-hover:opacity-100 transition-opacity bg-white/10 hover:bg-white/20 rounded flex-shrink-0"
           onClick={(e) => {
             e.stopPropagation();
             copyToClipboard();
           }}
         >
           {copied ? (
-            <Check className="h-4 w-4 text-green-400" />
+            <Check className="h-4 w-4 text-green-400" aria-hidden="true" />
           ) : (
-            <Copy className="h-4 w-4" />
+            <Copy className="h-4 w-4" aria-hidden="true" />
           )}
         </button>
       </div>
-      {copied && (
-        <div className="absolute -top-8 right-2 bg-green-600 text-white text-xs px-2 py-1 rounded">
-          Copied!
-        </div>
-      )}
+      <span className="sr-only" aria-live="polite">
+        {copied ? "Install command copied to clipboard" : ""}
+      </span>
     </div>
   );
 }
 
 function detectOS(): OS {
-  if (typeof window === 'undefined') return 'unknown';
-  
+  if (typeof window === 'undefined') return 'mac';
   const userAgent = window.navigator.userAgent.toLowerCase();
-  
   if (userAgent.includes('win')) return 'windows';
-  if (userAgent.includes('mac')) return 'mac';
   if (userAgent.includes('linux')) return 'linux';
-  
-  return 'unknown';
+  return 'mac';
 }
 
 interface OSInstallCommandProps {
@@ -84,8 +92,23 @@ interface OSInstallCommandProps {
   className?: string;
 }
 
+const OS_META: Record<OS, { title: string; icon: typeof Terminal; iconColor: string; scriptPath: string }> = {
+  mac: { title: 'macOS', icon: Terminal, iconColor: 'text-green-500', scriptPath: '/install.sh' },
+  linux: { title: 'Linux', icon: Terminal, iconColor: 'text-green-500', scriptPath: '/install.sh' },
+  windows: { title: 'Windows', icon: Monitor, iconColor: 'text-[hsl(var(--brand))]', scriptPath: '/install.ps1' },
+};
+
+function commandFor(os: OS, winFlavor: 'ps7' | 'ps5'): string {
+  if (os === 'windows') {
+    return winFlavor === 'ps7'
+      ? 'iwr https://runmat.com/install.ps1 | iex'
+      : 'iwr https://runmat.com/install.ps1 -UseBasicParsing | iex';
+  }
+  return 'curl -fsSL https://runmat.com/install.sh | sh';
+}
+
 export function OSInstallCommand({ variant = 'full', className = '' }: OSInstallCommandProps) {
-  const [selectedOS, setSelectedOS] = useState<OS>('unknown');
+  const [selectedOS, setSelectedOS] = useState<OS>('mac');
   const [mounted, setMounted] = useState(false);
   const [winFlavor, setWinFlavor] = useState<'ps7' | 'ps5'>('ps7');
 
@@ -94,195 +117,135 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
     setMounted(true);
   }, []);
 
-  if (!mounted) {
-    // Show both commands during SSR/hydration
-    return (
-      <div className={`grid grid-cols-1 lg:grid-cols-2 gap-6 ${className}`}>
-        <Card>
-          <CardHeader className="text-center pb-3">
-            <Terminal className="h-8 w-8 mx-auto mb-2 text-green-600" />
-            <CardTitle className="text-lg">Linux & macOS</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <CopyableCommand 
-              command="curl -fsSL https://runmat.com/install.sh | sh"
-              bgColor="bg-gray-900"
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="text-center pb-3">
-            <Monitor className="h-8 w-8 mx-auto mb-2 text-blue-600" />
-            <CardTitle className="text-lg">Windows</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <CopyableCommand 
-              command="iwr https://runmat.com/install.ps1 | iex"
-              bgColor="bg-blue-900"
-            />
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // Show OS-specific command after hydration
-  const getOSInfo = () => {
-    switch (selectedOS) {
-      case 'windows':
-        return {
-          title: 'Windows',
-          icon: Monitor,
-          command: winFlavor === 'ps7'
-            ? 'iwr https://runmat.com/install.ps1 | iex'
-            : 'iwr https://runmat.com/install.ps1 -UseBasicParsing | iex',
-          bgColor: 'bg-blue-900',
-          iconColor: 'text-blue-600',
-          description: null,
-        };
-      case 'mac':
-        return {
-          title: 'macOS',
-          icon: Terminal,
-          command: 'curl -fsSL https://runmat.com/install.sh | sh',
-          bgColor: 'bg-gray-900',
-          iconColor: 'text-green-600',
-          description: null
-        };
-      case 'linux':
-        return {
-          title: 'Linux',
-          icon: Terminal,
-          command: 'curl -fsSL https://runmat.com/install.sh | sh',
-          bgColor: 'bg-gray-900',
-          iconColor: 'text-green-600',
-          description: null
-        };
-      default:
-        return {
-          title: 'Your System',
-          icon: Terminal,
-          command: 'curl -fsSL https://runmat.com/install.sh | sh',
-          bgColor: 'bg-gray-900',
-          iconColor: 'text-green-600',
-          description: null
-        };
-    }
+  const handleSelect = (os: OS) => {
+    setSelectedOS(os);
+    trackWebsiteEvent("website.install.os_selected", {
+      category: "installation",
+      label: os,
+    });
   };
 
-  const osInfo = getOSInfo();
-  const Icon = osInfo.icon;
+  const meta = OS_META[selectedOS];
+  const Icon = meta.icon;
+  const command = commandFor(selectedOS, winFlavor);
+
+  const tabs = (
+    <div
+      role="tablist"
+      aria-label="Select operating system"
+      className="inline-flex items-center rounded-md border border-border bg-card p-1 text-sm"
+    >
+      {(['mac', 'linux', 'windows'] as OS[]).map((os) => {
+        const isActive = mounted && selectedOS === os;
+        const TabIcon = OS_META[os].icon;
+        return (
+          <button
+            key={os}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => handleSelect(os)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded transition-colors ${
+              isActive
+                ? 'bg-foreground text-background font-medium'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <TabIcon className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{OS_META[os].title}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const inspectLink = (
+    <a
+      href={meta.scriptPath}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline"
+    >
+      Inspect this script
+      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+    </a>
+  );
 
   if (variant === 'compact') {
     return (
       <div className={className}>
-        <div className="text-center mb-4">
-          <Icon className={`h-6 w-6 mx-auto mb-2 ${osInfo.iconColor}`} />
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Install for {osInfo.title}
-          </h3>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Icon className={`h-4 w-4 ${meta.iconColor}`} aria-hidden="true" />
+            <span>Install for {meta.title}</span>
+          </div>
+          {tabs}
         </div>
-        <CopyableCommand command={osInfo.command} bgColor={osInfo.bgColor} />
+        <CopyableCommand
+          command={command}
+          ariaLabel={`Install command for ${meta.title}. Click to copy.`}
+        />
         {selectedOS === 'windows' && (
-          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-            <span>Need a different PowerShell?</span>
+          <div className="mt-3 flex items-center justify-end gap-2 text-xs text-muted-foreground">
+            <span>PowerShell:</span>
             <button
-              className={`px-2 py-1 rounded ${winFlavor === 'ps7' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}
+              type="button"
+              className={`px-2 py-1 rounded ${winFlavor === 'ps7' ? 'bg-[hsl(var(--brand))] text-white' : 'bg-secondary'}`}
               onClick={() => setWinFlavor('ps7')}
-            >PS 7+</button>
+            >7+</button>
             <button
-              className={`px-2 py-1 rounded ${winFlavor === 'ps5' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}
+              type="button"
+              className={`px-2 py-1 rounded ${winFlavor === 'ps5' ? 'bg-[hsl(var(--brand))] text-white' : 'bg-secondary'}`}
               onClick={() => setWinFlavor('ps5')}
-            >PS 5.x</button>
+            >5.x</button>
           </div>
         )}
-        {osInfo.description && (
-          <p className="text-sm text-gray-600 dark:text-gray-300 text-center mt-2">
-            {osInfo.description}
-          </p>
-        )}
+        <div className="mt-2 flex justify-end">{inspectLink}</div>
       </div>
     );
   }
 
   return (
-    <Card className={className}>
-      <CardHeader className="text-center pb-3">
-        <Icon className={`h-8 w-8 mx-auto mb-2 ${osInfo.iconColor}`} />
-        <CardTitle className="text-lg">Install for {osInfo.title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className={osInfo.description ? 'mb-4' : ''}>
-          <CopyableCommand command={osInfo.command} bgColor={osInfo.bgColor} />
+    <Card className={`border-border bg-card ${className}`}>
+      <CardContent className="p-5 sm:p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Icon className={`h-4 w-4 ${meta.iconColor}`} aria-hidden="true" />
+            <span>Install for {meta.title}</span>
+          </div>
+          {tabs}
         </div>
-        {/* Intentionally no descriptive line above for Windows; keep UI simple */}
 
-        {selectedOS === 'windows' && (
-          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-            <span>Need a different PowerShell?</span>
-            <button
-              className={`px-2 py-1 rounded ${winFlavor === 'ps7' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}
-              onClick={() => setWinFlavor('ps7')}
-            >PS 7+</button>
-            <button
-              className={`px-2 py-1 rounded ${winFlavor === 'ps5' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}
-              onClick={() => setWinFlavor('ps5')}
-            >PS 5.x</button>
+        <CopyableCommand
+          command={command}
+          ariaLabel={`Install command for ${meta.title}. Click to copy.`}
+        />
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs text-muted-foreground">
+            {selectedOS === 'windows'
+              ? 'Runs in PowerShell. ~30 seconds.'
+              : 'Runs in your terminal. ~30 seconds.'}
           </div>
-        )}
-        
-        {selectedOS !== 'unknown' && (
-          <div className="mt-4 pt-4">
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center mb-3">
-              Not {getOSInfo().title}? Pick your platform:
-            </p>
-            <div className="flex justify-center gap-2">
-              {selectedOS !== 'windows' && (
+          <div className="flex items-center gap-3">
+            {selectedOS === 'windows' && (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="hidden sm:inline">PowerShell:</span>
                 <button
-                  onClick={() => {
-                    setSelectedOS('windows');
-                    trackWebsiteEvent("website.install.os_selected", {
-                      category: "installation",
-                      label: "windows",
-                    });
-                  }}
-                  className="px-3 py-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 rounded-md transition-colors"
-                >
-                  Windows
-                </button>
-              )}
-              {selectedOS !== 'mac' && (
+                  type="button"
+                  className={`px-2 py-1 rounded ${winFlavor === 'ps7' ? 'bg-[hsl(var(--brand))] text-white' : 'bg-secondary'}`}
+                  onClick={() => setWinFlavor('ps7')}
+                >7+</button>
                 <button
-                  onClick={() => {
-                    setSelectedOS('mac');
-                    trackWebsiteEvent("website.install.os_selected", {
-                      category: "installation",
-                      label: "mac",
-                    });
-                  }}
-                  className="px-3 py-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 rounded-md transition-colors"
-                >
-                  macOS
-                </button>
-              )}
-              {selectedOS !== 'linux' && (
-                <button
-                  onClick={() => {
-                    setSelectedOS('linux');
-                    trackWebsiteEvent("website.install.os_selected", {
-                      category: "installation",
-                      label: "linux",
-                    });
-                  }}
-                  className="px-3 py-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 rounded-md transition-colors"
-                >
-                  Linux
-                </button>
-              )}
-            </div>
+                  type="button"
+                  className={`px-2 py-1 rounded ${winFlavor === 'ps5' ? 'bg-[hsl(var(--brand))] text-white' : 'bg-secondary'}`}
+                  onClick={() => setWinFlavor('ps5')}
+                >5.x</button>
+              </div>
+            )}
+            {inspectLink}
           </div>
-        )}
+        </div>
       </CardContent>
     </Card>
   );

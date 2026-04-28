@@ -370,6 +370,7 @@ pub enum PlotObjectKind {
     YLabel = 3,
     ZLabel = 4,
     Legend = 5,
+    SuperTitle = 6,
 }
 
 impl PlotObjectKind {
@@ -380,6 +381,7 @@ impl PlotObjectKind {
             3 => Some(Self::YLabel),
             4 => Some(Self::ZLabel),
             5 => Some(Self::Legend),
+            6 => Some(Self::SuperTitle),
             _ => None,
         }
     }
@@ -520,6 +522,38 @@ pub fn set_figure_title_for_axes(
     Ok(object_handle)
 }
 
+pub fn set_sg_title_for_figure(
+    handle: FigureHandle,
+    title: &str,
+    style: TextStyle,
+) -> Result<f64, FigureError> {
+    let (object_handle, figure_clone) = with_figure_mut(handle, |state| {
+        state.figure.set_sg_title(title.to_string());
+        state.figure.set_sg_title_style(style);
+        encode_plot_object_handle(handle, 0, PlotObjectKind::SuperTitle)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(object_handle)
+}
+
+pub fn set_sg_title_properties_for_figure(
+    handle: FigureHandle,
+    text: Option<String>,
+    style: Option<TextStyle>,
+) -> Result<f64, FigureError> {
+    let (object_handle, figure_clone) = with_figure_mut(handle, |state| {
+        if let Some(text) = text {
+            state.figure.set_sg_title(text);
+        }
+        if let Some(style) = style {
+            state.figure.set_sg_title_style(style);
+        }
+        encode_plot_object_handle(handle, 0, PlotObjectKind::SuperTitle)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(object_handle)
+}
+
 pub fn set_text_properties_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -535,6 +569,7 @@ pub fn set_text_properties_for_axes(
                 PlotObjectKind::YLabel => state.figure.set_axes_ylabel(axes_index, text),
                 PlotObjectKind::ZLabel => state.figure.set_axes_zlabel(axes_index, text),
                 PlotObjectKind::Legend => {}
+                PlotObjectKind::SuperTitle => state.figure.set_sg_title(text),
             }
         }
         if let Some(style) = style {
@@ -544,6 +579,7 @@ pub fn set_text_properties_for_axes(
                 PlotObjectKind::YLabel => state.figure.set_axes_ylabel_style(axes_index, style),
                 PlotObjectKind::ZLabel => state.figure.set_axes_zlabel_style(axes_index, style),
                 PlotObjectKind::Legend => {}
+                PlotObjectKind::SuperTitle => state.figure.set_sg_title_style(style),
             }
         }
         encode_plot_object_handle(handle, axes_index, kind)
@@ -1789,6 +1825,17 @@ fn with_axes_target_mut<R>(
     Ok((result, state.figure.clone()))
 }
 
+fn with_figure_mut<R>(
+    handle: FigureHandle,
+    f: impl FnOnce(&mut FigureState) -> R,
+) -> Result<(R, Figure), FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    let result = f(state);
+    state.revision = state.revision.wrapping_add(1);
+    Ok((result, state.figure.clone()))
+}
+
 pub fn current_hold_enabled() -> bool {
     let mut reg = registry();
     let handle = reg.current;
@@ -1820,6 +1867,14 @@ pub fn figure_handles() -> Vec<FigureHandle> {
 pub fn clone_figure(handle: FigureHandle) -> Option<Figure> {
     let reg = registry();
     reg.figures.get(&handle).map(|state| state.figure.clone())
+}
+
+pub fn figure_has_sg_title(handle: FigureHandle) -> bool {
+    let reg = registry();
+    reg.figures
+        .get(&handle)
+        .map(|state| state.figure.sg_title.is_some())
+        .unwrap_or(false)
 }
 
 pub fn import_figure(figure: Figure) -> FigureHandle {

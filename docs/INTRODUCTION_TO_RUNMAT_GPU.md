@@ -16,6 +16,8 @@ Today’s reality:
 
 RunMat’s promise is “write MATLAB-syntax code, let the runtime discover and execute GPU-friendly pieces automatically.” To understand how it works, picture a four-stage pipeline.
 
+GPU results are tolerance-checked against the CPU path on every merge. See [Correctness & Trust](/docs/correctness) for the full methodology, coverage table, and reproducible `cargo test` commands.
+
 ---
 
 ## Stage 1 — Capture the math, not the syntax

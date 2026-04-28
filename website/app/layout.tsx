@@ -73,11 +73,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <link
-          rel="preload"
-          as="image"
-          href="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp"
-        />
+        <link rel="preconnect" href="https://web.runmatstatic.com" crossOrigin="" />
+        <link rel="dns-prefetch" href="https://web.runmatstatic.com" />
+
         <link rel="icon" href="/favicon.ico" sizes="32x32" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

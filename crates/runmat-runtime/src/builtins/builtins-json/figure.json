@@ -8,9 +8,6 @@
     "window selection"
   ],
   "summary": "Create a new figure or select an existing figure handle.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/figure.html"
-  ],
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -86,6 +83,18 @@
     {
       "label": "plot",
       "url": "./plot"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
     }
   ],
   "source": {

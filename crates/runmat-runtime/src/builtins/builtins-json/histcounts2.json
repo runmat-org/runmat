@@ -111,6 +111,18 @@
     {
       "question": "Can I use histcounts2 on GPU arrays in RunMat?",
       "answer": "Yes. RunMat supports `histcounts2` on GPU arrays with `f32` and `f64` precision. GPU providers can attach a device kernel for full hardware acceleration."
+    },
+    {
+      "question": "What's the relationship between `N`, `Xedges`, and `Yedges`?",
+      "answer": "The count matrix `N` has size `(length(Xedges)-1) × (length(Yedges)-1)`: one row per `X` bin and one column per `Y` bin. Each bin covers the half-open interval `[edge(k), edge(k+1))`, except the final row and column, which include their upper edge so the largest finite values are counted."
+    },
+    {
+      "question": "How do I get a 2-D probability density from `histcounts2`?",
+      "answer": "Pass `'Normalization', 'pdf'`, for example `[N, Xedges, Yedges] = histcounts2(X, Y, 'Normalization', 'pdf')`. Each bin value is divided by the bin area and by the total number of pairs, so `sum(N .* diff(Xedges)' .* diff(Yedges), 'all')` equals `1` when no samples fall outside the bin limits."
+    },
+    {
+      "question": "How do I use explicit bin edges with `histcounts2`?",
+      "answer": "Supply two monotonically increasing edge vectors as the third and fourth arguments, for example `Xedges = 0:0.1:1; Yedges = 0:0.1:1; N = histcounts2(X, Y, Xedges, Yedges)`. This gives you full control over bin placement and is the easiest way to reproduce a 2-D histogram across multiple datasets."
     }
   ],
   "links": [
@@ -130,6 +142,19 @@
   "source": {
     "label": "crates/runmat-runtime/src/builtins/stats/hist/histcounts2.rs",
     "url": "crates/runmat-runtime/src/builtins/stats/hist/histcounts2.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "[N, Xedges, Yedges] = histcounts2(X, Y)\n[N, Xedges, Yedges] = histcounts2(X, Y, nbins)\n[N, Xedges, Yedges] = histcounts2(X, Y, Xedges, Yedges)\n[N, Xedges, Yedges] = histcounts2(___, Name, Value)\n[N, Xedges, Yedges, binX, binY] = histcounts2(___)"
+    },
+    "points": [
+      "`X` and `Y` are numeric vectors (or arrays flattened column-major) of equal length holding paired observations.",
+      "`nbins` is either a scalar bin count applied to both axes or a two-element vector `[nX nY]` giving separate counts for the `X` and `Y` axes.",
+      "`Xedges` and `Yedges` are monotonically increasing edge vectors. Bin `k` covers `[edge(k), edge(k+1))`; the final bin also includes its right edge so maximum values are counted.",
+      "Name/value options include `'Normalization'` (`'count'`, `'probability'`, `'pdf'`, `'countdensity'`, `'cumcount'`, `'cdf'`), `'BinMethod'`, `'BinWidth'`, `'NumBins'`, `'XBinLimits'`, and `'YBinLimits'`.",
+      "With five outputs, `binX` and `binY` are integer indices the same size as the flattened inputs, giving the `X`- and `Y`-bin that each pair falls into (`0` when an observation is excluded)."
+    ]
   },
   "gpu_residency": "As with other RunMat histogram routines, you do not need to call `gpuArray` explicitly just to obtain GPU execution. Once providers implement the `histcounts2` hook, the fusion planner will keep residency on the device automatically. Until then, the builtin gathers data to the host and returns CPU tensors even when inputs originate on the GPU, matching MATLAB semantics after an explicit `gather`.",
   "gpu_behavior": [

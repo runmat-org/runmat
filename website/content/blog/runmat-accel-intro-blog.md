@@ -230,7 +230,7 @@ flowchart TD
   D -. "size thresholds + transfer costs (refined at runtime)" .-> C
 
   subgraph CPU["CPU"]
-    CJ["Ignition ➜ JIT (small arrays)<br/>Profiles hot loops; V8-style"]
+    CJ["VM ➜ JIT (small arrays)<br/>Profiles hot loops; V8-style"]
     CB["CPU BLAS<br/>(Big CPU math or FP64)"]
   end
 
@@ -331,7 +331,7 @@ This isn't a criticism of PyTorch—it's an excellent framework that makes GPU p
 
 ### Cross-ecosystem comparison at a glance
 
-A side-by-side of RunMat versus MATLAB+PCT, PyTorch, and Julia+CUDA.jl on six dimensions that matter for numerical computing: code surface, placement (CPU/GPU), fusion, residency, transfers, and learning curve. Scope: dense arrays and scripting—not full ML training stacks. For a guide to MATLAB's gpuArray and how RunMat fits in, see [How to Use GPUs in MATLAB](/blog/how-to-use-gpu-in-matlab).
+A side-by-side of RunMat versus MATLAB+PCT, PyTorch, and Julia+CUDA.jl on six dimensions that matter for numerical computing: code surface, placement (CPU/GPU), fusion, residency, transfers, and learning curve. Scope: dense arrays and scripting—not full ML training stacks. For a guide to MATLAB's gpuArray and how RunMat fits in, see [How to Use GPU in MATLAB Without CUDA](/blog/how-to-use-gpu-in-matlab).
 
 | Dimension                                                | RunMat Accelerate                                              | MATLAB \+ Parallel Computing Toolbox (gpuArray) | PyTorch (GPU)                                                | Julia \+ CUDA.jl                                                  |
 |----------------------------------------------------------|----------------------------------------------------------------|-------------------------------------------------|--------------------------------------------------------------|-------------------------------------------------------------------|
@@ -392,5 +392,4 @@ Yes. The planner chooses CPU JIT/BLAS or GPU per step. Fusion keeps GPU regions 
 
 **How do I report an issue or contribute?**  
  Open an issue or PR in the repository. Include OS, GPU/CPU info, a minimal script, and steps to reproduce. [GitHub](https://github.com/runmat-org/runmat)
-
 

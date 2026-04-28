@@ -83,7 +83,7 @@ mod resolver_storage {
 #[cfg(test)]
 static TEST_WORKSPACE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-/// Register the workspace resolver. Ignition installs this once during
+/// Register the workspace resolver. The VM installs this once during
 /// initialization so that language builtins can query variables lazily.
 pub fn register_workspace_resolver(resolver: WorkspaceResolver) {
     resolver_storage::set(resolver);

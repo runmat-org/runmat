@@ -133,7 +133,7 @@ If you've written MATLAB code, you know the trade-offs:
 - GNU Octave is free and compatible with lots of code, but startup and hot-path performance can be limiting.
 - Moving to a new language means rewriting and - perhaps most importantly - **retraining**.
 
-RunMat aims for a fourth path: keep the MATLAB language you know, but put it on a modern engine with a smaller core, clean semantics, and open extensibility.
+RunMat aims for a fourth path: keep the MATLAB language you know, but put it on a modern engine with a smaller core, clean semantics, and open extensibility. If you want a short background explainer, see this [guide](/resources/guides/what-is-matlab).
 
 ---
 
@@ -205,7 +205,7 @@ For a broader landscape view, see our comparison of RunMat vs Octave, Julia, and
 
 ## How it works
 
-- **Ignition interpreter**: immediate execution, great for REPL and scripts.
+- **VM interpreter**: immediate execution, great for REPL and scripts.
 - **Turbine JIT**: hot functions get compiled to optimized machine code (Cranelift backend).
 - **Slim builtins**: a curated set in core; everything else via packages. Docs are generated from runtime metadata.
 - **Great developer experience**: built in Jupyter kernel, flow-sensitive inference for great autocomplete and type hints, and more.

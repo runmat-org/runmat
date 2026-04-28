@@ -1,0 +1,115 @@
+{
+  "title": "cumtrapz",
+  "category": "math/reduction",
+  "keywords": [
+    "cumtrapz",
+    "cumulative trapezoidal integration",
+    "numerical integration",
+    "discrete integration",
+    "gpu"
+  ],
+  "summary": "Cumulative trapezoidal numerical integration of sampled data.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "GPU inputs currently gather to the host for cumulative trapezoidal integration and re-upload real-valued outputs so downstream code can remain device-resident."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::cumtrapz::tests"
+  },
+  "description": "`cumtrapz(Y)` computes the cumulative trapezoidal integral of sampled data in `Y`. The output has the same size as `Y`, with the first element along the working dimension set to zero and later elements holding the running integral.",
+  "behaviors": [
+    "`cumtrapz(Y)` assumes unit spacing between adjacent samples.",
+    "`cumtrapz(X, Y)` accepts a scalar spacing, a vector of coordinates whose length matches the working dimension, or an array `X` with the same size as `Y`.",
+    "`cumtrapz(..., dim)` selects the working dimension explicitly. Dimensions larger than `ndims(Y)` behave like singleton axes, so the result stays zero along those slices.",
+    "Logical inputs are promoted to double precision before integration. Complex-valued `Y` inputs are integrated component-wise and preserve their complex output type.",
+    "When the selected dimension has length 0 or 1, the output is zero along that dimension because there are no intervals to accumulate."
+  ],
+  "examples": [
+    {
+      "description": "Computing a cumulative integral with explicit coordinates",
+      "input": "x = [0 1 3];\ny = [0 1 2];\nq = cumtrapz(x, y)",
+      "output": "q = [0 0.5 3.5]"
+    },
+    {
+      "description": "Using unit spacing for sampled data",
+      "input": "y = [1 2 3];\nq = cumtrapz(y)",
+      "output": "q = [0 1.5 4]"
+    },
+    {
+      "description": "Accumulating across rows in a matrix",
+      "input": "A = [1 2 3; 4 5 6];\nq = cumtrapz(A, 2)",
+      "output": "q =\n     0    1.5    4\n     0    4.5   10"
+    },
+    {
+      "description": "Running cumtrapz on GPU data",
+      "input": "G = gpuArray([1 2 3]);\nq = cumtrapz(G);\nresult = gather(q)",
+      "output": "result = [0 1.5 4]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `cumtrapz` different from `trapz`?",
+      "answer": "`trapz` returns the final integrated value, while `cumtrapz` returns the running integral at every sample."
+    },
+    {
+      "question": "Why is the first element zero?",
+      "answer": "There is no interval before the first sample, so the cumulative integral begins at zero."
+    },
+    {
+      "question": "What forms of `X` are accepted?",
+      "answer": "A scalar spacing, a vector of coordinates matching the integration dimension, or an array with the same size as `Y`."
+    },
+    {
+      "question": "Does cumtrapz support complex inputs?",
+      "answer": "Yes. RunMat accumulates the real and imaginary components independently and returns a complex result."
+    },
+    {
+      "question": "Does cumtrapz keep gpuArray residency?",
+      "answer": "For real-valued results, yes. RunMat currently gathers GPU inputs to the host, computes the cumulative trapezoidal integral, and re-uploads the result so downstream GPU code can stay resident."
+    }
+  ],
+  "links": [
+    {
+      "label": "trapz",
+      "url": "./trapz"
+    },
+    {
+      "label": "cumsum",
+      "url": "./cumsum"
+    },
+    {
+      "label": "diff",
+      "url": "./diff"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/cumtrapz.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/cumtrapz.rs"
+  },
+  "gpu_residency": "Manual `gpuArray` promotion is optional. If sampled data already lives on the GPU, RunMat preserves real-valued cumulative results as gpuArrays by re-uploading the output after the host fallback path.",
+  "gpu_behavior": [
+    "RunMat does not yet expose a native provider hook for `cumtrapz`. When the input is a gpuArray, the runtime gathers the data to host memory, performs the cumulative trapezoidal integration with MATLAB-compatible dimension and spacing rules, and re-uploads real-valued outputs so downstream GPU work stays resident."
+  ]
+}

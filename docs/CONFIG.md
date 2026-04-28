@@ -73,21 +73,6 @@ debug = false
 mode = "auto"
 force_headless = false
 backend = "auto"
-
-[packages]
-enabled = true
-
-[[packages.registries]]
-name = "runmat"
-url = "https://packages.runmat.com"
-
-[packages.dependencies]
-# Resolve from registry
-"linalg-plus" = { source = "registry", version = "^1.2" }
-# Git dependency
-"viz-tools" = { source = "git", url = "https://github.com/acme/viz-tools", rev = "main" }
-# Local path during development
-"my-local-ext" = { source = "path", path = "../my-local-ext" }
 ```
 
 ## Language configuration
@@ -325,23 +310,6 @@ parentheses.
       - `progressive_rendering: bool` (true)
       - `lod_threshold: u32` (10000)
       - `texture_compression: bool` (true)
-
-### packages
-- `enabled: bool` (true)
-- `registries: list<registry>` (defaults to the official `runmat` registry)
-- `dependencies: map<string, package>` (empty)
-
-Note: Package manager features are not yet released. The schema is shared to help early adopters prepare;
-the `runmat pkg` commands will print a “coming soon” message until the first release lands.
-
-Registry schema:
-- `name: string`
-- `url: string`
-
-Package schema (tagged union by `source`):
-- `{ source = "registry", version: string, registry?: string, features?: list<string>, optional?: bool }`
-- `{ source = "git", url: string, rev?: string, features?: list<string>, optional?: bool }`
-- `{ source = "path", path: string, features?: list<string>, optional?: bool }`
 
 ## Environment variables (overrides)
 

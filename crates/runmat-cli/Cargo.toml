@@ -1,8 +1,8 @@
 [package]
 name = "runmat"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
-description = "High-performance MATLAB/Octave runtime with Jupyter kernel support"
+description = "High-performance MATLAB/Octave syntax mathematical runtime"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
 readme = "../../README.md"
@@ -43,30 +43,32 @@ base64 = "0.22"
 rand = "0.8"
 sha2 = "0.10"
 webbrowser = "0.8"
-runmat-server-client = { workspace = true }
+owo-colors = "4.3.0"
+supports-color = "3.0.2"
 
 # Ensure vendored OpenSSL can be enabled for cross targets (feature unification)
 openssl = { version = "0.10", optional = true }
 openssl-sys = { version = "0.9.109", optional = true }
 
 # RunMat crates
-runmat-kernel = { version = "=0.4.0", path = "../runmat-kernel" }
-runmat-core = { version = "=0.4.0", path = "../runmat-core" }
-runmat-parser = { version = "=0.4.0", path = "../runmat-parser" }
-runmat-hir = { version = "=0.4.0", path = "../runmat-hir" }
-runmat-ignition = { version = "=0.4.0", path = "../runmat-ignition" }
-runmat-runtime = { version = "=0.4.0", path = "../runmat-runtime" }
-runmat-turbine = { version = "=0.4.0", path = "../runmat-turbine" }
-runmat-gc = { version = "=0.4.0", path = "../runmat-gc" }
-runmat-builtins = { version = "=0.4.0", path = "../runmat-builtins" }
-runmat-snapshot = { version = "=0.4.0", path = "../runmat-snapshot" }
-runmat-plot = { version = "=0.4.0", path = "../runmat-plot" }
-runmat-accelerate = { version = "=0.4.0", path = "../runmat-accelerate" }
-runmat-accelerate-api = { version = "=0.4.0", path = "../runmat-accelerate-api" }
-runmat-config = { version = "=0.4.0", path = "../runmat-config", features = ["accelerate"] }
-runmat-time = { version = "=0.4.0", path = "../runmat-time" }
-runmat-filesystem = { version = "=0.4.0", path = "../runmat-filesystem" }
-runmat-telemetry = { version = "=0.4.0", path = "../runmat-telemetry" }
+runmat-kernel = { version = "=0.4.1", path = "../runmat-kernel" }
+runmat-core = { version = "=0.4.1", path = "../runmat-core" }
+runmat-parser = { version = "=0.4.1", path = "../runmat-parser" }
+runmat-hir = { version = "=0.4.1", path = "../runmat-hir" }
+runmat-vm = { version = "=0.4.1", path = "../runmat-vm" }
+runmat-runtime = { version = "=0.4.1", path = "../runmat-runtime" }
+runmat-turbine = { version = "=0.4.1", path = "../runmat-turbine" }
+runmat-gc = { version = "=0.4.1", path = "../runmat-gc" }
+runmat-builtins = { version = "=0.4.1", path = "../runmat-builtins" }
+runmat-snapshot = { version = "=0.4.1", path = "../runmat-snapshot" }
+runmat-plot = { version = "=0.4.1", path = "../runmat-plot" }
+runmat-accelerate = { version = "=0.4.1", path = "../runmat-accelerate" }
+runmat-accelerate-api = { version = "=0.4.1", path = "../runmat-accelerate-api" }
+runmat-config = { version = "=0.4.1", path = "../runmat-config", features = ["accelerate"] }
+runmat-time = { version = "=0.4.1", path = "../runmat-time" }
+runmat-filesystem = { version = "=0.4.1", path = "../runmat-filesystem" }
+runmat-telemetry = { version = "=0.4.1", path = "../runmat-telemetry" }
+runmat-server-client = { workspace = true }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)

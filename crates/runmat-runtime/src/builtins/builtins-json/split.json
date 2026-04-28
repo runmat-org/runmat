@@ -63,8 +63,8 @@
     },
     {
       "description": "Split Each Row Of A Character Array",
-      "input": "rows = char(\"GPU Accelerate\", \"Ignition Interpreter\");\nresult = split(rows)",
-      "output": "result = 2×2 string\n    \"GPU\"          \"Accelerate\"\n    \"Ignition\"     \"Interpreter\""
+      "input": "rows = char(\"GPU Accelerate\", \"VM Interpreter\");\nresult = split(rows)",
+      "output": "result = 2×2 string\n    \"GPU\"          \"Accelerate\"\n    \"VM\"           \"Interpreter\""
     },
     {
       "description": "Split Elements Of A Cell Array",

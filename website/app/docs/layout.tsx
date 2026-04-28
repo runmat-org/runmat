@@ -8,7 +8,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 export default function DocsLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-background overflow-visible">
-      <div className="container mx-auto px-4 md:px-6 py-8 overflow-visible">
+      <div className="container mx-auto py-8 overflow-visible">
         <ConditionalLayout>{children}</ConditionalLayout>
       </div>
     </div>
@@ -30,7 +30,7 @@ function ConditionalLayout({ children }: { children: React.ReactNode }) {
       <Suspense fallback={<div className="hidden lg:block" />}> 
         <Sidebar />
       </Suspense>
-      <main className="min-w-0 lg:pl-6 lg:border-l lg:border-border/60 overflow-visible">{children}</main>
+      <main className="min-w-0 lg:pl-8 lg:border-l lg:border-border/60 overflow-visible">{children}</main>
     </div>
   );
 }
@@ -94,7 +94,7 @@ function Sidebar() {
             </div>
           </div>
         </div>
-        <ul className="space-y-3 md:space-y-4">
+        <ul className="space-y-2">
           {docsTree.map((n, i) => (
             <li key={i}>
               <Section node={n} />
@@ -109,7 +109,7 @@ function Sidebar() {
 function Section({ node }: { node: DocsNode }) {
   const pathnameRaw = usePathname() || "/";
   const pathname = normalizePath(pathnameRaw);
-  const title = <div className="text-sm font-semibold text-foreground/90 mb-2">{node.title}</div>;
+  const title = <div className="text-xs font-semibold uppercase tracking-wider text-foreground mb-1.5">{node.title}</div>;
   const showChildren =
     node.children &&
     (!node.hideChildrenInNav || (pathname ? nodeMatchesPath(node, pathname) : false));
@@ -118,7 +118,7 @@ function Section({ node }: { node: DocsNode }) {
     href ? (
       <Link
         href={href}
-        className={`text-sm hover:text-foreground ${pathname === normalizePath(href) ? "text-foreground font-medium" : "text-muted-foreground"}`}
+        className={`text-sm block px-2 py-0.5 -ml-2 hover:text-foreground ${pathname === normalizePath(href) ? "text-foreground font-medium bg-muted" : "text-muted-foreground"}`}
       >
         {label}
       </Link>
@@ -133,7 +133,7 @@ function Section({ node }: { node: DocsNode }) {
       {node.externalHref && (
         <ul className="space-y-1 pl-3 border-l border-border/50">
           <li>
-            <Link href={node.externalHref} className={`text-sm hover:text-foreground ${pathname === normalizePath(node.externalHref) ? 'text-foreground font-medium' : 'text-muted-foreground'}`}>
+            <Link href={node.externalHref} className={`text-sm block px-2 py-0.5 -ml-2 hover:text-foreground ${pathname === normalizePath(node.externalHref) ? 'text-foreground font-medium bg-muted' : 'text-muted-foreground'}`}>
               {node.title}
             </Link>
           </li>

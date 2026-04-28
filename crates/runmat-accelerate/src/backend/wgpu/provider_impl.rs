@@ -54,7 +54,7 @@ use runmat_runtime::builtins::math::linalg::structure::ishermitian::ishermitian_
 use runmat_runtime::builtins::math::linalg::structure::issymmetric::ensure_matrix_shape as ensure_symmetry_shape;
 use runmat_runtime::builtins::math::linalg::structure::symrcm::symrcm_host_real_data;
 use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
-use runmat_runtime::builtins::math::reduction::compute_median_inplace;
+use runmat_runtime::builtins::math::reduction::{compute_median_inplace, matlab_gradient_shape};
 use runmat_runtime::RuntimeError;
 use runmat_time::Instant;
 use serde::{Deserialize, Serialize};
@@ -87,10 +87,10 @@ use crate::backend::wgpu::config::{
 };
 use crate::backend::wgpu::params::{
     BandwidthParams, Conv1dParams, CummaxParams, CumminParams, CumprodParams, CumsumParams,
-    DiffParams, FilterParams, ImageNormalizeUniforms, LinearGatherParams, LinearScatterParams,
-    QrPowerIterParams, SymmetryParamsF32, SymmetryParamsF64, SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS,
-    IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA, SYRK_FLAG_ACCUMULATE,
-    SYRK_FLAG_FILL_BOTH,
+    DiffParams, FilterParams, GradientParamsF32, GradientParamsF64, ImageNormalizeUniforms,
+    LinearGatherParams, LinearScatterParams, QrPowerIterParams, SymmetryParamsF32,
+    SymmetryParamsF64, SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS, IMAGE_NORMALIZE_FLAG_GAIN,
+    IMAGE_NORMALIZE_FLAG_GAMMA, SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
 };
 use crate::backend::wgpu::pipelines::{ImageNormalizeBootstrap, WgpuPipelines};
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
@@ -1387,6 +1387,10 @@ fn normalize_concat_shape(mut shape: Vec<usize>, dim_zero: usize) -> Vec<usize> 
         shape.pop();
     }
     normalize_scalar_shape(&shape)
+}
+
+fn normalize_gradient_shape(shape: &[usize], len: usize) -> Vec<usize> {
+    matlab_gradient_shape(shape, len)
 }
 
 fn conv1d_output_shape(len: usize, orientation: ProviderConvOrientation) -> Vec<usize> {
@@ -7028,6 +7032,142 @@ impl WgpuProvider {
         Ok(current)
     }
 
+    pub(crate) fn gradient_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: f64,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(handle)?;
+
+        ensure!(
+            entry.storage == GpuTensorStorage::Real,
+            "gradient: complex GPU gradients are not implemented"
+        );
+
+        let mut ext_shape = normalize_gradient_shape(&entry.shape, entry.len);
+        if ext_shape.is_empty() {
+            ext_shape = vec![0, 0];
+        }
+        while ext_shape.len() <= dim {
+            ext_shape.push(1);
+        }
+
+        let len_dim = ext_shape[dim];
+        let mut out_shape = normalize_gradient_shape(&entry.shape, entry.len);
+        if out_shape.is_empty() {
+            out_shape = vec![0, 0];
+        }
+        while out_shape.len() <= dim {
+            out_shape.push(1);
+        }
+
+        let out_buffer = self.create_storage_buffer(entry.len, "runmat-gradient-out");
+        if entry.len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+        }
+
+        let stride_before = if dim == 0 {
+            1usize
+        } else {
+            product_checked(&ext_shape[..dim])
+                .ok_or_else(|| anyhow!("gradient: stride computation overflow"))?
+                .max(1)
+        };
+        let stride_after = if dim + 1 >= ext_shape.len() {
+            1usize
+        } else {
+            product_checked(&ext_shape[dim + 1..])
+                .ok_or_else(|| anyhow!("gradient: stride computation overflow"))?
+                .max(1)
+        };
+
+        let expected_len = stride_before
+            .checked_mul(len_dim.max(1))
+            .and_then(|v| v.checked_mul(stride_after))
+            .ok_or_else(|| anyhow!("gradient: tensor size exceeds GPU limits"))?;
+        ensure!(
+            expected_len == entry.len,
+            "gradient: tensor shape mismatch (expected {} elements, got {})",
+            expected_len,
+            entry.len
+        );
+
+        let block = stride_before
+            .checked_mul(len_dim.max(1))
+            .ok_or_else(|| anyhow!("gradient: block size exceeds GPU limits"))?;
+        ensure!(
+            len_dim <= u32::MAX as usize
+                && stride_before <= u32::MAX as usize
+                && block <= u32::MAX as usize
+                && entry.len <= u32::MAX as usize,
+            "gradient: tensor exceeds GPU kernel limits"
+        );
+
+        let params_buffer = match self.precision {
+            NumericPrecision::F64 => self.uniform_buffer(
+                &GradientParamsF64 {
+                    stride_before: stride_before as u32,
+                    segment_len: len_dim as u32,
+                    block: block as u32,
+                    total: entry.len as u32,
+                    spacing,
+                    _pad0: 0.0,
+                    _pad1: 0.0,
+                    _pad2: 0.0,
+                },
+                "runmat-gradient-params",
+            ),
+            NumericPrecision::F32 => self.uniform_buffer(
+                &GradientParamsF32 {
+                    meta0: crate::backend::wgpu::params::PackedU32([
+                        stride_before as u32,
+                        len_dim as u32,
+                        block as u32,
+                        entry.len as u32,
+                    ]),
+                    meta1: crate::backend::wgpu::params::PackedF32([spacing as f32, 0.0, 0.0, 0.0]),
+                },
+                "runmat-gradient-params",
+            ),
+        };
+
+        let bind_group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-gradient-bind"),
+                layout: &self.pipelines.gradient.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+            entry.len as u32,
+            crate::backend::wgpu::config::WORKGROUP_SIZE,
+        );
+        crate::backend::wgpu::dispatch::gradient::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.gradient.pipeline,
+            &bind_group,
+            workgroups,
+        );
+
+        Ok(self.register_existing_buffer(out_buffer, out_shape, entry.len))
+    }
+
     pub(crate) fn repmat_exec(
         &self,
         handle: &GpuTensorHandle,
@@ -12153,6 +12293,161 @@ impl WgpuProvider {
         }
     }
 
+    pub(crate) fn cross_exec(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        dim: Option<usize>,
+    ) -> Result<GpuTensorHandle> {
+        let entry_lhs = self.get_entry(lhs)?;
+        let entry_rhs = self.get_entry(rhs)?;
+        ensure!(
+            entry_lhs.shape == entry_rhs.shape,
+            "cross: shape mismatch between inputs"
+        );
+
+        let shape = if entry_lhs.shape.is_empty() {
+            vec![1, 1]
+        } else {
+            entry_lhs.shape.clone()
+        };
+        let rank = shape.len();
+        let target_dim = match dim {
+            Some(target_dim) => {
+                ensure!(
+                    target_dim >= 1 && target_dim <= rank,
+                    "cross: dimension {} exceeds the number of array dimensions ({})",
+                    target_dim,
+                    rank
+                );
+                ensure!(
+                    shape[target_dim - 1] == 3,
+                    "cross: dimension {} must have length 3",
+                    target_dim
+                );
+                target_dim
+            }
+            None => shape
+                .iter()
+                .position(|&extent| extent == 3)
+                .map(|idx| idx + 1)
+                .ok_or_else(|| anyhow!("cross: inputs must have a dimension of length 3"))?,
+        };
+        let dim_index = target_dim - 1;
+        let total_len = entry_lhs.len;
+        if total_len == 0 {
+            return self.zeros_exec(&shape);
+        }
+
+        let stride_before = product_checked(&shape[..dim_index])
+            .ok_or_else(|| anyhow!("cross: internal dimension overflow"))?;
+        let stride_after = product_checked(&shape[dim_index + 1..])
+            .ok_or_else(|| anyhow!("cross: internal dimension overflow"))?;
+        let slice_stride = stride_before
+            .checked_mul(3)
+            .ok_or_else(|| anyhow!("cross: internal dimension overflow"))?;
+        let slice_count = stride_before
+            .checked_mul(stride_after)
+            .ok_or_else(|| anyhow!("cross: internal dimension overflow"))?;
+
+        let mut comp1 = Vec::with_capacity(slice_count);
+        let mut comp2 = Vec::with_capacity(slice_count);
+        let mut comp3 = Vec::with_capacity(slice_count);
+        for after in 0..stride_after {
+            let slice_base = after
+                .checked_mul(slice_stride)
+                .ok_or_else(|| anyhow!("cross: internal index overflow"))?;
+            for before in 0..stride_before {
+                let idx1 = slice_base + before;
+                let idx2 = idx1 + stride_before;
+                let idx3 = idx2 + stride_before;
+                comp1.push(
+                    u32::try_from(idx1).map_err(|_| anyhow!("cross: GPU index exceeds limits"))?,
+                );
+                comp2.push(
+                    u32::try_from(idx2).map_err(|_| anyhow!("cross: GPU index exceeds limits"))?,
+                );
+                comp3.push(
+                    u32::try_from(idx3).map_err(|_| anyhow!("cross: GPU index exceeds limits"))?,
+                );
+            }
+        }
+
+        let mut reduced_shape = shape.clone();
+        reduced_shape[dim_index] = 1;
+
+        // Track every intermediate handle outside the computation closure so that
+        // handles allocated before a failing `?` are still freed on error.
+        let mut to_free: Vec<GpuTensorHandle> = Vec::with_capacity(15);
+
+        let compute_result: Result<GpuTensorHandle> = (|| {
+            let a1 = self.gather_linear_exec(lhs, &comp1, &reduced_shape)?;
+            to_free.push(a1.clone());
+            let a2 = self.gather_linear_exec(lhs, &comp2, &reduced_shape)?;
+            to_free.push(a2.clone());
+            let a3 = self.gather_linear_exec(lhs, &comp3, &reduced_shape)?;
+            to_free.push(a3.clone());
+            let b1 = self.gather_linear_exec(rhs, &comp1, &reduced_shape)?;
+            to_free.push(b1.clone());
+            let b2 = self.gather_linear_exec(rhs, &comp2, &reduced_shape)?;
+            to_free.push(b2.clone());
+            let b3 = self.gather_linear_exec(rhs, &comp3, &reduced_shape)?;
+            to_free.push(b3.clone());
+
+            let a2b3 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b3)?;
+            to_free.push(a2b3.clone());
+            let a3b2 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b2)?;
+            to_free.push(a3b2.clone());
+            let c1 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a2b3, &a3b2)?;
+            to_free.push(c1.clone());
+
+            let a3b1 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b1)?;
+            to_free.push(a3b1.clone());
+            let a1b3 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b3)?;
+            to_free.push(a1b3.clone());
+            let c2 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a3b1, &a1b3)?;
+            to_free.push(c2.clone());
+
+            let a1b2 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b2)?;
+            to_free.push(a1b2.clone());
+            let a2b1 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b1)?;
+            to_free.push(a2b1.clone());
+            let c3 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a1b2, &a2b1)?;
+            to_free.push(c3.clone());
+
+            let out = self.zeros_exec(&shape)?;
+            let scatter_result = (|| -> Result<()> {
+                self.scatter_linear_exec(&out, &comp1, &c1)?;
+                self.scatter_linear_exec(&out, &comp2, &c2)?;
+                self.scatter_linear_exec(&out, &comp3, &c3)?;
+                Ok(())
+            })();
+
+            match scatter_result {
+                Ok(()) => Ok(out),
+                Err(err) => {
+                    let _ = self.free(&out);
+                    Err(err)
+                }
+            }
+        })();
+
+        for h in &to_free {
+            let _ = self.free(h);
+        }
+
+        compute_result
+    }
+
     pub(crate) fn elem_eq_exec(
         &self,
         a: &GpuTensorHandle,
@@ -14339,6 +14634,15 @@ impl AccelProvider for WgpuProvider {
         self.diff_exec(handle, dim, order)
     }
 
+    fn gradient_dim(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: f64,
+    ) -> Result<GpuTensorHandle> {
+        self.gradient_exec(handle, dim, spacing)
+    }
+
     fn cumsum_scan(
         &self,
         input: &GpuTensorHandle,
@@ -14526,6 +14830,14 @@ impl AccelProvider for WgpuProvider {
 
     fn kron(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.kron_exec(a, b)
+    }
+    fn cross(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        dim: Option<usize>,
+    ) -> Result<GpuTensorHandle> {
+        self.cross_exec(lhs, rhs, dim)
     }
     fn reshape(&self, handle: &GpuTensorHandle, new_shape: &[usize]) -> Result<GpuTensorHandle> {
         let new_len = if new_shape.is_empty() {

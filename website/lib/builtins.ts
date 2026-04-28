@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, realpathSync } from 'fs';
 import { join } from 'path';
 import type { BuiltinBadge } from './badge-utils';
 import { builtinHasGpuSupport, getBuiltinBadges } from './badge-utils';
+// touched to invalidate the in-memory builtin docs cache when JSON content changes
 
 export type BuiltinSignature = {
   in: string[];
@@ -30,6 +31,9 @@ export type BuiltinDocExample = {
   description: string;
   input: string;
   output?: string;
+  image?: string;
+  image_webp?: string;
+  matlab_script?: string;
 };
 
 export type BuiltinDocFAQ = {
@@ -40,6 +44,7 @@ export type BuiltinDocFAQ = {
 export type BuiltinDocLink = {
   label: string;
   url: string;
+  thumbnail?: string;
 };
 
 export type BuiltinDocSyntax = {
@@ -54,6 +59,14 @@ export type BuiltinDocJsonEncodeOption = {
   description: string;
 };
 
+export type BuiltinDocValidation = {
+  summary: string;
+  implementation?: BuiltinDocLink;
+  parity_test?: BuiltinDocLink;
+  tolerance?: string;
+  limitations?: string;
+};
+
 export type BuiltinDoc = {
   title: string;
   aliases?: string[];
@@ -62,6 +75,7 @@ export type BuiltinDoc = {
   summary: string;
   references: string[];
   description?: string;
+  hero_image?: string;
   behaviors?: string[];
   examples?: BuiltinDocExample[];
   faqs?: BuiltinDocFAQ[];
@@ -76,6 +90,7 @@ export type BuiltinDoc = {
   fusion?: Record<string, unknown>;
   requires_feature?: string | null;
   tested?: Record<string, string | string[]>;
+  validation?: BuiltinDocValidation;
 };
 
 export type BuiltinDocEntry = BuiltinDoc & { slug: string };

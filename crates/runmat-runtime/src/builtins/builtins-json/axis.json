@@ -35,11 +35,53 @@
       "input": "subplot(1, 2, 1);\nplot(1:5, [1 4 2 5 3]);\naxis tight;\nsubplot(1, 2, 2);\nplot(1:5, [5 4 3 2 1]);\naxis auto;"
     }
   ],
+  "faqs": [
+    {
+      "question": "How do I get equal aspect ratio so circles look like circles?",
+      "answer": "Call `axis equal` after your plot command. This forces one unit on x to equal one unit on y in screen space. Without it, a circle drawn with `plot(cos(t), sin(t))` will appear as an ellipse if the figure isn't perfectly square.\n\n```matlab\nt = linspace(0, 2*pi, 200);\nplot(cos(t), sin(t));\naxis equal;\n```"
+    },
+    {
+      "question": "How do I set manual axis limits?",
+      "answer": "Pass a four-element vector: `axis([xmin xmax ymin ymax])`. For 3-D plots, use six elements: `axis([xmin xmax ymin ymax zmin zmax])`. This overrides auto-fitting until you call `axis auto` to return to data-driven limits."
+    },
+    {
+      "question": "What does axis tight actually do?",
+      "answer": "`axis tight` fits the axes limits snugly around the plotted data with no padding. Compare to `axis auto`, which may add margin for readability. Use `tight` when you want the data to fill the entire axes area — useful for image-like plots or when whitespace is wasted space."
+    }
+  ],
   "links": [
-    { "label": "grid", "url": "./grid" },
-    { "label": "box", "url": "./box" },
-    { "label": "subplot", "url": "./subplot" },
-    { "label": "plot", "url": "./plot" }
+    {
+      "label": "grid",
+      "url": "./grid"
+    },
+    {
+      "label": "box",
+      "url": "./box"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",

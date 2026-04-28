@@ -63,6 +63,8 @@ const FFT_BLUESTEIN_FINALIZE_SHADER_F32: &str =
     crate::backend::wgpu::shaders::fft::FFT_BLUESTEIN_FINALIZE_SHADER_F32;
 const DIFF_SHADER_F64: &str = crate::backend::wgpu::shaders::diff::DIFF_SHADER_F64;
 const DIFF_SHADER_F32: &str = crate::backend::wgpu::shaders::diff::DIFF_SHADER_F32;
+const GRADIENT_SHADER_F64: &str = crate::backend::wgpu::shaders::gradient::GRADIENT_SHADER_F64;
+const GRADIENT_SHADER_F32: &str = crate::backend::wgpu::shaders::gradient::GRADIENT_SHADER_F32;
 const CUMSUM_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F64;
 const CUMSUM_SHADER_F32: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F32;
 const REPMAT_SHADER_F64: &str = crate::backend::wgpu::shaders::repmat::REPMAT_SHADER_F64;
@@ -214,6 +216,7 @@ pub struct WgpuPipelines {
     pub permute: PipelineBundle,
     pub flip: PipelineBundle,
     pub diff: PipelineBundle,
+    pub gradient: PipelineBundle,
     pub conv1d: PipelineBundle,
     pub filter: PipelineBundle,
     pub cumsum: PipelineBundle,
@@ -451,6 +454,22 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => DIFF_SHADER_F64,
                 NumericPrecision::F32 => DIFF_SHADER_F32,
+            },
+        );
+
+        let gradient = create_pipeline(
+            device,
+            "runmat-gradient-layout",
+            "runmat-gradient-shader",
+            "runmat-gradient-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => GRADIENT_SHADER_F64,
+                NumericPrecision::F32 => GRADIENT_SHADER_F32,
             },
         );
 
@@ -1435,6 +1454,7 @@ impl WgpuPipelines {
             permute,
             flip,
             diff,
+            gradient,
             conv1d,
             filter,
             cumsum,

@@ -43,6 +43,10 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: 'web.runmatstatic.com',
       },
+      {
+        protocol: 'https',
+        hostname: 'runmat.com',
+      },
     ],
   },
   experimental: {
@@ -103,6 +107,23 @@ const nextConfig: NextConfig = {
       {
         source: '/privacy',
         destination: '/docs/terms',
+        permanent: false,
+      },
+
+      // Lexer docs — crate README was deleted in the lexer crate split (fbd1d97f) and
+      // replacement is pending the compiler docs rewrite. Temporary so Google re-crawls
+      // once the canonical destination exists.
+      {
+        source: '/docs/internals/lexer',
+        destination: '/docs/architecture',
+        permanent: false,
+      },
+
+      // HIR docs — crate README was removed during the HIR refactor and replacement is
+      // pending. Temporary redirect to /docs/architecture so the indexed URL stops 404ing.
+      {
+        source: '/docs/internals/hir',
+        destination: '/docs/architecture',
         permanent: false,
       },
 
@@ -191,6 +212,13 @@ const nextConfig: NextConfig = {
       {
         source: '/docs/reference/introspection/:slug',
         destination: '/docs/reference/builtins/:slug',
+        permanent: true,
+      },
+      // `profile` has no builtin JSON page yet; send to the function index
+      // instead of the catch-all below (which would 308 into a 404).
+      {
+        source: '/docs/reference/diagnostics/profile',
+        destination: '/docs/matlab-function-reference',
         permanent: true,
       },
       {

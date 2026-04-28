@@ -263,7 +263,7 @@ To read more about RunMat Fusion, see [Introduction to RunMat GPU/Fusion](/docs/
 
 RunMat also invests heavily in the CPU story:
 
-- A fast-start interpreter tier (Ignition).
+- A fast-start VM interpreter tier.
 - A JIT compiler tier (Turbine/Cranelift) for hot paths.
 - A generational garbage collector (GC) tuned for numeric workloads.
 
@@ -309,7 +309,7 @@ MATLAB's performance reputation is mixed. Well-vectorized code can be fast, but 
 - **Interpreter overhead**: Even vectorized code goes through an interpreter layer before hitting optimized BLAS/LAPACK routines.
 - **No automatic GPU**: Traditional MATLAB requires explicit `gpuArray` calls (and the Parallel Computing Toolbox) to use GPU acceleration.
 
-RunMat addresses these with a **tiered execution model**—a fast-start interpreter (Ignition) plus a JIT compiler (Turbine) for hot paths—and **Fusion**, which automatically routes array operations to CPU or GPU based on cost heuristics.
+RunMat addresses these with a **tiered execution model**—a fast-start VM interpreter plus a JIT compiler (Turbine) for hot paths—and **Fusion**, which automatically routes array operations to CPU or GPU based on cost heuristics.
 
 ### Can MATLAB run on GPU?
 

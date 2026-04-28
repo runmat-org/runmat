@@ -108,6 +108,14 @@
     {
       "question": "Does round support GPU acceleration in RunMat?",
       "answer": "Yes. `round` runs on the GPU with elementwise fusion support. It accepts `f32` and `f64` precisions and supports MATLAB-compatible broadcasting."
+    },
+    {
+      "question": "Does MATLAB's `round` use banker's rounding?",
+      "answer": "— **No.** MATLAB (and RunMat) round halves *away from zero*, not to even. So `round(0.5)` returns `1`, `round(-0.5)` returns `-1`, `round(2.5)` returns `3`, and `round(3.5)` returns `4`. This differs from Python's built-in `round` and IEEE 754 default rounding, which both use banker's rounding (round-half-to-even). NumPy's `np.round` also uses banker's rounding, so ported code may give different results on `.5` cases — use `round(x)` in MATLAB/RunMat when you specifically want half-away-from-zero."
+    },
+    {
+      "question": "How do I round to N decimal places?",
+      "answer": "— Use `round(X, N)`. Positive `N` rounds to digits to the right of the decimal point; negative `N` rounds to digits to the left. For example, `round(pi, 3)` returns `3.1416` and `round(12345, -3)` returns `12000`. Use `round(X, N, 'significant')` when you want `N` significant digits instead of decimal places."
     }
   ],
   "links": [
@@ -147,5 +155,17 @@
   "gpu_residency": "You usually do **not** need to call `gpuArray` manually. RunMat's planner keeps tensors on the GPU when the provider exposes the required kernels and it is profitable to do so. `round` takes advantage of this mechanism for the plain `round(X)` form. When you specify digits or the `'significant'` option, RunMat currently gathers data to the host to match MATLAB exactly. Future providers can extend `unary_round` or add digit-aware kernels to keep those workloads on the device.",
   "gpu_behavior": [
     "When a tensor already resides on the GPU, RunMat checks whether the active acceleration provider implements a specialised `unary_round` kernel. If available, `round(X)` executes entirely on the device. Advanced modes (`round(X, N)` and `round(X, N, 'significant')`) currently gather tensors to the host before rounding to keep semantics aligned with MATLAB. Providers that add digit-aware kernels can extend this path in the future."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "Y = round(X)\nY = round(X, N)\nY = round(X, N, type)"
+    },
+    "points": [
+      "`X` is the numeric (or `duration`) input to round. Scalars, vectors, matrices, and N-D arrays are all accepted. Complex values are rounded component-wise; non-finite values (`NaN`, `Inf`) pass through unchanged.",
+      "`N` is an integer specifying the number of digits. When `type` is `'decimals'` (the default), positive `N` rounds to digits right of the decimal point and negative `N` rounds to digits left of it (tens, hundreds, thousands, ...). When `type` is `'significant'`, `N` must be a positive integer.",
+      "`type` is an optional string: `'decimals'` (default) or `'significant'`. `'significant'` rounds to `N` significant digits regardless of magnitude.",
+      "Returns `Y`, the rounded values, same shape and (promoted) class as `X`. Half values are rounded away from zero — MATLAB's `round` does **not** use banker's rounding."
+    ]
+  }
 }

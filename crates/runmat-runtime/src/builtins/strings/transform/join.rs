@@ -697,12 +697,12 @@ pub(crate) mod tests {
     fn join_cell_array_of_char_vectors() {
         let gpu = CharArray::new_row("GPU");
         let accel = CharArray::new_row("Accelerate");
-        let ignition = CharArray::new_row("Ignition");
+        let vm_label = CharArray::new_row("VM");
         let interpreter = CharArray::new_row("Interpreter");
         let values = vec![
             Value::CharArray(gpu),
             Value::CharArray(accel),
-            Value::CharArray(ignition),
+            Value::CharArray(vm_label),
             Value::CharArray(interpreter),
         ];
         let cell = make_cell(values, 2, 2).expect("cell");
@@ -721,7 +721,7 @@ pub(crate) mod tests {
                         );
                         assert_eq!(
                             char_row_to_string_slice(&b.data, b.cols, 0),
-                            "Ignition, Interpreter"
+                            "VM, Interpreter"
                         );
                     }
                     other => panic!("expected char arrays, got {other:?}"),

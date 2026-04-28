@@ -4,6 +4,74 @@ _What's new across the RunMat runtime, cloud, and sandbox. For technical runtime
 
 ---
 
+## [v0.4.4](https://github.com/runmat-org/runmat/compare/v0.4.1...v0.4.4)
+
+_April 24, 2026_
+
+### Runtime
+
+#### Added
+- Add `cross` — MATLAB-compatible vector cross products across row vectors, column vectors, matrices, and higher-rank tensors, with GPU-resident execution for real-valued inputs when the active provider supports it
+- Add `gradient` — numerical gradients with MATLAB-compatible matrix output ordering, scalar spacing support, complex host support, and WGPU-backed GPU residency for scalar-spacing gradients
+- Add `trapz` and `cumtrapz` — trapezoidal and cumulative trapezoidal integration with scalar spacing, coordinate-vector spacing, explicit dimension selection, complex inputs, and GPU input fallback that re-uploads real-valued outputs for downstream GPU work
+- Add `sgtitle` — figure-level titles for subplot layouts with text styling, explicit figure-handle targeting, `get`/`set` support, scene replay, and vector/native export support
+- Add CLI artifact capture for script runs — `--artifacts-dir`, `--artifacts-manifest`, `--capture-figures`, `--figure-size`, and `--max-figures`
+
+#### Changed
+- Rename `runmat-ignition` to `runmat-vm` and split the VM, compiler, interpreter dispatch, indexing, runtime state, and acceleration paths into smaller modules
+- Refactor the lexer, parser, HIR, core session, WASM runtime, and CLI layers for maintainability without changing their public behavior
+- Expand TypeScript/WASM figure metadata to include `sgTitle` and `sgTitleStyle`, matching the new figure-level title support
+
+#### Fixed
+- Fix WGPU provider cleanup for intermediate GPU tensor handles so error paths release temporary device resources correctly
+- Fix `gradient` shape handling for empty tensors and align WGPU gradient parameters for the backend layout
+- Fix SVG/vector-export text positioning so subplot titles and figure-level titles scale correctly with font size
+- Fix `sgtitle` serialization and child enumeration, and allow numeric values to be used as title text
+
+### Sandbox
+
+#### Changed
+- Reorganize the browser/WASM runtime into dedicated API, plotting, session, stream, filesystem, GPU, snapshot, state, and wire-format modules
+- Improve replay smoke coverage and GPU gradient coverage for the WASM target
+
+### Cloud
+
+#### Changed
+- Update remote-project CLI documentation around authentication, project selection, filesystem history, snapshots, git sync, retention policies, and `remote run`
+
+---
+
+## [v0.4.1](https://github.com/runmat-org/runmat/compare/v0.4.0...v0.4.1)
+
+_April 15, 2026_
+
+### Runtime
+
+#### Added
+- Expand `input()` compatibility — numeric prompts now accept logical values, named constants (`pi`, `inf`, `nan`), and matrix/vector literals with MATLAB-compatible output types. Complex expressions such as `sqrt(2)` and `ones(3)` now evaluate through the full MATLAB pipeline when an eval hook is available
+- Add configurable CLI credential storage for `runmat login` — `auto`, `secure`, `file`, and `memory`
+
+#### Changed
+- Improve CLI auth persistence — `auto` mode now prefers secure keyring storage and falls back to file-backed credentials with restricted permissions when secure storage is unavailable
+- Extract remote auth and public API client logic into a dedicated `runmat-server-client` crate
+
+#### Fixed
+- Fix native `input()` evaluation stack overflow by isolating nested prompt evaluation from the outer interpreter call stack
+- Fix GPU-backed selector indexing — GPU-resident index tensors now materialize correctly before linear and dimensional indexing
+
+### Sandbox
+
+#### Fixed
+- Fix workspace/variable display after `clear()` — variables assigned later in the same execution block now reappear correctly in workspace snapshots
+- Fix browser `input()` handling after session resets — reinitializing the WASM session now preserves the installed async input handler
+
+### Cloud
+
+#### Added
+- Expand the public API with project git import, project import status, usage notices, upgrade requests, chunk upload targets, data manifest access, run indexes, storage summaries, storage-category deletion, telemetry ingest, and web intake submission endpoints
+
+---
+
 ## [v0.4.0](https://github.com/runmat-org/runmat/compare/v0.3.2...v0.4.0)
 
 _April 13, 2026_
@@ -222,4 +290,3 @@ _August 10, 2025_
 #### Added
 - Initial release — lexer, architecture plan, project scaffolding
 - Add release workflow with macOS signing, cross-compilation, crates.io publishing
-

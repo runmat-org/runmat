@@ -10,6 +10,7 @@
     "topographic lines"
   ],
   "summary": "Create contour line plots for level sets, iso-lines, and MATLAB `contour` workflows.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-contour-thermal-field-level-sets.webp",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -56,14 +57,64 @@
       "description": "Inspect the returned contour handle",
       "input": "[X, Y] = meshgrid(1:20, 1:20);\nZ = X + Y;\nh = contour(X, Y, Z);\nget(h, 'Type')",
       "output": "ans =\n    'contour'"
+    },
+    {
+      "description": "Temperature-style level sets",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 120), linspace(-3, 3, 120));\nZ = 2*exp(-((X-1).^2 + Y.^2)) + 1.5*exp(-((X+1.5).^2 + (Y-1).^2)) - exp(-(X.^2 + (Y+1.5).^2));\n\ncontour(X, Y, Z, 20);\ncolormap('turbo');\ncolorbar;\ntitle('Thermal Field — Level Sets');\nxlabel('x (m)');\nylabel('y (m)');\naxis equal;",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-contour-thermal-field-level-sets.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I set specific contour levels?",
+      "answer": "Pass a vector of values as the fourth argument. Each value becomes one contour line.\n\n```matlab\ncontour(X, Y, Z, [0.1 0.3 0.5 0.7 0.9]);\n```\n\nIf you pass a scalar instead, it's interpreted as the number of levels (e.g., `contour(X, Y, Z, 20)` draws 20 automatically spaced levels)."
+    },
+    {
+      "question": "Can I add labels to the contour lines?",
+      "answer": "Use `clabel` after `contour` to annotate the lines with their level values. Pass the contour handle to `clabel` so it knows which plot to label.\n\n```matlab\n[C, h] = contour(X, Y, Z);\nclabel(C, h);\n```"
+    },
+    {
+      "question": "What's the difference between contour and contourf?",
+      "answer": "`contour` draws line-only iso-curves — the regions between lines are transparent. `contourf` fills those regions with colors from the active colormap. Use `contour` when you want to overlay on other plots or keep the background visible, and `contourf` when the filled color bands are the primary visualization."
     }
   ],
   "links": [
-    { "label": "contourf", "url": "./contourf" },
-    { "label": "surfc", "url": "./surfc" },
-    { "label": "meshc", "url": "./meshc" },
-    { "label": "colorbar", "url": "./colorbar" },
-    { "label": "colormap", "url": "./colormap" }
+    {
+      "label": "contourf",
+      "url": "./contourf"
+    },
+    {
+      "label": "surfc",
+      "url": "./surfc"
+    },
+    {
+      "label": "meshc",
+      "url": "./meshc"
+    },
+    {
+      "label": "colorbar",
+      "url": "./colorbar"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/contour.rs`",

@@ -125,12 +125,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     },
     {
-      url: `${baseUrl}/docs/reference/builtins`,
-      lastModified: currentDate,
-      changeFrequency: 'daily',
-      priority: 0.6,
-    },
-    {
       url: `${baseUrl}/docs/matlab-function-reference`,
       lastModified: currentDate,
       changeFrequency: 'daily',

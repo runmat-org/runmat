@@ -36,14 +36,14 @@ export function BlogLayout({
     descriptionPlacement === 'afterMeta' ? 'mt-6 mb-6' : 'mb-6';
 
   const descriptionElement = (
-    <p className={`${descriptionSpacingClass} text-base sm:text-xl text-muted-foreground leading-relaxed break-words`}>
+    <p className={`${descriptionSpacingClass} text-[0.938rem] text-foreground leading-relaxed break-words`}>
       {description}
     </p>
   );
 
   const headerContent = (
     <>
-      <h1 className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl break-words">
+      <h1 className="mb-6 text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl break-words">
         {title}
       </h1>
       
@@ -53,12 +53,12 @@ export function BlogLayout({
         <div className="flex items-center gap-2">
           <Calendar className="h-4 w-4" />
           <div className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
-            <span className="text-foreground font-medium">Published</span>
+            <span>Published</span>
             <span>{date}</span>
           </div>
         </div>
         {dateModified && dateModified !== date && (
-          <div className="flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-sm font-medium text-foreground/80">
+          <div className="flex items-center gap-2">
             <Calendar className="h-4 w-4" />
             <span>Updated {dateModified}</span>
           </div>
@@ -98,10 +98,10 @@ export function BlogLayout({
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="container px-4 py-8 md:px-6 md:py-16">
+      <div className="container mx-auto py-8 md:py-12">
         {rightAside ? (
-          <div className="mx-auto lg:max-w-7xl grid gap-8 lg:grid-cols-[minmax(0,1fr)_220px]">
-            <div className="min-w-0">
+          <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="min-w-0 lg:pl-48">
               {/* Back Link */}
               <Button variant="ghost" size="sm" className="mb-8 break-words" asChild>
                 <Link href={backLink.href}>

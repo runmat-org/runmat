@@ -1,6 +1,6 @@
 [package]
 name = "runmat-accelerate"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Pluggable GPU acceleration layer for RunMat (CUDA, ROCm, Metal, Vulkan/Spir-V)"
@@ -46,7 +46,7 @@ pollster = { version = "0.3", optional = true }
 
 [dev-dependencies]
 tempfile = "3.12"
-runmat-ignition = { workspace = true }
+runmat-vm = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
 

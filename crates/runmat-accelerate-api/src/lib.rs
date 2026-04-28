@@ -1942,6 +1942,14 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("diff_dim not supported by provider"))
     }
+    fn gradient_dim(
+        &self,
+        _handle: &GpuTensorHandle,
+        _dim: usize,
+        _spacing: f64,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("gradient_dim not supported by provider"))
+    }
     /// Perform an in-place FFT along a zero-based dimension, optionally padding/truncating to `len`.
     fn fft_dim<'a>(
         &'a self,
@@ -2019,6 +2027,15 @@ pub trait AccelProvider: Send + Sync {
     /// Compute the Kronecker product of two tensors, matching MATLAB semantics.
     fn kron(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("kron not supported by provider"))
+    }
+    /// Compute the cross product of 3-element vectors along a matching dimension.
+    fn cross(
+        &self,
+        _lhs: &GpuTensorHandle,
+        _rhs: &GpuTensorHandle,
+        _dim: Option<usize>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("cross not supported by provider"))
     }
     fn reduce_sum<'a>(
         &'a self,

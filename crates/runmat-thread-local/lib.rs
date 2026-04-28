@@ -43,17 +43,17 @@ unsafe impl<T> Sync for WasmTlsCell<T> {}
 #[cfg(not(target_arch = "wasm32"))]
 #[macro_export]
 macro_rules! runmat_thread_local {
-    ($(#[$meta:meta])* static $name:ident : $ty:ty = const { $init:expr }; $($rest:tt)*) => {
+    ($(#[$meta:meta])* $vis:vis static $name:ident : $ty:ty = const { $init:expr }; $($rest:tt)*) => {
         thread_local! {
             $(#[$meta])*
-            static $name: $ty = const { $init };
+            $vis static $name: $ty = const { $init };
         }
         $crate::runmat_thread_local! { $($rest)* }
     };
-    ($(#[$meta:meta])* static $name:ident : $ty:ty = $init:expr; $($rest:tt)*) => {
+    ($(#[$meta:meta])* $vis:vis static $name:ident : $ty:ty = $init:expr; $($rest:tt)*) => {
         thread_local! {
             $(#[$meta])*
-            static $name: $ty = $init;
+            $vis static $name: $ty = $init;
         }
         $crate::runmat_thread_local! { $($rest)* }
     };
@@ -63,16 +63,16 @@ macro_rules! runmat_thread_local {
 #[cfg(target_arch = "wasm32")]
 #[macro_export]
 macro_rules! runmat_thread_local {
-    ($(#[$meta:meta])* static $name:ident : $ty:ty = const { $init:expr }; $($rest:tt)*) => {
+    ($(#[$meta:meta])* $vis:vis static $name:ident : $ty:ty = const { $init:expr }; $($rest:tt)*) => {
         $crate::runmat_thread_local! {
             $(#[$meta])*
-            static $name : $ty = $init;
+            $vis static $name : $ty = $init;
             $($rest)*
         }
     };
-    ($(#[$meta:meta])* static $name:ident : $ty:ty = $init:expr; $($rest:tt)*) => {
+    ($(#[$meta:meta])* $vis:vis static $name:ident : $ty:ty = $init:expr; $($rest:tt)*) => {
         $(#[$meta])*
-        static $name: $crate::WasmTlsCell<$ty> = {
+        $vis static $name: $crate::WasmTlsCell<$ty> = {
             fn init() -> $ty {
                 $init
             }
