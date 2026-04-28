@@ -1,0 +1,92 @@
+{
+  "title": "subsasgn",
+  "category": "oop/indexing",
+  "keywords": [
+    "subsasgn",
+    "object assignment",
+    "overloaded indexing",
+    "dot assignment"
+  ],
+  "summary": "Dispatch object assignment requests to a class-specific `Class.subsasgn` implementation.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/subsasgn.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`subsasgn` is object-dispatch logic and executes on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-ignition/tests/functions.rs"
+  },
+  "description": "`subsasgn(obj, kind, payload, rhs)` is the advanced builtin that RunMat uses to implement overloaded indexed assignment on objects and handle objects. Normal syntax such as `obj.field = value`, `obj(2) = value`, and `obj{1} = value` generally lowers to this mechanism automatically. The global builtin resolves the receiver's class name and forwards the assignment to `Class.subsasgn`.",
+  "behaviors": [
+    "The receiver must be an object or handle object.",
+    "The `kind` argument selects the assignment form: `'.'`, `'()'`, or `'{}'`.",
+    "For dot assignment, `payload` is typically a field/property name string.",
+    "For `()` and `{}` assignment, `payload` is typically a cell array of indices.",
+    "The builtin forwards the assignment to the receiver's class-specific `Class.subsasgn` implementation and returns the updated object value.",
+    "Prefer normal assignment syntax in user code; direct calls to `subsasgn` are mainly useful for advanced dispatch or testing."
+  ],
+  "examples": [
+    {
+      "description": "Change a datetime display format explicitly",
+      "input": "t = datetime(2024, 4, 9);\nt = subsasgn(t, \".\", \"Format\", \"yyyy-MM-dd\");\ndisp(t)",
+      "output": "2024-04-09"
+    },
+    {
+      "description": "Replace one element of a datetime array explicitly",
+      "input": "t = datetime([2024 2025], [1 6], [15 20]);\nt = subsasgn(t, \"()\", {2}, datetime(2030, 1, 1));\ndisp(t)",
+      "output": "15-Jan-2024 00:00:00\n01-Jan-2030 00:00:00"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Should I call `subsasgn` directly in normal code?",
+      "answer": "Usually no. Prefer ordinary assignment syntax like `obj.field = value` or `obj(2) = value`. Direct calls are mainly for advanced dispatch and testing."
+    },
+    {
+      "question": "What values can `kind` take?",
+      "answer": "RunMat's object-dispatch path expects `'.'`, `'()'`, or `'{}'`."
+    },
+    {
+      "question": "What does the global `subsasgn` actually do?",
+      "answer": "It resolves the receiver's class and forwards the assignment to that class's `Class.subsasgn` implementation."
+    }
+  ],
+  "links": [
+    {
+      "label": "subsref",
+      "url": "./subsref"
+    },
+    {
+      "label": "datetime",
+      "url": "./datetime"
+    },
+    {
+      "label": "duration",
+      "url": "./duration"
+    },
+    {
+      "label": "containers.Map",
+      "url": "./containers.map"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/lib.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/lib.rs"
+  },
+  "gpu_residency": "`subsasgn` is host-side object dispatch and does not itself manage GPU residency.",
+  "gpu_behavior": [
+    "`subsasgn` performs no provider dispatch; it forwards assignment requests to the appropriate class-specific host implementation."
+  ]
+}

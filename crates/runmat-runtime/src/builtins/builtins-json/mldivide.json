@@ -1,9 +1,14 @@
 {
   "title": "mldivide",
+  "aliases": [
+    "backslash"
+  ],
   "category": "math/linalg/ops",
   "keywords": [
     "mldivide",
+    "backslash",
     "matrix left division",
+    "left divide",
     "linear systems",
     "least squares",
     "gpu"
@@ -90,6 +95,10 @@
     {
       "question": "How does RunMat handle NaN or Inf values?",
       "answer": "NaNs and Infs propagate through the least-squares solver exactly as MATLAB does—any slice containing NaNs will typically produce NaNs in the corresponding output entries."
+    },
+    {
+      "question": "Is there a `backslash()` function?",
+      "answer": "No. RunMat documents the matrix left-division operator `A \\\\ B` on the `mldivide` page, matching MATLAB's callable name and operator semantics."
     }
   ],
   "links": [

@@ -1,0 +1,86 @@
+{
+  "title": "hour",
+  "category": "datetime",
+  "keywords": [
+    "hour",
+    "datetime",
+    "time component",
+    "clock hour"
+  ],
+  "summary": "Extract hour numbers from datetime values.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/datetime.hour.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "datetime values are host-side objects; `hour` extracts the hour on the CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-ignition/tests/datetime.rs"
+  },
+  "description": "`hour` extracts the hour component from a datetime scalar or array and returns the result as doubles with the same shape as the input.",
+  "behaviors": [
+    "`hour(t)` accepts datetime scalars and datetime arrays.",
+    "The output shape matches the input shape.",
+    "Hour values are returned in 24-hour clock form.",
+    "Passing a non-datetime value raises a datetime-specific error."
+  ],
+  "examples": [
+    {
+      "description": "Extract the hour from a scalar datetime",
+      "input": "t = datetime(2024, 4, 9, 13, 30, 5);\nh = hour(t)",
+      "output": "h = 13"
+    },
+    {
+      "description": "Extract hours from a datetime array",
+      "input": "t = datetime([2024 2024], [4 4], [9 9], [8 17], [15 45], [0 0]);\nh = hour(t)",
+      "output": "h =\n     8    17"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What clock convention does `hour` use?",
+      "answer": "It returns 24-hour clock values such as `0`, `13`, or `23`."
+    },
+    {
+      "question": "Does `hour` preserve the input shape?",
+      "answer": "Yes. The numeric output has the same size as the input datetime array."
+    },
+    {
+      "question": "Does `hour` run on the GPU?",
+      "answer": "No. datetime values are host-side objects, so `hour` executes on the CPU."
+    }
+  ],
+  "links": [
+    {
+      "label": "datetime",
+      "url": "./datetime"
+    },
+    {
+      "label": "minute",
+      "url": "./minute"
+    },
+    {
+      "label": "second",
+      "url": "./second"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/datetime/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/datetime/mod.rs"
+  },
+  "gpu_residency": "No. `hour` reads datetime objects on the CPU and returns ordinary host-side numeric arrays.",
+  "gpu_behavior": [
+    "`hour` does not dispatch GPU kernels; it extracts the hour component from CPU-side datetime objects."
+  ]
+}

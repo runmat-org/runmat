@@ -1,0 +1,86 @@
+{
+  "title": "second",
+  "category": "datetime",
+  "keywords": [
+    "second",
+    "datetime",
+    "time component",
+    "fractional seconds"
+  ],
+  "summary": "Extract second values from datetime values.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/datetime.second.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "datetime values are host-side objects; `second` extracts the second component on the CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-ignition/tests/datetime.rs"
+  },
+  "description": "`second` extracts the second component from a datetime scalar or array and returns the result as doubles with the same shape as the input. Fractional seconds are preserved when the datetime stores sub-second precision.",
+  "behaviors": [
+    "`second(t)` accepts datetime scalars and datetime arrays.",
+    "The output shape matches the input shape.",
+    "Returned values are doubles so fractional seconds can be represented.",
+    "Passing a non-datetime value raises a datetime-specific error."
+  ],
+  "examples": [
+    {
+      "description": "Extract whole seconds from a scalar datetime",
+      "input": "t = datetime(2024, 4, 9, 13, 30, 5);\ns = second(t)",
+      "output": "s = 5"
+    },
+    {
+      "description": "Preserve fractional seconds",
+      "input": "t = datetime(2024, 4, 9, 13, 30, 5.25);\ns = second(t)",
+      "output": "s = 5.2500"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can `second` return fractional values?",
+      "answer": "Yes. RunMat preserves fractional seconds and returns them as doubles."
+    },
+    {
+      "question": "Does `second` preserve the input shape?",
+      "answer": "Yes. The numeric output has the same size as the input datetime array."
+    },
+    {
+      "question": "Does `second` run on the GPU?",
+      "answer": "No. datetime values are host-side objects, so `second` executes on the CPU."
+    }
+  ],
+  "links": [
+    {
+      "label": "datetime",
+      "url": "./datetime"
+    },
+    {
+      "label": "hour",
+      "url": "./hour"
+    },
+    {
+      "label": "minute",
+      "url": "./minute"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/datetime/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/datetime/mod.rs"
+  },
+  "gpu_residency": "No. `second` reads datetime objects on the CPU and returns ordinary host-side numeric arrays.",
+  "gpu_behavior": [
+    "`second` does not dispatch GPU kernels; it extracts the second component from CPU-side datetime objects."
+  ]
+}

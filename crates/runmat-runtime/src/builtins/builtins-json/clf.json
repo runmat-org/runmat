@@ -1,0 +1,96 @@
+{
+  "title": "clf",
+  "category": "plotting",
+  "keywords": [
+    "clf",
+    "clear figure",
+    "plotting",
+    "graphics handles"
+  ],
+  "summary": "Clear the contents of the current figure, selected figure handles, or all figures.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/clf.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`clf` clears plotting state only. It does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::clf::tests"
+  },
+  "description": "`clf` clears the contents of the current figure while keeping the figure handle itself alive. RunMat also accepts explicit figure handles and the `'all'` selector to clear multiple figures. The compatibility keyword `'reset'` is currently parsed but behaves the same as plain `clf`.",
+  "behaviors": [
+    "`clf()` clears the current figure.",
+    "`clf(handle)` clears the specified figure handle.",
+    "`clf('all')` clears every known figure and returns the number of figures that were cleared.",
+    "`clf(handle1, handle2, ...)` clears multiple figures and returns the number cleared when more than one handle is supplied.",
+    "`clf('reset')` is currently treated the same as plain `clf`."
+  ],
+  "examples": [
+    {
+      "description": "Clear the current figure after plotting",
+      "input": "figure(1);\nplot(1:5, [1 4 2 5 3]);\nout = clf()",
+      "output": "% out is the cleared figure handle"
+    },
+    {
+      "description": "Clear a specific figure by handle",
+      "input": "figure(3);\nplot(1:5, 1:5);\nout = clf(3)",
+      "output": "out = 3"
+    },
+    {
+      "description": "Clear every figure",
+      "input": "figure(1); plot(1:5, 1:5);\nfigure(2); plot(1:5, [5 4 3 2 1]);\ncount = clf(\"all\")",
+      "output": "count = 2"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `clf` delete the figure handle itself?",
+      "answer": "No. It clears the figure contents but keeps the figure handle selected and available."
+    },
+    {
+      "question": "What does `clf('reset')` do today?",
+      "answer": "RunMat parses the keyword for compatibility, but the current implementation treats it the same as plain `clf`."
+    },
+    {
+      "question": "What does `clf('all')` return?",
+      "answer": "It returns the number of figures that were cleared. When no figures exist, it returns `0`."
+    }
+  ],
+  "links": [
+    {
+      "label": "figure",
+      "url": "./figure"
+    },
+    {
+      "label": "gcf",
+      "url": "./gcf"
+    },
+    {
+      "label": "cla",
+      "url": "./cla"
+    },
+    {
+      "label": "hold",
+      "url": "./hold"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/clf.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/clf.rs"
+  },
+  "gpu_residency": "`clf` only mutates plotting state and does not affect array residency.",
+  "gpu_behavior": [
+    "`clf` performs no provider dispatch; it clears figures from the plotting registry and renderer state."
+  ]
+}
