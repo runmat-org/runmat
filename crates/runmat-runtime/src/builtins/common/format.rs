@@ -795,6 +795,35 @@ fn value_to_f64(value: &Value) -> BuiltinResult<f64> {
     }
 }
 
+fn number_to_string(value: f64) -> String {
+    if value.is_nan() {
+        return "NaN".to_string();
+    }
+    if value.is_infinite() {
+        return if value.is_sign_negative() {
+            "-Inf".to_string()
+        } else {
+            "Inf".to_string()
+        };
+    }
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    value.to_string()
+}
+
+fn complex_to_string(re: f64, im: f64) -> String {
+    if im == 0.0 {
+        number_to_string(re)
+    } else if re == 0.0 {
+        format!("{}i", number_to_string(im))
+    } else if im < 0.0 {
+        format!("{}-{}i", number_to_string(re), number_to_string(im.abs()))
+    } else {
+        format!("{}+{}i", number_to_string(re), number_to_string(im))
+    }
+}
+
 fn value_to_string(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
@@ -806,10 +835,10 @@ fn value_to_string(value: &Value) -> BuiltinResult<String> {
             Ok(s)
         }
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
-        Value::Num(n) => Ok(Value::Num(*n).to_string()),
+        Value::Num(n) => Ok(number_to_string(*n)),
         Value::Int(i) => Ok(i.to_i64().to_string()),
         Value::Bool(b) => Ok(if *b { "true" } else { "false" }.to_string()),
-        Value::Complex(re, im) => Ok(Value::Complex(*re, *im).to_string()),
+        Value::Complex(re, im) => Ok(complex_to_string(*re, *im)),
         other => Err(format_error(format!(
             "sprintf: expected text or scalar value for %s conversion, got {other:?}"
         ))),
@@ -1106,6 +1135,7 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{get_display_format, set_display_format, FormatMode};
 
     #[test]
     fn format_variadic_supports_thousands_grouping_flag() {
@@ -1119,5 +1149,19 @@ mod tests {
         let out = format_variadic("%Id", &[Value::Int(IntValue::I32(42))])
             .expect("I flag should be accepted as compatibility no-op");
         assert_eq!(out, "42");
+    }
+
+    #[test]
+    fn percent_s_numeric_and_complex_ignore_display_format() {
+        let previous = get_display_format();
+        set_display_format(FormatMode::Hex);
+        let result = format_variadic(
+            "%s %s",
+            &[Value::Num(std::f64::consts::PI), Value::Complex(1.5, -2.0)],
+        );
+        set_display_format(previous);
+
+        let out = result.expect("%s formatting should succeed");
+        assert_eq!(out, "3.141592653589793 1.5-2i");
     }
 }
