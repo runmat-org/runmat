@@ -48,7 +48,6 @@ export default function Navigation() {
               width={136}
               height={24}
               className="h-5 w-auto"
-              priority
             />
           </Link>
           <NavigationMenu viewport={false}>
@@ -198,7 +197,6 @@ export default function Navigation() {
                 width={120}
                 height={20}
                 className="h-4 w-auto"
-                priority
               />
             </Link>
           </div>

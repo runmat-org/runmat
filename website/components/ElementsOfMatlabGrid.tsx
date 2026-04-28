@@ -7,12 +7,18 @@ import Link from 'next/link';
 import { Grid3x3, List, Tags } from 'lucide-react';
 import type { Builtin } from '@/lib/builtins';
 import { getBuiltinBadges, getDisplayCategory } from '@/lib/builtin-utils';
-import type { DisplayCategory } from '@/lib/builtin-utils';
+import type { DisplayCategory, BuiltinBadge } from '@/lib/builtin-utils';
 import { formatCategoryName, getCategoryDisplayOrder, groupCategoriesByPrefix, categoryAnchorId } from '@/lib/display-categories';
 import { POPULAR_FUNCTIONS_BY_CATEGORY, getJsonCategoriesForDisplayCategory } from '@/lib/builtin-popularity';
 import { getCategoryColor } from '@/lib/category-colors';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
+
+const badgeLabel: Record<BuiltinBadge, string> = {
+  'GPU': 'Auto GPU',
+  'Fusion': 'Fusion',
+  'BLAS/LAPACK': 'BLAS/LAPACK',
+};
 
 type GroupedBuiltins = {
   category: DisplayCategory;
@@ -394,7 +400,7 @@ function ElementTile({ builtin }: { builtin: Builtin }) {
                 variant="secondary"
                 className="text-xs px-1.5 py-0.5 h-4 font-medium bg-white/20 text-white border-white/30"
               >
-                {badge}
+                {badgeLabel[badge]}
               </Badge>
             ))}
           </div>
@@ -611,11 +617,6 @@ function TagChip({ builtin }: { builtin: Builtin }) {
           style={{ backgroundColor: categoryColor }}
         >
           <span>{builtin.name}</span>
-          {badges.length > 0 && (
-            <span className="text-xs opacity-80">
-              {badges.map(b => b.charAt(0)).join('')}
-            </span>
-          )}
         </div>
       </Link>
 
@@ -695,7 +696,7 @@ function ListTile({ builtin }: { builtin: Builtin }) {
               variant="secondary"
               className="px-3 py-1 font-semibold"
             >
-              {badge}
+              {badgeLabel[badge]}
             </Badge>
           ))}
         </div>

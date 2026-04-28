@@ -20,7 +20,9 @@ export type BuiltinDocBlock =
   | { type: 'table'; headers: BuiltinDocInlineNode[][]; rows: BuiltinDocInlineNode[][][] }
   | { type: 'image'; src: string; alt: string; caption?: string }
   | { type: 'link-grid'; items: { label: string; href: string; thumbnail?: string }[] }
-  | { type: 'divider' };
+  | { type: 'divider' }
+  | { type: 'section'; children: BuiltinDocBlock[]; className?: string }
+  | { type: 'columns'; cols: BuiltinDocBlock[][]; className?: string };
 
 type BuiltinDocRendererProps = {
   blocks: BuiltinDocBlock[];
@@ -143,6 +145,30 @@ function renderBlock(block: BuiltinDocBlock): React.ReactNode {
       );
     case 'divider':
       return <hr className="my-12 border-t border-border" />;
+    case 'section':
+      return (
+        <div className={block.className}>
+          {block.children.map((child, i) => (
+            <React.Fragment key={`${child.type}-${i}`}>
+              {renderBlock(child)}
+            </React.Fragment>
+          ))}
+        </div>
+      );
+    case 'columns':
+      return (
+        <div className={block.className ?? 'grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1'}>
+          {block.cols.map((col, colIdx) => (
+            <div key={colIdx}>
+              {col.map((child, i) => (
+                <React.Fragment key={`${child.type}-${i}`}>
+                  {renderBlock(child)}
+                </React.Fragment>
+              ))}
+            </div>
+          ))}
+        </div>
+      );
     default:
       return null;
   }
@@ -155,7 +181,7 @@ function renderHeading(block: Extract<BuiltinDocBlock, { type: 'heading' }>) {
     1: 'text-xl sm:text-2xl font-bold mt-10 mb-4 text-foreground first:mt-0 break-words',
     2: 'group scroll-mt-24 text-lg sm:text-xl font-semibold mt-8 mb-3 text-foreground break-words',
     3: 'group scroll-mt-24 text-base sm:text-lg font-semibold mt-6 mb-2 text-foreground break-words',
-    4: 'group scroll-mt-24 text-sm sm:text-base font-semibold mt-5 mb-2 text-foreground break-words',
+    4: 'group scroll-mt-24 text-[0.8125rem] sm:text-sm font-semibold mt-5 mb-1.5 text-muted-foreground uppercase tracking-wide break-words',
     5: 'group scroll-mt-24 text-sm font-semibold mt-4 mb-1.5 text-foreground break-words',
     6: 'group scroll-mt-24 text-sm font-semibold mt-3 mb-1.5 text-foreground break-words',
   };

@@ -1,5 +1,5 @@
 import { MetadataRoute } from 'next'
-import { getPublicBlogPosts } from '@/lib/blog'
+import { getAllBlogPosts } from '@/lib/blog'
 import { getAllBenchmarks } from '@/lib/benchmarks'
 import { loadBuiltins } from '@/lib/builtins'
 import { flatten } from '@/content/docs'
@@ -175,7 +175,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ],
   }
 
-  const blogPostRoutes: MetadataRoute.Sitemap = getPublicBlogPosts().map(post => ({
+  const blogPostRoutes: MetadataRoute.Sitemap = getAllBlogPosts().map(post => ({
     url: `${baseUrl}/blog/${post.slug}`,
     lastModified: toDate(post.dateModified || post.date, currentDate),
     changeFrequency: 'monthly',

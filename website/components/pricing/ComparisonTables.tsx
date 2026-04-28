@@ -38,8 +38,8 @@ const productRows: ProductRow[] = [
 const productSectionLabels = [
   "Core Runtime",
   "Development Environment",
-  "Collaboration and Storage",
-  "Security and Compliance",
+  "Collaboration & Storage",
+  "Security & Compliance",
   "Support",
 ];
 const productSectionSizes = [4, 5, 6, 4, 2];
