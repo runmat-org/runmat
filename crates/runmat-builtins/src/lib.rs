@@ -1674,8 +1674,12 @@ pub fn format_number(value: f64) -> String {
         }
         .to_string();
     }
+    let mode = get_display_format();
+    if mode == FormatMode::Hex {
+        return fmt_hex(value);
+    }
     let v = if value == 0.0 { 0.0 } else { value };
-    match get_display_format() {
+    match mode {
         FormatMode::Short => fmt_short(v),
         FormatMode::Long => fmt_long(v),
         FormatMode::ShortE => fmt_sci(v, 4),
@@ -1683,7 +1687,7 @@ pub fn format_number(value: f64) -> String {
         FormatMode::ShortG => fmt_compact(v, 5),
         FormatMode::LongG => fmt_compact(v, 15),
         FormatMode::Rational => fmt_rational(v),
-        FormatMode::Hex => fmt_hex(v),
+        FormatMode::Hex => unreachable!("hex mode handled before zero normalization"),
     }
 }
 
@@ -2032,7 +2036,9 @@ impl fmt::Display for ComplexTensor {
 
 #[cfg(test)]
 mod display_tests {
-    use super::{ComplexTensor, LogicalArray, Tensor};
+    use super::{
+        format_number, set_display_format, ComplexTensor, FormatMode, LogicalArray, Tensor,
+    };
 
     #[test]
     fn tensor_nd_display_uses_page_headers() {
@@ -2075,6 +2081,14 @@ mod display_tests {
         let rendered = complex.to_string();
         assert!(rendered.contains("(:, :, 1) ="));
         assert!(rendered.contains("(:, :, 2) ="));
+    }
+
+    #[test]
+    fn format_hex_preserves_negative_zero_sign_bit() {
+        set_display_format(FormatMode::Hex);
+        assert_eq!(format_number(-0.0), "8000000000000000");
+        assert_eq!(format_number(0.0), "0000000000000000");
+        set_display_format(FormatMode::Short);
     }
 }
 
