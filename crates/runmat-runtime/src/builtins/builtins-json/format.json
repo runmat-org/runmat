@@ -1,0 +1,137 @@
+{
+  "title": "format",
+  "category": "io",
+  "keywords": [
+    "format",
+    "display",
+    "precision",
+    "numeric",
+    "short",
+    "long",
+    "scientific",
+    "rational",
+    "hex"
+  ],
+  "summary": "Set the numeric display format for console output, controlling how floating-point numbers are shown.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/format.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "format is a display-only setting; it has no effect on GPU computation or residency."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::format::tests",
+    "integration": null
+  },
+  "description": "`format` controls how numeric values appear in the Command Window. The setting is session-wide and persists until changed. Supported numeric precision modes: `short` (default), `long`, `shortE`, `longE`, `shortG`, `longG`, `rat`, and `hex`. Spacing modes `compact` and `loose` are accepted without error but are not yet implemented. Calling `format` without arguments resets to `short`.",
+  "behaviors": [
+    "Calling `format` with no arguments resets to the default `short` mode.",
+    "`format short` displays 4 decimal places in fixed notation for values in [0.001, 10000); uses scientific notation outside that range.",
+    "`format long` displays 15 decimal places in fixed notation for values in [0.001, 10000); uses 14-decimal scientific notation outside that range.",
+    "`format shortE` always uses scientific notation with 4 decimal places (e.g., `3.1416e+00`).",
+    "`format longE` always uses scientific notation with 14 decimal places.",
+    "`format shortG` uses the more compact of fixed/scientific notation with 5 significant digits, trimming trailing zeros.",
+    "`format longG` uses the more compact of fixed/scientific notation with 15 significant digits, trimming trailing zeros.",
+    "`format rat` approximates values as ratios of small integers using a tolerance of 5×10⁻⁷ (e.g., `355/113` for pi). `format rational` is accepted as an alias.",
+    "`format hex` displays the IEEE 754 double-precision hexadecimal bit pattern (e.g., `400921fb54442d18` for pi).",
+    "`format compact` and `format loose` are accepted without error for script compatibility but do not yet change output spacing.",
+    "The format setting applies to auto-print results and `disp` output. `fprintf`/`sprintf` use their own explicit format specifiers and are not affected.",
+    "Mode names are case-insensitive."
+  ],
+  "examples": [
+    {
+      "description": "Default short format",
+      "input": "format short\npi",
+      "output": "ans = 3.1416"
+    },
+    {
+      "description": "Long format for full precision",
+      "input": "format long\npi",
+      "output": "ans = 3.141592653589793"
+    },
+    {
+      "description": "Scientific notation with short precision",
+      "input": "format shortE\npi",
+      "output": "ans = 3.1416e+00"
+    },
+    {
+      "description": "Scientific notation with full precision",
+      "input": "format longE\npi",
+      "output": "ans = 3.14159265358979e+00"
+    },
+    {
+      "description": "Rational approximation",
+      "input": "format rat\npi",
+      "output": "ans = 355/113"
+    },
+    {
+      "description": "Hexadecimal IEEE 754 representation",
+      "input": "format hex\npi",
+      "output": "ans = 400921fb54442d18"
+    },
+    {
+      "description": "Resetting to default",
+      "input": "format\npi",
+      "output": "ans = 3.1416"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `format` affect computation results?",
+      "answer": "No. `format` only changes how values are displayed. Internal precision is always IEEE 754 double."
+    },
+    {
+      "question": "Is the format setting persistent across cells?",
+      "answer": "Yes. The setting is stored per-session thread and remains active until changed by another `format` call."
+    },
+    {
+      "question": "What is the default format?",
+      "answer": "`format short` — 4 decimal places in fixed notation, falling back to scientific for very large or very small values."
+    },
+    {
+      "question": "Does `format` affect `disp`?",
+      "answer": "Yes. `disp` and auto-print both use the active format setting. `fprintf` and `sprintf` use their own explicit format specifiers and ignore this setting."
+    },
+    {
+      "question": "Are format mode names case-sensitive?",
+      "answer": "No. `format SHORT`, `format Short`, and `format short` are all equivalent."
+    },
+    {
+      "question": "What does `format rat` do for integers?",
+      "answer": "Integers are displayed as-is without a denominator (e.g., `42` rather than `42/1`). `format rational` is accepted as an alias for `format rat`."
+    }
+  ],
+  "links": [
+    {
+      "label": "disp",
+      "url": "./disp"
+    },
+    {
+      "label": "fprintf",
+      "url": "./fprintf"
+    },
+    {
+      "label": "sprintf",
+      "url": "./sprintf"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/format.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/format.rs"
+  },
+  "gpu_residency": "`format` is a display-only setting with no effect on GPU residency or acceleration.",
+  "gpu_behavior": [
+    "`format` does not interact with GPU tensors. It only affects how values are rendered after being gathered to the host for display."
+  ]
+}

@@ -97,6 +97,16 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         name: "clear",
         arg_kind: CommandArgKind::StringifyWords,
     },
+    CommandVerb {
+        name: "format",
+        arg_kind: CommandArgKind::Keyword {
+            allowed: &[
+                "short", "long", "shortE", "longE", "shortG", "longG", "rat", "rational", "hex",
+                "compact", "loose",
+            ],
+            optional: true,
+        },
+    },
 ];
 
 impl Parser {
@@ -142,12 +152,7 @@ impl Parser {
 
         let mut i = 1;
         let mut saw_arg = false;
-        while matches!(
-            self.peek_token_at(i),
-            Some(Token::Newline | Token::Ellipsis)
-        ) {
-            i += 1;
-        }
+        self.skip_command_continuations(&mut i);
 
         if !matches!(
             self.peek_token_at(i),
@@ -166,9 +171,7 @@ impl Parser {
                     saw_arg = true;
                     i += 1;
                 }
-                Some(Token::Newline | Token::Ellipsis) => {
-                    i += 1;
-                }
+                Some(Token::Ellipsis) => self.skip_command_continuations(&mut i),
                 _ => break,
             }
         }
@@ -191,10 +194,12 @@ impl Parser {
     fn parse_command_args(&mut self) -> Vec<Expr> {
         let mut args = Vec::new();
         loop {
-            if self.consume(&Token::Newline) {
-                continue;
+            if matches!(self.peek_token(), Some(Token::Newline)) {
+                break;
             }
             if self.consume(&Token::Ellipsis) {
+                // `...` is a line-continuation; skip the following newline and keep parsing.
+                self.consume(&Token::Newline);
                 continue;
             }
             match self.peek_token() {
@@ -234,6 +239,15 @@ impl Parser {
             }
         }
         args
+    }
+
+    fn skip_command_continuations(&self, offset: &mut usize) {
+        while matches!(self.peek_token_at(*offset), Some(Token::Ellipsis)) {
+            *offset += 1;
+            if matches!(self.peek_token_at(*offset), Some(Token::Newline)) {
+                *offset += 1;
+            }
+        }
     }
 
     fn lookup_command(&self, name: &str) -> Option<&'static CommandVerb> {

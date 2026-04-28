@@ -27,6 +27,7 @@ impl RunMatSession {
         runmat_runtime::console::reset_thread_buffer();
         runmat_runtime::plotting_hooks::reset_recent_figures();
         runmat_runtime::warning_store::reset();
+        runmat_builtins::set_display_format(self.format_mode);
         reset_provider_telemetry();
         self.interrupt_flag.store(false, Ordering::Relaxed);
         let _interrupt_guard =
@@ -777,6 +778,7 @@ impl RunMatSession {
             result_value
         };
 
+        self.format_mode = runmat_builtins::get_display_format();
         Ok(ExecutionResult {
             value: public_value,
             execution_time_ms,

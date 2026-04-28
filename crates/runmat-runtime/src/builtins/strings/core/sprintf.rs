@@ -303,7 +303,7 @@ pub(crate) mod tests {
             vec![Value::Complex(1.5, -2.0)],
         )
         .expect("sprintf");
-        assert_eq!(char_value_to_string(result), "1.5-2i");
+        assert_eq!(char_value_to_string(result), "1.5000-2i");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
