@@ -1,0 +1,73 @@
+{
+  "title": "spline",
+  "category": "math/interpolation",
+  "keywords": [
+    "spline",
+    "cubic spline",
+    "interpolation",
+    "pp",
+    "ppval"
+  ],
+  "summary": "Construct or evaluate a cubic spline interpolant.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "GPU inputs are gathered to the CPU reference implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "description": "`spline(x, y)` returns a piecewise-polynomial structure for cubic spline interpolation. `spline(x, y, xq)` evaluates that spline directly at query points.",
+  "behaviors": [
+    "Returns a pp structure with `form`, `breaks`, `coefs`, `pieces`, `order`, and `dim` fields.",
+    "The direct evaluation form extrapolates outside the sample range, matching MATLAB's standalone `spline` behavior.",
+    "Dense real numeric inputs are supported in the initial implementation."
+  ],
+  "examples": [
+    {
+      "description": "Build and evaluate a spline",
+      "input": "x = [1 2 3];\ny = [1 4 9];\npp = spline(x, y);\nyq = ppval(pp, [1.5 2.5])",
+      "output": "yq = [2.25 6.25]"
+    },
+    {
+      "description": "Direct evaluation",
+      "input": "x = [1 2 3];\ny = [1 4 9];\nyq = spline(x, y, 1.5)",
+      "output": "yq = 2.25"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "pp = spline(x, y)\nyq = spline(x, y, xq)"
+    },
+    "points": [
+      "`x` is a strictly increasing vector of sample locations.",
+      "`y` contains the sampled values to interpolate.",
+      "`spline(x, y)` returns a piecewise-polynomial structure compatible with `ppval`.",
+      "`spline(x, y, xq)` evaluates the cubic spline directly at query points.",
+      "Standalone `spline` extrapolates outside the sample range using the first or last polynomial piece."
+    ]
+  },
+  "links": [
+    {
+      "label": "interp1",
+      "url": "./interp1"
+    },
+    {
+      "label": "ppval",
+      "url": "./ppval"
+    }
+  ],
+  "source": {
+    "label": "Open an issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  }
+}

@@ -1,5 +1,6 @@
 pub mod elementwise;
 pub mod fft;
+pub mod interpolation;
 pub mod linalg;
 pub mod poly;
 pub mod reduction;

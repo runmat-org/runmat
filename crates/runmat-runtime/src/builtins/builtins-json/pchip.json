@@ -1,0 +1,67 @@
+{
+  "title": "pchip",
+  "category": "math/interpolation",
+  "keywords": [
+    "pchip",
+    "piecewise cubic hermite",
+    "shape preserving",
+    "interpolation"
+  ],
+  "summary": "Shape-preserving piecewise cubic Hermite interpolation.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "GPU inputs are gathered to the CPU reference implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "description": "`pchip(x, y)` builds a shape-preserving cubic Hermite interpolant. `pchip(x, y, xq)` evaluates it at query points.",
+  "behaviors": [
+    "Returns the same pp-structure shape used by `spline`.",
+    "Uses monotonicity-preserving slopes so monotone data does not overshoot between samples.",
+    "Dense real numeric inputs are supported in the initial implementation."
+  ],
+  "examples": [
+    {
+      "description": "Shape-preserving interpolation",
+      "input": "x = [1 2 3];\ny = [1 4 9];\nyq = pchip(x, y, [1.5 2.5])",
+      "output": "yq = [2.21875 6.21875]"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "pp = pchip(x, y)\nyq = pchip(x, y, xq)"
+    },
+    "points": [
+      "`x` is a strictly increasing vector of sample locations.",
+      "`y` contains the sampled values to interpolate.",
+      "`pchip(x, y)` returns a piecewise-polynomial structure compatible with `ppval`.",
+      "`pchip(x, y, xq)` evaluates the shape-preserving interpolant directly at query points.",
+      "PCHIP is usually preferred over spline interpolation when monotonicity and avoiding overshoot matter."
+    ]
+  },
+  "links": [
+    {
+      "label": "interp1",
+      "url": "./interp1"
+    },
+    {
+      "label": "ppval",
+      "url": "./ppval"
+    }
+  ],
+  "source": {
+    "label": "Open an issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  }
+}
