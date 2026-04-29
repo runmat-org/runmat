@@ -5546,6 +5546,7 @@ dependencies = [
  "runmat-async",
  "runmat-gc-api",
  "runmat-macros",
+ "runmat-thread-local",
  "serde",
  "trybuild",
 ]

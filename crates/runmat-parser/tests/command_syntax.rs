@@ -33,6 +33,27 @@ fn command_form_with_quoted_and_ellipsis() {
 }
 
 #[test]
+fn command_form_does_not_continue_on_bare_newline() {
+    let program = parse("foo\nbar").unwrap();
+    assert_eq!(program.body.len(), 2);
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::Ident(name, _), _, _) => assert_eq!(name, "foo"),
+        other => panic!("statement 0: expected identifier, got {other:?}"),
+    }
+    match &program.body[1] {
+        Stmt::ExprStmt(Expr::Ident(name, _), _, _) => assert_eq!(name, "bar"),
+        other => panic!("statement 1: expected identifier, got {other:?}"),
+    }
+
+    let known_command = parse("grid\non").unwrap();
+    assert_eq!(known_command.body.len(), 2);
+    match &known_command.body[0] {
+        Stmt::ExprStmt(Expr::Ident(name, _), _, _) => assert_eq!(name, "grid"),
+        other => panic!("statement 0: expected identifier, got {other:?}"),
+    }
+}
+
+#[test]
 fn command_form_with_end_token_as_arg() {
     // end appears as a bare token in command-form; parser should treat it as an identifier literal
     let program = parse("foo end bar").unwrap();

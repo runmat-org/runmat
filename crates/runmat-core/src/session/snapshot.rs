@@ -121,6 +121,7 @@ impl RunMatSession {
             workspace_version: 0,
             emit_fusion_plan: false,
             compat_mode: CompatMode::Matlab,
+            format_mode: runmat_builtins::FormatMode::default(),
         };
 
         runmat_vm::set_call_stack_limit(session.callstack_limit);

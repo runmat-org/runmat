@@ -770,8 +770,8 @@ pub(crate) mod tests {
                 "     2       4".to_string(),
                 String::new(),
                 "(:,:,2) =".to_string(),
-                "5+0.5i  7+0.5i".to_string(),
-                "6+0.5i  8+0.5i".to_string()
+                "5+0.5000i  7+0.5000i".to_string(),
+                "6+0.5000i  8+0.5000i".to_string()
             ]
         );
     }

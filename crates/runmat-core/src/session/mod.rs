@@ -101,6 +101,8 @@ pub struct RunMatSession {
     workspace_version: u64,
     emit_fusion_plan: bool,
     compat_mode: CompatMode,
+    /// Persisted numeric display format for this session (survives across executions).
+    format_mode: runmat_builtins::FormatMode,
 }
 
 pub(crate) struct PreparedExecution {
