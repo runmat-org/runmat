@@ -459,7 +459,7 @@ fn first_non_singleton_len(tensor: &Tensor) -> Option<usize> {
         .find(|&dim| dim > 1)
 }
 
-fn is_vector_shape(shape: &[usize]) -> bool {
+pub(super) fn is_vector_shape(shape: &[usize]) -> bool {
     match shape {
         [] => true,
         [_] => true,
@@ -528,7 +528,7 @@ fn eval_pp_scalar(pp: &PiecewisePolynomial, series: usize, xq: f64, extrap: &Ext
     acc
 }
 
-fn interval_index(x: &[f64], xq: f64, allow_extrapolation: bool) -> Option<usize> {
+pub(super) fn interval_index(x: &[f64], xq: f64, allow_extrapolation: bool) -> Option<usize> {
     if xq < x[0] {
         return allow_extrapolation.then_some(0);
     }
@@ -546,7 +546,7 @@ fn interval_index(x: &[f64], xq: f64, allow_extrapolation: bool) -> Option<usize
     }
 }
 
-fn out_of_range_value(extrap: &Extrapolation) -> f64 {
+pub(super) fn out_of_range_value(extrap: &Extrapolation) -> f64 {
     match extrap {
         Extrapolation::Nan => f64::NAN,
         Extrapolation::Extrapolate => f64::NAN,

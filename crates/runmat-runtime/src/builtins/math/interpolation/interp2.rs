@@ -11,8 +11,8 @@ use crate::builtins::common::tensor;
 use crate::dispatcher;
 
 use super::pp::{
-    interp_error, parse_extrapolation, parse_method, query_points, vector_from_value,
-    Extrapolation, InterpMethod,
+    interp_error, interval_index, is_vector_shape, out_of_range_value, parse_extrapolation,
+    parse_method, query_points, vector_from_value, Extrapolation, InterpMethod,
 };
 
 const NAME: &str = "interp2";
@@ -230,14 +230,6 @@ async fn axis_from_value(
     vector_from_value(gathered, label, NAME).await
 }
 
-fn is_vector_shape(shape: &[usize]) -> bool {
-    match shape {
-        [] | [_] => true,
-        [rows, cols] => *rows == 1 || *cols == 1,
-        dims => dims.iter().filter(|&&dim| dim > 1).count() <= 1,
-    }
-}
-
 fn validate_axis(axis: &[f64], label: &str) -> crate::BuiltinResult<()> {
     if axis.len() < 2 {
         return Err(interp_error(
@@ -299,10 +291,10 @@ fn eval_bilinear(parsed: &ParsedInterp2, xq: f64, yq: f64) -> f64 {
     }
     let allow = matches!(parsed.extrap, Extrapolation::Extrapolate);
     let Some(col) = interval_index(&parsed.x_axis, xq, allow) else {
-        return out_of_range(&parsed.extrap);
+        return out_of_range_value(&parsed.extrap);
     };
     let Some(row) = interval_index(&parsed.y_axis, yq, allow) else {
-        return out_of_range(&parsed.extrap);
+        return out_of_range_value(&parsed.extrap);
     };
     let x0 = parsed.x_axis[col];
     let x1 = parsed.x_axis[col + 1];
@@ -322,34 +314,16 @@ fn eval_nearest(parsed: &ParsedInterp2, xq: f64, yq: f64) -> f64 {
         return f64::NAN;
     }
     let Some(col) = nearest_index(&parsed.x_axis, xq, &parsed.extrap) else {
-        return out_of_range(&parsed.extrap);
+        return out_of_range_value(&parsed.extrap);
     };
     let Some(row) = nearest_index(&parsed.y_axis, yq, &parsed.extrap) else {
-        return out_of_range(&parsed.extrap);
+        return out_of_range_value(&parsed.extrap);
     };
     z_at(&parsed.z, row, col)
 }
 
 fn z_at(z: &Tensor, row: usize, col: usize) -> f64 {
     z.data[row + col * z.rows]
-}
-
-fn interval_index(axis: &[f64], q: f64, allow_extrapolation: bool) -> Option<usize> {
-    if q < axis[0] {
-        return allow_extrapolation.then_some(0);
-    }
-    let last = axis.len() - 1;
-    if q > axis[last] {
-        return allow_extrapolation.then_some(last - 1);
-    }
-    if q == axis[last] {
-        return Some(last - 1);
-    }
-    match axis.binary_search_by(|probe| probe.partial_cmp(&q).unwrap()) {
-        Ok(index) => Some(index.min(last - 1)),
-        Err(index) if index > 0 && index < axis.len() => Some(index - 1),
-        _ => None,
-    }
 }
 
 fn nearest_index(axis: &[f64], q: f64, extrap: &Extrapolation) -> Option<usize> {
@@ -371,13 +345,6 @@ fn nearest_index(axis: &[f64], q: f64, extrap: &Extrapolation) -> Option<usize> 
                 Some(right)
             }
         }
-    }
-}
-
-fn out_of_range(extrap: &Extrapolation) -> f64 {
-    match extrap {
-        Extrapolation::Value(value) => *value,
-        Extrapolation::Nan | Extrapolation::Extrapolate => f64::NAN,
     }
 }
 
