@@ -420,8 +420,8 @@ fn tensor_from_pp_output(
     let shape = if dim == 1 {
         query.shape.clone()
     } else {
-        let mut shape = vec![dim];
-        shape.extend(query.shape.iter().copied());
+        let mut shape = query.shape.clone();
+        shape.push(dim);
         shape
     };
     value_from_data(data, shape, name)
@@ -767,5 +767,30 @@ mod tests {
         };
         assert!((tensor.data[0] - 2.25).abs() < 1e-10);
         assert!((tensor.data[1] - 6.25).abs() < 1e-10);
+    }
+
+    #[test]
+    fn ppval_multiseries_appends_series_dimension() {
+        let series = NumericSeries {
+            x: vec![1.0, 2.0, 3.0],
+            y: vec![1.0, 4.0, 9.0, 100.0, 400.0, 900.0],
+            series: 2,
+            trailing_shape: vec![2],
+        };
+        let pp = build_spline_pp(&series, "spline").expect("spline");
+        let query = QueryPoints {
+            values: vec![1.5, 2.5],
+            shape: vec![1, 2],
+        };
+        let value = evaluate_pp(&pp, &query, &Extrapolation::Extrapolate, "spline").expect("ppval");
+        let Value::Tensor(tensor) = value else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.shape, vec![1, 2, 2]);
+        assert_eq!(tensor.data.len(), 4);
+        assert!((tensor.data[0] - 2.25).abs() < 1e-10);
+        assert!((tensor.data[1] - 6.25).abs() < 1e-10);
+        assert!((tensor.data[2] - 225.0).abs() < 1e-10);
+        assert!((tensor.data[3] - 625.0).abs() < 1e-10);
     }
 }
