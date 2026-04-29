@@ -63,7 +63,7 @@ async fn fsolve_builtin(function: Value, x0: Value, rest: Vec<Value>) -> Builtin
     let options = parse_options(rest.first())?;
     let opts = FsolveOptions::from_struct(options.as_ref())?;
     let guess = initial_guess(NAME, x0).await?;
-    let solution = solve(&function, guess.values, &opts).await?;
+    let solution = solve(&function, guess.values, &guess.shape, guess.scalar, &opts).await?;
     vector_to_value(NAME, solution, &guess.shape, guess.scalar)
 }
 
@@ -117,6 +117,8 @@ impl FsolveOptions {
 async fn solve(
     function: &Value,
     mut x: Vec<f64>,
+    shape: &[usize],
+    scalar: bool,
     options: &FsolveOptions,
 ) -> BuiltinResult<Vec<f64>> {
     let n = x.len();
@@ -124,7 +126,7 @@ async fn solve(
         return Err(optim_error(NAME, "fsolve: initial guess cannot be empty"));
     }
 
-    let mut residual = eval_residual(function, &x).await?;
+    let mut residual = eval_residual(function, &x, shape, scalar).await?;
     let mut evals = 1usize;
     let mut lambda = 1.0e-3;
 
@@ -140,7 +142,8 @@ async fn solve(
             ));
         }
         let jacobian =
-            finite_difference_jacobian(function, &x, &residual, &mut evals, options).await?;
+            finite_difference_jacobian(function, &x, shape, scalar, &residual, &mut evals, options)
+                .await?;
         let j = DMatrix::from_row_slice(residual.len(), n, &jacobian);
         let f = DVector::from_column_slice(&residual);
         let gradient = j.transpose() * &f;
@@ -158,7 +161,7 @@ async fn solve(
                 .zip(delta.iter())
                 .map(|(xi, di)| xi + di)
                 .collect::<Vec<_>>();
-            let trial_residual = eval_residual(function, &trial).await?;
+            let trial_residual = eval_residual(function, &trial, shape, scalar).await?;
             evals += 1;
 
             if norm2(&trial_residual) < norm2(&residual) {
@@ -198,12 +201,17 @@ async fn solve(
     Err(optim_error(NAME, "fsolve: exceeded maximum iterations"))
 }
 
-async fn eval_residual(function: &Value, x: &[f64]) -> BuiltinResult<Vec<f64>> {
-    let arg = if x.len() == 1 {
+async fn eval_residual(
+    function: &Value,
+    x: &[f64],
+    shape: &[usize],
+    scalar: bool,
+) -> BuiltinResult<Vec<f64>> {
+    let arg = if scalar {
         Value::Num(x[0])
     } else {
         Value::Tensor(
-            runmat_builtins::Tensor::new(x.to_vec(), vec![x.len(), 1])
+            runmat_builtins::Tensor::new(x.to_vec(), shape.to_vec())
                 .map_err(|e| optim_error(NAME, format!("fsolve: {e}")))?,
         )
     };
@@ -222,6 +230,8 @@ async fn eval_residual(function: &Value, x: &[f64]) -> BuiltinResult<Vec<f64>> {
 async fn finite_difference_jacobian(
     function: &Value,
     x: &[f64],
+    shape: &[usize],
+    scalar: bool,
     residual: &[f64],
     evals: &mut usize,
     options: &FsolveOptions,
@@ -240,7 +250,7 @@ async fn finite_difference_jacobian(
         let mut perturbed = x.to_vec();
         let step = f64::EPSILON.sqrt() * (x[col].abs() + 1.0);
         perturbed[col] += step;
-        let next = eval_residual(function, &perturbed).await?;
+        let next = eval_residual(function, &perturbed, shape, scalar).await?;
         *evals += 1;
         if next.len() != m {
             return Err(optim_error(
@@ -271,6 +281,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::Tensor;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn fsolve_scalar_builtin_handle() {
@@ -319,5 +330,82 @@ mod tests {
             }
             other => panic!("unexpected value {other:?}"),
         }
+    }
+
+    #[test]
+    fn fsolve_preserves_row_vector_shape_for_callback() {
+        let seen_shapes = Arc::new(Mutex::new(Vec::new()));
+        let seen_shapes_for_invoker = Arc::clone(&seen_shapes);
+        let _guard = crate::user_functions::install_user_function_invoker(Some(Arc::new(
+            move |_name, args| {
+                let (x, shape) = match &args[0] {
+                    Value::Tensor(t) => (t.data.clone(), t.shape.clone()),
+                    other => panic!("expected tensor input, got {other:?}"),
+                };
+                assert_eq!(shape, vec![1, 2]);
+                seen_shapes_for_invoker.lock().unwrap().push(shape.clone());
+                Box::pin(async move {
+                    Ok(Value::Tensor(
+                        Tensor::new(vec![x[0] - 3.0, x[1] - 4.0], shape).unwrap(),
+                    ))
+                })
+            },
+        )));
+        let x0 = Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
+        let root = block_on(fsolve_builtin(
+            Value::FunctionHandle("row_system".into()),
+            Value::Tensor(x0),
+            Vec::new(),
+        ))
+        .unwrap();
+        match root {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 2]);
+                assert!((t.data[0] - 3.0).abs() < 1.0e-5);
+                assert!((t.data[1] - 4.0).abs() < 1.0e-5);
+            }
+            other => panic!("unexpected value {other:?}"),
+        }
+        assert!(!seen_shapes.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn fsolve_preserves_matrix_shape_for_callback() {
+        let seen_shapes = Arc::new(Mutex::new(Vec::new()));
+        let seen_shapes_for_invoker = Arc::clone(&seen_shapes);
+        let _guard = crate::user_functions::install_user_function_invoker(Some(Arc::new(
+            move |_name, args| {
+                let (x, shape) = match &args[0] {
+                    Value::Tensor(t) => (t.data.clone(), t.shape.clone()),
+                    other => panic!("expected tensor input, got {other:?}"),
+                };
+                assert_eq!(shape, vec![2, 2]);
+                seen_shapes_for_invoker.lock().unwrap().push(shape.clone());
+                Box::pin(async move {
+                    Ok(Value::Tensor(
+                        Tensor::new(vec![x[0] - 1.0, x[1] - 2.0, x[2] - 3.0, x[3] - 4.0], shape)
+                            .unwrap(),
+                    ))
+                })
+            },
+        )));
+        let x0 = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
+        let root = block_on(fsolve_builtin(
+            Value::FunctionHandle("matrix_system".into()),
+            Value::Tensor(x0),
+            Vec::new(),
+        ))
+        .unwrap();
+        match root {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert!((t.data[0] - 1.0).abs() < 1.0e-5);
+                assert!((t.data[1] - 2.0).abs() < 1.0e-5);
+                assert!((t.data[2] - 3.0).abs() < 1.0e-5);
+                assert!((t.data[3] - 4.0).abs() < 1.0e-5);
+            }
+            other => panic!("unexpected value {other:?}"),
+        }
+        assert!(!seen_shapes.lock().unwrap().is_empty());
     }
 }
