@@ -292,9 +292,7 @@ async fn brent(function: &Value, bracket: Bracket, options: &FzeroOptions) -> Bu
                 q = -q;
             }
             p = p.abs();
-            let min_a = 3.0 * midpoint * q.abs() - (tol * q).abs();
-            let min_b = (e * q).abs();
-            if 2.0 * p < min_a.min(min_b) {
+            if interpolation_step_accepted(p, q, midpoint, tol, e) {
                 e = d;
                 d = p / q;
             } else {
@@ -320,6 +318,12 @@ async fn brent(function: &Value, bracket: Bracket, options: &FzeroOptions) -> Bu
     }
 
     Err(optim_error(NAME, "fzero: exceeded maximum iterations"))
+}
+
+fn interpolation_step_accepted(p: f64, q: f64, midpoint: f64, tol: f64, e: f64) -> bool {
+    let min_a = 3.0 * midpoint * q - (tol * q).abs();
+    let min_b = (e * q).abs();
+    2.0 * p < min_a.min(min_b)
 }
 
 #[cfg(test)]
@@ -355,5 +359,11 @@ mod tests {
             Value::Num(n) => assert!((n - std::f64::consts::FRAC_PI_2).abs() < 1.0e-6),
             other => panic!("unexpected value {other:?}"),
         }
+    }
+
+    #[test]
+    fn brent_interpolation_acceptance_uses_signed_q() {
+        assert!(!interpolation_step_accepted(1.0, -2.0, 1.0, 0.1, 10.0));
+        assert!(interpolation_step_accepted(1.0, -2.0, -1.0, 0.1, 10.0));
     }
 }
