@@ -45,3 +45,42 @@ fn feval_with_string_handle() {
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
 }
+
+#[test]
+fn fzero_accepts_anonymous_function() {
+    let ast = parse("f = @(x) cos(x) - x; r = fzero(f, 0.5);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.7390851332).abs() < 1e-6)));
+}
+
+#[test]
+fn fzero_accepts_optimset_options() {
+    let ast =
+        parse("opts = optimset('TolX', 1e-10, 'Display', 'off'); r = fzero(@sin, [3 4], opts);")
+            .unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(
+        |v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI).abs() < 1e-8)
+    ));
+}
+
+#[test]
+fn fsolve_accepts_anonymous_vector_function() {
+    let ast =
+        parse("F = @(x) [x(1)^2 + x(2)^2 - 4; x(1)*x(2) - 1]; x = fsolve(F, [1; 1]);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| {
+        if let runmat_builtins::Value::Tensor(t) = v {
+            t.data.len() == 2
+                && (t.data[0] * t.data[0] + t.data[1] * t.data[1] - 4.0).abs() < 1e-5
+                && (t.data[0] * t.data[1] - 1.0).abs() < 1e-5
+        } else {
+            false
+        }
+    }));
+}

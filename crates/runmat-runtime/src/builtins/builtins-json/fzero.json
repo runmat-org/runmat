@@ -1,0 +1,58 @@
+{
+  "title": "fzero",
+  "category": "math/optim",
+  "keywords": ["fzero", "root finding", "zero", "brent", "optimization"],
+  "summary": "Find a zero of a scalar nonlinear function using bracket expansion and Brent's method.",
+  "references": ["https://www.mathworks.com/help/matlab/ref/fzero.html"],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "The solver runs on the host. Callback functions may still call GPU-aware builtins."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::fzero::tests",
+    "integration": "runmat-vm/tests/closures.rs::fzero_accepts_anonymous_function"
+  },
+  "description": "`x = fzero(fun, x0)` searches near the scalar initial point `x0` for a sign-changing bracket, then refines the zero. `x = fzero(fun, [a b])` uses the supplied two-element bracket directly.",
+  "behaviors": [
+    "The function handle must return a finite real scalar.",
+    "Bracket endpoints must have opposite signs unless one endpoint is already a root.",
+    "Options are supplied as a struct, usually created with `optimset`. `TolX`, `MaxIter`, `MaxFunEvals`, and `Display` are accepted.",
+    "Anonymous functions, named function handles, and function-handle strings work through RunMat's existing `feval` dispatch path."
+  ],
+  "examples": [
+    {
+      "description": "Find the fixed point of cosine",
+      "input": "f = @(x) cos(x) - x;\nx = fzero(f, 0.5)",
+      "output": "x =\n    0.7391"
+    },
+    {
+      "description": "Use an explicit bracket",
+      "input": "x = fzero(@sin, [3 4])",
+      "output": "x =\n    3.1416"
+    },
+    {
+      "description": "Set a tighter tolerance",
+      "input": "opts = optimset('TolX', 1e-10, 'Display', 'off');\nx = fzero(@sin, [3 4], opts)",
+      "output": "x =\n    3.1416"
+    }
+  ],
+  "links": [
+    { "label": "fsolve", "url": "./fsolve" },
+    { "label": "optimset", "url": "./optimset" },
+    { "label": "roots", "url": "./roots" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/fzero.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/fzero.rs"
+  }
+}
