@@ -795,7 +795,7 @@ fn value_to_f64(value: &Value) -> BuiltinResult<f64> {
     }
 }
 
-fn number_to_string(value: f64) -> String {
+pub(crate) fn number_to_string(value: f64) -> String {
     if value.is_nan() {
         return "NaN".to_string();
     }
@@ -812,7 +812,7 @@ fn number_to_string(value: f64) -> String {
     value.to_string()
 }
 
-fn complex_to_string(re: f64, im: f64) -> String {
+pub(crate) fn complex_to_string(re: f64, im: f64) -> String {
     if im == 0.0 {
         number_to_string(re)
     } else if re == 0.0 {

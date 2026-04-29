@@ -5,7 +5,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::format::format_variadic;
+use crate::builtins::common::format::{complex_to_string, format_variadic, number_to_string};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -742,35 +742,6 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
             "string: unsupported cell element type {:?}; expected text or scalar values",
             other
         ))),
-    }
-}
-
-fn number_to_string(value: f64) -> String {
-    if value.is_nan() {
-        return "NaN".to_string();
-    }
-    if value.is_infinite() {
-        return if value.is_sign_negative() {
-            "-Inf".to_string()
-        } else {
-            "Inf".to_string()
-        };
-    }
-    if value == 0.0 {
-        return "0".to_string();
-    }
-    value.to_string()
-}
-
-fn complex_to_string(re: f64, im: f64) -> String {
-    if im == 0.0 {
-        number_to_string(re)
-    } else if re == 0.0 {
-        format!("{}i", number_to_string(im))
-    } else if im < 0.0 {
-        format!("{}-{}i", number_to_string(re), number_to_string(im.abs()))
-    } else {
-        format!("{}+{}i", number_to_string(re), number_to_string(im))
     }
 }
 
