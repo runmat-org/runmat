@@ -1,0 +1,77 @@
+{
+  "title": "interp2",
+  "category": "math/interpolation",
+  "keywords": [
+    "interp2",
+    "2-D interpolation",
+    "bilinear",
+    "nearest",
+    "meshgrid"
+  ],
+  "summary": "Interpolate values over a two-dimensional gridded surface.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "GPU inputs are gathered to the CPU reference implementation in this release. Bilinear and nearest interpolation are intended future provider-kernel targets."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 5,
+    "constants": "inline"
+  },
+  "description": "`interp2(X, Y, Z, Xq, Yq)` estimates surface values at query points from gridded data. Vector axes and meshgrid-style coordinate matrices are accepted. `interp2(Z, Xq, Yq)` uses implicit axes based on the rows and columns of `Z`.",
+  "behaviors": [
+    "Supports `linear` and `nearest` methods in the initial implementation.",
+    "Out-of-range query points return `NaN` unless an extrapolation value or `'extrap'` is supplied.",
+    "Dense real numeric inputs are supported. GPU inputs gather to the host reference path."
+  ],
+  "examples": [
+    {
+      "description": "Bilinear interpolation with implicit axes",
+      "input": "Z = [1 2; 3 4];\nzq = interp2(Z, 1.5, 1.5)",
+      "output": "zq = 2.5"
+    },
+    {
+      "description": "Interpolation with meshgrid axes",
+      "input": "[X, Y] = meshgrid([10 20], [100 200]);\nZ = [1 2; 3 4];\nzq = interp2(X, Y, Z, 15, 150)",
+      "output": "zq = 2.5"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "Zq = interp2(Z, Xq, Yq)\nZq = interp2(X, Y, Z, Xq, Yq)\nZq = interp2(X, Y, Z, Xq, Yq, method)"
+    },
+    "points": [
+      "`Z` is a dense 2-D matrix of sampled surface values.",
+      "`X` and `Y` may be vector axes or meshgrid-style coordinate matrices matching `Z`. When omitted, implicit column and row axes are used.",
+      "`Xq` and `Yq` are scalar or same-size query arrays. Scalar queries broadcast against array queries.",
+      "`method` may be `linear` or `nearest` in the initial implementation. The default is `linear`.",
+      "Out-of-range queries return `NaN` by default. Pass `'extrap'` to extrapolate or pass a scalar fill value."
+    ]
+  },
+  "links": [
+    {
+      "label": "interp1",
+      "url": "./interp1"
+    },
+    {
+      "label": "meshgrid",
+      "url": "./meshgrid"
+    },
+    {
+      "label": "peaks",
+      "url": "./peaks"
+    }
+  ],
+  "source": {
+    "label": "Open an issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  }
+}
