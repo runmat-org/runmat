@@ -210,6 +210,24 @@ async fn expand_bracket(
                 evals,
             });
         }
+        if fa.signum() != f0.signum() {
+            return Ok(Bracket {
+                a,
+                b: x0,
+                fa,
+                fb: f0,
+                evals,
+            });
+        }
+        if fb.signum() != f0.signum() {
+            return Ok(Bracket {
+                a: x0,
+                b,
+                fa: f0,
+                fb,
+                evals,
+            });
+        }
         if fb == 0.0 || fa.signum() != fb.signum() {
             return Ok(Bracket {
                 a,
@@ -357,6 +375,20 @@ mod tests {
         .unwrap();
         match root {
             Value::Num(n) => assert!((n - std::f64::consts::FRAC_PI_2).abs() < 1.0e-6),
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fzero_scalar_initial_guess_uses_center_sign_for_bracket() {
+        let root = block_on(fzero_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(std::f64::consts::FRAC_PI_2),
+            Vec::new(),
+        ))
+        .unwrap();
+        match root {
+            Value::Num(n) => assert!(n.abs() < 1.0e-6),
             other => panic!("unexpected value {other:?}"),
         }
     }
