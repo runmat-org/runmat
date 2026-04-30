@@ -332,15 +332,20 @@ fn build_truecolor_image_surface(
         ));
     }
     let channels = tensor.shape.get(2).copied().unwrap_or(3);
+    let scale = match tensor.dtype {
+        NumericDType::U8 => 1.0f32 / 255.0,
+        NumericDType::U16 => 1.0f32 / 65535.0,
+        NumericDType::F32 | NumericDType::F64 => 1.0,
+    };
     let mut grid = vec![vec![glam::Vec4::ZERO; image_rows]; image_cols];
     for row in 0..image_rows {
         for col in 0..image_cols {
             let base = row + image_rows * col;
-            let r = tensor.data[base] as f32;
-            let g = tensor.data[base + image_rows * image_cols] as f32;
-            let b = tensor.data[base + 2 * image_rows * image_cols] as f32;
+            let r = tensor.data[base] as f32 * scale;
+            let g = tensor.data[base + image_rows * image_cols] as f32 * scale;
+            let b = tensor.data[base + 2 * image_rows * image_cols] as f32 * scale;
             let a = if channels == 4 {
-                tensor.data[base + 3 * image_rows * image_cols] as f32
+                tensor.data[base + 3 * image_rows * image_cols] as f32 * scale
             } else {
                 1.0
             };

@@ -205,6 +205,7 @@ async fn rand_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => rand_single(shape),
             NumericDType::F64 => rand_double(shape),
+            NumericDType::U8 | NumericDType::U16 => rand_double(shape),
         },
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => {
             rand_double(shape)
@@ -289,6 +290,10 @@ fn try_gpu_uniform(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult
     let precision = match dtype {
         NumericDType::F32 => ProviderPrecision::F32,
         NumericDType::F64 => ProviderPrecision::F64,
+        NumericDType::U8 | NumericDType::U16 => {
+            log_rand_fallback(shape, dtype, "integer-dtype");
+            return Ok(None);
+        }
     };
     if provider.precision() != precision {
         log_rand_fallback(shape, dtype, "precision-mismatch");

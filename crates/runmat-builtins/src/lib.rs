@@ -189,6 +189,28 @@ impl Default for StructValue {
 pub enum NumericDType {
     F64,
     F32,
+    U8,
+    U16,
+}
+
+impl NumericDType {
+    pub fn class_name(self) -> &'static str {
+        match self {
+            NumericDType::F64 => "double",
+            NumericDType::F32 => "single",
+            NumericDType::U8 => "uint8",
+            NumericDType::U16 => "uint16",
+        }
+    }
+
+    pub fn byte_size(self) -> usize {
+        match self {
+            NumericDType::F64 => 8,
+            NumericDType::F32 => 4,
+            NumericDType::U8 => 1,
+            NumericDType::U16 => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
