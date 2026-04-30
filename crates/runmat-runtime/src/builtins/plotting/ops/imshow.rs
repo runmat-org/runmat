@@ -207,10 +207,9 @@ async fn render_truecolor_tensor(tensor: Tensor) -> crate::BuiltinResult<f64> {
 }
 
 async fn render_surface(
-    mut surface: SurfacePlot,
+    surface: SurfacePlot,
     color_limits: Option<(f64, f64)>,
 ) -> crate::BuiltinResult<f64> {
-    surface = surface.with_flatten_z(true).with_image_mode(true);
     let mut surface = Some(surface);
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);

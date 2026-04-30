@@ -13,12 +13,9 @@
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": [
-      "single",
-      "double"
-    ],
+    "precisions": [],
     "broadcasting": "none",
-    "notes": "`imshow` is a plotting sink. Grayscale gpuArray inputs can use the existing image/surface rendering path; filename decoding and truecolor normalization run on the host."
+    "notes": "`imshow` is a plotting sink and does not advertise precision-specialized GPU kernels. Grayscale gpuArray inputs may use the image/surface rendering path; filename decoding and truecolor normalization run on the host."
   },
   "fusion": {
     "elementwise": false,
