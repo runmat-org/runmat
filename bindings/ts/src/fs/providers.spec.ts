@@ -69,9 +69,63 @@ describe("indexeddb filesystem provider", () => {
 
     await deleteDatabase(dbName);
   });
+
+  it("shares a live volume across same-page handles", async () => {
+    const dbName = `runmat-test-live-${Date.now()}`;
+    const handle1 = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 0 });
+    const handle2 = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 0 });
+
+    try {
+      handle2.provider.writeFile("/test.jpg", new Uint8Array([1, 2, 3]));
+      expect(handle1.provider.readFile("/test.jpg")).toEqual(new Uint8Array([1, 2, 3]));
+
+      handle1.close();
+      handle2.provider.writeFile("/after-close.txt", encoder.encode("still-live"));
+      await handle2.flush();
+      handle2.close();
+
+      const handle3 = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 0 });
+      try {
+        expect(toText(handle3.provider.readFile("/after-close.txt"))).toBe("still-live");
+      } finally {
+        handle3.close();
+      }
+    } finally {
+      handle1.close();
+      handle2.close();
+      await deleteDatabase(dbName);
+    }
+  });
+
+  it("rejects incompatible shared backing options for the same database", async () => {
+    const dbName = `runmat-test-options-${Date.now()}`;
+    const now = () => 1;
+    const handle = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 5_000, now });
+
+    try {
+      await expect(createIndexedDbFsHandle({ dbName, flushDebounceMs: 0, now })).rejects.toThrow(
+        /flushDebounceMs/
+      );
+      await expect(
+        createIndexedDbFsHandle({ dbName, flushDebounceMs: 5_000, now: () => 2 })
+      ).rejects.toThrow(/now/);
+    } finally {
+      handle.close();
+      await deleteDatabase(dbName);
+    }
+  });
 });
 
 describe("default filesystem provider", () => {
+  it("shares one live provider across default calls", async () => {
+    const provider1 = await createDefaultFsProvider();
+    const provider2 = await createDefaultFsProvider();
+
+    expect(provider2).toBe(provider1);
+    provider1.writeFile("/default-shared.txt", encoder.encode("shared"));
+    expect(toText(provider2.readFile("/default-shared.txt"))).toBe("shared");
+  });
+
   it("uses persistent storage when IndexedDB is available", async () => {
     const provider1 = await createDefaultFsProvider();
     provider1.createDirAll?.("/auto");

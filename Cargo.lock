@@ -5829,6 +5829,7 @@ dependencies = [
  "getrandom 0.2.16",
  "glam",
  "glob",
+ "image",
  "inventory",
  "js-sys",
  "lapack",
