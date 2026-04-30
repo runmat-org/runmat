@@ -96,6 +96,24 @@ describe("indexeddb filesystem provider", () => {
       await deleteDatabase(dbName);
     }
   });
+
+  it("rejects incompatible shared backing options for the same database", async () => {
+    const dbName = `runmat-test-options-${Date.now()}`;
+    const now = () => 1;
+    const handle = await createIndexedDbFsHandle({ dbName, flushDebounceMs: 5_000, now });
+
+    try {
+      await expect(createIndexedDbFsHandle({ dbName, flushDebounceMs: 0, now })).rejects.toThrow(
+        /flushDebounceMs/
+      );
+      await expect(
+        createIndexedDbFsHandle({ dbName, flushDebounceMs: 5_000, now: () => 2 })
+      ).rejects.toThrow(/now/);
+    } finally {
+      handle.close();
+      await deleteDatabase(dbName);
+    }
+  });
 });
 
 describe("default filesystem provider", () => {

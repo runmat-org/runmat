@@ -23,11 +23,17 @@ interface SharedIndexedDbBacking {
   storeName: string;
   volume: MemoryVolume;
   flushDebounceMs: number;
+  options: SharedIndexedDbBackingOptions;
   refCount: number;
   pendingFlush: Promise<void> | null;
   flushTimer: ReturnType<typeof setTimeout> | null;
   closed: boolean;
   dirty: boolean;
+}
+
+interface SharedIndexedDbBackingOptions {
+  flushDebounceMs: number;
+  now: (() => number) | null;
 }
 
 function sharedBackings(): Map<string, Promise<SharedIndexedDbBacking>> {
@@ -48,16 +54,18 @@ export async function createIndexedDbFsHandle(
   const storeName = options.storeName ?? DEFAULT_STORE_NAME;
   const version = options.version ?? 1;
   const key = sharedBackingKey(dbName, storeName, version);
+  const backingOptions = normalizeSharedBackingOptions(options);
   const backings = sharedBackings();
   let backingPromise = backings.get(key);
   if (!backingPromise) {
-    backingPromise = createSharedBacking(idb, dbName, storeName, version, options).catch((error) => {
+    backingPromise = createSharedBacking(idb, dbName, storeName, version, backingOptions).catch((error) => {
       backings.delete(key);
       throw error;
     });
     backings.set(key, backingPromise);
   }
   const backing = await backingPromise;
+  assertSharedBackingOptions(key, backing.options, backingOptions);
   backing.refCount += 1;
   return new IndexedDbHandle(key, backing);
 }
@@ -166,23 +174,53 @@ async function createSharedBacking(
   dbName: string,
   storeName: string,
   version: number,
-  options: IndexedDbProviderOptions
+  options: SharedIndexedDbBackingOptions
 ): Promise<SharedIndexedDbBacking> {
   const db = await openDatabase(idb, dbName, storeName, version);
   const snapshot = await readAllEntries(db, storeName);
-  const volume = new MemoryVolume({ now: options.now });
+  const volume = new MemoryVolume({ now: options.now ?? undefined });
   volume.load(snapshot);
   return {
     db,
     storeName,
     volume,
-    flushDebounceMs: options.flushDebounceMs ?? 25,
+    flushDebounceMs: options.flushDebounceMs,
+    options,
     refCount: 0,
     pendingFlush: null,
     flushTimer: null,
     closed: false,
     dirty: false
   };
+}
+
+function normalizeSharedBackingOptions(options: IndexedDbProviderOptions): SharedIndexedDbBackingOptions {
+  return {
+    flushDebounceMs: options.flushDebounceMs ?? 25,
+    now: options.now ?? null
+  };
+}
+
+function assertSharedBackingOptions(
+  key: string,
+  active: SharedIndexedDbBackingOptions,
+  requested: SharedIndexedDbBackingOptions
+): void {
+  const mismatches: string[] = [];
+  if (active.flushDebounceMs !== requested.flushDebounceMs) {
+    mismatches.push("flushDebounceMs");
+  }
+  if (active.now !== requested.now) {
+    mismatches.push("now");
+  }
+  if (mismatches.length === 0) {
+    return;
+  }
+  throw new Error(
+    `IndexedDB filesystem backing '${key}' is already open with different ${mismatches.join(
+      " and "
+    )}; close existing handles before opening it with different persistence options`
+  );
 }
 
 function sharedBackingKey(dbName: string, storeName: string, version: number): string {
