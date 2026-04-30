@@ -32,7 +32,7 @@ Browse the complete list: [Built-in Function Reference](/docs/matlab-function-re
 
 RunMat includes 40+ plotting builtins with GPU-first rendering, interactive 3D camera, theming, and scene persistence.
 
-**2D chart types:** `plot`, `scatter`, `bar`, `histogram`, `hist`, `area`, `stairs`, `stem`, `errorbar`, `pie`, `contour`, `contourf`, `image`, `imagesc`, `quiver`
+**2D chart types:** `plot`, `scatter`, `bar`, `histogram`, `hist`, `area`, `stairs`, `stem`, `errorbar`, `pie`, `contour`, `contourf`, `image`, `imagesc`, `imshow`, `quiver`
 
 **3D chart types:** `plot3`, `surf`, `surfc`, `mesh`, `meshc`, `scatter3`
 
@@ -56,7 +56,7 @@ RunMat focuses on core MATLAB — the language, operators, data types, and gener
 | Simulink | ❌ | RunMat is script-based only; no block-diagram modeling |
 | Signal Processing | ❌ | Not implemented |
 | Control System | ❌ | Not implemented |
-| Image Processing | ❌ | Basic array ops and `image`/`imagesc` work on image data |
+| Image Processing | ❌ | Basic array ops and `image`/`imagesc`/`imshow` work on image data |
 | Statistics & Machine Learning | ❌ | Core stats functions (`mean`, `std`, `var`, `median`, `sort`, `hist`, etc.) are available as builtins |
 | Optimization | ❌ | Not implemented |
 | Symbolic Math | ❌ | Not implemented |

@@ -1,0 +1,97 @@
+{
+  "title": "imshow",
+  "category": "plotting",
+  "keywords": [
+    "imshow",
+    "image display",
+    "grayscale image",
+    "binary image",
+    "rgb image",
+    "matlab imshow"
+  ],
+  "summary": "Display grayscale, binary, truecolor, or file-backed images.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`imshow` is a plotting sink. Grayscale gpuArray inputs can use the existing image/surface rendering path; filename decoding and truecolor normalization run on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::imshow::tests"
+  },
+  "description": "`imshow` displays image data using MATLAB-familiar defaults. Numeric and logical 2-D arrays render as grayscale images, MxNx3 and MxNx4 arrays render as truecolor images, and filename inputs are decoded through RunMat's filesystem layer before display.",
+  "behaviors": [
+    "`imshow(I)` displays 2-D numeric data with grayscale limits `[0, 1]`, matching MATLAB double-image defaults.",
+    "`imshow(BW)` displays logical image data as black and white using `[0, 1]` limits.",
+    "`imshow(RGB)` displays MxNx3 truecolor data directly.",
+    "`imshow(RGBA)` displays MxNx4 truecolor data with alpha.",
+    "`imshow(I, [low high])` displays grayscale image data using an explicit display range.",
+    "`imshow(I, [])` auto-scales grayscale image data from finite minimum to finite maximum.",
+    "`imshow(filename)` reads and decodes an image file, then displays it as truecolor data."
+  ],
+  "examples": [
+    {
+      "description": "Display a simple grayscale image",
+      "input": "row = 100;\ncol = 100;\nrsm = ones(row, col);\nimshow(rsm);"
+    },
+    {
+      "description": "Auto-scale a matrix for display",
+      "input": "A = peaks(128);\nimshow(A, []);"
+    },
+    {
+      "description": "Display truecolor RGB data",
+      "input": "R = ones(64, 64);\nG = zeros(64, 64);\nB = zeros(64, 64);\nRGB = cat(3, R, G, B);\nimshow(RGB);"
+    },
+    {
+      "description": "Display an image file",
+      "input": "imshow(\"photo.png\");"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What display range does imshow use for doubles?",
+      "answer": "`imshow(I)` uses `[0, 1]` for floating-point grayscale data. Use `imshow(I, [])` when you want RunMat to scale the visible range from the data minimum to maximum."
+    },
+    {
+      "question": "Does imshow support uint8 and uint16 image defaults?",
+      "answer": "File-backed images decode with byte pixel semantics. User-created integer image arrays currently depend on RunMat's broader numeric-class metadata model, so exact MATLAB class-dependent defaults for dense uint8/uint16 tensors are tracked separately."
+    },
+    {
+      "question": "How is imshow different from imagesc?",
+      "answer": "`imshow` is for image display and uses grayscale or truecolor image defaults. `imagesc` is for scaled matrix visualization and maps data through the active colormap."
+    }
+  ],
+  "links": [
+    {
+      "label": "image",
+      "url": "./image"
+    },
+    {
+      "label": "imagesc",
+      "url": "./imagesc"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "axis",
+      "url": "./axis"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/imshow.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/imshow.rs"
+  }
+}

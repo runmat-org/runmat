@@ -16,6 +16,29 @@ export interface IndexedDbFsHandle {
 
 const DEFAULT_DB_NAME = "runmat-fs";
 const DEFAULT_STORE_NAME = "entries";
+const SHARED_BACKINGS_SYMBOL = Symbol.for("runmat.fs.indexedDbBackings");
+
+interface SharedIndexedDbBacking {
+  db: IDBDatabase;
+  storeName: string;
+  volume: MemoryVolume;
+  flushDebounceMs: number;
+  refCount: number;
+  pendingFlush: Promise<void> | null;
+  flushTimer: ReturnType<typeof setTimeout> | null;
+  closed: boolean;
+  dirty: boolean;
+}
+
+function sharedBackings(): Map<string, Promise<SharedIndexedDbBacking>> {
+  const globalState = globalThis as typeof globalThis & {
+    [SHARED_BACKINGS_SYMBOL]?: Map<string, Promise<SharedIndexedDbBacking>>;
+  };
+  if (!globalState[SHARED_BACKINGS_SYMBOL]) {
+    globalState[SHARED_BACKINGS_SYMBOL] = new Map();
+  }
+  return globalState[SHARED_BACKINGS_SYMBOL];
+}
 
 export async function createIndexedDbFsHandle(
   options: IndexedDbProviderOptions = {}
@@ -24,11 +47,19 @@ export async function createIndexedDbFsHandle(
   const dbName = options.dbName ?? DEFAULT_DB_NAME;
   const storeName = options.storeName ?? DEFAULT_STORE_NAME;
   const version = options.version ?? 1;
-  const db = await openDatabase(idb, dbName, storeName, version);
-  const snapshot = await readAllEntries(db, storeName);
-  const volume = new MemoryVolume({ now: options.now });
-  volume.load(snapshot);
-  return new IndexedDbHandle(db, storeName, volume, options.flushDebounceMs ?? 25);
+  const key = sharedBackingKey(dbName, storeName, version);
+  const backings = sharedBackings();
+  let backingPromise = backings.get(key);
+  if (!backingPromise) {
+    backingPromise = createSharedBacking(idb, dbName, storeName, version, options).catch((error) => {
+      backings.delete(key);
+      throw error;
+    });
+    backings.set(key, backingPromise);
+  }
+  const backing = await backingPromise;
+  backing.refCount += 1;
+  return new IndexedDbHandle(key, backing);
 }
 
 export async function createIndexedDbFsProvider(
@@ -40,31 +71,26 @@ export async function createIndexedDbFsProvider(
 
 class IndexedDbHandle implements IndexedDbFsHandle {
   public readonly provider: RunMatFilesystemProvider;
-  private pendingFlush: Promise<void> | null = null;
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
-  private dirty = false;
 
   constructor(
-    private readonly db: IDBDatabase,
-    private readonly storeName: string,
-    private readonly volume: MemoryVolume,
-    private readonly flushDebounceMs: number
+    private readonly key: string,
+    private readonly backing: SharedIndexedDbBacking
   ) {
-    this.provider = volume.createProvider(() => this.onMutate());
+    this.provider = backing.volume.createProvider(() => this.onMutate());
   }
 
   async flush(): Promise<void> {
-    if (this.closed) {
+    if (this.backing.closed) {
       return;
     }
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
+    if (this.backing.flushTimer) {
+      clearTimeout(this.backing.flushTimer);
+      this.backing.flushTimer = null;
     }
     this.queueFlush();
-    if (this.pendingFlush) {
-      await this.pendingFlush;
+    if (this.backing.pendingFlush) {
+      await this.backing.pendingFlush;
     }
   }
 
@@ -72,58 +98,95 @@ class IndexedDbHandle implements IndexedDbFsHandle {
     if (this.closed) {
       return;
     }
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = null;
-    }
     this.closed = true;
-    this.db.close();
+    if (this.backing.closed) {
+      return;
+    }
+    this.backing.refCount = Math.max(0, this.backing.refCount - 1);
+    if (this.backing.refCount > 0) {
+      return;
+    }
+    if (this.backing.flushTimer) {
+      clearTimeout(this.backing.flushTimer);
+      this.backing.flushTimer = null;
+    }
+    this.backing.closed = true;
+    this.backing.db.close();
+    sharedBackings().delete(this.key);
   }
 
   private scheduleFlush(): void {
-    if (this.closed) {
+    if (this.backing.closed) {
       return;
     }
-    if (this.flushDebounceMs === 0) {
+    if (this.backing.flushDebounceMs === 0) {
       this.queueFlush();
       return;
     }
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
+    if (this.backing.flushTimer) {
+      clearTimeout(this.backing.flushTimer);
     }
-    this.flushTimer = setTimeout(() => {
-      this.flushTimer = null;
+    this.backing.flushTimer = setTimeout(() => {
+      this.backing.flushTimer = null;
       this.queueFlush();
-    }, this.flushDebounceMs);
+    }, this.backing.flushDebounceMs);
   }
 
   private queueFlush(): void {
-    if (this.closed || this.pendingFlush) {
+    if (this.backing.closed || this.backing.pendingFlush) {
       return;
     }
-    this.pendingFlush = this.persistAll().finally(() => {
-      this.pendingFlush = null;
-      if (this.dirty) {
+    this.backing.pendingFlush = this.persistAll().finally(() => {
+      this.backing.pendingFlush = null;
+      if (this.backing.dirty) {
         this.queueFlush();
       }
     });
   }
 
   private onMutate(): void {
-    this.dirty = true;
+    this.backing.dirty = true;
     this.scheduleFlush();
   }
 
   private async persistAll(): Promise<void> {
-    while (!this.closed) {
-      this.dirty = false;
-      const snapshot = this.volume.serialize();
-      await writeAllEntries(this.db, this.storeName, snapshot);
-      if (!this.dirty) {
+    while (!this.backing.closed) {
+      this.backing.dirty = false;
+      const snapshot = this.backing.volume.serialize();
+      await writeAllEntries(this.backing.db, this.backing.storeName, snapshot);
+      if (!this.backing.dirty) {
         break;
       }
     }
   }
+}
+
+async function createSharedBacking(
+  idb: IDBFactory,
+  dbName: string,
+  storeName: string,
+  version: number,
+  options: IndexedDbProviderOptions
+): Promise<SharedIndexedDbBacking> {
+  const db = await openDatabase(idb, dbName, storeName, version);
+  const snapshot = await readAllEntries(db, storeName);
+  const volume = new MemoryVolume({ now: options.now });
+  volume.load(snapshot);
+  return {
+    db,
+    storeName,
+    volume,
+    flushDebounceMs: options.flushDebounceMs ?? 25,
+    refCount: 0,
+    pendingFlush: null,
+    flushTimer: null,
+    closed: false,
+    dirty: false
+  };
+}
+
+function sharedBackingKey(dbName: string, storeName: string, version: number): string {
+  return `${dbName}\0${storeName}\0${version}`;
 }
 
 function getIndexedDb(): IDBFactory {
