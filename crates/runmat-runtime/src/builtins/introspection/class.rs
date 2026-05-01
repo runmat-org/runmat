@@ -50,9 +50,8 @@ fn class_builtin(value: Value) -> crate::BuiltinResult<String> {
 /// Return the canonical MATLAB class name for a runtime value.
 pub(crate) fn class_name_for_value(value: &Value) -> String {
     match value {
-        Value::Num(_) | Value::Tensor(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => {
-            "double".to_string()
-        }
+        Value::Num(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => "double".to_string(),
+        Value::Tensor(tensor) => tensor.dtype.class_name().to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::String(_) | Value::StringArray(_) => "string".to_string(),

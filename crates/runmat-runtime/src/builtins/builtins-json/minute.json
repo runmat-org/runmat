@@ -1,0 +1,86 @@
+{
+  "title": "minute",
+  "category": "datetime",
+  "keywords": [
+    "minute",
+    "datetime",
+    "time component",
+    "clock minute"
+  ],
+  "summary": "Extract minute numbers from datetime values.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/datetime.minute.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "datetime values are host-side objects; `minute` extracts the minute on the CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-ignition/tests/datetime.rs"
+  },
+  "description": "`minute` extracts the minute component from a datetime scalar or array and returns the result as doubles with the same shape as the input.",
+  "behaviors": [
+    "`minute(t)` accepts datetime scalars and datetime arrays.",
+    "The output shape matches the input shape.",
+    "Minute values follow the clock minute stored in the datetime.",
+    "Passing a non-datetime value raises a datetime-specific error."
+  ],
+  "examples": [
+    {
+      "description": "Extract the minute from a scalar datetime",
+      "input": "t = datetime(2024, 4, 9, 13, 30, 5);\nmn = minute(t)",
+      "output": "mn = 30"
+    },
+    {
+      "description": "Extract minutes from a datetime array",
+      "input": "t = datetime([2024 2024], [4 4], [9 9], [8 17], [15 45], [0 0]);\nmn = minute(t)",
+      "output": "mn =\n    15    45"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What range does `minute` return?",
+      "answer": "It returns the minute component in the usual `0` through `59` range."
+    },
+    {
+      "question": "Does `minute` preserve the input shape?",
+      "answer": "Yes. The numeric output has the same size as the input datetime array."
+    },
+    {
+      "question": "Does `minute` run on the GPU?",
+      "answer": "No. datetime values are host-side objects, so `minute` executes on the CPU."
+    }
+  ],
+  "links": [
+    {
+      "label": "datetime",
+      "url": "./datetime"
+    },
+    {
+      "label": "hour",
+      "url": "./hour"
+    },
+    {
+      "label": "second",
+      "url": "./second"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/datetime/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/datetime/mod.rs"
+  },
+  "gpu_residency": "No. `minute` reads datetime objects on the CPU and returns ordinary host-side numeric arrays.",
+  "gpu_behavior": [
+    "`minute` does not dispatch GPU kernels; it extracts the minute component from CPU-side datetime objects."
+  ]
+}

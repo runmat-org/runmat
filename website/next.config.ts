@@ -1,4 +1,39 @@
 import type { NextConfig } from "next";
+import { readdirSync, readFileSync } from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+
+type BuiltinAliasDoc = {
+  title?: string;
+  aliases?: string[];
+};
+
+const WEBSITE_DIR = dirname(fileURLToPath(import.meta.url));
+
+function loadBuiltinAliasRedirects() {
+  const docsDir = join(WEBSITE_DIR, "../crates/runmat-runtime/src/builtins/builtins-json");
+  const redirects: { source: string; destination: string; permanent: boolean }[] = [];
+
+  for (const fileName of readdirSync(docsDir)) {
+    if (!fileName.endsWith(".json")) continue;
+    const raw = readFileSync(join(docsDir, fileName), "utf8");
+    const parsed = JSON.parse(raw) as BuiltinAliasDoc;
+    const slug = String(parsed.title ?? fileName.replace(/\.json$/, "")).trim().toLowerCase();
+    const aliases = Array.isArray(parsed.aliases)
+      ? parsed.aliases.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
+      : [];
+    for (const alias of aliases) {
+      if (alias === slug) continue;
+      redirects.push({
+        source: `/docs/reference/builtins/${alias}`,
+        destination: `/docs/reference/builtins/${slug}`,
+        permanent: true,
+      });
+    }
+  }
+
+  return redirects;
+}
 
 const nextConfig: NextConfig = {
   // Allow API routes to run on Vercel (no static export)
@@ -26,6 +61,7 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     return [
+      ...loadBuiltinAliasRedirects(),
       {
         source: '/run-matlab-online',
         destination: '/matlab-online',

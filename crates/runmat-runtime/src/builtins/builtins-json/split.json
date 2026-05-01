@@ -105,9 +105,17 @@
     {
       "question": "Which argument types are accepted as delimiters?",
       "answer": "You may pass string scalars, string arrays, character arrays (each row is a delimiter), or cell arrays containing string scalars or character vectors."
+    },
+    {
+      "question": "How is `split` different from `strsplit`?",
+      "answer": "`split` is the vectorized string-focused builtin in RunMat. Use `strsplit` when you need the MATLAB-style scalar-text API with optional `matches` output and `DelimiterType` handling."
     }
   ],
   "links": [
+    {
+      "label": "strsplit",
+      "url": "./strsplit"
+    },
     {
       "label": "replace",
       "url": "./replace"

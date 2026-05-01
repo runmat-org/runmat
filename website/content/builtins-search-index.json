@@ -1771,6 +1771,24 @@
     ]
   },
   {
+    "title": "imread",
+    "slug": "imread",
+    "summary": "Read image data from an uploaded file into MATLAB-compatible arrays.",
+    "keywords": [
+      "imread",
+      "image",
+      "read image",
+      "png",
+      "jpeg",
+      "jpg",
+      "tiff",
+      "bmp",
+      "gif",
+      "webp",
+      "upload"
+    ]
+  },
+  {
     "title": "ind2sub",
     "slug": "ind2sub",
     "summary": "Convert MATLAB column-major linear indices into per-dimension subscript arrays.",
@@ -2490,7 +2508,9 @@
     "summary": "Solve A * X = B using MATLAB's left-division operator (`\\`).",
     "keywords": [
       "mldivide",
+      "backslash",
       "matrix left division",
+      "left divide",
       "linear systems",
       "least squares",
       "gpu"
@@ -2553,6 +2573,7 @@
     "summary": "Matrix multiplication (A * B) with MATLAB-compatible semantics.",
     "keywords": [
       "mtimes",
+      "matmul",
       "matrix multiplication",
       "linear algebra",
       "gpu"
@@ -3741,6 +3762,19 @@
       "character array replace",
       "text replacement",
       "substring replace"
+    ]
+  },
+  {
+    "title": "strsplit",
+    "slug": "strsplit",
+    "summary": "Split a string scalar or character vector into substrings using simple or regular-expression delimiters.",
+    "keywords": [
+      "strsplit",
+      "split string",
+      "character vector split",
+      "CollapseDelimiters",
+      "DelimiterType",
+      "matches"
     ]
   },
   {

@@ -95,27 +95,38 @@ function main() {
     const category = typeof parsed.category === "string" ? parsed.category : "";
     const categoryPath = categoryPathFromCategory(category);
     const slug = slugFromTitle(title);
+    const aliases = Array.isArray(parsed.aliases)
+      ? parsed.aliases.map((value) => String(value).trim().toLowerCase()).filter(Boolean)
+      : [];
     const keywords = Array.isArray(parsed.keywords)
       ? parsed.keywords.map((value) => String(value).trim()).filter(Boolean)
       : [];
+    const mergedKeywords = [...keywords];
+    for (const alias of aliases) {
+      if (!mergedKeywords.includes(alias)) {
+        mergedKeywords.push(alias);
+      }
+    }
     const summary = typeof parsed.summary === "string" ? parsed.summary : "";
     const doc = {
       ...parsed,
       key,
       title,
       slug,
+      aliases,
       category,
       categoryPath,
-      keywords,
+      keywords: mergedKeywords,
       summary
     };
     const manifestEntry = {
       key,
       title,
       slug,
+      aliases,
       category,
       categoryPath,
-      keywords,
+      keywords: mergedKeywords,
       summary,
       exampleCount: Array.isArray(parsed.examples) ? parsed.examples.length : 0
     };
@@ -140,7 +151,7 @@ function main() {
           summary,
           code,
           ...(output ? { output } : {}),
-          keywords,
+          keywords: mergedKeywords,
           suggestedPath: buildExampleSuggestedPath(key, index + 1),
         });
       }

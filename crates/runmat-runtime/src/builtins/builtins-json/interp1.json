@@ -1,0 +1,79 @@
+{
+  "title": "interp1",
+  "category": "math/interpolation",
+  "keywords": [
+    "interp1",
+    "interpolation",
+    "linear",
+    "nearest",
+    "spline",
+    "pchip"
+  ],
+  "summary": "Interpolate one-dimensional sampled data at query points.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "GPU inputs are gathered to the CPU reference implementation in this release. Linear and nearest interpolation are good future provider-kernel candidates."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "description": "`interp1(x, y, xq)` estimates values of a one-dimensional data set at query points `xq`. The default method is linear interpolation; `nearest`, `spline`, and `pchip` are also accepted.",
+  "behaviors": [
+    "`interp1(y, xq)` uses implicit sample points `1:numel(y)`.",
+    "`interp1(x, y, xq, method)` supports `linear`, `nearest`, `spline`, and `pchip`.",
+    "Out-of-range query points return `NaN` unless an extrapolation value or `'extrap'` is supplied.",
+    "Dense real numeric arrays are supported. GPU inputs gather to the host reference path."
+  ],
+  "examples": [
+    {
+      "description": "Linear interpolation",
+      "input": "x = [1 2 3];\ny = [10 20 40];\nyq = interp1(x, y, [1.5 2.5])",
+      "output": "yq = [15 30]"
+    },
+    {
+      "description": "Spline interpolation",
+      "input": "x = [1 2 3];\ny = [1 4 9];\nyq = interp1(x, y, [1.5 2.5], 'spline')",
+      "output": "yq = [2.25 6.25]"
+    }
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "yq = interp1(y, xq)\nyq = interp1(x, y, xq)\nyq = interp1(x, y, xq, method)\nyq = interp1(x, y, xq, method, 'extrap')"
+    },
+    "points": [
+      "`x` is a strictly increasing vector of sample locations. When omitted, RunMat uses `1:numel(y)`.",
+      "`y` contains the sampled values. Vector inputs produce vector outputs; matrix inputs are interpolated along the sample dimension.",
+      "`xq` contains query points. Scalar queries return scalars, and array queries preserve their shape.",
+      "`method` may be `linear`, `nearest`, `spline`, or `pchip`. The default is `linear`.",
+      "Out-of-range queries return `NaN` by default. Pass `'extrap'` to extrapolate or pass a scalar fill value."
+    ]
+  },
+  "links": [
+    {
+      "label": "spline",
+      "url": "./spline"
+    },
+    {
+      "label": "pchip",
+      "url": "./pchip"
+    },
+    {
+      "label": "interp2",
+      "url": "./interp2"
+    }
+  ],
+  "source": {
+    "label": "Open an issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  }
+}

@@ -190,6 +190,7 @@ async fn build_output(parsed: ParsedRandn) -> crate::BuiltinResult<Value> {
         RandnTemplate::Double => match parsed.dtype {
             NumericDType::F64 => randn_double(&parsed.shape),
             NumericDType::F32 => randn_single(&parsed.shape),
+            NumericDType::U8 | NumericDType::U16 => randn_double(&parsed.shape),
         },
         RandnTemplate::Like(proto) => randn_like(&proto, &parsed.shape).await,
     }
@@ -246,6 +247,7 @@ async fn randn_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => randn_single(shape),
             NumericDType::F64 => randn_double(shape),
+            NumericDType::U8 | NumericDType::U16 => randn_double(shape),
         },
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::LogicalArray(_) => {
             randn_double(shape)

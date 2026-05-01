@@ -1,0 +1,86 @@
+{
+  "title": "year",
+  "category": "datetime",
+  "keywords": [
+    "year",
+    "datetime",
+    "date component",
+    "calendar year"
+  ],
+  "summary": "Extract year numbers from datetime values.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/datetime.year.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "datetime values are host-side objects; `year` reads the stored serial-date data on the CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-ignition/tests/datetime.rs"
+  },
+  "description": "`year` extracts the calendar year from a datetime scalar or array and returns the result as doubles with the same shape as the input.",
+  "behaviors": [
+    "`year(t)` accepts datetime scalars and datetime arrays.",
+    "The output shape matches the input shape.",
+    "The returned values are numeric doubles, even when the years are mathematically integers.",
+    "Passing a non-datetime value raises a datetime-specific error."
+  ],
+  "examples": [
+    {
+      "description": "Extract the year from a scalar datetime",
+      "input": "t = datetime(2024, 4, 9, 13, 30, 0);\ny = year(t)",
+      "output": "y = 2024"
+    },
+    {
+      "description": "Extract years from a datetime array",
+      "input": "t = datetime([2024 2025], [1 6], [15 20]);\ny = year(t)",
+      "output": "y =\n     2024     2025"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `year` preserve the input shape?",
+      "answer": "Yes. A scalar datetime returns a scalar double, and datetime arrays return numeric arrays of the same size."
+    },
+    {
+      "question": "Does `year` return integers?",
+      "answer": "It returns MATLAB-style doubles whose values are whole-number years."
+    },
+    {
+      "question": "Does `year` run on the GPU?",
+      "answer": "No. datetime values are host-side objects, so `year` executes on the CPU."
+    }
+  ],
+  "links": [
+    {
+      "label": "datetime",
+      "url": "./datetime"
+    },
+    {
+      "label": "month",
+      "url": "./month"
+    },
+    {
+      "label": "day",
+      "url": "./day"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/datetime/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/datetime/mod.rs"
+  },
+  "gpu_residency": "No. `year` reads datetime objects on the CPU and returns ordinary host-side numeric arrays.",
+  "gpu_behavior": [
+    "`year` does not dispatch GPU kernels. If the datetime was produced from gathered numeric data, the result still remains a CPU numeric array."
+  ]
+}

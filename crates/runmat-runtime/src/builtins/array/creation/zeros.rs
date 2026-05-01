@@ -360,6 +360,9 @@ async fn zeros_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
         Value::Tensor(t) => match t.dtype {
             NumericDType::F32 => zeros_single(shape),
             NumericDType::F64 => zeros_double(shape),
+            NumericDType::U8 | NumericDType::U16 => tensor::zeros_with_dtype(shape, t.dtype)
+                .map(Value::Tensor)
+                .map_err(|e| builtin_error(format!("zeros: {e}"))),
         },
         Value::Num(_) | Value::Int(_) => zeros_double(shape),
         Value::CharArray(_) | Value::Cell(_) => zeros_double(shape),
@@ -415,6 +418,10 @@ fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult
     let precision = match dtype {
         NumericDType::F32 => ProviderPrecision::F32,
         NumericDType::F64 => ProviderPrecision::F64,
+        NumericDType::U8 | NumericDType::U16 => {
+            log_zeros_fallback(shape, dtype, "integer-dtype");
+            return Ok(None);
+        }
     };
     if provider.precision() != precision {
         log_zeros_fallback(shape, dtype, "precision-mismatch");

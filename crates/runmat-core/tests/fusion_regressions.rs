@@ -1,6 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use futures::executor::block_on;
+use runmat_builtins::Value;
 use runmat_core::RunMatSession;
 use runmat_gc::gc_test_context;
 use std::sync::Once;
@@ -17,11 +18,11 @@ fn ensure_fusion_regression_env() {
 
 fn read_scalar(engine: &mut RunMatSession, expr: &str) -> f64 {
     let result = block_on(engine.execute(expr)).expect("evaluate scalar expression");
-    let rendered = result
-        .value
-        .expect("scalar value should be available")
-        .to_string();
-    rendered.parse().expect("scalar should render as f64")
+    match result.value.expect("scalar value should be available") {
+        Value::Num(value) => value,
+        Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+        other => panic!("expected scalar numeric value, got {other:?}"),
+    }
 }
 
 #[test]

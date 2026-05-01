@@ -2,7 +2,7 @@
 
 use log::trace;
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, IntValue, Tensor, Value};
+use runmat_builtins::{CharArray, IntValue, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::{
@@ -131,6 +131,7 @@ fn uint16_tensor_to_host(mut tensor: Tensor) -> Tensor {
     for value in &mut tensor.data {
         *value = cast_scalar_to_uint16(*value) as f64;
     }
+    tensor.dtype = NumericDType::U16;
     tensor
 }
 

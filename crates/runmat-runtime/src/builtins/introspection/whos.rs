@@ -521,7 +521,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use crate::call_builtin_async;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, CharArray, StructValue as TestStruct, Tensor};
+    use runmat_builtins::{CellArray, CharArray, NumericDType, StructValue as TestStruct, Tensor};
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
     use std::collections::{HashMap, HashSet};
@@ -985,5 +985,40 @@ pub(crate) mod tests {
         };
         let expected = elem * tensor.data.len() as f64;
         assert!((bytes - expected).abs() < 1e-6);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn whos_reports_f64_width_for_integer_typed_tensors() {
+        // Tensor.data is always Vec<f64> (8 bytes/element) regardless of dtype.
+        let _guard = workspace_guard();
+        ensure_test_resolver();
+        let u8_tensor =
+            Tensor::new_with_dtype(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::U8).unwrap();
+        let u16_tensor =
+            Tensor::new_with_dtype(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::U16)
+                .unwrap();
+        set_workspace(
+            &[
+                ("u8mat", Value::Tensor(u8_tensor)),
+                ("u16mat", Value::Tensor(u16_tensor)),
+            ],
+            &[],
+        );
+
+        let value = whos_builtin(Vec::new()).expect("whos");
+        let entries = structs_from_value(value);
+
+        let u8_entry = entries
+            .iter()
+            .find(|st| field_string(st, "name").as_deref() == Some("u8mat"))
+            .expect("u8mat");
+        assert_eq!(field_bytes(u8_entry).unwrap(), 32.0);
+
+        let u16_entry = entries
+            .iter()
+            .find(|st| field_string(st, "name").as_deref() == Some("u16mat"))
+            .expect("u16mat");
+        assert_eq!(field_bytes(u16_entry).unwrap(), 32.0);
     }
 }

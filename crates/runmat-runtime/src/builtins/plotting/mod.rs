@@ -64,6 +64,8 @@ pub(crate) mod hold;
 pub(crate) mod image;
 #[path = "ops/imagesc.rs"]
 pub(crate) mod imagesc;
+#[path = "ops/imshow.rs"]
+pub(crate) mod imshow;
 #[path = "ops/isgraphics.rs"]
 pub(crate) mod isgraphics;
 #[path = "ops/ishandle.rs"]

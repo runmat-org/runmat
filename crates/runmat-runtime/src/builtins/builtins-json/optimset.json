@@ -1,0 +1,45 @@
+{
+  "title": "optimset",
+  "category": "math/optim",
+  "keywords": ["optimset", "options", "TolX", "TolFun", "MaxIter", "Display"],
+  "summary": "Create or update an optimization options structure for fzero and fsolve.",
+  "references": ["https://www.mathworks.com/help/matlab/ref/optimset.html"],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Options are host metadata."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::optim::optimset::tests"
+  },
+  "description": "`opts = optimset(name, value, ...)` creates a struct of optimization options. `opts = optimset(old, name, value, ...)` copies an existing options struct and applies overrides.",
+  "behaviors": [
+    "Option names are case-insensitive for the builtins that consume them.",
+    "`TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, and `Display` are canonicalized when constructed with `optimset`.",
+    "Unknown option names are preserved so future solvers can read them."
+  ],
+  "examples": [
+    {
+      "description": "Create options for fzero",
+      "input": "opts = optimset('TolX', 1e-10, 'Display', 'off');\nx = fzero(@sin, [3 4], opts)",
+      "output": "x =\n    3.1416"
+    }
+  ],
+  "links": [
+    { "label": "fzero", "url": "./fzero" },
+    { "label": "fsolve", "url": "./fsolve" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/optim/optimset.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/optim/optimset.rs"
+  }
+}

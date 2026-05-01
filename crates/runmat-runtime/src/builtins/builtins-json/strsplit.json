@@ -1,0 +1,109 @@
+{
+  "title": "strsplit",
+  "category": "strings/transform",
+  "keywords": [
+    "strsplit",
+    "split string",
+    "character vector split",
+    "CollapseDelimiters",
+    "DelimiterType",
+    "matches"
+  ],
+  "summary": "Split a string scalar or character vector into substrings using simple or regular-expression delimiters.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/strsplit.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Executes on the CPU; GPU-resident text or delimiters are gathered to host memory before splitting."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::strings::transform::split::tests::strsplit_string_scalar_returns_string_array",
+    "regex": "builtins::strings::transform::split::tests::strsplit_regular_expression_mode"
+  },
+  "description": "`strsplit(str)` splits a string scalar or character vector into substrings. RunMat implements the MATLAB-style scalar-text API, including `'CollapseDelimiters'`, `'DelimiterType'`, and the optional second output containing the matched delimiters.",
+  "behaviors": [
+    "The first argument must be scalar text: a string scalar or a character vector. Unlike `split`, `strsplit` does not accept string arrays, character matrices, or cell arrays of text.",
+    "When you omit the delimiter, `strsplit` splits on MATLAB's default whitespace set (`' '`, `\\f`, `\\n`, `\\r`, `\\t`, `\\v`) and collapses consecutive delimiters.",
+    "Explicit delimiters default to `'CollapseDelimiters', true`, so adjacent delimiters are grouped unless you opt out.",
+    "Set `'DelimiterType', 'RegularExpression'` to interpret delimiters as regex patterns. In `'Simple'` mode, delimiters are matched literally and special regex characters are escaped.",
+    "String input returns a row string array. Character-vector input returns a row cell array of text elements."
+  ],
+  "examples": [
+    {
+      "description": "Split A Character Vector On Whitespace",
+      "input": "txt = 'The rain in Spain.';\nparts = strsplit(txt)",
+      "output": "parts = 1x4 cell\n    {'The'}    {'rain'}    {'in'}    {'Spain.'}"
+    },
+    {
+      "description": "Split Using A Literal Delimiter",
+      "input": "csv = \"alpha,beta,gamma\";\nparts = strsplit(csv, \",\")",
+      "output": "parts = 1x3 string\n    \"alpha\"    \"beta\"    \"gamma\""
+    },
+    {
+      "description": "Return The Matched Delimiters",
+      "input": "[parts, matches] = strsplit(\"a,,b,\", \",\")",
+      "output": "parts = 1x3 string\n    \"a\"    \"b\"    \"\"\n\nmatches = 1x2 string\n    \",,\"    \",\""
+    },
+    {
+      "description": "Use A Regular Expression Delimiter",
+      "input": "[parts, matches] = strsplit(\"1.21m/s 1.985 m/s\", \"\\s*m/s\\s*\", \"DelimiterType\", \"RegularExpression\")",
+      "output": "parts = 1x3 string\n    \"1.21\"    \"1.985\"    \"\"\n\nmatches = 1x2 string\n    \"m/s \"    \" m/s\""
+    },
+    {
+      "description": "Preserve Empty Fields",
+      "input": "parts = strsplit(\"a,,b\", \",\", \"CollapseDelimiters\", false)",
+      "output": "parts = 1x3 string\n    \"a\"    \"\"    \"b\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `strsplit` different from `split`?",
+      "answer": "`strsplit` is the scalar-text API that mirrors MATLAB's older function shape, including optional `matches` output and regex delimiter mode. `split` is the vectorized string-array builtin."
+    },
+    {
+      "question": "What does the second output contain?",
+      "answer": "The optional `matches` output returns the delimiter text that produced each split. When delimiters are collapsed, adjacent delimiter runs are grouped into the matched text."
+    },
+    {
+      "question": "Can `strsplit` use regular expressions?",
+      "answer": "Yes. Pass `'DelimiterType', 'RegularExpression'` and provide delimiter patterns as regex fragments."
+    },
+    {
+      "question": "Does `strsplit` accept string arrays?",
+      "answer": "No. RunMat currently restricts `strsplit` to scalar text, matching MATLAB's documented scalar-input API."
+    }
+  ],
+  "links": [
+    {
+      "label": "split",
+      "url": "./split"
+    },
+    {
+      "label": "strjoin",
+      "url": "./strjoin"
+    },
+    {
+      "label": "regexp",
+      "url": "./regexp"
+    },
+    {
+      "label": "join",
+      "url": "./join"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/strings/transform/split.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/strings/transform/split.rs"
+  }
+}

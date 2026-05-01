@@ -5,7 +5,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::common::format::format_variadic;
+use crate::builtins::common::format::{complex_to_string, format_variadic, number_to_string};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -441,14 +441,14 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
             shape: t.shape,
         }),
         Value::Complex(re, im) => Ok(ArgumentData {
-            values: vec![Value::String(Value::Complex(re, im).to_string())],
+            values: vec![Value::String(complex_to_string(re, im))],
             shape: vec![1, 1],
         }),
         Value::ComplexTensor(t) => Ok(ArgumentData {
             values: t
                 .data
                 .into_iter()
-                .map(|(re, im)| Value::String(Value::Complex(re, im).to_string()))
+                .map(|(re, im)| Value::String(complex_to_string(re, im)))
                 .collect(),
             shape: t.shape,
         }),
@@ -506,9 +506,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                             }
                             Value::Num(if la.data[0] != 0 { 1.0 } else { 0.0 })
                         }
-                        Value::Complex(re, im) => {
-                            Value::String(Value::Complex(re, im).to_string())
-                        }
+                        Value::Complex(re, im) => Value::String(complex_to_string(re, im)),
                         Value::ComplexTensor(t) => {
                             if t.data.len() != 1 {
                                 return Err(string_flow(
@@ -516,7 +514,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                                 ));
                             }
                             let (re, im) = t.data[0];
-                            Value::String(Value::Complex(re, im).to_string())
+                            Value::String(complex_to_string(re, im))
                         }
                         other => {
                             return Err(string_flow(format!(
@@ -573,10 +571,10 @@ async fn convert_to_string_array(
         Value::ComplexTensor(tensor) => complex_tensor_to_string_array(tensor),
         Value::LogicalArray(logical) => logical_array_to_string_array(logical),
         Value::Cell(cell) => cell_array_to_string_array(cell, encoding).await,
-        Value::Num(n) => string_scalar(Value::Num(n).to_string()),
+        Value::Num(n) => string_scalar(number_to_string(n)),
         Value::Int(i) => string_scalar(int_value_to_string(&i)),
         Value::Bool(b) => string_scalar(bool_to_string(b).to_string()),
-        Value::Complex(re, im) => string_scalar(Value::Complex(re, im).to_string()),
+        Value::Complex(re, im) => string_scalar(complex_to_string(re, im)),
         Value::GpuTensor(handle) => {
             // Defensive fallback: gather and retry.
             let gathered = gather_if_needed_async(&Value::GpuTensor(handle))
@@ -636,7 +634,7 @@ fn char_array_to_string_array(
 fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
     let mut strings = Vec::with_capacity(tensor.data.len());
     for &value in &tensor.data {
-        strings.push(Value::Num(value).to_string());
+        strings.push(number_to_string(value));
     }
     StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
 }
@@ -644,7 +642,7 @@ fn tensor_to_string_array(tensor: Tensor) -> BuiltinResult<StringArray> {
 fn complex_tensor_to_string_array(tensor: ComplexTensor) -> BuiltinResult<StringArray> {
     let mut strings = Vec::with_capacity(tensor.data.len());
     for &(re, im) in &tensor.data {
-        strings.push(Value::Complex(re, im).to_string());
+        strings.push(complex_to_string(re, im));
     }
     StringArray::new(strings, tensor.shape).map_err(|e| string_flow(format!("string: {e}")))
 }
@@ -714,7 +712,7 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
                 ))
             }
         }
-        Value::Num(n) => Ok(Value::Num(*n).to_string()),
+        Value::Num(n) => Ok(number_to_string(*n)),
         Value::Int(i) => Ok(int_value_to_string(i)),
         Value::Bool(b) => Ok(bool_to_string(*b).to_string()),
         Value::LogicalArray(array) => {
@@ -726,16 +724,16 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
         }
         Value::Tensor(t) => {
             if t.data.len() == 1 {
-                Ok(Value::Num(t.data[0]).to_string())
+                Ok(number_to_string(t.data[0]))
             } else {
                 Err(string_flow("string: cell numeric values must be scalar"))
             }
         }
-        Value::Complex(re, im) => Ok(Value::Complex(*re, *im).to_string()),
+        Value::Complex(re, im) => Ok(complex_to_string(*re, *im)),
         Value::ComplexTensor(t) => {
             if t.data.len() == 1 {
                 let (re, im) = t.data[0];
-                Ok(Value::Complex(re, im).to_string())
+                Ok(complex_to_string(re, im))
             } else {
                 Err(string_flow("string: cell complex values must be scalar"))
             }

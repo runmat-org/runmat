@@ -1,5 +1,7 @@
 pub use inventory;
 use runmat_gc_api::GcPtr;
+use runmat_thread_local::runmat_thread_local;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
@@ -187,6 +189,28 @@ impl Default for StructValue {
 pub enum NumericDType {
     F64,
     F32,
+    U8,
+    U16,
+}
+
+impl NumericDType {
+    pub fn class_name(self) -> &'static str {
+        match self {
+            NumericDType::F64 => "double",
+            NumericDType::F32 => "single",
+            NumericDType::U8 => "uint8",
+            NumericDType::U16 => "uint16",
+        }
+    }
+
+    pub fn byte_size(self) -> usize {
+        match self {
+            NumericDType::F64 => 8,
+            NumericDType::F32 => 4,
+            NumericDType::U8 => 1,
+            NumericDType::U16 => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -598,7 +622,7 @@ impl fmt::Display for Tensor {
                     if i > 0 {
                         write!(f, " ")?;
                     }
-                    write!(f, "{}", format_number_short_g(*v))?;
+                    write!(f, "{}", format_number(*v))?;
                 }
                 write!(f, "]")
             }
@@ -614,7 +638,7 @@ impl fmt::Display for Tensor {
                             write!(f, "  ")?;
                         }
                         let v = self.data[r + c * rows];
-                        write!(f, "{}", format_number_short_g(v))?;
+                        write!(f, "{}", format_number(v))?;
                     }
                 }
                 Ok(())
@@ -622,7 +646,7 @@ impl fmt::Display for Tensor {
             _ => {
                 if should_expand_nd_display(&self.shape) {
                     write_nd_pages(f, &self.shape, |f, idx| {
-                        write!(f, "{}", format_number_short_g(self.data[idx]))
+                        write!(f, "{}", format_number(self.data[idx]))
                     })
                 } else {
                     write!(f, "Tensor(shape={:?})", self.shape)
@@ -1625,7 +1649,42 @@ pub fn builtin_docs() -> Vec<&'static BuiltinDoc> {
 // Display implementations
 // ----------------------
 
-fn format_number_short_g(value: f64) -> String {
+/// Controls how numeric values are displayed in the console, mirroring MATLAB's `format` command.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum FormatMode {
+    /// 4 decimal places, fixed or scientific (MATLAB default).
+    #[default]
+    Short,
+    /// 15 decimal places, fixed or scientific.
+    Long,
+    /// Always scientific notation, 4 decimal places.
+    ShortE,
+    /// Always scientific notation, 14 decimal places.
+    LongE,
+    /// Compact: shorter of fixed/scientific, 5 significant digits.
+    ShortG,
+    /// Compact: shorter of fixed/scientific, 15 significant digits.
+    LongG,
+    /// Rational approximation (p/q).
+    Rational,
+    /// IEEE 754 hexadecimal representation.
+    Hex,
+}
+
+runmat_thread_local! {
+    static DISPLAY_FORMAT: RefCell<FormatMode> = const { RefCell::new(FormatMode::Short) };
+}
+
+pub fn set_display_format(mode: FormatMode) {
+    DISPLAY_FORMAT.with(|c| *c.borrow_mut() = mode);
+}
+
+pub fn get_display_format() -> FormatMode {
+    DISPLAY_FORMAT.with(|c| *c.borrow())
+}
+
+/// Format a number using the current thread-local display format.
+pub fn format_number(value: f64) -> String {
     if value.is_nan() {
         return "NaN".to_string();
     }
@@ -1637,59 +1696,111 @@ fn format_number_short_g(value: f64) -> String {
         }
         .to_string();
     }
-    // Normalize -0.0 to 0
-    let mut v = value;
-    if v == 0.0 {
-        v = 0.0;
+    let mode = get_display_format();
+    if mode == FormatMode::Hex {
+        return fmt_hex(value);
     }
+    let v = if value == 0.0 { 0.0 } else { value };
+    match mode {
+        FormatMode::Short => fmt_short(v),
+        FormatMode::Long => fmt_long(v),
+        FormatMode::ShortE => fmt_sci(v, 4),
+        FormatMode::LongE => fmt_sci(v, 14),
+        FormatMode::ShortG => fmt_compact(v, 5),
+        FormatMode::LongG => fmt_compact(v, 15),
+        FormatMode::Rational => fmt_rational(v),
+        FormatMode::Hex => unreachable!("hex mode handled before zero normalization"),
+    }
+}
 
+/// Reformat Rust's `e`-notation exponent into MATLAB style (`e+02`, `e-03`).
+fn matlab_exp(s: &str) -> String {
+    if let Some(e_pos) = s.find('e') {
+        let mantissa = &s[..e_pos];
+        let exp: i32 = s[e_pos + 1..].parse().unwrap_or(0);
+        let sign = if exp >= 0 { '+' } else { '-' };
+        format!("{mantissa}e{sign}{:02}", exp.unsigned_abs())
+    } else {
+        s.to_string()
+    }
+}
+
+fn fmt_sci(v: f64, dec: usize) -> String {
+    if v == 0.0 {
+        return format!("0.{:0>dec$}e+00", 0, dec = dec);
+    }
+    let s = format!("{v:.dec$e}");
+    matlab_exp(&s)
+}
+
+fn fmt_short(v: f64) -> String {
     let abs = v.abs();
     if abs == 0.0 {
         return "0".to_string();
     }
-
-    // Decide between fixed and scientific notation roughly like short g
-    let use_scientific = !(1e-4..1e6).contains(&abs);
-
-    if use_scientific {
-        // 5 significant digits in scientific notation for short g style
-        let s = format!("{v:.4e}");
-        // Trim trailing zeros in fraction part
-        if let Some(idx) = s.find('e') {
-            let (mut mantissa, exp) = s.split_at(idx);
-            // mantissa like "-1.23450"
-            if let Some(dot_idx) = mantissa.find('.') {
-                // Trim trailing zeros
-                let mut end = mantissa.len();
-                while end > dot_idx + 1 && mantissa.as_bytes()[end - 1] == b'0' {
-                    end -= 1;
-                }
-                if end > 0 && mantissa.as_bytes()[end - 1] == b'.' {
-                    end -= 1;
-                }
-                mantissa = &mantissa[..end];
-            }
-            return format!("{mantissa}{exp}");
-        }
-        return s;
+    if v.fract() == 0.0 && abs < 1e15 {
+        return format!("{}", v as i64);
     }
+    if (0.001..10000.0).contains(&abs) {
+        format!("{:.4}", v)
+    } else {
+        fmt_sci(v, 4)
+    }
+}
 
-    // Fixed notation with up to 12 significant digits, trim trailing zeros
-    // Compute number of decimals to retain to reach ~12 significant digits
-    let exp10 = abs.log10().floor() as i32; // position of most significant digit
-    let sig_digits: i32 = 12;
-    let decimals = (sig_digits - 1 - exp10).clamp(0, 12) as usize;
-    // Round to that many decimals
+fn fmt_long(v: f64) -> String {
+    let abs = v.abs();
+    if abs == 0.0 {
+        return "0".to_string();
+    }
+    if v.fract() == 0.0 && abs < 1e15 {
+        return format!("{}", v as i64);
+    }
+    if (0.001..10000.0).contains(&abs) {
+        format!("{:.15}", v)
+    } else {
+        fmt_sci(v, 14)
+    }
+}
+
+fn fmt_compact(v: f64, sig_digits: usize) -> String {
+    let abs = v.abs();
+    if abs == 0.0 {
+        return "0".to_string();
+    }
+    let use_scientific = !(1e-4..1e6).contains(&abs);
+    if use_scientific {
+        let dec = sig_digits - 1;
+        let s = format!("{v:.dec$e}");
+        // trim trailing zeros in mantissa then reformat exponent
+        if let Some(e_pos) = s.find('e') {
+            let exp_part = &s[e_pos..];
+            let mut mantissa = s[..e_pos].to_string();
+            if let Some(dot) = mantissa.find('.') {
+                let mut end = mantissa.len();
+                while end > dot + 1 && mantissa.as_bytes()[end - 1] == b'0' {
+                    end -= 1;
+                }
+                if mantissa.as_bytes()[end - 1] == b'.' {
+                    end -= 1;
+                }
+                mantissa.truncate(end);
+            }
+            return matlab_exp(&format!("{mantissa}{exp_part}"));
+        }
+        return matlab_exp(&s);
+    }
+    let exp10 = abs.log10().floor() as i32;
+    let decimals = ((sig_digits as i32 - 1 - exp10).max(0)) as usize;
     let pow = 10f64.powi(decimals as i32);
     let rounded = (v * pow).round() / pow;
     let mut s = format!("{rounded:.decimals$}");
     if let Some(dot) = s.find('.') {
-        // Trim trailing zeros
         let mut end = s.len();
         while end > dot + 1 && s.as_bytes()[end - 1] == b'0' {
             end -= 1;
         }
-        if end > 0 && s.as_bytes()[end - 1] == b'.' {
+        if s.as_bytes()[end - 1] == b'.' {
             end -= 1;
         }
         s.truncate(end);
@@ -1698,6 +1809,64 @@ fn format_number_short_g(value: f64) -> String {
         s = "0".to_string();
     }
     s
+}
+
+fn fmt_rational(v: f64) -> String {
+    if v == 0.0 {
+        return "0".to_string();
+    }
+    let negative = v < 0.0;
+    let abs = v.abs();
+    if v.fract() == 0.0 && abs < 1e15 {
+        return format!("{}", v as i64);
+    }
+    // Continued fraction convergents; stop at the first one within MATLAB's
+    // 5e-7 relative tolerance (matches `format rational` behaviour for pi → 355/113).
+    let tol = 5e-7 * abs;
+    let max_d = 1_000_000i64;
+    let mut n0: i64 = 1;
+    let mut n1: i64 = abs.floor() as i64;
+    let mut d0: i64 = 0;
+    let mut d1: i64 = 1;
+    let mut a = abs;
+    let mut best_n = n1;
+    let mut best_d = d1;
+    for _ in 0..50 {
+        if (abs - best_n as f64 / best_d as f64).abs() <= tol {
+            break;
+        }
+        let f = a.fract();
+        if f < 1e-10 {
+            break;
+        }
+        a = 1.0 / f;
+        let q = a.floor() as i64;
+        let Some(n2) = q.checked_mul(n1).and_then(|v| v.checked_add(n0)) else {
+            break;
+        };
+        let Some(d2) = q.checked_mul(d1).and_then(|v| v.checked_add(d0)) else {
+            break;
+        };
+        if d2 > max_d {
+            break;
+        }
+        best_n = n2;
+        best_d = d2;
+        n0 = n1;
+        n1 = n2;
+        d0 = d1;
+        d1 = d2;
+    }
+    let sign = if negative { "-" } else { "" };
+    if best_d == 1 {
+        format!("{sign}{best_n}")
+    } else {
+        format!("{sign}{best_n}/{best_d}")
+    }
+}
+
+fn fmt_hex(v: f64) -> String {
+    format!("{:016x}", v.to_bits())
 }
 
 // -------- Exception type --------
@@ -1759,26 +1928,16 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Int(i) => write!(f, "{}", i.to_i64()),
-            Value::Num(n) => write!(f, "{}", format_number_short_g(*n)),
+            Value::Num(n) => write!(f, "{}", format_number(*n)),
             Value::Complex(re, im) => {
                 if *im == 0.0 {
-                    write!(f, "{}", format_number_short_g(*re))
+                    write!(f, "{}", format_number(*re))
                 } else if *re == 0.0 {
-                    write!(f, "{}i", format_number_short_g(*im))
+                    write!(f, "{}i", format_number(*im))
                 } else if *im < 0.0 {
-                    write!(
-                        f,
-                        "{}-{}i",
-                        format_number_short_g(*re),
-                        format_number_short_g(im.abs())
-                    )
+                    write!(f, "{}-{}i", format_number(*re), format_number(im.abs()))
                 } else {
-                    write!(
-                        f,
-                        "{}+{}i",
-                        format_number_short_g(*re),
-                        format_number_short_g(*im)
-                    )
+                    write!(f, "{}+{}i", format_number(*re), format_number(*im))
                 }
             }
             Value::Bool(b) => write!(f, "{}", if *b { 1 } else { 0 }),
@@ -1903,7 +2062,28 @@ impl fmt::Display for ComplexTensor {
 
 #[cfg(test)]
 mod display_tests {
-    use super::{ComplexTensor, LogicalArray, Tensor};
+    use super::{
+        fmt_rational, format_number, set_display_format, ComplexTensor, FormatMode, LogicalArray,
+        Tensor,
+    };
+
+    #[test]
+    fn fmt_rational_large_value_with_tiny_fract_does_not_overflow() {
+        // abs ~1e15 with a small fractional part: q*n1 would overflow i64 without
+        // checked arithmetic.
+        let result = std::panic::catch_unwind(|| fmt_rational(1_000_000_000_000_000.000_1));
+        assert!(
+            result.is_ok(),
+            "fmt_rational panicked on large value with tiny fract"
+        );
+
+        // Negative counterpart.
+        let result = std::panic::catch_unwind(|| fmt_rational(-1_000_000_000_000_000.000_1));
+        assert!(
+            result.is_ok(),
+            "fmt_rational panicked on negative large value with tiny fract"
+        );
+    }
 
     #[test]
     fn tensor_nd_display_uses_page_headers() {
@@ -1946,6 +2126,14 @@ mod display_tests {
         let rendered = complex.to_string();
         assert!(rendered.contains("(:, :, 1) ="));
         assert!(rendered.contains("(:, :, 2) ="));
+    }
+
+    #[test]
+    fn format_hex_preserves_negative_zero_sign_bit() {
+        set_display_format(FormatMode::Hex);
+        assert_eq!(format_number(-0.0), "8000000000000000");
+        assert_eq!(format_number(0.0), "0000000000000000");
+        set_display_format(FormatMode::Short);
     }
 }
 

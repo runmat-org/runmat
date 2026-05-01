@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use log::warn;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
 
@@ -353,15 +353,20 @@ fn build_truecolor_image_surface(
     let rows = x_axis.len();
     let cols = y_axis.len();
     let channels = tensor.shape.get(2).copied().unwrap_or(3);
+    let scale = match tensor.dtype {
+        NumericDType::U8 => 1.0f32 / 255.0,
+        NumericDType::U16 => 1.0f32 / 65535.0,
+        NumericDType::F32 | NumericDType::F64 => 1.0,
+    };
     let mut grid = vec![vec![glam::Vec4::ZERO; cols]; rows];
     for row in 0..rows {
         for col in 0..cols {
             let base = row + rows * col;
-            let r = tensor.data[base] as f32;
-            let g = tensor.data[base + rows * cols] as f32;
-            let b = tensor.data[base + 2 * rows * cols] as f32;
+            let r = tensor.data[base] as f32 * scale;
+            let g = tensor.data[base + rows * cols] as f32 * scale;
+            let b = tensor.data[base + 2 * rows * cols] as f32 * scale;
             let a = if channels == 4 {
-                tensor.data[base + 3 * rows * cols] as f32
+                tensor.data[base + 3 * rows * cols] as f32 * scale
             } else {
                 1.0
             };

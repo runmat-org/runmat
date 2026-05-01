@@ -275,6 +275,10 @@ impl HistWeightsInput {
                         data: values,
                         total_weight: total,
                     }),
+                    NumericDType::U8 | NumericDType::U16 => Ok(HistogramGpuWeights::HostF64 {
+                        data: values,
+                        total_weight: total,
+                    }),
                 }
             }
             HistWeightsInput::Gpu(handle) => {
