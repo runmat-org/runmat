@@ -263,7 +263,7 @@ fn send_request_impl(request: &HttpRequest) -> Result<HttpResponse, TransportErr
         return Err(TransportError::new(
             TransportErrorKind::Connect,
             &request.url,
-            "status code 0",
+            wasm_network_detail("browser reported status code 0"),
         ));
     }
 
@@ -305,12 +305,27 @@ fn map_js_error(url: &Url, err: JsValue) -> TransportError {
         if name.eq_ignore_ascii_case("TimeoutError") {
             TransportError::new(TransportErrorKind::Timeout, url, dom.message())
         } else if name.eq_ignore_ascii_case("NetworkError") {
-            TransportError::new(TransportErrorKind::Connect, url, dom.message())
+            TransportError::new(
+                TransportErrorKind::Connect,
+                url,
+                wasm_network_detail(dom.message()),
+            )
         } else {
             TransportError::new(TransportErrorKind::Other, url, dom.message())
         }
     } else {
         TransportError::new(TransportErrorKind::Other, url, format!("{err:?}"))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn wasm_network_detail(message: impl AsRef<str>) -> String {
+    let message = message.as_ref().trim();
+    let suffix = "In browser/WASM, remote URLs must be reachable from the browser and must permit cross-origin access (CORS). Use a CORS-enabled URL, upload/read a local file, or route the image through a same-origin proxy.";
+    if message.is_empty() {
+        suffix.to_string()
+    } else {
+        format!("{message}. {suffix}")
     }
 }
 

@@ -211,6 +211,7 @@ async fn call_builtin_async_impl(
             categorized.push(b);
         }
     }
+    let matching_count = no_category.len() + categorized.len();
 
     // Try each builtin until one succeeds. Within each group, prefer later-registered
     // implementations to allow overrides when names collide.
@@ -248,6 +249,13 @@ async fn call_builtin_async_impl(
                 }
             }
         }
+    }
+
+    // A single implementation already knows whether its inputs are invalid or
+    // whether execution failed. Preserve that error verbatim instead of
+    // presenting it as overload resolution noise.
+    if matching_count == 1 || last_error.identifier().is_some() {
+        return Err(last_error);
     }
 
     // If none succeeded, return the last error

@@ -1771,6 +1771,24 @@
     ]
   },
   {
+    "title": "imread",
+    "slug": "imread",
+    "summary": "Read image data from an uploaded file into MATLAB-compatible arrays.",
+    "keywords": [
+      "imread",
+      "image",
+      "read image",
+      "png",
+      "jpeg",
+      "jpg",
+      "tiff",
+      "bmp",
+      "gif",
+      "webp",
+      "upload"
+    ]
+  },
+  {
     "title": "ind2sub",
     "slug": "ind2sub",
     "summary": "Convert MATLAB column-major linear indices into per-dimension subscript arrays.",

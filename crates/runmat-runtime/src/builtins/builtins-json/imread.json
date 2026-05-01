@@ -1,0 +1,120 @@
+{
+  "title": "imread",
+  "category": "image/io",
+  "keywords": [
+    "imread",
+    "image",
+    "read image",
+    "png",
+    "jpeg",
+    "jpg",
+    "tiff",
+    "bmp",
+    "gif",
+    "webp",
+    "upload"
+  ],
+  "summary": "Read image data from an uploaded file into MATLAB-compatible arrays.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/imread.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`imread` performs host-side file or network I/O and CPU decoding. Results are host tensors; wrap with `gpuArray` if device residency is needed after import."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::image::imread::tests",
+    "integration": "builtins::image::imread::tests::imread_fetches_http_url"
+  },
+  "description": "`imread(filename)` reads raster image data into dense column-major tensors using MATLAB-compatible shape conventions. Grayscale images return an MxN array, RGB images return an MxNx3 truecolor array, and alpha channels are available through the third output. Due to CORS and browser security restrictions, `file://` and `http://`/`https://` URLs are not currently supported — upload your image first and pass the resulting filename to `imread`.",
+  "behaviors": [
+    "Accepts a character vector or string scalar for the image source.",
+    "Due to CORS and browser security restrictions, `file://` URLs and `http://`/`https://` URLs are not currently supported. Upload your image first and pass the resulting filename to `imread`.",
+    "Accepts an optional explicit format hint: `imread(filename, format)`. Common hints include `png`, `jpg`, `jpeg`, `tif`, `tiff`, `bmp`, `gif`, and `webp`.",
+    "Without a format hint, RunMat detects the image format from the byte stream.",
+    "Grayscale images return MxN tensors. RGB and RGBA images return MxNx3 truecolor tensors using red, green, and blue planes along the third dimension.",
+    "8-bit images return `uint8` tensors and 16-bit images return `uint16` tensors. Floating-point images return `single` tensors when the decoder exposes floating-point pixel data.",
+    "For `[X, map] = imread(...)`, RunMat returns `X` and an empty colormap for direct-color formats.",
+    "For `[X, map, alpha] = imread(...)`, RunMat returns alpha as an MxN tensor when the source image has an alpha channel; otherwise alpha is empty.",
+    "Animated image frame selection and indexed colormap extraction are not implemented yet; current decoding returns the first decoded image frame as direct pixel data."
+  ],
+  "examples": [
+    {
+      "description": "Read A Local PNG",
+      "input": "img = imread(\"logo.png\");\nsize(img)",
+      "output": "ans =\n    rows    cols     3"
+    },
+    {
+      "description": "Get Alpha Separately",
+      "input": "[rgb, map, alpha] = imread(\"icon.png\");\nsize(alpha)",
+      "output": "ans =\n    rows    cols"
+    },
+    {
+      "description": "Use An Explicit Format Hint",
+      "input": "img = imread(\"raw-download\", \"jpg\");",
+      "output": "% Decodes the bytes as JPEG even when the file name has no extension."
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What shape does `imread` return for RGB images?",
+      "answer": "RGB images return an MxNx3 tensor where the third dimension stores red, green, and blue planes. Data is stored in RunMat's column-major tensor layout while preserving MATLAB indexing semantics."
+    },
+    {
+      "question": "Where is the alpha channel returned?",
+      "answer": "Use the three-output form: `[X, map, alpha] = imread(filename)`. Direct-color images return an empty colormap in `map`; alpha is an MxN tensor when present."
+    },
+    {
+      "question": "Can `imread` load `file://` or HTTP URLs?",
+      "answer": "Not currently. Due to CORS and browser security restrictions, `file://` and `http://`/`https://` URLs are blocked. Upload your image first and pass the resulting filename to `imread`."
+    },
+    {
+      "question": "Does `imread` return GPU arrays?",
+      "answer": "No. Image reading performs host I/O and CPU decoding, so outputs are host tensors. Call `gpuArray(imread(...))` if subsequent processing should run on the GPU."
+    },
+    {
+      "question": "Are animated GIF frames supported?",
+      "answer": "Not yet. The current decoder returns the first decoded image frame as direct pixel data."
+    }
+  ],
+  "links": [
+    {
+      "label": "image",
+      "url": "./image"
+    },
+    {
+      "label": "imagesc",
+      "url": "./imagesc"
+    },
+    {
+      "label": "class",
+      "url": "./class"
+    },
+    {
+      "label": "size",
+      "url": "./size"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/image/imread.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/imread.rs"
+  },
+  "gpu_residency": "`imread` always returns host-resident tensors because file and network I/O plus image decoding occur on the CPU. Use `gpuArray` after reading if later operations should use device residency.",
+  "gpu_behavior": [
+    "`imread` does not dispatch provider kernels and is not fusion eligible. GPU-resident scalar string inputs are gathered before decoding, and decoded pixel tensors remain on the host."
+  ]
+}

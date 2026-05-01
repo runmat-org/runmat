@@ -1,11 +1,10 @@
-use runmat_builtins::{LogicalArray, NumericDType, Value};
+use runmat_builtins::{LogicalArray, Value};
 
 /// MATLAB-style class name for a runtime value.
 pub fn matlab_class_name(value: &Value) -> String {
     match value {
-        Value::Num(_) | Value::Tensor(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => {
-            "double".to_string()
-        }
+        Value::Num(_) | Value::ComplexTensor(_) | Value::Complex(_, _) => "double".to_string(),
+        Value::Tensor(tensor) => tensor.dtype.class_name().to_string(),
         Value::Int(iv) => iv.class_name().to_string(),
         Value::Bool(_) | Value::LogicalArray(_) => "logical".to_string(),
         Value::String(_) | Value::StringArray(_) => "string".to_string(),
@@ -56,10 +55,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
 pub fn numeric_dtype_label(value: &Value) -> Option<&'static str> {
     match value {
         Value::Num(_) | Value::Complex(_, _) => Some("double"),
-        Value::Tensor(t) => Some(match t.dtype {
-            NumericDType::F32 => "single",
-            NumericDType::F64 => "double",
-        }),
+        Value::Tensor(t) => Some(t.dtype.class_name()),
         Value::LogicalArray(_) => Some("logical"),
         Value::Int(iv) => Some(iv.class_name()),
         _ => None,
@@ -72,7 +68,7 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
         Value::Num(_) | Value::Int(_) | Value::Complex(_, _) => 8,
         Value::Bool(_) => 1,
         Value::LogicalArray(arr) => arr.data.len() as u64,
-        Value::Tensor(t) => (t.data.len() * 8) as u64,
+        Value::Tensor(t) => (t.data.len() * t.dtype.byte_size()) as u64,
         Value::ComplexTensor(t) => (t.data.len() * 16) as u64,
         Value::String(s) => s.len() as u64,
         Value::StringArray(sa) => sa.data.iter().map(|s| s.len() as u64).sum(),

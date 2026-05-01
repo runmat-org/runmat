@@ -422,7 +422,7 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
             .iter()
             .map(|s| s.encode_utf16().count().saturating_mul(2))
             .sum(),
-        Value::Tensor(t) => t.data.len().saturating_mul(8),
+        Value::Tensor(t) => t.data.len().saturating_mul(t.dtype.byte_size()),
         Value::Complex(_, _) => 16,
         Value::ComplexTensor(t) => t.data.len().saturating_mul(16),
         Value::Cell(ca) => {
