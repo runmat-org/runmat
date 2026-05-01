@@ -68,7 +68,7 @@ pub fn approximate_size_bytes(value: &Value) -> Option<u64> {
         Value::Num(_) | Value::Int(_) | Value::Complex(_, _) => 8,
         Value::Bool(_) => 1,
         Value::LogicalArray(arr) => arr.data.len() as u64,
-        Value::Tensor(t) => (t.data.len() * t.dtype.byte_size()) as u64,
+        Value::Tensor(t) => (t.data.len() * 8) as u64,
         Value::ComplexTensor(t) => (t.data.len() * 16) as u64,
         Value::String(s) => s.len() as u64,
         Value::StringArray(sa) => sa.data.iter().map(|s| s.len() as u64).sum(),
@@ -121,7 +121,22 @@ fn preview_logical_slice(arr: &LogicalArray, limit: usize) -> (Vec<f64>, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_builtins::{ObjectInstance, Tensor};
+    use runmat_builtins::{NumericDType, ObjectInstance, Tensor};
+
+    #[test]
+    fn approximate_size_bytes_uses_f64_width_for_integer_dtypes() {
+        // Tensor.data is always Vec<f64> (8 bytes/element) regardless of dtype.
+        let u8_tensor = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![3, 1], NumericDType::U8)
+            .expect("tensor");
+        let u16_tensor = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![3, 1], NumericDType::U16)
+            .expect("tensor");
+        let f32_tensor = Tensor::new_with_dtype(vec![1.0, 2.0, 3.0], vec![3, 1], NumericDType::F32)
+            .expect("tensor");
+
+        assert_eq!(approximate_size_bytes(&Value::Tensor(u8_tensor)), Some(24));
+        assert_eq!(approximate_size_bytes(&Value::Tensor(u16_tensor)), Some(24));
+        assert_eq!(approximate_size_bytes(&Value::Tensor(f32_tensor)), Some(24));
+    }
 
     #[test]
     fn datetime_object_shape_comes_from_internal_serial_tensor() {
