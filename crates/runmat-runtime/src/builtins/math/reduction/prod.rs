@@ -705,64 +705,29 @@ async fn coerce_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResu
         NumericDType::F64 => Ok(value),
         NumericDType::F32 | NumericDType::U8 | NumericDType::U16 => match value {
             Value::Tensor(tensor) => {
-                let tensor = coerce_tensor_dtype(tensor, dtype);
+                let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
             Value::Num(n) => {
                 let tensor = Tensor::new(vec![n], vec![1, 1])
                     .map_err(|e| prod_error(format!("{NAME}: {e}")))?;
-                let tensor = coerce_tensor_dtype(tensor, dtype);
+                let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
             Value::LogicalArray(logical) => {
                 let tensor = tensor::logical_to_tensor(&logical)
                     .map_err(|e| prod_error(format!("{NAME}: {e}")))?;
-                let tensor = coerce_tensor_dtype(tensor, dtype);
+                let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
             Value::GpuTensor(handle) => {
                 let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-                let tensor = coerce_tensor_dtype(tensor, dtype);
+                let tensor = tensor::coerce_tensor_dtype(tensor, dtype);
                 Ok(Value::Tensor(tensor))
             }
             other => Ok(other),
         },
     }
-}
-
-fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
-    match dtype {
-        NumericDType::F64 => {
-            tensor.dtype = NumericDType::F64;
-        }
-        NumericDType::F32 => {
-            for value in &mut tensor.data {
-                *value = (*value as f32) as f64;
-            }
-            tensor.dtype = NumericDType::F32;
-        }
-        NumericDType::U8 => {
-            for value in &mut tensor.data {
-                *value = clamp_u8(*value);
-            }
-            tensor.dtype = NumericDType::U8;
-        }
-        NumericDType::U16 => {
-            for value in &mut tensor.data {
-                *value = clamp_u16(*value);
-            }
-            tensor.dtype = NumericDType::U16;
-        }
-    }
-    tensor
-}
-
-fn clamp_u8(value: f64) -> f64 {
-    value.round().clamp(0.0, u8::MAX as f64)
-}
-
-fn clamp_u16(value: f64) -> f64 {
-    value.round().clamp(0.0, u16::MAX as f64)
 }
 
 async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {

@@ -856,20 +856,20 @@ fn cast_tensor_dtype(tensor: Tensor, dtype: NumericDType) -> BuiltinResult<Tenso
             .map(|value| (*value as f32) as f64)
             .collect(),
         NumericDType::F64 => tensor.data.clone(),
-        NumericDType::U8 => tensor.data.iter().map(|value| clamp_u8(*value)).collect(),
-        NumericDType::U16 => tensor.data.iter().map(|value| clamp_u16(*value)).collect(),
+        NumericDType::U8 => tensor
+            .data
+            .iter()
+            .map(|value| tensor::clamp_u8(*value))
+            .collect(),
+        NumericDType::U16 => tensor
+            .data
+            .iter()
+            .map(|value| tensor::clamp_u16(*value))
+            .collect(),
     };
 
     Tensor::new_with_dtype(data, tensor.shape.clone(), dtype)
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
-}
-
-fn clamp_u8(value: f64) -> f64 {
-    value.round().clamp(0.0, u8::MAX as f64)
-}
-
-fn clamp_u16(value: f64) -> f64 {
-    value.round().clamp(0.0, u16::MAX as f64)
 }
 
 fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {

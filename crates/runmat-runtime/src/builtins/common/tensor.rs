@@ -321,6 +321,44 @@ pub fn default_shape_for(shape: &[usize], len: usize) -> Vec<usize> {
     }
 }
 
+/// Clamp a scalar f64 to the uint8 range [0, 255], rounding to the nearest integer.
+pub fn clamp_u8(value: f64) -> f64 {
+    value.round().clamp(0.0, u8::MAX as f64)
+}
+
+/// Clamp a scalar f64 to the uint16 range [0, 65535], rounding to the nearest integer.
+pub fn clamp_u16(value: f64) -> f64 {
+    value.round().clamp(0.0, u16::MAX as f64)
+}
+
+/// Cast all elements of a tensor to the target dtype in-place, preserving the f64 backing store.
+pub fn coerce_tensor_dtype(mut tensor: Tensor, dtype: NumericDType) -> Tensor {
+    match dtype {
+        NumericDType::F64 => {
+            tensor.dtype = NumericDType::F64;
+        }
+        NumericDType::F32 => {
+            for value in &mut tensor.data {
+                *value = (*value as f32) as f64;
+            }
+            tensor.dtype = NumericDType::F32;
+        }
+        NumericDType::U8 => {
+            for value in &mut tensor.data {
+                *value = clamp_u8(*value);
+            }
+            tensor.dtype = NumericDType::U8;
+        }
+        NumericDType::U16 => {
+            for value in &mut tensor.data {
+                *value = clamp_u16(*value);
+            }
+            tensor.dtype = NumericDType::U16;
+        }
+    }
+    tensor
+}
+
 /// Align two numeric tensors for a binary element-wise operation with scalar broadcasting.
 ///
 /// Returns `(lhs_data, rhs_data, output_shape)`.  If either operand is a
