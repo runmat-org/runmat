@@ -250,7 +250,13 @@ async fn display_range_for_input(
     range: DisplayRange,
 ) -> crate::BuiltinResult<(f64, f64)> {
     match range {
-        DisplayRange::Default => Ok((0.0, 1.0)),
+        DisplayRange::Default => {
+            let limits = match input {
+                SurfaceDataInput::Host(tensor) => dtype_default_limits(tensor.dtype),
+                SurfaceDataInput::Gpu(_) => (0.0, 1.0),
+            };
+            Ok(limits)
+        }
         DisplayRange::Limits(lo, hi) => Ok((lo, hi)),
         DisplayRange::Auto => {
             let (lo, hi) = match input {
@@ -292,6 +298,14 @@ fn expand_degenerate_limits(lo: f64, hi: f64) -> (f64, f64) {
         (lo, 0.0)
     } else {
         (0.0, 1.0)
+    }
+}
+
+fn dtype_default_limits(dtype: NumericDType) -> (f64, f64) {
+    match dtype {
+        NumericDType::U8 => (0.0, 255.0),
+        NumericDType::U16 => (0.0, 65535.0),
+        NumericDType::F32 | NumericDType::F64 => (0.0, 1.0),
     }
 }
 
@@ -655,6 +669,42 @@ mod tests {
             panic!("expected surface");
         };
         assert_eq!(surface.color_limits, Some((10.0, 20.0)));
+    }
+
+    #[test]
+    fn imshow_uint8_grayscale_defaults_to_0_255() {
+        let _guard = reset();
+        let tensor = Tensor {
+            data: vec![0.0, 128.0, 200.0, 255.0],
+            shape: vec![2, 2],
+            rows: 2,
+            cols: 2,
+            dtype: NumericDType::U8,
+        };
+        futures::executor::block_on(imshow_builtin(vec![Value::Tensor(tensor)])).unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {
+            panic!("expected surface");
+        };
+        assert_eq!(surface.color_limits, Some((0.0, 255.0)));
+    }
+
+    #[test]
+    fn imshow_uint16_grayscale_defaults_to_0_65535() {
+        let _guard = reset();
+        let tensor = Tensor {
+            data: vec![0.0, 1000.0, 40000.0, 65535.0],
+            shape: vec![2, 2],
+            rows: 2,
+            cols: 2,
+            dtype: NumericDType::U16,
+        };
+        futures::executor::block_on(imshow_builtin(vec![Value::Tensor(tensor)])).unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {
+            panic!("expected surface");
+        };
+        assert_eq!(surface.color_limits, Some((0.0, 65535.0)));
     }
 
     #[test]

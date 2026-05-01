@@ -198,8 +198,8 @@ impl Parser {
                 break;
             }
             if self.consume(&Token::Ellipsis) {
-                // `...` is a line-continuation; skip the following newline and keep parsing.
-                self.consume(&Token::Newline);
+                // `...` is a line-continuation; skip all following newlines and keep parsing.
+                while self.consume(&Token::Newline) {}
                 continue;
             }
             match self.peek_token() {
@@ -244,7 +244,7 @@ impl Parser {
     fn skip_command_continuations(&self, offset: &mut usize) {
         while matches!(self.peek_token_at(*offset), Some(Token::Ellipsis)) {
             *offset += 1;
-            if matches!(self.peek_token_at(*offset), Some(Token::Newline)) {
+            while matches!(self.peek_token_at(*offset), Some(Token::Newline)) {
                 *offset += 1;
             }
         }

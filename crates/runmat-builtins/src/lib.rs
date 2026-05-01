@@ -1841,8 +1841,12 @@ fn fmt_rational(v: f64) -> String {
         }
         a = 1.0 / f;
         let q = a.floor() as i64;
-        let n2 = q * n1 + n0;
-        let d2 = q * d1 + d0;
+        let Some(n2) = q.checked_mul(n1).and_then(|v| v.checked_add(n0)) else {
+            break;
+        };
+        let Some(d2) = q.checked_mul(d1).and_then(|v| v.checked_add(d0)) else {
+            break;
+        };
         if d2 > max_d {
             break;
         }
@@ -2059,8 +2063,27 @@ impl fmt::Display for ComplexTensor {
 #[cfg(test)]
 mod display_tests {
     use super::{
-        format_number, set_display_format, ComplexTensor, FormatMode, LogicalArray, Tensor,
+        fmt_rational, format_number, set_display_format, ComplexTensor, FormatMode, LogicalArray,
+        Tensor,
     };
+
+    #[test]
+    fn fmt_rational_large_value_with_tiny_fract_does_not_overflow() {
+        // abs ~1e15 with a small fractional part: q*n1 would overflow i64 without
+        // checked arithmetic.
+        let result = std::panic::catch_unwind(|| fmt_rational(1_000_000_000_000_000.000_1));
+        assert!(
+            result.is_ok(),
+            "fmt_rational panicked on large value with tiny fract"
+        );
+
+        // Negative counterpart.
+        let result = std::panic::catch_unwind(|| fmt_rational(-1_000_000_000_000_000.000_1));
+        assert!(
+            result.is_ok(),
+            "fmt_rational panicked on negative large value with tiny fract"
+        );
+    }
 
     #[test]
     fn tensor_nd_display_uses_page_headers() {
