@@ -244,7 +244,7 @@ impl Parser {
     fn skip_command_continuations(&self, offset: &mut usize) {
         while matches!(self.peek_token_at(*offset), Some(Token::Ellipsis)) {
             *offset += 1;
-            while matches!(self.peek_token_at(*offset), Some(Token::Newline)) {
+            if matches!(self.peek_token_at(*offset), Some(Token::Newline)) {
                 *offset += 1;
             }
         }

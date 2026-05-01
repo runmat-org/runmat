@@ -34,6 +34,7 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
 
     let toks = tokenize_detailed(input);
     let mut tokens = Vec::new();
+    let mut skip_newlines = false;
 
     for t in toks {
         if matches!(t.token, Token::Error) {
@@ -46,8 +47,16 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
         }
         // Skip layout-only tokens from lexing.
         if matches!(t.token, Token::Ellipsis | Token::Section) {
+            // After ellipsis, also drop any immediately following Newline tokens.
+            // The lexer callback already consumed the first \n after `...`; any
+            // additional blank lines should be treated as part of the continuation.
+            skip_newlines = matches!(t.token, Token::Ellipsis);
             continue;
         }
+        if skip_newlines && matches!(t.token, Token::Newline) {
+            continue;
+        }
+        skip_newlines = false;
         tokens.push(TokenInfo {
             token: t.token,
             lexeme: t.lexeme,
