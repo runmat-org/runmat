@@ -210,7 +210,7 @@ fn file_url_to_path(url: &Url) -> BuiltinResult<PathBuf> {
             } else {
                 decoded.as_str()
             };
-        return Ok(PathBuf::from(path));
+        Ok(PathBuf::from(path))
     }
 
     #[cfg(not(windows))]
