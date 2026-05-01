@@ -160,17 +160,21 @@ fn parse_format_hint(value: &str) -> BuiltinResult<ImageFormat> {
 
 async fn read_source_bytes(source: &str) -> BuiltinResult<Vec<u8>> {
     if let Ok(url) = Url::parse(source) {
-        return match url.scheme() {
-            "http" | "https" => read_url_bytes(url).await,
-            "file" => {
-                let path = file_url_to_path(&url)?;
-                read_local_path(&path).await
-            }
-            scheme => Err(imread_error(
-                "RunMat:imread:UnsupportedScheme",
-                format!("imread: unsupported URL scheme '{scheme}'"),
-            )),
-        };
+        let scheme = url.scheme();
+        // A single-letter scheme is a Windows drive letter (e.g. "C:/..."), not a URL.
+        if scheme.len() > 1 {
+            return match scheme {
+                "http" | "https" => read_url_bytes(url).await,
+                "file" => {
+                    let path = file_url_to_path(&url)?;
+                    read_local_path(&path).await
+                }
+                _ => Err(imread_error(
+                    "RunMat:imread:UnsupportedScheme",
+                    format!("imread: unsupported URL scheme '{scheme}'"),
+                )),
+            };
+        }
     }
 
     read_local_path(Path::new(source)).await
@@ -674,6 +678,23 @@ mod tests {
     fn imread_reads_local_file_path() {
         let result = run_imread(&rgb_png(), "png", Vec::new());
         assert!(matches!(result, Value::Tensor(_)));
+    }
+
+    #[test]
+    fn imread_windows_drive_letter_path_is_not_treated_as_url_scheme() {
+        // Url::parse("C:/foo.png") succeeds with scheme "c", which must not be
+        // treated as an unsupported URL scheme — it should fall through to the
+        // local path reader and produce a file-not-found error, not a scheme error.
+        let err = futures::executor::block_on(imread_builtin(
+            Value::from("C:/nonexistent/photo.png"),
+            Vec::new(),
+        ))
+        .expect_err("expected error for missing file");
+        assert_ne!(
+            err.identifier(),
+            Some("RunMat:imread:UnsupportedScheme"),
+            "drive-letter path incorrectly rejected as unsupported URL scheme"
+        );
     }
 
     #[test]
