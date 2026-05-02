@@ -4,6 +4,36 @@ _What's new across the RunMat runtime, cloud, and sandbox. For technical runtime
 
 ---
 
+## [v0.4.5](https://github.com/runmat-org/runmat/compare/v0.4.4...v0.4.5)
+
+_May 1, 2026_
+
+### Runtime
+
+#### Added
+- Add image I/O and display support — `imread` reads raster images into MATLAB-compatible grayscale, truecolor, and alpha arrays, and `imshow` displays numeric, logical, truecolor, and file-backed images with MATLAB-style display ranges
+- Add interpolation builtins — `interp1`, `interp2`, `spline`, `pchip`, and `ppval`, including piecewise-polynomial structs and linear, nearest, spline, and shape-preserving cubic paths
+- Add optimization builtins — `fzero`, `fsolve`, and `optimset`, with bracket expansion, Brent refinement, finite-difference Levenberg-Marquardt solving, display/tolerance options, and output shape preservation
+- Add `format` — session-persistent numeric display modes for `short`, `long`, `shortE`, `longE`, `shortG`, `longG`, `rat`, and `hex`
+- Add `strsplit` with simple and regular-expression delimiters, `CollapseDelimiters`, `DelimiterType`, and optional delimiter-match output
+
+#### Changed
+- Extend tensor dtype metadata for `uint8` and `uint16` so `class`, WASM value previews, image operations, `diag`, reductions, and `zeros`/`ones(..., "like", value)` report and preserve integer image-style arrays correctly
+- Share common tensor dtype coercion and clamping helpers across image, reduction, and array creation builtins
+- Route numeric-to-string conversion through the active `format` mode so display output, string conversion, and complex formatting stay consistent
+
+#### Fixed
+- Fix command-form parsing so bare newlines terminate commands, while `...` continuations still work after multiple blank lines
+- Fix `whos` and value metadata size reporting for tensors stored in the runtime's f64 backing representation
+
+### Sandbox
+
+#### Changed
+- Share the default browser filesystem provider and IndexedDB backing across session instances, with ref-counted cleanup and consistent flush behavior
+- Reject incompatible IndexedDB backing options instead of silently mixing providers with different timing hooks or flush policies
+
+---
+
 ## [v0.4.4](https://github.com/runmat-org/runmat/compare/v0.4.1...v0.4.4)
 
 _April 24, 2026_
