@@ -40,7 +40,6 @@ metadata can be added later without rewriting existing code.
 3. Implement the functions, annotating each with `#[matlab_fn(name = "...")]`.
 4. Provide comprehensive unit tests covering typical usage, error cases and edge
    conditions. Tests live in `crates/<name>/tests/`.
-5. Update `PLAN.md` with a short entry summarising the addition.
 
 ## Testing Guidelines
 
