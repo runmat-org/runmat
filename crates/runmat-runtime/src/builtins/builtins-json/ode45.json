@@ -1,0 +1,46 @@
+{
+  "title": "ode45",
+  "category": "math/ode",
+  "keywords": ["ode45", "ode", "nonstiff", "Dormand-Prince", "adaptive step"],
+  "summary": "Solve nonstiff ordinary differential equations with an adaptive Dormand-Prince 5(4) method.",
+  "references": ["https://www.mathworks.com/help/matlab/ref/ode45.html"],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "The adaptive integrator runs on the host. RHS callback functions may still call GPU-aware builtins."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::ode::ode45::tests"
+  },
+  "description": "`ode45` integrates first-order ODE systems `y' = f(t, y)` over `tspan` using adaptive time stepping. For two outputs, it returns `[t, y]` where each row of `y` corresponds to one time in `t`.",
+  "behaviors": [
+    "Supports scalar, vector, and matrix-valued initial conditions.",
+    "Accepts options as a struct, including `RelTol`, `AbsTol`, `InitialStep`, and `MaxStep`.",
+    "When `tspan` has more than two points, the solver returns values at each requested time.",
+    "With one output, returns only the `y` trajectory matrix."
+  ],
+  "examples": [
+    {
+      "description": "Integrate exponential decay",
+      "input": "[t, y] = ode45(@(t, y) -y, [0 5], 1)",
+      "output": "y(end) ≈ exp(-5)"
+    }
+  ],
+  "links": [
+    { "label": "ode23", "url": "./ode23" },
+    { "label": "ode15s", "url": "./ode15s" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/ode/ode45.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/ode/ode45.rs"
+  }
+}

@@ -2,6 +2,7 @@ pub mod elementwise;
 pub mod fft;
 pub mod interpolation;
 pub mod linalg;
+pub mod ode;
 pub mod optim;
 pub mod poly;
 pub mod reduction;
