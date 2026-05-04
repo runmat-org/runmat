@@ -1289,3 +1289,522 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     Out.data[idx] = peaks_at(X.data[idx], Y.data[idx]);
 }
 "#;
+
+// ── Parameterized distribution samplers ──────────────────────────────────────
+//
+// All three shaders (exprnd, normrnd, unifrnd) share the same Philox-4×32
+// CSPRNG and the same RandomDistParams uniform layout.  Only the final
+// transform applied to the uniform sample(s) differs.
+//
+// F64 struct layout (32 bytes, 8-byte aligned):
+//   offset u32 | chunk u32 | key0 u32 | key1 u32 | param1 f64 | param2 f64
+//
+// F32 struct layout (32 bytes, 4-byte aligned + 8-byte pad):
+//   offset u32 | chunk u32 | key0 u32 | key1 u32 | param1 f32 | param2 f32 | _pad×2
+
+pub const RANDOM_EXPRND_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct RandomDistParams {
+    offset: u32,
+    chunk: u32,
+    key0: u32,
+    key1: u32,
+    param1: f64,
+    param2: f64,
+};
+
+@group(0) @binding(0) var<storage, read_write> Out: Tensor;
+@group(0) @binding(1) var<uniform> params: RandomDistParams;
+
+const PHILOX_M0: u32 = 0xD2511F53u;
+const PHILOX_M1: u32 = 0xCD9E8D57u;
+const PHILOX_W0: u32 = 0x9E3779B9u;
+const PHILOX_W1: u32 = 0xBB67AE85u;
+const INV_POW53: f64 = 1.0 / 9007199254740992.0;
+const MIN_UNIFORM: f64 = 1.0e-16;
+
+fn mul_hi_u32(a: u32, b: u32) -> u32 {
+    let a_hi = a >> 16u;
+    let a_lo = a & 0xFFFFu;
+    let b_hi = b >> 16u;
+    let b_lo = b & 0xFFFFu;
+    let p0 = a_lo * b_lo;
+    let p1 = a_lo * b_hi;
+    let p2 = a_hi * b_lo;
+    let p3 = a_hi * b_hi;
+    let mid = (p0 >> 16u) + (p1 & 0xFFFFu) + (p2 & 0xFFFFu);
+    return p3 + (p1 >> 16u) + (p2 >> 16u) + (mid >> 16u);
+}
+
+fn philox_round(counter: vec4<u32>, key: vec2<u32>) -> vec4<u32> {
+    let hi0 = mul_hi_u32(PHILOX_M0, counter.x);
+    let lo0 = PHILOX_M0 * counter.x;
+    let hi1 = mul_hi_u32(PHILOX_M1, counter.z);
+    let lo1 = PHILOX_M1 * counter.z;
+    return vec4<u32>(
+        hi1 ^ counter.y ^ key.x,
+        lo1,
+        hi0 ^ counter.w ^ key.y,
+        lo0,
+    );
+}
+
+fn philox(counter: vec4<u32>, key: vec2<u32>) -> vec4<u32> {
+    var ctr = counter;
+    var k = key;
+    for (var i: u32 = 0u; i < 10u; i = i + 1u) {
+        ctr = philox_round(ctr, k);
+        k = vec2<u32>(k.x + PHILOX_W0, k.y + PHILOX_W1);
+    }
+    return ctr;
+}
+
+fn uniform_from_pair(bits0: u32, bits1: u32) -> f64 {
+    let hi = bits0 >> 5u;
+    let lo = bits1 >> 6u;
+    let combined = f64(hi) * 67108864.0 + f64(lo);
+    return combined * INV_POW53;
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if idx >= params.chunk {
+        return;
+    }
+    let global_idx = params.offset + idx;
+    let key = vec2<u32>(params.key0, params.key1);
+    let counter = vec4<u32>(global_idx, 0u, 0u, 0u);
+    let rnd = philox(counter, key);
+    let u = max(uniform_from_pair(rnd.x, rnd.y), MIN_UNIFORM);
+    Out.data[global_idx] = -params.param1 * log(u);
+}
+"#;
+
+pub const RANDOM_EXPRND_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct RandomDistParams {
+    offset: u32,
+    chunk: u32,
+    key0: u32,
+    key1: u32,
+    param1: f32,
+    param2: f32,
+    _pad0: u32,
+    _pad1: u32,
+};
+
+@group(0) @binding(0) var<storage, read_write> Out: Tensor;
+@group(0) @binding(1) var<uniform> params: RandomDistParams;
+
+const PHILOX_M0: u32 = 0xD2511F53u;
+const PHILOX_M1: u32 = 0xCD9E8D57u;
+const PHILOX_W0: u32 = 0x9E3779B9u;
+const PHILOX_W1: u32 = 0xBB67AE85u;
+const INV_U32: f32 = 1.0 / 4294967296.0;
+const MIN_UNIFORM: f32 = 1.0e-8;
+const ALMOST_ONE: f32 = 0.99999994;
+
+fn mul_hi_u32(a: u32, b: u32) -> u32 {
+    let a_hi = a >> 16u;
+    let a_lo = a & 0xFFFFu;
+    let b_hi = b >> 16u;
+    let b_lo = b & 0xFFFFu;
+    let p0 = a_lo * b_lo;
+    let p1 = a_lo * b_hi;
+    let p2 = a_hi * b_lo;
+    let p3 = a_hi * b_hi;
+    let mid = (p0 >> 16u) + (p1 & 0xFFFFu) + (p2 & 0xFFFFu);
+    return p3 + (p1 >> 16u) + (p2 >> 16u) + (mid >> 16u);
+}
+
+fn philox_round(counter: vec4<u32>, key: vec2<u32>) -> vec4<u32> {
+    let hi0 = mul_hi_u32(PHILOX_M0, counter.x);
+    let lo0 = PHILOX_M0 * counter.x;
+    let hi1 = mul_hi_u32(PHILOX_M1, counter.z);
+    let lo1 = PHILOX_M1 * counter.z;
+    return vec4<u32>(
+        hi1 ^ counter.y ^ key.x,
+        lo1,
+        hi0 ^ counter.w ^ key.y,
+        lo0,
+    );
+}
+
+fn philox(counter: vec4<u32>, key: vec2<u32>) -> vec4<u32> {
+    var ctr = counter;
+    var k = key;
+    for (var i: u32 = 0u; i < 10u; i = i + 1u) {
+        ctr = philox_round(ctr, k);
+        k = vec2<u32>(k.x + PHILOX_W0, k.y + PHILOX_W1);
+    }
+    return ctr;
+}
+
+fn uniform_from_bits(bits: u32) -> f32 {
+    let sample = (f32(bits) + 0.5) * INV_U32;
+    return clamp(sample, MIN_UNIFORM, ALMOST_ONE);
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if idx >= params.chunk {
+        return;
+    }
+    let global_idx = params.offset + idx;
+    let key = vec2<u32>(params.key0, params.key1);
+    let counter = vec4<u32>(global_idx, 0u, 0u, 0u);
+    let rnd = philox(counter, key);
+    let u = uniform_from_bits(rnd.x);
+    Out.data[global_idx] = -params.param1 * log(u);
+}
+"#;
+
+pub const RANDOM_NORMRND_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct RandomDistParams {
+    offset: u32,
+    chunk: u32,
+    key0: u32,
+    key1: u32,
+    param1: f64,
+    param2: f64,
+};
+
+@group(0) @binding(0) var<storage, read_write> Out: Tensor;
+@group(0) @binding(1) var<uniform> params: RandomDistParams;
+
+const PHILOX_M0: u32 = 0xD2511F53u;
+const PHILOX_M1: u32 = 0xCD9E8D57u;
+const PHILOX_W0: u32 = 0x9E3779B9u;
+const PHILOX_W1: u32 = 0xBB67AE85u;
+const INV_POW53: f64 = 1.0 / 9007199254740992.0;
+const TWO_PI: f64 = 6.283185307179586;
+const MIN_UNIFORM: f64 = 1.0e-16;
+
+fn mul_hi_u32(a: u32, b: u32) -> u32 {
+    let a_hi = a >> 16u;
+    let a_lo = a & 0xFFFFu;
+    let b_hi = b >> 16u;
+    let b_lo = b & 0xFFFFu;
+    let p0 = a_lo * b_lo;
+    let p1 = a_lo * b_hi;
+    let p2 = a_hi * b_lo;
+    let p3 = a_hi * b_hi;
+    let mid = (p0 >> 16u) + (p1 & 0xFFFFu) + (p2 & 0xFFFFu);
+    return p3 + (p1 >> 16u) + (p2 >> 16u) + (mid >> 16u);
+}
+
+fn philox_round(counter: vec4<u32>, key: vec2<u32>) -> vec4<u32> {
+    let hi0 = mul_hi_u32(PHILOX_M0, counter.x);
+    let lo0 = PHILOX_M0 * counter.x;
+    let hi1 = mul_hi_u32(PHILOX_M1, counter.z);
+    let lo1 = PHILOX_M1 * counter.z;
+    return vec4<u32>(
+        hi1 ^ counter.y ^ key.x,
+        lo1,
+        hi0 ^ counter.w ^ key.y,
+        lo0,
+    );
+}
+
+fn philox(counter: vec4<u32>, key: vec2<u32>) -> vec4<u32> {
+    var ctr = counter;
+    var k = key;
+    for (var i: u32 = 0u; i < 10u; i = i + 1u) {
+        ctr = philox_round(ctr, k);
+        k = vec2<u32>(k.x + PHILOX_W0, k.y + PHILOX_W1);
+    }
+    return ctr;
+}
+
+fn uniform_pair(counter: vec4<u32>, key: vec2<u32>) -> vec2<f64> {
+    let rnd = philox(counter, key);
+    let hi = rnd.x >> 5u;
+    let lo = rnd.y >> 6u;
+    let combined = f64(hi) * 67108864.0 + f64(lo);
+    let u1 = max(combined * INV_POW53, MIN_UNIFORM);
+    let hi2 = rnd.z >> 5u;
+    let lo2 = rnd.w >> 6u;
+    let combined2 = f64(hi2) * 67108864.0 + f64(lo2);
+    let u2 = min(combined2 * INV_POW53, 0.9999999999999999);
+    return vec2<f64>(u1, u2);
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if idx >= params.chunk {
+        return;
+    }
+    let global_idx = params.offset + idx;
+    let key = vec2<u32>(params.key0, params.key1);
+    let counter = vec4<u32>(global_idx, 0u, 0u, 0u);
+    let uniforms = uniform_pair(counter, key);
+    let radius = sqrt(-2.0 * log(uniforms.x));
+    let angle = TWO_PI * uniforms.y;
+    let z = radius * cos(angle);
+    Out.data[global_idx] = params.param1 + params.param2 * z;
+}
+"#;
+
+pub const RANDOM_NORMRND_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct RandomDistParams {
+    offset: u32,
+    chunk: u32,
+    key0: u32,
+    key1: u32,
+    param1: f32,
+    param2: f32,
+    _pad0: u32,
+    _pad1: u32,
+};
+
+@group(0) @binding(0) var<storage, read_write> Out: Tensor;
+@group(0) @binding(1) var<uniform> params: RandomDistParams;
+
+const PHILOX_M0: u32 = 0xD2511F53u;
+const PHILOX_M1: u32 = 0xCD9E8D57u;
+const PHILOX_W0: u32 = 0x9E3779B9u;
+const PHILOX_W1: u32 = 0xBB67AE85u;
+const INV_U32: f32 = 1.0 / 4294967296.0;
+const TWO_PI: f32 = 6.2831855;
+const MIN_UNIFORM: f32 = 1.0e-8;
+const ALMOST_ONE: f32 = 0.99999994;
+
+fn mul_hi_u32(a: u32, b: u32) -> u32 {
+    let a_hi = a >> 16u;
+    let a_lo = a & 0xFFFFu;
+    let b_hi = b >> 16u;
+    let b_lo = b & 0xFFFFu;
+    let p0 = a_lo * b_lo;
+    let p1 = a_lo * b_hi;
+    let p2 = a_hi * b_lo;
+    let p3 = a_hi * b_hi;
+    let mid = (p0 >> 16u) + (p1 & 0xFFFFu) + (p2 & 0xFFFFu);
+    return p3 + (p1 >> 16u) + (p2 >> 16u) + (mid >> 16u);
+}
+
+fn philox_round(counter: vec4<u32>, key: vec2<u32>) -> vec4<u32> {
+    let hi0 = mul_hi_u32(PHILOX_M0, counter.x);
+    let lo0 = PHILOX_M0 * counter.x;
+    let hi1 = mul_hi_u32(PHILOX_M1, counter.z);
+    let lo1 = PHILOX_M1 * counter.z;
+    return vec4<u32>(
+        hi1 ^ counter.y ^ key.x,
+        lo1,
+        hi0 ^ counter.w ^ key.y,
+        lo0,
+    );
+}
+
+fn philox(counter: vec4<u32>, key: vec2<u32>) -> vec4<u32> {
+    var ctr = counter;
+    var k = key;
+    for (var i: u32 = 0u; i < 10u; i = i + 1u) {
+        ctr = philox_round(ctr, k);
+        k = vec2<u32>(k.x + PHILOX_W0, k.y + PHILOX_W1);
+    }
+    return ctr;
+}
+
+fn uniform_from_bits(bits: u32) -> f32 {
+    let sample = (f32(bits) + 0.5) * INV_U32;
+    return clamp(sample, MIN_UNIFORM, ALMOST_ONE);
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if idx >= params.chunk {
+        return;
+    }
+    let global_idx = params.offset + idx;
+    let key = vec2<u32>(params.key0, params.key1);
+    let counter = vec4<u32>(global_idx, 0u, 0u, 0u);
+    let rnd = philox(counter, key);
+    let u1 = uniform_from_bits(rnd.x);
+    let u2 = uniform_from_bits(rnd.y);
+    let radius = sqrt(-2.0 * log(u1));
+    let angle = TWO_PI * u2;
+    let z = radius * cos(angle);
+    Out.data[global_idx] = params.param1 + params.param2 * z;
+}
+"#;
+
+pub const RANDOM_UNIFRND_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct RandomDistParams {
+    offset: u32,
+    chunk: u32,
+    key0: u32,
+    key1: u32,
+    param1: f64,
+    param2: f64,
+};
+
+@group(0) @binding(0) var<storage, read_write> Out: Tensor;
+@group(0) @binding(1) var<uniform> params: RandomDistParams;
+
+const PHILOX_M0: u32 = 0xD2511F53u;
+const PHILOX_M1: u32 = 0xCD9E8D57u;
+const PHILOX_W0: u32 = 0x9E3779B9u;
+const PHILOX_W1: u32 = 0xBB67AE85u;
+const INV_POW53: f64 = 1.0 / 9007199254740992.0;
+
+fn mul_hi_u32(a: u32, b: u32) -> u32 {
+    let a_hi = a >> 16u;
+    let a_lo = a & 0xFFFFu;
+    let b_hi = b >> 16u;
+    let b_lo = b & 0xFFFFu;
+    let p0 = a_lo * b_lo;
+    let p1 = a_lo * b_hi;
+    let p2 = a_hi * b_lo;
+    let p3 = a_hi * b_hi;
+    let mid = (p0 >> 16u) + (p1 & 0xFFFFu) + (p2 & 0xFFFFu);
+    return p3 + (p1 >> 16u) + (p2 >> 16u) + (mid >> 16u);
+}
+
+fn philox_round(counter: vec4<u32>, key: vec2<u32>) -> vec4<u32> {
+    let hi0 = mul_hi_u32(PHILOX_M0, counter.x);
+    let lo0 = PHILOX_M0 * counter.x;
+    let hi1 = mul_hi_u32(PHILOX_M1, counter.z);
+    let lo1 = PHILOX_M1 * counter.z;
+    return vec4<u32>(
+        hi1 ^ counter.y ^ key.x,
+        lo1,
+        hi0 ^ counter.w ^ key.y,
+        lo0,
+    );
+}
+
+fn philox(counter: vec4<u32>, key: vec2<u32>) -> vec4<u32> {
+    var ctr = counter;
+    var k = key;
+    for (var i: u32 = 0u; i < 10u; i = i + 1u) {
+        ctr = philox_round(ctr, k);
+        k = vec2<u32>(k.x + PHILOX_W0, k.y + PHILOX_W1);
+    }
+    return ctr;
+}
+
+fn uniform_from_pair(bits0: u32, bits1: u32) -> f64 {
+    let hi = bits0 >> 5u;
+    let lo = bits1 >> 6u;
+    let combined = f64(hi) * 67108864.0 + f64(lo);
+    return combined * INV_POW53;
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if idx >= params.chunk {
+        return;
+    }
+    let global_idx = params.offset + idx;
+    let key = vec2<u32>(params.key0, params.key1);
+    let counter = vec4<u32>(global_idx, 0u, 0u, 0u);
+    let rnd = philox(counter, key);
+    let u = uniform_from_pair(rnd.x, rnd.y);
+    Out.data[global_idx] = params.param1 + (params.param2 - params.param1) * u;
+}
+"#;
+
+pub const RANDOM_UNIFRND_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct RandomDistParams {
+    offset: u32,
+    chunk: u32,
+    key0: u32,
+    key1: u32,
+    param1: f32,
+    param2: f32,
+    _pad0: u32,
+    _pad1: u32,
+};
+
+@group(0) @binding(0) var<storage, read_write> Out: Tensor;
+@group(0) @binding(1) var<uniform> params: RandomDistParams;
+
+const PHILOX_M0: u32 = 0xD2511F53u;
+const PHILOX_M1: u32 = 0xCD9E8D57u;
+const PHILOX_W0: u32 = 0x9E3779B9u;
+const PHILOX_W1: u32 = 0xBB67AE85u;
+const INV_U32: f32 = 1.0 / 4294967296.0;
+const ALMOST_ONE: f32 = 0.99999994;
+
+fn mul_hi_u32(a: u32, b: u32) -> u32 {
+    let a_hi = a >> 16u;
+    let a_lo = a & 0xFFFFu;
+    let b_hi = b >> 16u;
+    let b_lo = b & 0xFFFFu;
+    let p0 = a_lo * b_lo;
+    let p1 = a_lo * b_hi;
+    let p2 = a_hi * b_lo;
+    let p3 = a_hi * b_hi;
+    let mid = (p0 >> 16u) + (p1 & 0xFFFFu) + (p2 & 0xFFFFu);
+    return p3 + (p1 >> 16u) + (p2 >> 16u) + (mid >> 16u);
+}
+
+fn philox_round(counter: vec4<u32>, key: vec2<u32>) -> vec4<u32> {
+    let hi0 = mul_hi_u32(PHILOX_M0, counter.x);
+    let lo0 = PHILOX_M0 * counter.x;
+    let hi1 = mul_hi_u32(PHILOX_M1, counter.z);
+    let lo1 = PHILOX_M1 * counter.z;
+    return vec4<u32>(
+        hi1 ^ counter.y ^ key.x,
+        lo1,
+        hi0 ^ counter.w ^ key.y,
+        lo0,
+    );
+}
+
+fn philox(counter: vec4<u32>, key: vec2<u32>) -> vec4<u32> {
+    var ctr = counter;
+    var k = key;
+    for (var i: u32 = 0u; i < 10u; i = i + 1u) {
+        ctr = philox_round(ctr, k);
+        k = vec2<u32>(k.x + PHILOX_W0, k.y + PHILOX_W1);
+    }
+    return ctr;
+}
+
+fn uniform_from_bits(bits: u32) -> f32 {
+    let sample = (f32(bits) + 0.5) * INV_U32;
+    return min(sample, ALMOST_ONE);
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if idx >= params.chunk {
+        return;
+    }
+    let global_idx = params.offset + idx;
+    let key = vec2<u32>(params.key0, params.key1);
+    let counter = vec4<u32>(global_idx, 0u, 0u, 0u);
+    let rnd = philox(counter, key);
+    let u = uniform_from_bits(rnd.x);
+    Out.data[global_idx] = params.param1 + (params.param2 - params.param1) * u;
+}
+"#;

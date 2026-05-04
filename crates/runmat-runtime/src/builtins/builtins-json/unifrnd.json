@@ -1,0 +1,117 @@
+{
+  "title": "unifrnd",
+  "category": "stats/random",
+  "keywords": [
+    "unifrnd",
+    "uniform",
+    "random",
+    "distribution",
+    "statistics"
+  ],
+  "summary": "Uniformly-distributed random numbers on the interval [a, b).",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Uses the provider random_unifrnd hook (Philox CSPRNG + affine scaling) when an F64-precision provider is active. F32 providers and providers without the hook fall back to host generation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "none"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::stats::random::unifrnd::tests",
+    "integration": null
+  },
+  "description": "`unifrnd` draws pseudorandom samples from the continuous uniform distribution on the half-open interval `[a, b)`. It is part of the **Statistics and Machine Learning Toolbox** family in MATLAB and Octave's `statistics` package. RunMat implements it by scaling base uniform variates as `r = a + (b - a) * U` where `U ~ Uniform(0, 1)`.",
+  "behaviors": [
+    "`unifrnd(a, b)` returns a scalar double drawn from `Uniform(a, b)`.",
+    "`unifrnd(a, b, n)` returns an `n × n` matrix of samples.",
+    "`unifrnd(a, b, m, n)` returns an `m × n` matrix of samples.",
+    "`unifrnd(a, b, sz)` accepts a size vector and returns an array with shape `sz`.",
+    "`a` and `b` must be scalar numeric values.",
+    "`a` must be less than `b`; `unifrnd` errors if `a >= b`.",
+    "All outputs are double precision regardless of input type."
+  ],
+  "examples": [
+    {
+      "description": "Single sample from Uniform(2, 5)",
+      "input": "rng(0);\nr = unifrnd(2, 5)",
+      "output": "r = 2.2918"
+    },
+    {
+      "description": "Matrix of random values between -1 and 1",
+      "input": "rng(0);\nX = unifrnd(-1, 1, 2, 3)",
+      "output": "X =\n   -0.8055    0.6992    0.2210\n    0.8186   -0.7390   -0.9554"
+    },
+    {
+      "description": "Monte Carlo samples for uncertain input bounds",
+      "input": "rng(0);\nlow = 10; high = 20;\nsamples = unifrnd(low, high, 1, 5)",
+      "output": "samples =\n   10.9725   19.0932   18.4960   11.3052   16.1049"
+    },
+    {
+      "description": "Specifying dimensions with a size vector",
+      "input": "rng(0);\nT = unifrnd(0, 100, [2 3])",
+      "output": "T =\n    9.7251   84.9604   61.0490\n   90.9324   13.0519    2.2277"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Are the bounds inclusive?",
+      "answer": "RunMat generates samples on the half-open interval `[a, b)`: values can be equal to `a`, but are always strictly less than `b`."
+    },
+    {
+      "question": "What is the workaround if unifrnd is unavailable?",
+      "answer": "`unifrnd(a, b)` is mathematically equivalent to `a + (b - a) * rand()`. For arrays, use `a + (b - a) * rand(sz)` with the same requested size."
+    },
+    {
+      "question": "Why must a be less than b?",
+      "answer": "A continuous uniform distribution needs a positive-width interval. `unifrnd` raises an error if `a >= b` to catch invalid bounds early."
+    },
+    {
+      "question": "What use cases does unifrnd support?",
+      "answer": "Common uses include Monte Carlo sampling, randomized initial conditions, parameter sweeps over bounded ranges, simulation inputs, and continuous random perturbations."
+    },
+    {
+      "question": "Does unifrnd fuse with other operations?",
+      "answer": "No. Random generation is excluded from fusion planning to preserve statistical properties."
+    },
+    {
+      "question": "How do I control reproducibility?",
+      "answer": "Use `rng` before calling `unifrnd` to seed the global generator."
+    }
+  ],
+  "links": [
+    {
+      "label": "exprnd",
+      "url": "./exprnd"
+    },
+    {
+      "label": "normrnd",
+      "url": "./normrnd"
+    },
+    {
+      "label": "rand",
+      "url": "./rand"
+    },
+    {
+      "label": "randn",
+      "url": "./randn"
+    },
+    {
+      "label": "rng",
+      "url": "./rng"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/stats/random/unifrnd.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/unifrnd.rs"
+  }
+}

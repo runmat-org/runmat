@@ -1795,6 +1795,74 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn random_exponential(&self, mu: f64, shape: &[usize]) -> Result<GpuTensorHandle> {
+        let len: usize = shape.iter().copied().product();
+        let mut data = vec![0.0f64; len];
+        {
+            let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
+            for slot in &mut data {
+                let u = next_uniform(&mut guard).max(f64::MIN_POSITIVE);
+                *slot = -mu * u.ln();
+            }
+        }
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, data);
+        Ok(GpuTensorHandle {
+            shape: shape.to_vec(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn random_normrnd(&self, mu: f64, sigma: f64, shape: &[usize]) -> Result<GpuTensorHandle> {
+        let len: usize = shape.iter().copied().product();
+        let mut data = Vec::with_capacity(len);
+        if len > 0 {
+            let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
+            while data.len() < len {
+                let (z0, z1) = next_normal_pair(&mut guard);
+                data.push(mu + sigma * z0);
+                if data.len() < len {
+                    data.push(mu + sigma * z1);
+                }
+            }
+        }
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, data);
+        Ok(GpuTensorHandle {
+            shape: shape.to_vec(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
+    fn random_unifrnd(&self, a: f64, b: f64, shape: &[usize]) -> Result<GpuTensorHandle> {
+        let len: usize = shape.iter().copied().product();
+        let mut data = vec![0.0f64; len];
+        {
+            let mut guard = rng_state().lock().unwrap_or_else(|e| e.into_inner());
+            for slot in &mut data {
+                *slot = a + (b - a) * next_uniform(&mut guard);
+            }
+        }
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        registry()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, data);
+        Ok(GpuTensorHandle {
+            shape: shape.to_vec(),
+            device_id: 0,
+            buffer_id: id,
+        })
+    }
+
     fn set_rng_state(&self, state: u64) -> Result<()> {
         let mut guard = rng_state()
             .lock()
