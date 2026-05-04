@@ -10464,15 +10464,32 @@ impl WgpuProvider {
                 .map_err(|_| anyhow!("exprnd: tensor offset exceeds GPU limits"))?;
             let (key0, key1) = philox_keys_from_state(chunk_state);
 
-            let params = crate::backend::wgpu::params::RandomDistParamsF64 {
-                offset: offset_u32,
-                chunk: chunk_u32,
-                key0,
-                key1,
-                param1: mu,
-                param2: 0.0,
+            let params_buffer = match self.precision {
+                NumericPrecision::F64 => {
+                    let params = crate::backend::wgpu::params::RandomDistParamsF64 {
+                        offset: offset_u32,
+                        chunk: chunk_u32,
+                        key0,
+                        key1,
+                        param1: mu,
+                        param2: 0.0,
+                    };
+                    self.uniform_buffer(&params, "runmat-rng-exprnd-f64-params")
+                }
+                NumericPrecision::F32 => {
+                    let params = crate::backend::wgpu::params::RandomDistParamsF32 {
+                        offset: offset_u32,
+                        chunk: chunk_u32,
+                        key0,
+                        key1,
+                        param1: mu as f32,
+                        param2: 0.0,
+                        _pad0: 0,
+                        _pad1: 0,
+                    };
+                    self.uniform_buffer(&params, "runmat-rng-exprnd-f32-params")
+                }
             };
-            let params_buffer = self.uniform_buffer(&params, "runmat-rng-exprnd-params");
 
             let bind_group = self
                 .device_ref()
@@ -10550,15 +10567,32 @@ impl WgpuProvider {
                 .map_err(|_| anyhow!("normrnd: tensor offset exceeds GPU limits"))?;
             let (key0, key1) = philox_keys_from_state(chunk_state);
 
-            let params = crate::backend::wgpu::params::RandomDistParamsF64 {
-                offset: offset_u32,
-                chunk: chunk_u32,
-                key0,
-                key1,
-                param1: mu,
-                param2: sigma,
+            let params_buffer = match self.precision {
+                NumericPrecision::F64 => {
+                    let params = crate::backend::wgpu::params::RandomDistParamsF64 {
+                        offset: offset_u32,
+                        chunk: chunk_u32,
+                        key0,
+                        key1,
+                        param1: mu,
+                        param2: sigma,
+                    };
+                    self.uniform_buffer(&params, "runmat-rng-normrnd-f64-params")
+                }
+                NumericPrecision::F32 => {
+                    let params = crate::backend::wgpu::params::RandomDistParamsF32 {
+                        offset: offset_u32,
+                        chunk: chunk_u32,
+                        key0,
+                        key1,
+                        param1: mu as f32,
+                        param2: sigma as f32,
+                        _pad0: 0,
+                        _pad1: 0,
+                    };
+                    self.uniform_buffer(&params, "runmat-rng-normrnd-f32-params")
+                }
             };
-            let params_buffer = self.uniform_buffer(&params, "runmat-rng-normrnd-params");
 
             let bind_group = self
                 .device_ref()
@@ -10638,15 +10672,32 @@ impl WgpuProvider {
                 .map_err(|_| anyhow!("unifrnd: tensor offset exceeds GPU limits"))?;
             let (key0, key1) = philox_keys_from_state(chunk_state);
 
-            let params = crate::backend::wgpu::params::RandomDistParamsF64 {
-                offset: offset_u32,
-                chunk: chunk_u32,
-                key0,
-                key1,
-                param1: a,
-                param2: b,
+            let params_buffer = match self.precision {
+                NumericPrecision::F64 => {
+                    let params = crate::backend::wgpu::params::RandomDistParamsF64 {
+                        offset: offset_u32,
+                        chunk: chunk_u32,
+                        key0,
+                        key1,
+                        param1: a,
+                        param2: b,
+                    };
+                    self.uniform_buffer(&params, "runmat-rng-unifrnd-f64-params")
+                }
+                NumericPrecision::F32 => {
+                    let params = crate::backend::wgpu::params::RandomDistParamsF32 {
+                        offset: offset_u32,
+                        chunk: chunk_u32,
+                        key0,
+                        key1,
+                        param1: a as f32,
+                        param2: b as f32,
+                        _pad0: 0,
+                        _pad1: 0,
+                    };
+                    self.uniform_buffer(&params, "runmat-rng-unifrnd-f32-params")
+                }
             };
-            let params_buffer = self.uniform_buffer(&params, "runmat-rng-unifrnd-params");
 
             let bind_group = self
                 .device_ref()
