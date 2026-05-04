@@ -1,0 +1,46 @@
+{
+  "title": "ode23",
+  "category": "math/ode",
+  "keywords": ["ode23", "ode", "nonstiff", "Bogacki-Shampine", "adaptive step"],
+  "summary": "Solve nonstiff ordinary differential equations with an adaptive Bogacki-Shampine 3(2) method.",
+  "references": ["https://www.mathworks.com/help/matlab/ref/ode23.html"],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "The adaptive integrator runs on the host. RHS callback functions may still call GPU-aware builtins."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::ode::ode23::tests"
+  },
+  "description": "`ode23` integrates first-order ODE systems `y' = f(t, y)` using adaptive low-order Runge-Kutta stepping. For two outputs, it returns `[t, y]` where each row of `y` corresponds to one time in `t`.",
+  "behaviors": [
+    "Supports scalar, vector, and matrix-valued initial conditions.",
+    "Accepts options as a struct, including `RelTol`, `AbsTol`, `InitialStep`, and `MaxStep`.",
+    "When `tspan` has more than two points, the solver returns values at each requested time.",
+    "With one output, returns only the `y` trajectory matrix."
+  ],
+  "examples": [
+    {
+      "description": "Integrate a scalar ODE at requested output times",
+      "input": "[t, y] = ode23(@(t, y) -2*y, [0 0.25 0.5 1.0], 1)",
+      "output": "size(t) = [4, 1], size(y) = [4, 1]"
+    }
+  ],
+  "links": [
+    { "label": "ode45", "url": "./ode45" },
+    { "label": "ode15s", "url": "./ode15s" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/ode/ode23.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/ode/ode23.rs"
+  }
+}

@@ -84,3 +84,33 @@ fn fsolve_accepts_anonymous_vector_function() {
         }
     }));
 }
+
+#[test]
+fn ode45_accepts_anonymous_rhs_function() {
+    let ast = parse("y = ode45(@(t, y) -y, [0 1], 1);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| {
+        if let runmat_builtins::Value::Tensor(t) = v {
+            t.cols() == 1 && (t.data[t.rows() - 1] - (-1.0_f64).exp()).abs() < 1e-2
+        } else {
+            false
+        }
+    }));
+}
+
+#[test]
+fn ode23_accepts_two_output_assignment() {
+    let ast = parse("[t, y] = ode23(@(t, y) -2*y, [0 0.25 0.5 1.0], 1);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars.iter().any(|v| {
+        if let runmat_builtins::Value::Tensor(tensor) = v {
+            tensor.cols() == 1
+                && tensor.rows() == 4
+                && (tensor.data[tensor.rows() - 1] - (-2.0_f64).exp()).abs() < 2e-2
+        } else {
+            false
+        }
+    }));
+}
