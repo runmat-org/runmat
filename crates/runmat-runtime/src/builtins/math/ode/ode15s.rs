@@ -74,7 +74,7 @@ async fn ode15s_builtin(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::Tensor;
+    use runmat_builtins::{StructValue, Tensor};
     use std::sync::Arc;
 
     #[test]
@@ -104,6 +104,44 @@ mod tests {
                 assert!(last.is_finite());
                 assert!(last > 0.0);
                 assert!(last < 0.1);
+            }
+            other => panic!("unexpected output {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ode15s_accepts_picard_unstable_stiff_step_with_newton() {
+        let _guard = crate::user_functions::install_user_function_invoker(Some(Arc::new(
+            move |_name, args| {
+                let y = match &args[1] {
+                    Value::Num(n) => *n,
+                    other => panic!("expected scalar state, got {other:?}"),
+                };
+                Box::pin(async move { Ok(Value::Num(-1000.0 * y)) })
+            },
+        )));
+        let mut options = StructValue::new();
+        options.insert("RelTol", Value::Num(1.0e6));
+        options.insert("AbsTol", Value::Num(1.0e6));
+        options.insert("InitialStep", Value::Num(0.1));
+        options.insert("MaxStep", Value::Num(0.1));
+        options.insert("MaxSteps", Value::Num(2.0));
+
+        let out = block_on(ode15s_builtin(
+            Value::FunctionHandle("very_stiff_decay".into()),
+            Value::Tensor(Tensor::new(vec![0.0, 0.1], vec![1, 2]).unwrap()),
+            Value::Num(1.0),
+            vec![Value::Struct(options)],
+        ))
+        .unwrap();
+
+        match out {
+            Value::Tensor(t) => {
+                assert_eq!(t.cols(), 1);
+                let last = t.data[t.rows() - 1];
+                assert!(last.is_finite());
+                assert!(last > 0.0);
+                assert!(last < 0.02);
             }
             other => panic!("unexpected output {other:?}"),
         }
