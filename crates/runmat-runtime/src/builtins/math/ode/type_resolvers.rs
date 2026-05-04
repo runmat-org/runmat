@@ -1,14 +1,8 @@
 use runmat_builtins::{ResolveContext, Type};
 
-pub fn ode_solution_type(args: &[Type], _context: &ResolveContext) -> Type {
-    match args.get(2) {
-        Some(Type::Tensor { shape }) => Type::Tensor {
-            shape: shape.clone(),
-        },
-        Some(Type::Logical { shape }) => Type::Tensor {
-            shape: shape.clone(),
-        },
-        Some(Type::Num | Type::Int | Type::Bool) => Type::tensor_with_shape(vec![1, 1]),
-        _ => Type::tensor(),
-    }
+pub fn ode_solution_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    // ODE solvers return an output matrix of shape [T, N], where T depends on
+    // runtime integration behavior (adaptive stepping or tspan sample count).
+    // Because T cannot be inferred statically from y0, keep the shape unknown.
+    Type::tensor()
 }
