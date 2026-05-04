@@ -687,14 +687,16 @@ async fn eval_rhs(
 }
 
 fn scaled_error_norm(y: &[f64], y_next: &[f64], err: &[f64], rel_tol: f64, abs_tol: f64) -> f64 {
-    y.iter()
-        .zip(y_next.iter())
-        .zip(err.iter())
-        .map(|((yn, yn1), e)| {
-            let scale = abs_tol + rel_tol * yn.abs().max(yn1.abs());
-            e.abs() / scale.max(1.0e-15)
-        })
-        .fold(0.0_f64, f64::max)
+    let mut norm = 0.0_f64;
+    for ((yn, yn1), e) in y.iter().zip(y_next.iter()).zip(err.iter()) {
+        let scale = abs_tol + rel_tol * yn.abs().max(yn1.abs());
+        let component = e.abs() / scale.max(1.0e-15);
+        if !component.is_finite() {
+            return f64::INFINITY;
+        }
+        norm = norm.max(component);
+    }
+    norm
 }
 
 fn lincomb(base: &[f64], h: f64, terms: &[(&[f64], f64)]) -> Vec<f64> {
@@ -708,9 +710,14 @@ fn lincomb(base: &[f64], h: f64, terms: &[(&[f64], f64)]) -> Vec<f64> {
 }
 
 fn max_abs(values: &[f64]) -> f64 {
-    values
-        .iter()
-        .fold(0.0_f64, |acc, value| acc.max(value.abs()))
+    let mut max = 0.0_f64;
+    for value in values {
+        if !value.is_finite() {
+            return f64::INFINITY;
+        }
+        max = max.max(value.abs());
+    }
+    max
 }
 
 fn remaining_distance(current: f64, target: f64, direction: f64) -> f64 {
@@ -861,6 +868,12 @@ mod tests {
         let next = scaled_next_step(h, err, OdeMethod::Ode23.embedded_error_order(), 1.0, None);
         let expected = h * 0.9 * err.powf(-1.0 / 3.0);
         assert!((next - expected).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn scaled_error_norm_treats_nan_as_infinite_error() {
+        let norm = scaled_error_norm(&[1.0], &[f64::NAN], &[f64::NAN], 1.0e-3, 1.0e-6);
+        assert!(norm.is_infinite());
     }
 
     #[test]

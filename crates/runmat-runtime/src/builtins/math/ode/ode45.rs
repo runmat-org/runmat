@@ -106,4 +106,21 @@ mod tests {
             other => panic!("unexpected output {other:?}"),
         }
     }
+
+    #[test]
+    fn ode45_rejects_nan_rhs() {
+        let _guard = crate::user_functions::install_user_function_invoker(Some(Arc::new(
+            move |_name, _args| Box::pin(async move { Ok(Value::Num(f64::NAN)) }),
+        )));
+
+        let err = block_on(ode45_builtin(
+            Value::FunctionHandle("nan_rhs".into()),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .expect_err("ode45 should reject NaN derivative values");
+
+        assert!(err.to_string().contains("function value must be finite"));
+    }
 }
