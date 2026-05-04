@@ -15,10 +15,11 @@ pub(crate) enum OdeMethod {
 }
 
 impl OdeMethod {
-    fn order(self) -> f64 {
+    fn embedded_error_order(self) -> f64 {
         match self {
-            Self::Ode45 => 5.0,
-            Self::Ode23 => 3.0,
+            // Embedded RK error estimate uses the lower-order formula.
+            Self::Ode45 => 4.0,
+            Self::Ode23 => 2.0,
             Self::Ode15s => 1.0,
         }
     }
@@ -238,7 +239,7 @@ pub(crate) async fn solve_ode(
                 h = scaled_next_step(
                     h,
                     step.error_norm,
-                    method.order(),
+                    method.embedded_error_order(),
                     direction,
                     options.max_step,
                 );
@@ -246,7 +247,7 @@ pub(crate) async fn solve_ode(
                 h = scaled_next_step(
                     h,
                     step.error_norm,
-                    method.order(),
+                    method.embedded_error_order(),
                     direction,
                     options.max_step,
                 );
@@ -286,7 +287,7 @@ pub(crate) async fn solve_ode(
                     h = scaled_next_step(
                         h,
                         step.error_norm,
-                        method.order(),
+                        method.embedded_error_order(),
                         direction,
                         options.max_step,
                     );
@@ -294,7 +295,7 @@ pub(crate) async fn solve_ode(
                     h = scaled_next_step(
                         h,
                         step.error_norm,
-                        method.order(),
+                        method.embedded_error_order(),
                         direction,
                         options.max_step,
                     );
@@ -679,4 +680,29 @@ fn rows_to_matrix_value(name: &str, rows: &[Vec<f64>]) -> BuiltinResult<Value> {
     Tensor::new(data, vec![row_count, col_count])
         .map(Value::Tensor)
         .map_err(|e| ode_error(name, format!("{name}: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn step_scaling_uses_embedded_error_order_for_ode45() {
+        let h = 0.1;
+        let err = 1.0e-2;
+
+        let next = scaled_next_step(h, err, OdeMethod::Ode45.embedded_error_order(), 1.0, None);
+        let expected = h * 0.9 * err.powf(-1.0 / 5.0);
+        assert!((next - expected).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn step_scaling_uses_embedded_error_order_for_ode23() {
+        let h = 0.1;
+        let err = 1.0e-2;
+
+        let next = scaled_next_step(h, err, OdeMethod::Ode23.embedded_error_order(), 1.0, None);
+        let expected = h * 0.9 * err.powf(-1.0 / 3.0);
+        assert!((next - expected).abs() < 1.0e-12);
+    }
 }
