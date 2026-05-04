@@ -44,23 +44,19 @@
   "examples": [
     {
       "description": "Single sample from Exp(2)",
-      "input": "rng(0);\nr = exprnd(2)",
-      "output": "r = 0.3012"
+      "input": "rng(0);\nr = exprnd(2)"
     },
     {
       "description": "Matrix of arrival times for a Poisson process (lambda = 2)",
-      "input": "rng(0);\nlambda = 2;\nintervals = exprnd(1/lambda, 1, 5)",
-      "output": "intervals =\n   0.1506   0.0234   0.2487   0.1028   0.6401"
+      "input": "rng(0);\nlambda = 2;\nintervals = exprnd(1/lambda, 1, 5)"
     },
     {
       "description": "M/M/1 queueing simulation fragment",
-      "input": "rng(0);\nlambda = 2; mu_svc = 2.5; Tsim = 100;\nt = 0; arrivals = 0;\nwhile t < Tsim\n    t = t + exprnd(1/lambda);\n    arrivals = arrivals + 1;\nend\narrivals",
-      "output": "arrivals = 201"
+      "input": "rng(0);\nlambda = 2; mu_svc = 2.5; Tsim = 100;\nt = 0; arrivals = 0;\nwhile t < Tsim\n    t = t + exprnd(1/lambda);\n    arrivals = arrivals + 1;\nend\narrivals"
     },
     {
       "description": "Specifying dimensions with a size vector",
-      "input": "rng(0);\nT = exprnd(1, [2 3])",
-      "output": "T =\n   0.1506   0.2487   0.6401\n   0.0234   0.1028   0.3712"
+      "input": "rng(0);\nT = exprnd(1, [2 3])"
     }
   ],
   "faqs": [

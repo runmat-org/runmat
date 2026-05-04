@@ -44,23 +44,19 @@
   "examples": [
     {
       "description": "Single sample from N(0, 1)",
-      "input": "rng(0);\nr = normrnd(0, 1)",
-      "output": "r = 1.8179"
+      "input": "rng(0);\nr = normrnd(0, 1)"
     },
     {
       "description": "Matrix of Gaussian noise with mean 10 and standard deviation 2",
-      "input": "rng(0);\nX = normrnd(10, 2, 2, 3)",
-      "output": "X =\n   13.6358   10.7790   11.9676\n    7.6710   10.8350   10.2772"
+      "input": "rng(0);\nX = normrnd(10, 2, 2, 3)"
     },
     {
       "description": "Simulating normally-distributed measurement errors",
-      "input": "rng(0);\ntrueValue = 100;\nsigma = 0.5;\nmeasurements = trueValue + normrnd(0, sigma, 1, 5)",
-      "output": "measurements =\n  100.9089   99.4177  100.1947  100.2088  100.4919"
+      "input": "rng(0);\ntrueValue = 100;\nsigma = 0.5;\nmeasurements = trueValue + normrnd(0, sigma, 1, 5)"
     },
     {
       "description": "Specifying dimensions with a size vector",
-      "input": "rng(0);\nT = normrnd(5, 1.5, [2 3])",
-      "output": "T =\n    7.7268    5.5842    6.4757\n    3.2533    5.6262    5.2079"
+      "input": "rng(0);\nT = normrnd(5, 1.5, [2 3])"
     }
   ],
   "faqs": [

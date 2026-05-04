@@ -43,23 +43,19 @@
   "examples": [
     {
       "description": "Single sample from Uniform(2, 5)",
-      "input": "rng(0);\nr = unifrnd(2, 5)",
-      "output": "r = 2.2918"
+      "input": "rng(0);\nr = unifrnd(2, 5)"
     },
     {
       "description": "Matrix of random values between -1 and 1",
-      "input": "rng(0);\nX = unifrnd(-1, 1, 2, 3)",
-      "output": "X =\n   -0.8055    0.6992    0.2210\n    0.8186   -0.7390   -0.9554"
+      "input": "rng(0);\nX = unifrnd(-1, 1, 2, 3)"
     },
     {
       "description": "Monte Carlo samples for uncertain input bounds",
-      "input": "rng(0);\nlow = 10; high = 20;\nsamples = unifrnd(low, high, 1, 5)",
-      "output": "samples =\n   10.9725   19.0932   18.4960   11.3052   16.1049"
+      "input": "rng(0);\nlow = 10; high = 20;\nsamples = unifrnd(low, high, 1, 5)"
     },
     {
       "description": "Specifying dimensions with a size vector",
-      "input": "rng(0);\nT = unifrnd(0, 100, [2 3])",
-      "output": "T =\n    9.7251   84.9604   61.0490\n   90.9324   13.0519    2.2277"
+      "input": "rng(0);\nT = unifrnd(0, 100, [2 3])"
     }
   ],
   "faqs": [
