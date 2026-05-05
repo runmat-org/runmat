@@ -73,6 +73,7 @@ use tracing::info_span;
 use wgpu::util::DeviceExt;
 
 mod fft;
+mod rnd;
 mod solve;
 mod window;
 
@@ -13892,6 +13893,18 @@ impl AccelProvider for WgpuProvider {
 
     fn random_normal(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         self.random_normal_exec(shape)
+    }
+
+    fn random_exponential(&self, mu: f64, shape: &[usize]) -> Result<GpuTensorHandle> {
+        self.random_exponential_exec(mu, shape)
+    }
+
+    fn random_normrnd(&self, mu: f64, sigma: f64, shape: &[usize]) -> Result<GpuTensorHandle> {
+        self.random_normrnd_exec(mu, sigma, shape)
+    }
+
+    fn random_unifrnd(&self, a: f64, b: f64, shape: &[usize]) -> Result<GpuTensorHandle> {
+        self.random_unifrnd_exec(a, b, shape)
     }
 
     fn stochastic_evolution(

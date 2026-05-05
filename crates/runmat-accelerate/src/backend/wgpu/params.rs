@@ -925,6 +925,32 @@ pub struct RandomScalarParams {
     pub key1: u32,
 }
 
+/// Params for parameterized distribution samplers (exprnd, normrnd, unifrnd).
+/// param1/param2 carry distribution-specific scalars (mu, sigma, a, b, etc.).
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RandomDistParamsF64 {
+    pub offset: u32,
+    pub chunk: u32,
+    pub key0: u32,
+    pub key1: u32,
+    pub param1: f64,
+    pub param2: f64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RandomDistParamsF32 {
+    pub offset: u32,
+    pub chunk: u32,
+    pub key0: u32,
+    pub key1: u32,
+    pub param1: f32,
+    pub param2: f32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct StochasticEvolutionParamsF32 {
