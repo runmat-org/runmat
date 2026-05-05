@@ -28,6 +28,7 @@ const POPULAR_FUNCTIONS: Record<string, string[]> = {
   'diagnostics': ['assert', 'error', 'warning'],
   'timing': ['tic', 'toc'],
   'image/filters': ['filter2', 'fspecial', 'imfilter'],
+  'image/color': ['rgb2gray', 'im2double', 'im2uint8', 'rgb2hsv', 'hsv2rgb'],
 };
 
 // Get popular functions for a category
@@ -45,4 +46,3 @@ export const POPULAR_FUNCTIONS_BY_CATEGORY = new Proxy({} as Record<DisplayCateg
 export function getJsonCategoriesForDisplayCategory(displayCategory: DisplayCategory): string[] {
   return [displayCategory];
 }
-

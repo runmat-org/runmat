@@ -1,0 +1,16 @@
+{
+  "title": "ind2rgb",
+  "category": "image/color",
+  "keywords": ["ind2rgb", "indexed image", "colormap", "rgb", "image"],
+  "summary": "Convert indexed image data and a colormap to RGB truecolor data.",
+  "references": ["https://www.mathworks.com/help/matlab/ref/ind2rgb.html"],
+  "gpu_support": { "elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "GPU inputs gather to host because lookup semantics depend on index class metadata." },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 2, "constants": "inline" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::image::color::ind2rgb::tests" },
+  "description": "`ind2rgb(X, map)` maps indexed image values through an Nx3 colormap and returns truecolor RGB data.",
+  "behaviors": ["Double and single index arrays use 1-based colormap indices.", "uint8 and uint16 index arrays use zero-based indexed-image values.", "The output appends a third RGB channel dimension."],
+  "examples": [{ "description": "Indexed Image To RGB", "input": "RGB = ind2rgb(X, map);", "output": "% RGB is size(X) with a third RGB channel" }],
+  "links": [{ "label": "rgb2hsv", "url": "./rgb2hsv" }],
+  "source": { "label": "crates/runmat-runtime/src/builtins/image/color/ind2rgb.rs", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/color/ind2rgb.rs" }
+}

@@ -1,0 +1,16 @@
+{
+  "title": "rgb2lab",
+  "category": "image/color",
+  "keywords": ["rgb2lab", "rgb", "lab", "cielab", "color", "image"],
+  "summary": "Convert sRGB image or colormap values to CIE L*a*b* using D65 white.",
+  "references": ["https://www.mathworks.com/help/images/ref/rgb2lab.html"],
+  "gpu_support": { "elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "Host implementation uses the default sRGB/D65 conversion path." },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::image::color::rgb2lab::tests" },
+  "description": "`rgb2lab(RGB)` converts RGB image or colormap values to CIE L*a*b* using the default sRGB/D65 assumptions.",
+  "behaviors": ["Accepts MxNx3 truecolor images and Nx3 colormaps.", "Integer RGB inputs are scaled into [0,1] before conversion.", "Name-value options are not implemented in this Tier 1 version."],
+  "examples": [{ "description": "RGB To Lab", "input": "LAB = rgb2lab(RGB);", "output": "% LAB has L*, a*, and b* channels" }],
+  "links": [{ "label": "lab2rgb", "url": "./lab2rgb" }],
+  "source": { "label": "crates/runmat-runtime/src/builtins/image/color/rgb2lab.rs", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/color/rgb2lab.rs" }
+}

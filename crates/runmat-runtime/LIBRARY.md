@@ -57,6 +57,7 @@
 |     ✅     | math/signal    | conv, conv2, deconv, filter                                | 1D/2D conv & filtering   | ✓   | S      | —                | Small kernels fuse; large can call FFT‑based conv.                                      |
 |     ✅     | image/filters  | fspecial                                                   | Generate filter kernels   | —   | —      | —                | Included: gaussian, average, laplacian, log, motion, sobel, prewitt, unsharp, disk.     |
 |     ✅     | image/filters  | imfilter, filter2                                          | Apply linear filters      | ✓   | S      | —                | Padding modes: replicate, circular, symmetric.                                          |
+|     ✅     | image/color    | rgb2gray, gray2rgb, ind2rgb, im2double, im2uint8, im2uint16, rgb2hsv, hsv2rgb, rgb2lab, lab2rgb | Image color/class conversions | — | — | — | Host-correct Tier 1 Image Processing Toolbox conversions; GPU provider work tracked separately. |
 
 ## Polynomials & fitting
 

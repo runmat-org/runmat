@@ -1,0 +1,16 @@
+{
+  "title": "im2uint8",
+  "category": "image/color",
+  "keywords": ["im2uint8", "image", "uint8", "double", "uint16", "convert"],
+  "summary": "Convert image data to uint8 using image scaling rules.",
+  "references": ["https://www.mathworks.com/help/matlab/ref/im2uint8.html"],
+  "gpu_support": { "elementwise": false, "reduction": false, "precisions": [], "broadcasting": "none", "notes": "GPU inputs gather to host because uint8 image output dtype is host metadata today." },
+  "fusion": { "elementwise": false, "reduction": false, "max_inputs": 1, "constants": "inline" },
+  "requires_feature": null,
+  "tested": { "unit": "builtins::image::color::im2uint8::tests" },
+  "description": "`im2uint8(I)` converts floating image values in [0,1] to uint8 [0,255] and rescales uint16 image data.",
+  "behaviors": ["Floating-point inputs are clamped to [0,1], multiplied by 255, and rounded.", "uint16 inputs are rescaled from [0,65535] to [0,255]."],
+  "examples": [{ "description": "Convert Double Image", "input": "J = im2uint8(I);", "output": "% J is uint8 image data" }],
+  "links": [{ "label": "im2double", "url": "./im2double" }, { "label": "im2uint16", "url": "./im2uint16" }],
+  "source": { "label": "crates/runmat-runtime/src/builtins/image/color/im2uint8.rs", "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/color/im2uint8.rs" }
+}
