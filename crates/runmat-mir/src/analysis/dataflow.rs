@@ -155,24 +155,25 @@ fn simple_operand_fact(operand: &MirOperand) -> SimpleValueFact {
                 class: NumericClass::Double,
                 domain: NumericDomain::Real,
             };
-            SimpleValueFact {
-                ty: ty.clone(),
-                shape: ShapeFact::Scalar,
-                value_flow: ValueFlowFact::Single(ty),
-                async_value: None,
-            }
+            scalar_single_fact(ty)
+        }
+        MirOperand::Constant(crate::MirConstant::String(_)) => {
+            scalar_single_fact(TypeFact::CharArray)
         }
         MirOperand::FunctionHandle(FunctionHandleTarget::Function(function))
         | MirOperand::FunctionHandle(FunctionHandleTarget::Anonymous(function)) => {
-            let ty = TypeFact::Function(*function);
-            SimpleValueFact {
-                ty: ty.clone(),
-                shape: ShapeFact::Scalar,
-                value_flow: ValueFlowFact::Single(ty),
-                async_value: None,
-            }
+            scalar_single_fact(TypeFact::Function(*function))
         }
         _ => SimpleValueFact::default(),
+    }
+}
+
+fn scalar_single_fact(ty: TypeFact) -> SimpleValueFact {
+    SimpleValueFact {
+        ty: ty.clone(),
+        shape: ShapeFact::Scalar,
+        value_flow: ValueFlowFact::Single(ty),
+        async_value: None,
     }
 }
 

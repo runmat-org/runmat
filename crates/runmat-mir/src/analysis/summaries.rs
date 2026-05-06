@@ -4,6 +4,7 @@ use crate::{
 };
 use runmat_hir::{
     BindingId, FunctionId, HirCallableRef, RequestedOutputCount, SpawnSafetyFact, TypeFact,
+    WorkspaceEffect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -21,6 +22,9 @@ pub struct FunctionSummary {
     pub effects: EffectSummary,
     pub reads_captures: BTreeSet<BindingId>,
     pub writes_captures: BTreeSet<BindingId>,
+    pub writes_globals: BTreeSet<BindingId>,
+    pub writes_persistents: BTreeSet<BindingId>,
+    pub may_call_unknown: bool,
     pub calls: Vec<CallSummary>,
     pub spawn_safety: SpawnSafetyFact,
     pub fusibility: FusibilityFact,
@@ -53,7 +57,10 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
     let mut environment = Vec::new();
     let mut reads_captures = BTreeSet::new();
     let mut writes_captures = BTreeSet::new();
+    let mut writes_globals = BTreeSet::new();
+    let mut writes_persistents = BTreeSet::new();
     let mut calls = Vec::new();
+    let mut may_call_unknown = false;
 
     for block in &body.blocks {
         for stmt in &block.statements {
@@ -65,6 +72,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
                         &mut reads_captures,
                         &mut async_behavior,
                         &mut calls,
+                        &mut may_call_unknown,
                     );
                     scan_place_write(body, place, &mut writes_captures);
                 }
@@ -75,6 +83,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
                         &mut reads_captures,
                         &mut async_behavior,
                         &mut calls,
+                        &mut may_call_unknown,
                     );
                     for target in &targets.targets {
                         if let crate::MirOutputTarget::Place(place) = target {
@@ -89,10 +98,20 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
                         &mut reads_captures,
                         &mut async_behavior,
                         &mut calls,
+                        &mut may_call_unknown,
                     );
                 }
                 MirStmtKind::PlaceMutation(_) => {}
-                MirStmtKind::WorkspaceEffect { effect, .. } => workspace.push(effect.clone()),
+                MirStmtKind::WorkspaceEffect { effect, bindings } => {
+                    scan_workspace_effect(
+                        body,
+                        effect,
+                        bindings,
+                        &mut writes_globals,
+                        &mut writes_persistents,
+                    );
+                    workspace.push(effect.clone());
+                }
                 MirStmtKind::EnvironmentEffect(effect) => environment.push(effect.clone()),
             }
         }
@@ -116,6 +135,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
                     &mut reads_captures,
                     &mut async_behavior,
                     &mut calls,
+                    &mut may_call_unknown,
                 );
                 scan_local_write(body, *binding, &mut writes_captures);
             }
@@ -134,6 +154,10 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
             | MirTerminatorKind::Unreachable => {}
         }
     }
+
+    let fusibility = classify_fusibility(&workspace, &environment, may_call_unknown);
+    let parallel_safety = classify_parallel_safety(&workspace, &environment, may_call_unknown);
+    let accel_eligibility = classify_accel_eligibility(&workspace, &environment, may_call_unknown);
 
     let summary = FunctionSummary {
         function: body.function,
@@ -154,14 +178,75 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
         },
         reads_captures,
         writes_captures,
+        writes_globals,
+        writes_persistents,
+        may_call_unknown,
         calls,
         spawn_safety: SpawnSafetyFact::RequiresIsolation,
-        fusibility: FusibilityFact::Unknown,
-        parallel_safety: ParallelSafetyFact::Unknown,
-        accel_eligibility: AccelEligibilityFact::Unknown,
+        fusibility,
+        parallel_safety,
+        accel_eligibility,
     };
     store.functions.insert(body.function, summary.clone());
     summary
+}
+
+fn classify_fusibility(
+    workspace: &[WorkspaceEffect],
+    environment: &[runmat_hir::EnvironmentEffect],
+    may_call_unknown: bool,
+) -> FusibilityFact {
+    if may_call_unknown {
+        return FusibilityFact::NonFusible("unknown call barrier".into());
+    }
+    if !environment.is_empty() {
+        return FusibilityFact::NonFusible("environment effect barrier".into());
+    }
+    if workspace
+        .iter()
+        .any(|effect| !matches!(effect, WorkspaceEffect::None))
+    {
+        return FusibilityFact::NonFusible("workspace effect barrier".into());
+    }
+    FusibilityFact::Unknown
+}
+
+fn classify_parallel_safety(
+    workspace: &[WorkspaceEffect],
+    environment: &[runmat_hir::EnvironmentEffect],
+    may_call_unknown: bool,
+) -> ParallelSafetyFact {
+    if may_call_unknown {
+        ParallelSafetyFact::Unknown
+    } else if !environment.is_empty()
+        || workspace
+            .iter()
+            .any(|effect| !matches!(effect, WorkspaceEffect::None))
+    {
+        ParallelSafetyFact::WritesSharedState
+    } else {
+        ParallelSafetyFact::Unknown
+    }
+}
+
+fn classify_accel_eligibility(
+    workspace: &[WorkspaceEffect],
+    environment: &[runmat_hir::EnvironmentEffect],
+    may_call_unknown: bool,
+) -> AccelEligibilityFact {
+    if may_call_unknown {
+        return AccelEligibilityFact::Ineligible("unknown call barrier".into());
+    }
+    if !environment.is_empty() {
+        return AccelEligibilityFact::Ineligible("environment effect barrier".into());
+    }
+    if workspace
+        .iter()
+        .any(|effect| !matches!(effect, WorkspaceEffect::None))
+    {
+        return AccelEligibilityFact::Ineligible("workspace effect barrier".into());
+    }
+    AccelEligibilityFact::Unknown
 }
 
 fn scan_rvalue(
@@ -170,6 +255,7 @@ fn scan_rvalue(
     reads_captures: &mut BTreeSet<BindingId>,
     async_behavior: &mut AsyncBehaviorFact,
     calls: &mut Vec<CallSummary>,
+    may_call_unknown: &mut bool,
 ) {
     match value {
         MirRvalue::Use(operand) | MirRvalue::Unary(_, operand) => {
@@ -187,6 +273,9 @@ fn scan_rvalue(
             scan_operand(body, end, reads_captures);
         }
         MirRvalue::Call(call) => {
+            if is_unknown_call(&call.callee) {
+                *may_call_unknown = true;
+            }
             calls.push(call_summary(call));
             for arg in &call.args {
                 scan_operand(body, arg.operand(), reads_captures);
@@ -209,6 +298,13 @@ fn scan_rvalue(
     }
 }
 
+fn is_unknown_call(callee: &HirCallableRef) -> bool {
+    matches!(
+        callee,
+        HirCallableRef::DynamicExpr(_) | HirCallableRef::Unresolved(_)
+    )
+}
+
 fn call_summary(call: &MirCall) -> CallSummary {
     CallSummary {
         callee: call.callee.clone(),
@@ -219,6 +315,27 @@ fn call_summary(call: &MirCall) -> CallSummary {
             .iter()
             .filter(|arg| matches!(arg, MirCallArg::Expansion(_)))
             .count(),
+    }
+}
+
+fn scan_workspace_effect(
+    body: &MirBody,
+    effect: &WorkspaceEffect,
+    bindings: &[MirLocalId],
+    writes_globals: &mut BTreeSet<BindingId>,
+    writes_persistents: &mut BTreeSet<BindingId>,
+) {
+    let target = match effect {
+        WorkspaceEffect::MutatesGlobal => Some(writes_globals),
+        WorkspaceEffect::MutatesPersistent => Some(writes_persistents),
+        _ => None,
+    };
+    if let Some(target) = target {
+        for local in bindings {
+            if let Some(binding) = local_for_id(body, *local).and_then(|local| local.binding) {
+                target.insert(binding);
+            }
+        }
     }
 }
 

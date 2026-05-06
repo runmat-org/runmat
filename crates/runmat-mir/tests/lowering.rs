@@ -2,8 +2,8 @@ use runmat_hir::{lower, EnvironmentEffect, HirCallableRef, LoweringContext};
 use runmat_mir::{
     analysis::{
         analyze_assembly, analyze_body, analyze_liveness, analyze_spawn_boundaries,
-        diagnose_uninitialized_reads, summarize_body, summarize_spawn_safety, AnalysisStore,
-        InitFact, MirLocalKey,
+        diagnose_uninitialized_reads, summarize_body, summarize_spawn_safety, AccelEligibilityFact,
+        AnalysisStore, FusibilityFact, InitFact, MirLocalKey, ParallelSafetyFact,
     },
     lowering::lower_assembly,
     AsyncBehaviorFact, CacheProduct, MirAggregateKind, MirBody, MirCallArg, MirLocalKind,
@@ -180,6 +180,42 @@ fn analyze_body_records_simple_numeric_local_and_binding_facts() {
 }
 
 #[test]
+fn analyze_body_records_simple_string_value_flow_fact() {
+    let (body, store) = analyze_single_body("function y = f(); y = 'name'; end");
+    let output = first_local_of_kind(&body, MirLocalKind::Output);
+    let fact = store
+        .mir_locals
+        .get(&MirLocalKey {
+            function: body.function,
+            local: output,
+        })
+        .unwrap();
+
+    assert_eq!(fact.ty, runmat_hir::TypeFact::CharArray);
+    assert_eq!(fact.shape, runmat_hir::ShapeFact::Scalar);
+    assert_eq!(
+        fact.value_flow,
+        runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::CharArray)
+    );
+}
+
+#[test]
+fn analyze_body_records_function_handle_value_flow_fact() {
+    let mir = lower_mir("function h = f(); h = @target; end\nfunction y = target(x); y = x; end");
+    let store = analyze_assembly(&mir);
+    let function_fact = store
+        .mir_locals
+        .values()
+        .find(|fact| matches!(fact.ty, runmat_hir::TypeFact::Function(_)))
+        .unwrap();
+
+    assert!(matches!(
+        function_fact.value_flow,
+        runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::Function(_))
+    ));
+}
+
+#[test]
 fn analyze_body_records_future_and_task_async_value_facts() {
     let mir = lower_mir("function y = f(); fut = @(x) x; task = spawn(fut); y = 1; end");
     let store = analyze_assembly(&mir);
@@ -348,6 +384,22 @@ fn summary_records_requested_output_sensitive_call_facts() {
     ));
     assert_eq!(summary.calls[0].arg_count, 1);
     assert_eq!(summary.calls[0].expansion_arg_count, 1);
+}
+
+#[test]
+fn summary_marks_unresolved_calls_as_unknown_call_barriers() {
+    let mir = lower_mir("function y = f(x); y = unresolved_target(x); end");
+    let body = mir.bodies.values().next().unwrap();
+    let mut store = AnalysisStore::default();
+
+    let summary = summarize_body(body, &mut store);
+
+    assert!(summary.may_call_unknown);
+    assert!(matches!(summary.fusibility, FusibilityFact::NonFusible(_)));
+    assert!(matches!(
+        summary.accel_eligibility,
+        AccelEligibilityFact::Ineligible(_)
+    ));
 }
 
 #[test]
@@ -559,6 +611,7 @@ fn liveness_records_locals_live_across_await() {
 fn global_statement_lowers_to_workspace_effect() {
     let mir = lower_mir("function y = f(); global g; y = 1; end");
     let body = mir.bodies.values().next().unwrap();
+    let mut store = AnalysisStore::default();
 
     assert!(matches!(
         body.blocks[0].statements[0].kind,
@@ -566,6 +619,22 @@ fn global_statement_lowers_to_workspace_effect() {
             effect: runmat_hir::WorkspaceEffect::MutatesGlobal,
             ..
         }
+    ));
+    let global_local = match &body.blocks[0].statements[0].kind {
+        MirStmtKind::WorkspaceEffect { bindings, .. } => bindings[0],
+        _ => unreachable!(),
+    };
+    let summary = summarize_body(body, &mut store);
+    let global_binding = body.locals[global_local.0].binding.unwrap();
+    assert!(summary.writes_globals.contains(&global_binding));
+    assert!(matches!(summary.fusibility, FusibilityFact::NonFusible(_)));
+    assert!(matches!(
+        summary.parallel_safety,
+        ParallelSafetyFact::WritesSharedState
+    ));
+    assert!(matches!(
+        summary.accel_eligibility,
+        AccelEligibilityFact::Ineligible(_)
     ));
 }
 
@@ -581,6 +650,12 @@ fn persistent_statement_lowers_to_summary_workspace_effect() {
         .effects
         .workspace
         .contains(&runmat_hir::WorkspaceEffect::MutatesPersistent));
+    let persistent_local = match &body.blocks[0].statements[0].kind {
+        MirStmtKind::WorkspaceEffect { bindings, .. } => bindings[0],
+        _ => unreachable!(),
+    };
+    let persistent_binding = body.locals[persistent_local.0].binding.unwrap();
+    assert!(summary.writes_persistents.contains(&persistent_binding));
 }
 
 #[test]
@@ -603,6 +678,15 @@ fn summary_records_explicit_environment_effects() {
         summary.effects.environment,
         vec![EnvironmentEffect::FunctionCacheInvalidation]
     );
+    assert!(matches!(summary.fusibility, FusibilityFact::NonFusible(_)));
+    assert!(matches!(
+        summary.parallel_safety,
+        ParallelSafetyFact::WritesSharedState
+    ));
+    assert!(matches!(
+        summary.accel_eligibility,
+        AccelEligibilityFact::Ineligible(_)
+    ));
 }
 
 #[test]
