@@ -10,7 +10,26 @@ pub struct MirStmt {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MirStmtKind {
-    Assign { place: MirPlace, value: MirRvalue },
+    Assign {
+        place: MirPlace,
+        value: MirRvalue,
+    },
+    MultiAssign {
+        targets: MirOutputTargetList,
+        value: MirRvalue,
+    },
     Expr(MirRvalue),
     PlaceMutation(PlaceMutation),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MirOutputTargetList {
+    pub targets: Vec<MirOutputTarget>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MirOutputTarget {
+    Place(MirPlace),
+    Discard,
+    VarargoutExpansion,
 }

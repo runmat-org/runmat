@@ -32,7 +32,14 @@ impl ControlFlowBuilder {
         return_terminator: MirTerminator,
     ) -> Result<(Vec<BasicBlock>, Vec<MirSourceRecord>), SemanticError> {
         let entry = self.fresh_block();
-        let entry = self.lower_block(ctx, entry, body, return_terminator, None)?;
+        let entry = self.lower_block(
+            ctx,
+            entry,
+            body,
+            return_terminator.clone(),
+            &return_terminator,
+            None,
+        )?;
         self.blocks.push(entry);
         self.blocks.sort_by_key(|block| block.id.0);
         Ok((self.blocks, self.source_records))
@@ -44,6 +51,7 @@ impl ControlFlowBuilder {
         id: BasicBlockId,
         body: &HirBlock,
         final_terminator: MirTerminator,
+        return_terminator: &MirTerminator,
         loop_targets: Option<(BasicBlockId, BasicBlockId)>,
     ) -> Result<BasicBlock, SemanticError> {
         let mut statements = Vec::new();
@@ -78,6 +86,7 @@ impl ControlFlowBuilder {
                     then_id,
                     then_body,
                     merge_terminator.clone(),
+                    return_terminator,
                     loop_targets,
                 )?;
                 let empty_else = HirBlock { statements: vec![] };
@@ -86,6 +95,7 @@ impl ControlFlowBuilder {
                     else_id,
                     else_body.as_ref().unwrap_or(&empty_else),
                     merge_terminator,
+                    return_terminator,
                     loop_targets,
                 )?;
                 self.blocks.push(then_block);
@@ -119,6 +129,7 @@ impl ControlFlowBuilder {
                         kind: MirTerminatorKind::Goto(id),
                         span: stmt.span,
                     },
+                    return_terminator,
                     Some((id, exit_id)),
                 )?;
                 self.blocks.push(body_block);
@@ -157,6 +168,7 @@ impl ControlFlowBuilder {
                         kind: MirTerminatorKind::Goto(id),
                         span: stmt.span,
                     },
+                    return_terminator,
                     Some((id, exit_id)),
                 )?;
                 self.blocks.push(body_block);
@@ -198,10 +210,17 @@ impl ControlFlowBuilder {
                     try_id,
                     try_body,
                     merge_terminator.clone(),
+                    return_terminator,
                     loop_targets,
                 )?;
-                let catch_block =
-                    self.lower_block(ctx, catch_id, catch_body, merge_terminator, loop_targets)?;
+                let catch_block = self.lower_block(
+                    ctx,
+                    catch_id,
+                    catch_body,
+                    merge_terminator,
+                    return_terminator,
+                    loop_targets,
+                )?;
                 self.blocks.push(try_block);
                 self.blocks.push(catch_block);
                 self.blocks.push(BasicBlock {
@@ -243,6 +262,16 @@ impl ControlFlowBuilder {
                     statements,
                     terminator: MirTerminator {
                         kind: MirTerminatorKind::Goto(continue_target),
+                        span: stmt.span,
+                    },
+                });
+            }
+            if matches!(stmt.kind, HirStmtKind::Return) {
+                return Ok(BasicBlock {
+                    id,
+                    statements,
+                    terminator: MirTerminator {
+                        kind: return_terminator.kind.clone(),
                         span: stmt.span,
                     },
                 });

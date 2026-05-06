@@ -1,5 +1,7 @@
 use runmat_hir::{lower, HirCallableRef, LoweringContext};
-use runmat_mir::{lowering::lower_assembly, MirRvalue, MirStmtKind, MirTerminatorKind};
+use runmat_mir::{
+    lowering::lower_assembly, MirOutputTarget, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
+};
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
     let ast = runmat_parser::parse(src).unwrap();
@@ -58,6 +60,56 @@ fn direct_function_call_preserves_callee_and_requested_outputs() {
     assert!(matches!(
         call.requested_outputs,
         runmat_hir::RequestedOutputCount::One
+    ));
+}
+
+#[test]
+fn multi_assign_preserves_discard_targets_and_requested_outputs() {
+    let mir = lower_mir("function idx = pick(x); [~, idx] = max(x); end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let MirStmtKind::MultiAssign {
+        targets,
+        value: MirRvalue::Call(call),
+    } = &body.blocks[0].statements[0].kind
+    else {
+        panic!("expected multi-output call assignment");
+    };
+
+    assert_eq!(targets.targets.len(), 2);
+    assert!(matches!(targets.targets[0], MirOutputTarget::Discard));
+    assert!(matches!(targets.targets[1], MirOutputTarget::Place(_)));
+    assert!(matches!(
+        call.requested_outputs,
+        runmat_hir::RequestedOutputCount::Exactly(2)
+    ));
+}
+
+#[test]
+fn indexed_assignment_lowers_to_index_place() {
+    let mir = lower_mir("function y = write_index(x); x(1) = 2; y = x; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(matches!(
+        body.blocks[0].statements[0].kind,
+        MirStmtKind::Assign {
+            place: MirPlace::Index(_, _),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn member_assignment_lowers_to_member_place() {
+    let mir = lower_mir("function s = write_member(s); s.value = 2; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(matches!(
+        body.blocks[0].statements[0].kind,
+        MirStmtKind::Assign {
+            place: MirPlace::Member(_, _),
+            ..
+        }
     ));
 }
 
@@ -176,5 +228,20 @@ fn continue_in_loop_lowers_to_loop_condition_edge() {
     assert!(matches!(
         body.blocks[1].terminator.kind,
         MirTerminatorKind::Goto(target) if target == body.blocks[0].id
+    ));
+}
+
+#[test]
+fn return_in_nested_block_lowers_to_return_terminator() {
+    let mir = lower_mir("function y = done(c); if c; return; else; y = 1; end; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(matches!(
+        body.blocks[1].terminator.kind,
+        MirTerminatorKind::Return(_)
+    ));
+    assert!(matches!(
+        body.blocks[2].terminator.kind,
+        MirTerminatorKind::Goto(_)
     ));
 }
