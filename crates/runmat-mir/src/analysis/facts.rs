@@ -1,5 +1,7 @@
 use crate::AsyncBehaviorFact;
-use runmat_hir::{EnvironmentEffect, ShapeFact, TypeFact, ValueFlowFact, WorkspaceEffect};
+use runmat_hir::{
+    AsyncValueFact, EnvironmentEffect, ShapeFact, TypeFact, ValueFlowFact, WorkspaceEffect,
+};
 use serde::{Deserialize, Serialize};
 
 use super::InitFact;
@@ -9,6 +11,7 @@ pub struct MirLocalFact {
     pub ty: TypeFact,
     pub shape: ShapeFact,
     pub value_flow: ValueFlowFact,
+    pub async_value: Option<AsyncValueFact>,
     pub initialized: InitFact,
 }
 

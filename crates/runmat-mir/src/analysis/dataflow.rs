@@ -3,7 +3,10 @@ use crate::{
     MirIndexComponent, MirIndexing, MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue,
     MirStmtKind, MirTerminatorKind,
 };
-use runmat_hir::{ShapeFact, Span, TypeFact, ValueFlowFact};
+use runmat_hir::{
+    AsyncValueFact, FunctionHandleTarget, FutureFact, FutureStateFact, NumericClass, NumericDomain,
+    ShapeFact, Span, SpawnSafetyFact, TaskHandleFact, TypeFact, ValueFlowFact,
+};
 use std::collections::{HashMap, VecDeque};
 
 use super::{
@@ -17,8 +20,28 @@ struct InitDataflowResult {
     final_state: Vec<InitFact>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct SimpleValueFact {
+    ty: TypeFact,
+    shape: ShapeFact,
+    value_flow: ValueFlowFact,
+    async_value: Option<AsyncValueFact>,
+}
+
+impl Default for SimpleValueFact {
+    fn default() -> Self {
+        Self {
+            ty: TypeFact::Unknown,
+            shape: ShapeFact::Unknown,
+            value_flow: ValueFlowFact::UnknownList,
+            async_value: None,
+        }
+    }
+}
+
 pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
     let result = compute_init_dataflow(body);
+    let local_facts = compute_simple_local_facts(body);
 
     for record in &body.source_map.statements {
         if let Some(expr) = record.expr {
@@ -36,14 +59,26 @@ pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
                 local: local.id,
             },
             MirLocalFact {
-                ty: TypeFact::Unknown,
-                shape: ShapeFact::Unknown,
-                value_flow: ValueFlowFact::UnknownList,
+                ty: local_facts[local.id.0].clone().unwrap_or_default().ty,
+                shape: local_facts[local.id.0].clone().unwrap_or_default().shape,
+                value_flow: local_facts[local.id.0]
+                    .clone()
+                    .unwrap_or_default()
+                    .value_flow,
+                async_value: local_facts[local.id.0]
+                    .clone()
+                    .unwrap_or_default()
+                    .async_value,
                 initialized,
             },
         );
         if let Some(binding) = local.binding {
-            insert_binding_fact(store, binding, initialized);
+            insert_binding_fact(
+                store,
+                binding,
+                initialized,
+                local_facts[local.id.0].clone().unwrap_or_default().ty,
+            );
         }
     }
 }
@@ -52,18 +87,142 @@ fn insert_binding_fact(
     store: &mut AnalysisStore,
     binding: runmat_hir::BindingId,
     initialized: InitFact,
+    ty: TypeFact,
 ) {
-    let incoming = BindingFact {
-        ty: TypeFact::Unknown,
-        initialized,
-    };
+    let incoming = BindingFact { ty, initialized };
     store
         .bindings
         .entry(binding)
         .and_modify(|existing| {
-            existing.initialized = join_init(existing.initialized, incoming.initialized)
+            existing.ty = join_type(&existing.ty, &incoming.ty);
+            existing.initialized = join_init(existing.initialized, incoming.initialized);
         })
         .or_insert(incoming);
+}
+
+fn compute_simple_local_facts(body: &MirBody) -> Vec<Option<SimpleValueFact>> {
+    let mut facts = vec![None; body.locals.len()];
+    for block in &body.blocks {
+        for stmt in &block.statements {
+            match &stmt.kind {
+                MirStmtKind::Assign { place, value } => {
+                    if let MirPlace::Local(local) = place {
+                        merge_simple_fact(&mut facts[local.0], simple_rvalue_fact(value));
+                    }
+                }
+                MirStmtKind::MultiAssign { targets, .. } => {
+                    for target in &targets.targets {
+                        if let crate::MirOutputTarget::Place(MirPlace::Local(local)) = target {
+                            merge_simple_fact(&mut facts[local.0], SimpleValueFact::default());
+                        }
+                    }
+                }
+                MirStmtKind::Expr(_)
+                | MirStmtKind::PlaceMutation(_)
+                | MirStmtKind::WorkspaceEffect { .. }
+                | MirStmtKind::EnvironmentEffect(_) => {}
+            }
+        }
+    }
+    facts
+}
+
+fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
+    match value {
+        MirRvalue::Use(operand) => simple_operand_fact(operand),
+        MirRvalue::Future(_) => SimpleValueFact {
+            async_value: Some(AsyncValueFact::Future(FutureFact {
+                output: Box::new(TypeFact::Unknown),
+                state: FutureStateFact::Lazy,
+            })),
+            ..SimpleValueFact::default()
+        },
+        MirRvalue::Spawn(_) => SimpleValueFact {
+            async_value: Some(AsyncValueFact::TaskHandle(TaskHandleFact {
+                output: Box::new(TypeFact::Unknown),
+                spawn_safety: SpawnSafetyFact::RequiresIsolation,
+            })),
+            ..SimpleValueFact::default()
+        },
+        _ => SimpleValueFact::default(),
+    }
+}
+
+fn simple_operand_fact(operand: &MirOperand) -> SimpleValueFact {
+    match operand {
+        MirOperand::Constant(crate::MirConstant::Number(_)) => {
+            let ty = TypeFact::Numeric {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            };
+            SimpleValueFact {
+                ty: ty.clone(),
+                shape: ShapeFact::Scalar,
+                value_flow: ValueFlowFact::Single(ty),
+                async_value: None,
+            }
+        }
+        MirOperand::FunctionHandle(FunctionHandleTarget::Function(function))
+        | MirOperand::FunctionHandle(FunctionHandleTarget::Anonymous(function)) => {
+            let ty = TypeFact::Function(*function);
+            SimpleValueFact {
+                ty: ty.clone(),
+                shape: ShapeFact::Scalar,
+                value_flow: ValueFlowFact::Single(ty),
+                async_value: None,
+            }
+        }
+        _ => SimpleValueFact::default(),
+    }
+}
+
+fn merge_simple_fact(slot: &mut Option<SimpleValueFact>, incoming: SimpleValueFact) {
+    match slot {
+        Some(existing) => {
+            *existing = SimpleValueFact {
+                ty: join_type(&existing.ty, &incoming.ty),
+                shape: join_shape(&existing.shape, &incoming.shape),
+                value_flow: join_value_flow(&existing.value_flow, &incoming.value_flow),
+                async_value: join_async_value(&existing.async_value, &incoming.async_value),
+            };
+        }
+        None => *slot = Some(incoming),
+    }
+}
+
+fn join_type(left: &TypeFact, right: &TypeFact) -> TypeFact {
+    if left == right {
+        left.clone()
+    } else {
+        TypeFact::Unknown
+    }
+}
+
+fn join_shape(left: &ShapeFact, right: &ShapeFact) -> ShapeFact {
+    if left == right {
+        left.clone()
+    } else {
+        ShapeFact::Unknown
+    }
+}
+
+fn join_value_flow(left: &ValueFlowFact, right: &ValueFlowFact) -> ValueFlowFact {
+    if left == right {
+        left.clone()
+    } else {
+        ValueFlowFact::UnknownList
+    }
+}
+
+fn join_async_value(
+    left: &Option<AsyncValueFact>,
+    right: &Option<AsyncValueFact>,
+) -> Option<AsyncValueFact> {
+    if left == right {
+        left.clone()
+    } else {
+        None
+    }
 }
 
 pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {

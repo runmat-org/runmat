@@ -145,6 +145,68 @@ fn analyze_assembly_populates_binding_facts_by_semantic_id() {
 }
 
 #[test]
+fn analyze_body_records_simple_numeric_local_and_binding_facts() {
+    let (body, store) = analyze_single_body("function y = f(); y = 1; end");
+    let output = first_local_of_kind(&body, MirLocalKind::Output);
+    let output_binding = body
+        .locals
+        .iter()
+        .find(|local| local.id == output)
+        .unwrap()
+        .binding
+        .unwrap();
+
+    assert_eq!(
+        store
+            .mir_locals
+            .get(&MirLocalKey {
+                function: body.function,
+                local: output,
+            })
+            .unwrap()
+            .ty,
+        runmat_hir::TypeFact::Numeric {
+            class: runmat_hir::NumericClass::Double,
+            domain: runmat_hir::NumericDomain::Real,
+        }
+    );
+    assert_eq!(
+        store.bindings.get(&output_binding).unwrap().ty,
+        runmat_hir::TypeFact::Numeric {
+            class: runmat_hir::NumericClass::Double,
+            domain: runmat_hir::NumericDomain::Real,
+        }
+    );
+}
+
+#[test]
+fn analyze_body_records_future_and_task_async_value_facts() {
+    let (body, store) =
+        analyze_single_body("function y = f(); fut = @(x) x; task = spawn(fut); y = 1; end");
+
+    let async_values: Vec<_> = body
+        .locals
+        .iter()
+        .filter_map(|local| {
+            store
+                .mir_locals
+                .get(&MirLocalKey {
+                    function: body.function,
+                    local: local.id,
+                })
+                .and_then(|fact| fact.async_value.as_ref())
+        })
+        .collect();
+
+    assert!(async_values
+        .iter()
+        .any(|fact| matches!(fact, runmat_hir::AsyncValueFact::Future(_))));
+    assert!(async_values
+        .iter()
+        .any(|fact| matches!(fact, runmat_hir::AsyncValueFact::TaskHandle(_))));
+}
+
+#[test]
 fn analyze_body_populates_expression_facts_from_source_map() {
     let (body, store) = analyze_single_body("function y = f(x); y = x + 1; end");
     let expr = body
