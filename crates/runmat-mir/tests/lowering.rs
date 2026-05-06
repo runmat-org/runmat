@@ -753,6 +753,11 @@ fn tensor_literal_lowers_to_mir_aggregate() {
         .locals
         .iter()
         .any(|local| matches!(local.kind, MirLocalKind::Temporary)));
+    assert!(body
+        .source_map
+        .locals
+        .iter()
+        .any(|source| source.binding.is_none() && source.expr.is_some()));
     assert!(matches!(
         body.blocks[0].statements[1].kind,
         MirStmtKind::Assign {

@@ -1,5 +1,5 @@
 use crate::{MirLocal, MirLocalId, MirLocalKind, MirLocalSource};
-use runmat_hir::{BindingId, HirFunction, SemanticError, Span};
+use runmat_hir::{BindingId, ExprId, HirFunction, SemanticError, Span};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -55,6 +55,7 @@ impl MirLoweringContext {
                     MirLocalSource {
                         local,
                         binding: Some(*binding),
+                        expr: None,
                         span: function.span,
                     },
                 )
@@ -62,7 +63,7 @@ impl MirLoweringContext {
             .unzip()
     }
 
-    pub(crate) fn fresh_temp(&self, span: Span) -> MirLocalId {
+    pub(crate) fn fresh_temp(&self, span: Span, expr: Option<ExprId>) -> MirLocalId {
         let local = MirLocalId(self.next_local + self.temp_locals.borrow().len());
         self.temp_locals.borrow_mut().push(MirLocal {
             id: local,
@@ -73,6 +74,7 @@ impl MirLoweringContext {
         self.temp_sources.borrow_mut().push(MirLocalSource {
             local,
             binding: None,
+            expr,
             span,
         });
         local

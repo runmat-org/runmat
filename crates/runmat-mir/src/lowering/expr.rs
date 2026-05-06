@@ -176,7 +176,7 @@ pub(crate) fn lower_operand(
     }
 
     let value = lower_expr(ctx, expr, temps)?;
-    let local = ctx.fresh_temp(expr.span);
+    let local = ctx.fresh_temp(expr.span, Some(expr.id));
     temps.push(MirStmt {
         kind: MirStmtKind::Assign {
             place: MirPlace::Local(local),
