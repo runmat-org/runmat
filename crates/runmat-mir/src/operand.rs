@@ -1,5 +1,5 @@
 use crate::{MirLocalId, MirTempId};
-use runmat_hir::{FunctionHandleTarget, StringLiteral};
+use runmat_hir::{FunctionHandleTarget, StringLiteral, SymbolName};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -14,6 +14,7 @@ pub enum MirOperand {
 pub enum MirConstant {
     Number(String),
     String(StringLiteral),
+    Symbol(SymbolName),
     Bool(bool),
     EmptyArray,
 }

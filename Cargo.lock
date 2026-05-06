@@ -5762,6 +5762,7 @@ name = "runmat-mir"
 version = "0.4.1"
 dependencies = [
  "runmat-hir",
+ "runmat-parser",
  "serde",
 ]
 
