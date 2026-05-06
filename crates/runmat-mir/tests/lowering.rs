@@ -153,3 +153,28 @@ fn try_catch_lowers_to_try_catch_blocks_and_merge() {
     ));
     assert_eq!(body.source_map.statements.len(), 3);
 }
+
+#[test]
+fn break_in_loop_lowers_to_exit_edge() {
+    let mir = lower_mir("function y = first(c); while c; break; end; y = 1; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let MirTerminatorKind::Branch { else_block, .. } = body.blocks[0].terminator.kind else {
+        panic!("expected while branch");
+    };
+    assert!(matches!(
+        body.blocks[1].terminator.kind,
+        MirTerminatorKind::Goto(target) if target == else_block
+    ));
+}
+
+#[test]
+fn continue_in_loop_lowers_to_loop_condition_edge() {
+    let mir = lower_mir("function y = again(c); while c; continue; end; y = 1; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(matches!(
+        body.blocks[1].terminator.kind,
+        MirTerminatorKind::Goto(target) if target == body.blocks[0].id
+    ));
+}

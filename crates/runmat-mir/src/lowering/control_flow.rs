@@ -32,7 +32,7 @@ impl ControlFlowBuilder {
         return_terminator: MirTerminator,
     ) -> Result<(Vec<BasicBlock>, Vec<MirSourceRecord>), SemanticError> {
         let entry = self.fresh_block();
-        let entry = self.lower_block(ctx, entry, body, return_terminator)?;
+        let entry = self.lower_block(ctx, entry, body, return_terminator, None)?;
         self.blocks.push(entry);
         self.blocks.sort_by_key(|block| block.id.0);
         Ok((self.blocks, self.source_records))
@@ -44,6 +44,7 @@ impl ControlFlowBuilder {
         id: BasicBlockId,
         body: &HirBlock,
         final_terminator: MirTerminator,
+        loop_targets: Option<(BasicBlockId, BasicBlockId)>,
     ) -> Result<BasicBlock, SemanticError> {
         let mut statements = Vec::new();
         for stmt in &body.statements {
@@ -72,14 +73,20 @@ impl ControlFlowBuilder {
                     kind: MirTerminatorKind::Goto(merge_id),
                     span: stmt.span,
                 };
-                let then_block =
-                    self.lower_block(ctx, then_id, then_body, merge_terminator.clone())?;
+                let then_block = self.lower_block(
+                    ctx,
+                    then_id,
+                    then_body,
+                    merge_terminator.clone(),
+                    loop_targets,
+                )?;
                 let empty_else = HirBlock { statements: vec![] };
                 let else_block = self.lower_block(
                     ctx,
                     else_id,
                     else_body.as_ref().unwrap_or(&empty_else),
                     merge_terminator,
+                    loop_targets,
                 )?;
                 self.blocks.push(then_block);
                 self.blocks.push(else_block);
@@ -112,6 +119,7 @@ impl ControlFlowBuilder {
                         kind: MirTerminatorKind::Goto(id),
                         span: stmt.span,
                     },
+                    Some((id, exit_id)),
                 )?;
                 self.blocks.push(body_block);
                 self.blocks.push(BasicBlock {
@@ -149,6 +157,7 @@ impl ControlFlowBuilder {
                         kind: MirTerminatorKind::Goto(id),
                         span: stmt.span,
                     },
+                    Some((id, exit_id)),
                 )?;
                 self.blocks.push(body_block);
                 self.blocks.push(BasicBlock {
@@ -184,9 +193,15 @@ impl ControlFlowBuilder {
                     kind: MirTerminatorKind::Goto(merge_id),
                     span: stmt.span,
                 };
-                let try_block =
-                    self.lower_block(ctx, try_id, try_body, merge_terminator.clone())?;
-                let catch_block = self.lower_block(ctx, catch_id, catch_body, merge_terminator)?;
+                let try_block = self.lower_block(
+                    ctx,
+                    try_id,
+                    try_body,
+                    merge_terminator.clone(),
+                    loop_targets,
+                )?;
+                let catch_block =
+                    self.lower_block(ctx, catch_id, catch_body, merge_terminator, loop_targets)?;
                 self.blocks.push(try_block);
                 self.blocks.push(catch_block);
                 self.blocks.push(BasicBlock {
@@ -202,6 +217,32 @@ impl ControlFlowBuilder {
                             try_block: try_id,
                             catch_block: catch_id,
                         },
+                        span: stmt.span,
+                    },
+                });
+            }
+            if matches!(stmt.kind, HirStmtKind::Break) {
+                let Some((_, break_target)) = loop_targets else {
+                    return Err(SemanticError::new("break outside loop"));
+                };
+                return Ok(BasicBlock {
+                    id,
+                    statements,
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::Goto(break_target),
+                        span: stmt.span,
+                    },
+                });
+            }
+            if matches!(stmt.kind, HirStmtKind::Continue) {
+                let Some((continue_target, _)) = loop_targets else {
+                    return Err(SemanticError::new("continue outside loop"));
+                };
+                return Ok(BasicBlock {
+                    id,
+                    statements,
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::Goto(continue_target),
                         span: stmt.span,
                     },
                 });
