@@ -1,7 +1,8 @@
 use runmat_hir::{lower, HirCallableRef, LoweringContext};
 use runmat_mir::{
     analysis::{
-        analyze_body, diagnose_uninitialized_reads, summarize_body, AnalysisStore, InitFact,
+        analyze_body, analyze_liveness, diagnose_uninitialized_reads, summarize_body,
+        AnalysisStore, InitFact,
     },
     lowering::lower_assembly,
     AsyncBehaviorFact, MirAggregateKind, MirBody, MirLocalKind, MirOperand, MirOutputTarget,
@@ -198,6 +199,25 @@ fn dataflow_marks_await_assignment_output_definitely_assigned() {
         store.mir_locals.get(&output).unwrap().initialized,
         InitFact::DefinitelyAssigned
     );
+}
+
+#[test]
+fn liveness_records_locals_live_across_await() {
+    let mir = lower_mir("async function y = f(g, x); await(g); y = x; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let facts = analyze_liveness(body);
+
+    assert_eq!(facts.live_across_await.len(), 1);
+    let live = &facts.live_across_await[0].1;
+    let param_locals: Vec<_> = body
+        .locals
+        .iter()
+        .filter(|local| matches!(local.kind, MirLocalKind::Parameter))
+        .map(|local| local.id)
+        .collect();
+    assert!(param_locals.iter().any(|local| live.contains(local)));
+    assert!(live.len() >= 2);
 }
 
 #[test]
