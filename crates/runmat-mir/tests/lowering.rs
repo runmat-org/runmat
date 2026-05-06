@@ -347,10 +347,29 @@ fn indexed_assignment_lowers_to_index_place() {
 
     assert!(matches!(
         body.blocks[0].statements[0].kind,
+        MirStmtKind::PlaceMutation(ref mutation)
+            if mutation.kind == runmat_hir::PlaceMutationKind::IndexedAssign
+                && mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::CreateArrayByIndex
+    ));
+    assert!(matches!(
+        body.blocks[0].statements[1].kind,
         MirStmtKind::Assign {
             place: MirPlace::Index(_, _),
             ..
         }
+    ));
+}
+
+#[test]
+fn indexed_empty_assignment_lowers_to_delete_mutation() {
+    let mir = lower_mir("function y = delete_index(x); x(1) = []; y = x; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(matches!(
+        body.blocks[0].statements[0].kind,
+        MirStmtKind::PlaceMutation(ref mutation)
+            if mutation.kind == runmat_hir::PlaceMutationKind::Delete
+                && mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::ExistingOnly
     ));
 }
 
@@ -391,6 +410,12 @@ fn member_assignment_lowers_to_member_place() {
 
     assert!(matches!(
         body.blocks[0].statements[0].kind,
+        MirStmtKind::PlaceMutation(ref mutation)
+            if mutation.kind == runmat_hir::PlaceMutationKind::MemberAssign
+                && mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::CreateStructFieldPath
+    ));
+    assert!(matches!(
+        body.blocks[0].statements[1].kind,
         MirStmtKind::Assign {
             place: MirPlace::Member(_, _),
             ..

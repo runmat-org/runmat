@@ -1,5 +1,8 @@
 use crate::{MirOutputTarget, MirOutputTargetList, MirStmt, MirStmtKind};
-use runmat_hir::{HirStmt, HirStmtKind, OutputTarget, SemanticError, WorkspaceEffect};
+use runmat_hir::{
+    AssignmentCreationPolicy, AssignmentShapePolicy, HirExpr, HirExprKind, HirPlace, HirStmt,
+    HirStmtKind, OutputTarget, PlaceMutation, PlaceMutationKind, SemanticError, WorkspaceEffect,
+};
 
 use super::{expr::lower_expr, place::lower_place, MirLoweringContext};
 
@@ -11,6 +14,15 @@ pub(crate) fn lower_stmt(
         HirStmtKind::Assign(place, expr, _) => {
             let mut stmts = Vec::new();
             let value = lower_expr(ctx, expr, &mut stmts)?;
+            if !matches!(place, HirPlace::Binding(_)) || is_empty_array_expr(expr) {
+                stmts.push(MirStmt {
+                    kind: MirStmtKind::PlaceMutation(place_mutation(
+                        place,
+                        is_empty_array_expr(expr),
+                    )),
+                    span: stmt.span,
+                });
+            }
             let place = lower_place(ctx, place, &mut stmts)?;
             stmts.push(MirStmt {
                 kind: MirStmtKind::Assign { place, value },
@@ -72,6 +84,46 @@ pub(crate) fn lower_stmt(
             ))
         }
     })
+}
+
+fn place_mutation(place: &HirPlace, deletion: bool) -> PlaceMutation {
+    PlaceMutation {
+        place: place.clone(),
+        kind: mutation_kind_for_place(place, deletion),
+        creation_policy: creation_policy_for_place(place, deletion),
+        shape_policy: AssignmentShapePolicy::MatlabCompatible,
+    }
+}
+
+fn mutation_kind_for_place(place: &HirPlace, deletion: bool) -> PlaceMutationKind {
+    if deletion {
+        return PlaceMutationKind::Delete;
+    }
+    match place {
+        HirPlace::Binding(_) => PlaceMutationKind::BindOrAssign,
+        HirPlace::Index(_, _) => PlaceMutationKind::IndexedAssign,
+        HirPlace::IndexCell(_, _) => PlaceMutationKind::CellAssign,
+        HirPlace::Member(_, _) | HirPlace::MemberDynamic(_, _) => PlaceMutationKind::MemberAssign,
+    }
+}
+
+fn creation_policy_for_place(place: &HirPlace, deletion: bool) -> AssignmentCreationPolicy {
+    if deletion {
+        return AssignmentCreationPolicy::ExistingOnly;
+    }
+    match place {
+        HirPlace::Binding(_) => AssignmentCreationPolicy::CreateBinding,
+        HirPlace::Index(_, _) | HirPlace::IndexCell(_, _) => {
+            AssignmentCreationPolicy::CreateArrayByIndex
+        }
+        HirPlace::Member(_, _) | HirPlace::MemberDynamic(_, _) => {
+            AssignmentCreationPolicy::CreateStructFieldPath
+        }
+    }
+}
+
+fn is_empty_array_expr(expr: &HirExpr) -> bool {
+    matches!(&expr.kind, HirExprKind::Tensor(rows) if rows.is_empty() || rows.iter().all(Vec::is_empty))
 }
 
 fn lower_output_target(
