@@ -1,6 +1,6 @@
 use runmat_hir::{lower, HirCallableRef, LoweringContext};
 use runmat_mir::{
-    analysis::{analyze_body, AnalysisStore, InitFact},
+    analysis::{analyze_body, diagnose_uninitialized_reads, AnalysisStore, InitFact},
     lowering::lower_assembly,
     MirBody, MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmtKind,
     MirTerminatorKind,
@@ -86,6 +86,32 @@ fn dataflow_widens_loop_assignment_as_maybe_assigned() {
         store.mir_locals.get(&output).unwrap().initialized,
         InitFact::MaybeAssigned
     );
+}
+
+#[test]
+fn diagnostics_report_unassigned_local_read() {
+    let mir = lower_mir("function y = f(); z = y; y = 1; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let diagnostics = diagnose_uninitialized_reads(body);
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RM-MIR0001"
+            && diagnostic.category == Some("definite-assignment")
+            && diagnostic.primary.span.start < diagnostic.primary.span.end
+    }));
+}
+
+#[test]
+fn diagnostics_report_maybe_assigned_local_read_after_branch() {
+    let mir = lower_mir("function y = f(c); if c; y = 1; end; x = y; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let diagnostics = diagnose_uninitialized_reads(body);
+
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-MIR0002"));
 }
 
 #[test]

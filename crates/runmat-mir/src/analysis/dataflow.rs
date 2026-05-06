@@ -1,15 +1,55 @@
 use crate::{
-    BasicBlockId, MirBody, MirLocalId, MirLocalKind, MirPlace, MirStmtKind, MirTerminatorKind,
+    BasicBlock, BasicBlockId, MirBody, MirDiagnostic, MirDiagnosticSeverity, MirLocalId,
+    MirLocalKind, MirOperand, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
 };
-use runmat_hir::{ShapeFact, TypeFact, ValueFlowFact};
+use runmat_hir::{ShapeFact, Span, TypeFact, ValueFlowFact};
 use std::collections::{HashMap, VecDeque};
 
 use super::{AnalysisStore, InitFact, MirLocalFact};
 
+#[derive(Debug, Clone)]
+struct InitDataflowResult {
+    in_states: Vec<Option<Vec<InitFact>>>,
+    final_state: Vec<InitFact>,
+}
+
 pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
+    let result = compute_init_dataflow(body);
+
+    for local in &body.locals {
+        store.mir_locals.insert(
+            local.id,
+            MirLocalFact {
+                ty: TypeFact::Unknown,
+                shape: ShapeFact::Unknown,
+                value_flow: ValueFlowFact::UnknownList,
+                initialized: result.final_state[local.id.0],
+            },
+        );
+    }
+}
+
+pub fn diagnose_uninitialized_reads(body: &MirBody) -> Vec<MirDiagnostic> {
+    let result = compute_init_dataflow(body);
+    let mut diagnostics = Vec::new();
+
+    for (idx, block) in body.blocks.iter().enumerate() {
+        let Some(mut state) = result.in_states[idx].clone() else {
+            continue;
+        };
+        diagnose_block(block, &mut state, &mut diagnostics);
+    }
+
+    diagnostics
+}
+
+fn compute_init_dataflow(body: &MirBody) -> InitDataflowResult {
     let local_count = body.locals.len();
     if body.blocks.is_empty() {
-        return;
+        return InitDataflowResult {
+            in_states: Vec::new(),
+            final_state: Vec::new(),
+        };
     }
 
     let block_index: HashMap<BasicBlockId, usize> = body
@@ -68,18 +108,9 @@ pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
             }
         }
     }
-    let final_state = final_state.unwrap_or_else(|| vec![InitFact::Unassigned; local_count]);
-
-    for local in &body.locals {
-        store.mir_locals.insert(
-            local.id,
-            MirLocalFact {
-                ty: TypeFact::Unknown,
-                shape: ShapeFact::Unknown,
-                value_flow: ValueFlowFact::UnknownList,
-                initialized: final_state[local.id.0],
-            },
-        );
+    InitDataflowResult {
+        in_states,
+        final_state: final_state.unwrap_or_else(|| vec![InitFact::Unassigned; local_count]),
     }
 }
 
@@ -102,6 +133,127 @@ fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<In
         state[binding.0] = InitFact::DefinitelyAssigned;
     }
     state
+}
+
+fn diagnose_block(
+    block: &BasicBlock,
+    state: &mut [InitFact],
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    for stmt in &block.statements {
+        match &stmt.kind {
+            MirStmtKind::Assign { place, value } => {
+                diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
+                mark_place_assigned(place, state);
+            }
+            MirStmtKind::MultiAssign { targets, value } => {
+                diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
+                for target in &targets.targets {
+                    if let crate::MirOutputTarget::Place(place) = target {
+                        mark_place_assigned(place, state);
+                    }
+                }
+            }
+            MirStmtKind::Expr(value) => diagnose_rvalue_reads(value, state, stmt.span, diagnostics),
+            MirStmtKind::PlaceMutation(_) => {}
+        }
+    }
+
+    match &block.terminator.kind {
+        MirTerminatorKind::Branch { cond, .. } => {
+            diagnose_operand_read(cond, state, block.terminator.span, diagnostics);
+        }
+        MirTerminatorKind::For {
+            binding, iterable, ..
+        } => {
+            diagnose_rvalue_reads(iterable, state, block.terminator.span, diagnostics);
+            state[binding.0] = InitFact::DefinitelyAssigned;
+        }
+        MirTerminatorKind::Return(outputs) => {
+            for output in outputs {
+                diagnose_operand_read(output, state, block.terminator.span, diagnostics);
+            }
+        }
+        MirTerminatorKind::Await { future, .. } => {
+            diagnose_operand_read(future, state, block.terminator.span, diagnostics);
+        }
+        MirTerminatorKind::Goto(_)
+        | MirTerminatorKind::TryCatch { .. }
+        | MirTerminatorKind::Unreachable => {}
+    }
+}
+
+fn diagnose_rvalue_reads(
+    value: &MirRvalue,
+    state: &[InitFact],
+    span: Span,
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    match value {
+        MirRvalue::Use(operand) | MirRvalue::Unary(_, operand) | MirRvalue::Spawn(operand) => {
+            diagnose_operand_read(operand, state, span, diagnostics);
+        }
+        MirRvalue::Binary(left, _, right) => {
+            diagnose_operand_read(left, state, span, diagnostics);
+            diagnose_operand_read(right, state, span, diagnostics);
+        }
+        MirRvalue::Range { start, step, end } => {
+            diagnose_operand_read(start, state, span, diagnostics);
+            if let Some(step) = step {
+                diagnose_operand_read(step, state, span, diagnostics);
+            }
+            diagnose_operand_read(end, state, span, diagnostics);
+        }
+        MirRvalue::Call(call) => {
+            for arg in &call.args {
+                diagnose_operand_read(arg, state, span, diagnostics);
+            }
+        }
+        MirRvalue::Aggregate { elements, .. } => {
+            for element in elements {
+                diagnose_operand_read(element, state, span, diagnostics);
+            }
+        }
+        MirRvalue::Index { base, .. } => diagnose_operand_read(base, state, span, diagnostics),
+        MirRvalue::Future(_) => {}
+    }
+}
+
+fn diagnose_operand_read(
+    operand: &MirOperand,
+    state: &[InitFact],
+    span: Span,
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    let MirOperand::Local(local) = operand else {
+        return;
+    };
+    match state[local.0] {
+        InitFact::DefinitelyAssigned => {}
+        InitFact::Unassigned => diagnostics.push(init_diagnostic(
+            "RM-MIR0001",
+            "local may be read before it is assigned",
+            "this local is read before any assignment reaches this point",
+            span,
+        )),
+        InitFact::MaybeAssigned => diagnostics.push(init_diagnostic(
+            "RM-MIR0002",
+            "local may be read before assignment on some control-flow paths",
+            "this local is not definitely assigned on every path reaching this point",
+            span,
+        )),
+    }
+}
+
+fn init_diagnostic(
+    code: &'static str,
+    message: &'static str,
+    label: &'static str,
+    span: Span,
+) -> MirDiagnostic {
+    MirDiagnostic::new(code, MirDiagnosticSeverity::Error, message, span)
+        .with_primary_label(label)
+        .with_category("definite-assignment")
 }
 
 fn mark_place_assigned(place: &MirPlace, state: &mut [InitFact]) {
