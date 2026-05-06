@@ -27,6 +27,7 @@ pub struct FunctionSummary {
 pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSummary {
     let mut output_count = 0;
     let mut async_behavior = AsyncBehaviorFact::NeverSuspends;
+    let mut workspace = Vec::new();
     let mut reads_captures = BTreeSet::new();
     let mut writes_captures = BTreeSet::new();
 
@@ -49,6 +50,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
                     scan_rvalue(body, value, &mut reads_captures, &mut async_behavior);
                 }
                 MirStmtKind::PlaceMutation(_) => {}
+                MirStmtKind::WorkspaceEffect { effect, .. } => workspace.push(effect.clone()),
             }
         }
 
@@ -83,7 +85,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
         outputs: vec![TypeFact::Unknown; output_count],
         requested_output_sensitive: Vec::new(),
         effects: EffectSummary {
-            workspace: Vec::new(),
+            workspace,
             environment: Vec::new(),
             async_behavior: Some(async_behavior),
         },

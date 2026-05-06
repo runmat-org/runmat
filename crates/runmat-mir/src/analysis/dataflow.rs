@@ -125,7 +125,9 @@ fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<In
                     }
                 }
             }
-            MirStmtKind::Expr(_) | MirStmtKind::PlaceMutation(_) => {}
+            MirStmtKind::Expr(_)
+            | MirStmtKind::PlaceMutation(_)
+            | MirStmtKind::WorkspaceEffect { .. } => {}
         }
     }
 
@@ -155,7 +157,7 @@ fn diagnose_block(
                 }
             }
             MirStmtKind::Expr(value) => diagnose_rvalue_reads(value, state, stmt.span, diagnostics),
-            MirStmtKind::PlaceMutation(_) => {}
+            MirStmtKind::PlaceMutation(_) | MirStmtKind::WorkspaceEffect { .. } => {}
         }
     }
 

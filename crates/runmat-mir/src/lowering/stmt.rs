@@ -1,5 +1,5 @@
 use crate::{MirOutputTarget, MirOutputTargetList, MirStmt, MirStmtKind};
-use runmat_hir::{HirStmt, HirStmtKind, OutputTarget, SemanticError};
+use runmat_hir::{HirStmt, HirStmtKind, OutputTarget, SemanticError, WorkspaceEffect};
 
 use super::{expr::lower_expr, place::lower_place, MirLoweringContext};
 
@@ -47,6 +47,26 @@ pub(crate) fn lower_stmt(
             });
             stmts
         }
+        HirStmtKind::Global(bindings) => vec![MirStmt {
+            kind: MirStmtKind::WorkspaceEffect {
+                effect: WorkspaceEffect::MutatesGlobal,
+                bindings: bindings
+                    .iter()
+                    .map(|binding| ctx.local_for_binding(*binding))
+                    .collect::<Result<_, _>>()?,
+            },
+            span: stmt.span,
+        }],
+        HirStmtKind::Persistent(bindings) => vec![MirStmt {
+            kind: MirStmtKind::WorkspaceEffect {
+                effect: WorkspaceEffect::MutatesPersistent,
+                bindings: bindings
+                    .iter()
+                    .map(|binding| ctx.local_for_binding(*binding))
+                    .collect::<Result<_, _>>()?,
+            },
+            span: stmt.span,
+        }],
         HirStmtKind::Return => Vec::new(),
         _ => {
             return Err(SemanticError::new(

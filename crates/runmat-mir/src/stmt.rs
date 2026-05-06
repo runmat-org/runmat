@@ -1,5 +1,5 @@
-use crate::{MirPlace, MirRvalue};
-use runmat_hir::{PlaceMutation, Span};
+use crate::{MirLocalId, MirPlace, MirRvalue};
+use runmat_hir::{PlaceMutation, Span, WorkspaceEffect};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -20,6 +20,10 @@ pub enum MirStmtKind {
     },
     Expr(MirRvalue),
     PlaceMutation(PlaceMutation),
+    WorkspaceEffect {
+        effect: WorkspaceEffect,
+        bindings: Vec<MirLocalId>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

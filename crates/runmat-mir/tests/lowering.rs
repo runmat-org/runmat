@@ -148,6 +148,34 @@ fn summary_marks_spawn_as_requiring_async_runtime() {
 }
 
 #[test]
+fn global_statement_lowers_to_workspace_effect() {
+    let mir = lower_mir("function y = f(); global g; y = 1; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(matches!(
+        body.blocks[0].statements[0].kind,
+        MirStmtKind::WorkspaceEffect {
+            effect: runmat_hir::WorkspaceEffect::MutatesGlobal,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn persistent_statement_lowers_to_summary_workspace_effect() {
+    let mir = lower_mir("function y = f(); persistent p; y = 1; end");
+    let body = mir.bodies.values().next().unwrap();
+    let mut store = AnalysisStore::default();
+
+    let summary = summarize_body(body, &mut store);
+
+    assert!(summary
+        .effects
+        .workspace
+        .contains(&runmat_hir::WorkspaceEffect::MutatesPersistent));
+}
+
+#[test]
 fn direct_function_call_preserves_callee_and_requested_outputs() {
     let mir = lower_mir("function y = g(x); y = f(x); end\nfunction z = f(a); z = a; end");
     let stmt = mir
