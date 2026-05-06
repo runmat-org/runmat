@@ -2,8 +2,8 @@ use crate::schema::{
     normalize_literal_string, DatasetSchema, DatasetSchemaProvider, FsDatasetSchemaProvider,
 };
 use runmat_hir::{
-    HirClassMember, HirDiagnostic, HirDiagnosticSeverity, HirExpr, HirExprKind, HirLValue, HirStmt,
-    LoweringResult, VarId,
+    BindingId, CallSyntax, HirBlock, HirCallableRef, HirDiagnostic, HirDiagnosticSeverity, HirExpr,
+    HirExprKind, HirPlace, HirStmt, HirStmtKind, LoweringResult, QualifiedName,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -14,137 +14,238 @@ struct DatasetBinding {
 
 #[derive(Clone)]
 struct ArrayBinding {
-    array_name: String,
     rank: Option<usize>,
 }
 
 pub fn lint_data_api(result: &LoweringResult) -> Vec<HirDiagnostic> {
-    let provider = FsDatasetSchemaProvider;
-    lint_data_api_with_provider(result, &provider)
+    lint_data_api_with_provider(result, &FsDatasetSchemaProvider)
 }
 
 pub fn lint_data_api_with_provider(
     result: &LoweringResult,
     provider: &dyn DatasetSchemaProvider,
 ) -> Vec<HirDiagnostic> {
-    let mut diags = Vec::new();
-    let mut non_tx_write_count = 0usize;
-    let mut tx_vars = HashSet::<VarId>::new();
-    collect_tx_bindings_from_stmts(&result.hir.body, &mut tx_vars);
-    for stmt in &result.hir.body {
-        walk_stmt_general(stmt, &mut diags, &mut non_tx_write_count, &tx_vars);
+    let mut ctx = DataLintContext {
+        provider,
+        datasets: HashMap::new(),
+        arrays: HashMap::new(),
+        tx_bindings: HashSet::new(),
+        non_tx_write_count: 0,
+        diagnostics: Vec::new(),
+    };
+
+    for function in &result.assembly.functions {
+        ctx.collect_tx_bindings(&function.body);
+    }
+    for function in &result.assembly.functions {
+        ctx.walk_block(&function.body);
     }
 
-    let mut datasets = HashMap::<VarId, DatasetBinding>::new();
-    let mut arrays = HashMap::<VarId, ArrayBinding>::new();
-    for stmt in &result.hir.body {
-        analyze_stmt_bindings(
-            stmt,
-            result,
-            provider,
-            &mut datasets,
-            &mut arrays,
-            &mut diags,
-        );
-    }
-
-    diags
+    ctx.diagnostics
 }
 
-fn collect_tx_bindings_from_stmts(stmts: &[HirStmt], tx_vars: &mut HashSet<VarId>) {
-    for stmt in stmts {
-        match stmt {
-            HirStmt::Assign(var_id, expr, _, _)
-            | HirStmt::AssignLValue(HirLValue::Var(var_id), expr, _, _) => {
-                if expr_is_begin_call(expr) {
-                    tx_vars.insert(*var_id);
+struct DataLintContext<'a> {
+    provider: &'a dyn DatasetSchemaProvider,
+    datasets: HashMap<BindingId, DatasetBinding>,
+    arrays: HashMap<BindingId, ArrayBinding>,
+    tx_bindings: HashSet<BindingId>,
+    non_tx_write_count: usize,
+    diagnostics: Vec<HirDiagnostic>,
+}
+
+impl DataLintContext<'_> {
+    fn collect_tx_bindings(&mut self, block: &HirBlock) {
+        for stmt in &block.statements {
+            match &stmt.kind {
+                HirStmtKind::Assign(place, expr, _) if is_begin_call(expr) => {
+                    if let HirPlace::Binding(binding) = place {
+                        self.tx_bindings.insert(*binding);
+                    }
                 }
+                HirStmtKind::MultiAssign(targets, expr, _) if is_begin_call(expr) => {
+                    for target in &targets.targets {
+                        if let runmat_hir::OutputTarget::Place(HirPlace::Binding(binding)) = target
+                        {
+                            self.tx_bindings.insert(*binding);
+                        }
+                    }
+                }
+                _ => self.walk_nested_blocks(stmt, |this, block| this.collect_tx_bindings(block)),
             }
-            HirStmt::MultiAssign(var_ids, expr, _, _) => {
-                if expr_is_begin_call(expr) {
-                    for var_id in var_ids.iter().flatten() {
-                        tx_vars.insert(*var_id);
+        }
+    }
+
+    fn walk_block(&mut self, block: &HirBlock) {
+        for stmt in &block.statements {
+            self.walk_stmt(stmt);
+        }
+    }
+
+    fn walk_stmt(&mut self, stmt: &HirStmt) {
+        match &stmt.kind {
+            HirStmtKind::Assign(place, expr, _) => {
+                self.walk_expr(expr, false);
+                if let HirPlace::Binding(binding) = place {
+                    let (dataset, array) = self.infer_binding(expr);
+                    if let Some(dataset) = dataset {
+                        self.datasets.insert(*binding, dataset);
+                    }
+                    if let Some(array) = array {
+                        self.arrays.insert(*binding, array);
                     }
                 }
             }
-            HirStmt::If {
+            HirStmtKind::MultiAssign(_, expr, _) | HirStmtKind::ExprStmt(expr, _) => {
+                self.walk_expr(expr, matches!(stmt.kind, HirStmtKind::ExprStmt(_, _)));
+            }
+            _ => self.walk_nested_blocks(stmt, |this, block| this.walk_block(block)),
+        }
+    }
+
+    fn walk_nested_blocks(&mut self, stmt: &HirStmt, mut f: impl FnMut(&mut Self, &HirBlock)) {
+        match &stmt.kind {
+            HirStmtKind::If {
                 then_body,
                 elseif_blocks,
                 else_body,
                 ..
             } => {
-                collect_tx_bindings_from_stmts(then_body, tx_vars);
-                for (_, body) in elseif_blocks {
-                    collect_tx_bindings_from_stmts(body, tx_vars);
+                f(self, then_body);
+                for (_, block) in elseif_blocks {
+                    f(self, block);
                 }
-                if let Some(body) = else_body {
-                    collect_tx_bindings_from_stmts(body, tx_vars);
+                if let Some(block) = else_body {
+                    f(self, block);
                 }
             }
-            HirStmt::While { body, .. }
-            | HirStmt::For { body, .. }
-            | HirStmt::Function { body, .. } => {
-                collect_tx_bindings_from_stmts(body, tx_vars);
-            }
-            HirStmt::Switch {
+            HirStmtKind::While { body, .. } | HirStmtKind::For { body, .. } => f(self, body),
+            HirStmtKind::Switch {
                 cases, otherwise, ..
             } => {
-                for (_, body) in cases {
-                    collect_tx_bindings_from_stmts(body, tx_vars);
+                for (_, block) in cases {
+                    f(self, block);
                 }
-                if let Some(body) = otherwise {
-                    collect_tx_bindings_from_stmts(body, tx_vars);
+                if let Some(block) = otherwise {
+                    f(self, block);
                 }
             }
-            HirStmt::TryCatch {
+            HirStmtKind::TryCatch {
                 try_body,
                 catch_body,
                 ..
             } => {
-                collect_tx_bindings_from_stmts(try_body, tx_vars);
-                collect_tx_bindings_from_stmts(catch_body, tx_vars);
+                f(self, try_body);
+                f(self, catch_body);
             }
-            HirStmt::ClassDef { members, .. } => {
-                for member in members {
-                    if let HirClassMember::Methods { body, .. } = member {
-                        collect_tx_bindings_from_stmts(body, tx_vars);
+            _ => {}
+        }
+    }
+
+    fn walk_expr(&mut self, expr: &HirExpr, statement_position: bool) {
+        if let HirExprKind::Call(call) = &expr.kind {
+            let name = call_name(&call.callee);
+            if is_data_open_call(call.syntax.clone(), name.as_deref(), &call.args)
+                && !data_open_path_arg(name.as_deref(), &call.args)
+                    .is_some_and(|arg| literal_string(arg).is_some())
+            {
+                self.diagnostics.push(diagnostic(
+                    "lint.data.no_untyped_open",
+                    "data.open should use a literal dataset path for static checking",
+                    expr.span,
+                ));
+            }
+            if call.syntax == CallSyntax::Method && name.as_deref() == Some("write") {
+                let in_tx = call
+                    .args
+                    .first()
+                    .and_then(binding_expr)
+                    .is_some_and(|binding| self.tx_bindings.contains(&binding));
+                if !in_tx {
+                    self.non_tx_write_count += 1;
+                    if self.non_tx_write_count > 1 {
+                        self.diagnostics.push(diagnostic(
+                            "lint.data.no_multiwrite_outside_tx",
+                            "multiple dataset writes should be grouped in a transaction",
+                            expr.span,
+                        ));
                     }
                 }
             }
-            HirStmt::ExprStmt(_, _, _)
-            | HirStmt::Break(_)
-            | HirStmt::Continue(_)
-            | HirStmt::Return(_)
-            | HirStmt::Global(_, _)
-            | HirStmt::Persistent(_, _)
-            | HirStmt::Import { .. }
-            | HirStmt::AssignLValue(_, _, _, _) => {}
+            if statement_position
+                && call.syntax == CallSyntax::Method
+                && name.as_deref() == Some("commit")
+            {
+                self.diagnostics.push(diagnostic(
+                    "lint.data.ignore_commit_result",
+                    "transaction commit result should be checked",
+                    expr.span,
+                ));
+            }
+            self.check_array_read(expr, call.args.as_slice(), name.as_deref());
+            for arg in &call.args {
+                self.walk_expr(arg, false);
+            }
+            return;
+        }
+
+        walk_children(expr, |child| self.walk_expr(child, false));
+    }
+
+    fn check_array_read(&mut self, expr: &HirExpr, args: &[HirExpr], name: Option<&str>) {
+        if name != Some("read") {
+            return;
+        }
+        let Some(array_binding) = args.first().and_then(binding_expr) else {
+            return;
+        };
+        let Some(array) = self.arrays.get(&array_binding) else {
+            return;
+        };
+        let Some(slice) = args.get(1) else {
+            return;
+        };
+        if let (Some(expected), Some(actual)) = (array.rank, slice_rank(slice)) {
+            if expected != actual {
+                self.diagnostics.push(diagnostic(
+                    "lint.data.invalid_slice_rank",
+                    format!("slice rank {actual} does not match array rank {expected}"),
+                    expr.span,
+                ));
+            }
         }
     }
-}
 
-fn expr_is_begin_call(expr: &HirExpr) -> bool {
-    match &expr.kind {
-        HirExprKind::MethodCall(_, method, _) | HirExprKind::DottedInvoke(_, method, _) => {
-            method == "begin"
+    fn infer_binding(&mut self, expr: &HirExpr) -> (Option<DatasetBinding>, Option<ArrayBinding>) {
+        let HirExprKind::Call(call) = &expr.kind else {
+            return (None, None);
+        };
+        let name = call_name(&call.callee);
+        if is_data_open_call(call.syntax.clone(), name.as_deref(), &call.args) {
+            if let Some(path) =
+                data_open_path_arg(name.as_deref(), &call.args).and_then(literal_string)
+            {
+                return (infer_dataset_binding(self.provider, &path), None);
+            }
+            return (None, None);
         }
-        HirExprKind::FuncCall(name, _) => name == "Dataset.begin",
-        _ => false,
-    }
-}
-
-fn literal_string(expr: &HirExpr) -> Option<String> {
-    match &expr.kind {
-        HirExprKind::String(s) => Some(normalize_literal_string(s)),
-        _ => None,
-    }
-}
-
-fn slice_rank(expr: &HirExpr) -> Option<usize> {
-    match &expr.kind {
-        HirExprKind::Cell(rows) => Some(rows.iter().map(|row| row.len()).sum()),
-        HirExprKind::Colon => Some(1),
-        _ => None,
+        if call.syntax == CallSyntax::Method && name.as_deref() == Some("array") {
+            let dataset = call.args.first().and_then(binding_expr);
+            let array_name = call.args.get(1).and_then(literal_string);
+            if let (Some(dataset), Some(array_name)) = (dataset, array_name) {
+                if let Some(dataset) = self.datasets.get(&dataset) {
+                    let rank = dataset.arrays.get(&array_name).copied();
+                    if rank.is_none() {
+                        self.diagnostics.push(diagnostic(
+                            "lint.data.unknown_array_name",
+                            format!("dataset schema does not contain array '{array_name}'"),
+                            expr.span,
+                        ));
+                    }
+                    return (None, Some(ArrayBinding { rank }));
+                }
+            }
+        }
+        (None, None)
     }
 }
 
@@ -158,606 +259,138 @@ fn infer_dataset_binding(
     })
 }
 
-fn infer_binding_from_expr(
-    expr: &HirExpr,
-    datasets: &HashMap<VarId, DatasetBinding>,
-    provider: &dyn DatasetSchemaProvider,
-) -> (Option<DatasetBinding>, Option<ArrayBinding>) {
-    match &expr.kind {
-        HirExprKind::FuncCall(name, args) if name == "data.open" => {
-            if let Some(path_expr) = args.first() {
-                if let Some(path) = literal_string(path_expr) {
-                    return (infer_dataset_binding(provider, &path), None);
-                }
-            }
-            (None, None)
-        }
-        HirExprKind::MethodCall(base, method, args)
-        | HirExprKind::DottedInvoke(base, method, args)
-            if method == "array" =>
-        {
-            if let HirExprKind::Var(ds_var) = base.kind {
-                if let Some(dataset) = datasets.get(&ds_var) {
-                    if let Some(name_expr) = args.first() {
-                        if let Some(name) = literal_string(name_expr) {
-                            let rank = dataset.arrays.get(&name).copied();
-                            return (
-                                None,
-                                Some(ArrayBinding {
-                                    array_name: name,
-                                    rank,
-                                }),
-                            );
-                        }
-                    }
-                }
-            }
-            (None, None)
-        }
-        HirExprKind::FuncCall(name, args) if name == "Dataset.array" => {
-            if let Some(base) = args.first() {
-                if let HirExprKind::Var(ds_var) = base.kind {
-                    if let Some(dataset) = datasets.get(&ds_var) {
-                        if let Some(name_expr) = args.get(1) {
-                            if let Some(name) = literal_string(name_expr) {
-                                let rank = dataset.arrays.get(&name).copied();
-                                return (
-                                    None,
-                                    Some(ArrayBinding {
-                                        array_name: name,
-                                        rank,
-                                    }),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-            (None, None)
-        }
-        _ => (None, None),
+fn is_begin_call(expr: &HirExpr) -> bool {
+    matches!(
+        &expr.kind,
+        HirExprKind::Call(call)
+            if call_name(&call.callee).as_deref() == Some("Dataset.begin")
+                || (call.syntax == CallSyntax::Method
+                    && call_name(&call.callee).as_deref() == Some("begin"))
+    )
+}
+
+fn is_data_open_call(syntax: CallSyntax, name: Option<&str>, args: &[HirExpr]) -> bool {
+    name == Some("data.open")
+        || (syntax == CallSyntax::Method
+            && name == Some("open")
+            && args.first().is_some_and(|arg| expr_has_name(arg, "data")))
+}
+
+fn data_open_path_arg<'a>(name: Option<&str>, args: &'a [HirExpr]) -> Option<&'a HirExpr> {
+    if name == Some("data.open") {
+        args.first()
+    } else {
+        args.get(1)
     }
 }
 
-fn analyze_data_expr(
-    expr: &HirExpr,
-    result: &LoweringResult,
-    datasets: &HashMap<VarId, DatasetBinding>,
-    arrays: &HashMap<VarId, ArrayBinding>,
-    diags: &mut Vec<HirDiagnostic>,
-) {
+fn expr_has_name(expr: &HirExpr, name: &str) -> bool {
     match &expr.kind {
-        HirExprKind::MethodCall(base, method, args)
-        | HirExprKind::DottedInvoke(base, method, args) => {
-            if method == "array" {
-                if let HirExprKind::Var(ds_var) = base.kind {
-                    if let Some(dataset) = datasets.get(&ds_var) {
-                        if let Some(name_expr) = args.first() {
-                            if let Some(name) = literal_string(name_expr) {
-                                if !dataset.arrays.contains_key(&name) {
-                                    diags.push(HirDiagnostic {
-                                        message: format!(
-                                            "array '{name}' is not present in inferred dataset schema"
-                                        ),
-                                        span: name_expr.span,
-                                        code: "lint.data.unknown_array_name",
-                                        severity: HirDiagnosticSeverity::Warning,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        HirExprKind::Constant(symbol) => symbol.0 == name,
+        HirExprKind::Call(call) => call_name(&call.callee).as_deref() == Some(name),
+        _ => false,
+    }
+}
 
-            if method == "read" || method == "write" {
-                if let HirExprKind::Var(array_var) = base.kind {
-                    if let Some(array_binding) = arrays.get(&array_var) {
-                        if let Some(rank) = array_binding.rank {
-                            let slice_arg = args.first();
-                            if let Some(slice_expr) = slice_arg {
-                                if let Some(actual_slice_rank) = slice_rank(slice_expr) {
-                                    if actual_slice_rank > rank {
-                                        let array_var_name = result
-                                            .var_names
-                                            .get(&array_var)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("v{}", array_var.0));
-                                        diags.push(HirDiagnostic {
-                                            message: format!(
-                                                "slice rank {actual_slice_rank} exceeds array rank {rank} for '{array_var_name}' ({})",
-                                                array_binding.array_name
-                                            ),
-                                            span: slice_expr.span,
-                                            code: "lint.data.invalid_slice_rank",
-                                            severity: HirDiagnosticSeverity::Warning,
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+fn call_name(callee: &HirCallableRef) -> Option<String> {
+    match callee {
+        HirCallableRef::Builtin(id) => Some(id.0.clone()),
+        HirCallableRef::Unresolved(name) => Some(qualified_name(name)),
+        _ => None,
+    }
+}
 
-            analyze_data_expr(base, result, datasets, arrays, diags);
-            for arg in args {
-                analyze_data_expr(arg, result, datasets, arrays, diags);
-            }
+fn qualified_name(name: &QualifiedName) -> String {
+    name.0
+        .iter()
+        .map(|part| part.0.as_str())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn literal_string(expr: &HirExpr) -> Option<String> {
+    match &expr.kind {
+        HirExprKind::String(value) => Some(normalize_literal_string(&value.0)),
+        _ => None,
+    }
+}
+
+fn binding_expr(expr: &HirExpr) -> Option<BindingId> {
+    match expr.kind {
+        HirExprKind::Binding(binding) => Some(binding),
+        _ => None,
+    }
+}
+
+fn slice_rank(expr: &HirExpr) -> Option<usize> {
+    match &expr.kind {
+        HirExprKind::Cell(rows) => Some(rows.iter().map(Vec::len).sum()),
+        HirExprKind::Colon => Some(1),
+        _ => None,
+    }
+}
+
+fn walk_children(expr: &HirExpr, mut f: impl FnMut(&HirExpr)) {
+    match &expr.kind {
+        HirExprKind::Unary(_, inner) | HirExprKind::Await(inner) | HirExprKind::Spawn(inner) => {
+            f(inner)
         }
-        HirExprKind::FuncCall(name, args) => {
-            if name == "Dataset.array" {
-                if let Some(base) = args.first() {
-                    if let HirExprKind::Var(ds_var) = base.kind {
-                        if let Some(dataset) = datasets.get(&ds_var) {
-                            if let Some(name_expr) = args.get(1) {
-                                if let Some(array_name) = literal_string(name_expr) {
-                                    if !dataset.arrays.contains_key(&array_name) {
-                                        diags.push(HirDiagnostic {
-                                            message: format!(
-                                                "array '{array_name}' is not present in inferred dataset schema"
-                                            ),
-                                            span: name_expr.span,
-                                            code: "lint.data.unknown_array_name",
-                                            severity: HirDiagnosticSeverity::Warning,
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if name == "DataArray.read" || name == "DataArray.write" {
-                if let Some(base) = args.first() {
-                    if let HirExprKind::Var(array_var) = base.kind {
-                        if let Some(array_binding) = arrays.get(&array_var) {
-                            if let Some(rank) = array_binding.rank {
-                                let slice_arg = args.get(1);
-                                if let Some(slice_expr) = slice_arg {
-                                    if let Some(actual_slice_rank) = slice_rank(slice_expr) {
-                                        if actual_slice_rank > rank {
-                                            let array_var_name = result
-                                                .var_names
-                                                .get(&array_var)
-                                                .cloned()
-                                                .unwrap_or_else(|| format!("v{}", array_var.0));
-                                            diags.push(HirDiagnostic {
-                                                message: format!(
-                                                    "slice rank {actual_slice_rank} exceeds array rank {rank} for '{array_var_name}' ({})",
-                                                    array_binding.array_name
-                                                ),
-                                                span: slice_expr.span,
-                                                code: "lint.data.invalid_slice_rank",
-                                                severity: HirDiagnosticSeverity::Warning,
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            for arg in args {
-                analyze_data_expr(arg, result, datasets, arrays, diags);
-            }
-        }
-        HirExprKind::Unary(_, inner) => analyze_data_expr(inner, result, datasets, arrays, diags),
-        HirExprKind::Binary(lhs, _, rhs) => {
-            analyze_data_expr(lhs, result, datasets, arrays, diags);
-            analyze_data_expr(rhs, result, datasets, arrays, diags);
+        HirExprKind::Binary(left, _, right) => {
+            f(left);
+            f(right);
         }
         HirExprKind::Tensor(rows) | HirExprKind::Cell(rows) => {
             for row in rows {
-                for value in row {
-                    analyze_data_expr(value, result, datasets, arrays, diags);
+                for element in row {
+                    f(element);
                 }
-            }
-        }
-        HirExprKind::Index(base, args) | HirExprKind::IndexCell(base, args) => {
-            analyze_data_expr(base, result, datasets, arrays, diags);
-            for arg in args {
-                analyze_data_expr(arg, result, datasets, arrays, diags);
             }
         }
         HirExprKind::Range(start, step, end) => {
-            analyze_data_expr(start, result, datasets, arrays, diags);
+            f(start);
             if let Some(step) = step {
-                analyze_data_expr(step, result, datasets, arrays, diags);
+                f(step);
             }
-            analyze_data_expr(end, result, datasets, arrays, diags);
+            f(end);
         }
-        HirExprKind::Member(base, _) | HirExprKind::AnonFunc { body: base, .. } => {
-            analyze_data_expr(base, result, datasets, arrays, diags)
+        HirExprKind::Index(base, indexing) => {
+            f(base);
+            for component in &indexing.components {
+                match component {
+                    runmat_hir::IndexComponent::Expr(expr)
+                    | runmat_hir::IndexComponent::Logical(expr) => f(expr),
+                    runmat_hir::IndexComponent::Colon | runmat_hir::IndexComponent::End { .. } => {}
+                }
+            }
         }
-        HirExprKind::MemberDynamic(base, field) => {
-            analyze_data_expr(base, result, datasets, arrays, diags);
-            analyze_data_expr(field, result, datasets, arrays, diags);
+        HirExprKind::Member(base, _) => f(base),
+        HirExprKind::MemberDynamic(base, member) => {
+            f(base);
+            f(member);
         }
-        HirExprKind::FuncHandle(_)
-        | HirExprKind::MetaClass(_)
-        | HirExprKind::Var(_)
+        HirExprKind::Call(call) => {
+            for arg in &call.args {
+                f(arg);
+            }
+        }
+        HirExprKind::Number(_)
         | HirExprKind::String(_)
-        | HirExprKind::Number(_)
         | HirExprKind::Constant(_)
+        | HirExprKind::Binding(_)
         | HirExprKind::Colon
-        | HirExprKind::End => {}
+        | HirExprKind::End
+        | HirExprKind::CommandCall(_)
+        | HirExprKind::FunctionHandle(_)
+        | HirExprKind::AnonymousFunction(_)
+        | HirExprKind::MetaClass(_) => {}
     }
 }
 
-fn analyze_stmt_bindings(
-    stmt: &HirStmt,
-    result: &LoweringResult,
-    provider: &dyn DatasetSchemaProvider,
-    datasets: &mut HashMap<VarId, DatasetBinding>,
-    arrays: &mut HashMap<VarId, ArrayBinding>,
-    diags: &mut Vec<HirDiagnostic>,
-) {
-    match stmt {
-        HirStmt::ExprStmt(expr, _, _) => analyze_data_expr(expr, result, datasets, arrays, diags),
-        HirStmt::Assign(var, expr, _, _) => {
-            analyze_data_expr(expr, result, datasets, arrays, diags);
-            let (dataset_binding, array_binding) =
-                infer_binding_from_expr(expr, datasets, provider);
-            if let Some(binding) = dataset_binding {
-                datasets.insert(*var, binding);
-                arrays.remove(var);
-                return;
-            }
-            if let Some(binding) = array_binding {
-                arrays.insert(*var, binding);
-                datasets.remove(var);
-                return;
-            }
-            datasets.remove(var);
-            arrays.remove(var);
-        }
-        HirStmt::MultiAssign(_, expr, _, _) => {
-            analyze_data_expr(expr, result, datasets, arrays, diags)
-        }
-        HirStmt::AssignLValue(lv, expr, _, _) => {
-            analyze_data_expr(expr, result, datasets, arrays, diags);
-            match lv {
-                HirLValue::Var(var) => {
-                    datasets.remove(var);
-                    arrays.remove(var);
-                }
-                HirLValue::Index(base, args) | HirLValue::IndexCell(base, args) => {
-                    analyze_data_expr(base, result, datasets, arrays, diags);
-                    for arg in args {
-                        analyze_data_expr(arg, result, datasets, arrays, diags);
-                    }
-                }
-                HirLValue::Member(base, _) => {
-                    analyze_data_expr(base, result, datasets, arrays, diags)
-                }
-                HirLValue::MemberDynamic(base, field) => {
-                    analyze_data_expr(base, result, datasets, arrays, diags);
-                    analyze_data_expr(field, result, datasets, arrays, diags);
-                }
-            }
-        }
-        HirStmt::If {
-            cond,
-            then_body,
-            elseif_blocks,
-            else_body,
-            ..
-        } => {
-            analyze_data_expr(cond, result, datasets, arrays, diags);
-            for nested in then_body {
-                analyze_stmt_bindings(nested, result, provider, datasets, arrays, diags);
-            }
-            for (cond, body) in elseif_blocks {
-                analyze_data_expr(cond, result, datasets, arrays, diags);
-                for nested in body {
-                    analyze_stmt_bindings(nested, result, provider, datasets, arrays, diags);
-                }
-            }
-            if let Some(body) = else_body {
-                for nested in body {
-                    analyze_stmt_bindings(nested, result, provider, datasets, arrays, diags);
-                }
-            }
-        }
-        HirStmt::While { cond, body, .. } => {
-            analyze_data_expr(cond, result, datasets, arrays, diags);
-            for nested in body {
-                analyze_stmt_bindings(nested, result, provider, datasets, arrays, diags);
-            }
-        }
-        HirStmt::For { expr, body, .. } => {
-            analyze_data_expr(expr, result, datasets, arrays, diags);
-            for nested in body {
-                analyze_stmt_bindings(nested, result, provider, datasets, arrays, diags);
-            }
-        }
-        HirStmt::Switch {
-            expr,
-            cases,
-            otherwise,
-            ..
-        } => {
-            analyze_data_expr(expr, result, datasets, arrays, diags);
-            for (case_expr, body) in cases {
-                analyze_data_expr(case_expr, result, datasets, arrays, diags);
-                for nested in body {
-                    analyze_stmt_bindings(nested, result, provider, datasets, arrays, diags);
-                }
-            }
-            if let Some(body) = otherwise {
-                for nested in body {
-                    analyze_stmt_bindings(nested, result, provider, datasets, arrays, diags);
-                }
-            }
-        }
-        HirStmt::TryCatch {
-            try_body,
-            catch_body,
-            ..
-        } => {
-            for nested in try_body {
-                analyze_stmt_bindings(nested, result, provider, datasets, arrays, diags);
-            }
-            for nested in catch_body {
-                analyze_stmt_bindings(nested, result, provider, datasets, arrays, diags);
-            }
-        }
-        HirStmt::Function { body, .. } => {
-            for nested in body {
-                analyze_stmt_bindings(nested, result, provider, datasets, arrays, diags);
-            }
-        }
-        HirStmt::ClassDef { members, .. } => {
-            for member in members {
-                if let HirClassMember::Methods { body, .. } = member {
-                    for nested in body {
-                        analyze_stmt_bindings(nested, result, provider, datasets, arrays, diags);
-                    }
-                }
-            }
-        }
-        HirStmt::Break(_)
-        | HirStmt::Continue(_)
-        | HirStmt::Return(_)
-        | HirStmt::Global(_, _)
-        | HirStmt::Persistent(_, _)
-        | HirStmt::Import { .. } => {}
-    }
-}
-
-fn walk_expr_general(
-    expr: &HirExpr,
-    diags: &mut Vec<HirDiagnostic>,
-    non_tx_write_count: &mut usize,
-    tx_vars: &HashSet<VarId>,
-) {
-    match &expr.kind {
-        HirExprKind::FuncCall(name, args) => {
-            if name == "data.open" {
-                let first = args.first();
-                let is_typed_open = args.len() > 1;
-                let first_is_literal =
-                    matches!(first.map(|a| &a.kind), Some(HirExprKind::String(_)));
-                if !first_is_literal && !is_typed_open {
-                    diags.push(HirDiagnostic {
-                        message: "data.open with dynamic path should include explicit schema for type safety"
-                            .to_string(),
-                        span: expr.span,
-                        code: "lint.data.no_untyped_open",
-                        severity: HirDiagnosticSeverity::Warning,
-                    });
-                }
-            }
-            for arg in args {
-                walk_expr_general(arg, diags, non_tx_write_count, tx_vars);
-            }
-        }
-        HirExprKind::MethodCall(base, method, args)
-        | HirExprKind::DottedInvoke(base, method, args) => {
-            if method == "write" {
-                let in_tx =
-                    matches!(base.kind, HirExprKind::Var(var_id) if tx_vars.contains(&var_id));
-                if !in_tx {
-                    *non_tx_write_count += 1;
-                    if *non_tx_write_count > 1 {
-                        diags.push(HirDiagnostic {
-                            message:
-                                "multiple data writes detected outside explicit transaction; consider ds.begin() + tx.commit()"
-                                    .to_string(),
-                            span: expr.span,
-                            code: "lint.data.no_multiwrite_outside_tx",
-                            severity: HirDiagnosticSeverity::Warning,
-                        });
-                    }
-                }
-            }
-            walk_expr_general(base, diags, non_tx_write_count, tx_vars);
-            for arg in args {
-                walk_expr_general(arg, diags, non_tx_write_count, tx_vars);
-            }
-        }
-        HirExprKind::Unary(_, inner) => {
-            walk_expr_general(inner, diags, non_tx_write_count, tx_vars)
-        }
-        HirExprKind::Binary(lhs, _, rhs) => {
-            walk_expr_general(lhs, diags, non_tx_write_count, tx_vars);
-            walk_expr_general(rhs, diags, non_tx_write_count, tx_vars);
-        }
-        HirExprKind::Tensor(rows) | HirExprKind::Cell(rows) => {
-            for row in rows {
-                for value in row {
-                    walk_expr_general(value, diags, non_tx_write_count, tx_vars);
-                }
-            }
-        }
-        HirExprKind::Index(base, args) | HirExprKind::IndexCell(base, args) => {
-            walk_expr_general(base, diags, non_tx_write_count, tx_vars);
-            for arg in args {
-                walk_expr_general(arg, diags, non_tx_write_count, tx_vars);
-            }
-        }
-        HirExprKind::Range(start, step, end) => {
-            walk_expr_general(start, diags, non_tx_write_count, tx_vars);
-            if let Some(step) = step {
-                walk_expr_general(step, diags, non_tx_write_count, tx_vars);
-            }
-            walk_expr_general(end, diags, non_tx_write_count, tx_vars);
-        }
-        HirExprKind::Member(base, _) | HirExprKind::AnonFunc { body: base, .. } => {
-            walk_expr_general(base, diags, non_tx_write_count, tx_vars)
-        }
-        HirExprKind::MemberDynamic(base, field) => {
-            walk_expr_general(base, diags, non_tx_write_count, tx_vars);
-            walk_expr_general(field, diags, non_tx_write_count, tx_vars);
-        }
-        HirExprKind::FuncHandle(_)
-        | HirExprKind::MetaClass(_)
-        | HirExprKind::Var(_)
-        | HirExprKind::String(_)
-        | HirExprKind::Number(_)
-        | HirExprKind::Constant(_)
-        | HirExprKind::Colon
-        | HirExprKind::End => {}
-    }
-}
-
-fn walk_stmt_general(
-    stmt: &HirStmt,
-    diags: &mut Vec<HirDiagnostic>,
-    non_tx_write_count: &mut usize,
-    tx_vars: &HashSet<VarId>,
-) {
-    match stmt {
-        HirStmt::ExprStmt(expr, _, _) => {
-            if matches!(
-                &expr.kind,
-                HirExprKind::MethodCall(_, method, _) | HirExprKind::DottedInvoke(_, method, _)
-                    if method == "commit"
-            ) {
-                diags.push(HirDiagnostic {
-                    message: "consider checking transaction commit outcomes in shared workflows"
-                        .to_string(),
-                    span: expr.span,
-                    code: "lint.data.ignore_commit_result",
-                    severity: HirDiagnosticSeverity::Information,
-                });
-            }
-            walk_expr_general(expr, diags, non_tx_write_count, tx_vars)
-        }
-        HirStmt::Assign(_, expr, _, _) => {
-            walk_expr_general(expr, diags, non_tx_write_count, tx_vars)
-        }
-        HirStmt::MultiAssign(_, expr, _, _) => {
-            walk_expr_general(expr, diags, non_tx_write_count, tx_vars)
-        }
-        HirStmt::AssignLValue(lv, expr, _, _) => {
-            match lv {
-                HirLValue::Var(_) => {}
-                HirLValue::Index(base, args) | HirLValue::IndexCell(base, args) => {
-                    walk_expr_general(base, diags, non_tx_write_count, tx_vars);
-                    for arg in args {
-                        walk_expr_general(arg, diags, non_tx_write_count, tx_vars);
-                    }
-                }
-                HirLValue::Member(base, _) => {
-                    walk_expr_general(base, diags, non_tx_write_count, tx_vars)
-                }
-                HirLValue::MemberDynamic(base, field) => {
-                    walk_expr_general(base, diags, non_tx_write_count, tx_vars);
-                    walk_expr_general(field, diags, non_tx_write_count, tx_vars);
-                }
-            }
-            walk_expr_general(expr, diags, non_tx_write_count, tx_vars);
-        }
-        HirStmt::If {
-            cond,
-            then_body,
-            elseif_blocks,
-            else_body,
-            ..
-        } => {
-            walk_expr_general(cond, diags, non_tx_write_count, tx_vars);
-            for stmt in then_body {
-                walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
-            }
-            for (cond, body) in elseif_blocks {
-                walk_expr_general(cond, diags, non_tx_write_count, tx_vars);
-                for stmt in body {
-                    walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
-                }
-            }
-            if let Some(body) = else_body {
-                for stmt in body {
-                    walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
-                }
-            }
-        }
-        HirStmt::While { cond, body, .. } => {
-            walk_expr_general(cond, diags, non_tx_write_count, tx_vars);
-            for stmt in body {
-                walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
-            }
-        }
-        HirStmt::For { expr, body, .. } => {
-            walk_expr_general(expr, diags, non_tx_write_count, tx_vars);
-            for stmt in body {
-                walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
-            }
-        }
-        HirStmt::Switch {
-            expr,
-            cases,
-            otherwise,
-            ..
-        } => {
-            walk_expr_general(expr, diags, non_tx_write_count, tx_vars);
-            for (case_expr, body) in cases {
-                walk_expr_general(case_expr, diags, non_tx_write_count, tx_vars);
-                for stmt in body {
-                    walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
-                }
-            }
-            if let Some(body) = otherwise {
-                for stmt in body {
-                    walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
-                }
-            }
-        }
-        HirStmt::TryCatch {
-            try_body,
-            catch_body,
-            ..
-        } => {
-            for stmt in try_body {
-                walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
-            }
-            for stmt in catch_body {
-                walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
-            }
-        }
-        HirStmt::Function { body, .. } => {
-            for stmt in body {
-                walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
-            }
-        }
-        HirStmt::ClassDef { members, .. } => {
-            for member in members {
-                if let HirClassMember::Methods { body, .. } = member {
-                    for stmt in body {
-                        walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
-                    }
-                }
-            }
-        }
-        HirStmt::Break(_)
-        | HirStmt::Continue(_)
-        | HirStmt::Return(_)
-        | HirStmt::Global(_, _)
-        | HirStmt::Persistent(_, _)
-        | HirStmt::Import { .. } => {}
-    }
+fn diagnostic(
+    code: &'static str,
+    message: impl Into<String>,
+    span: runmat_hir::Span,
+) -> HirDiagnostic {
+    HirDiagnostic::new(code, HirDiagnosticSeverity::Warning, message, span)
+        .with_category("data-api")
 }
