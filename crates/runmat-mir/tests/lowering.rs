@@ -618,13 +618,21 @@ fn analyze_assembly_collects_structured_diagnostics() {
 
 #[test]
 fn analysis_store_diagnostics_serialize_with_store() {
-    let mir = lower_mir("function y = f(c); if c; y = 1; end; z = y; end");
+    let mir = lower_mir(
+        "async function y = f(c, g); if c; y = 1; end; t = spawn(g); await(t); z = y; end",
+    );
     let store = analyze_assembly(&mir);
 
     let json = serde_json::to_string(&store).unwrap();
+    let roundtrip: AnalysisStore = serde_json::from_str(&json).unwrap();
 
     assert!(json.contains("RM-MIR0002"));
     assert!(json.contains("definite-assignment"));
+    assert_eq!(roundtrip, store);
+    assert!(!roundtrip.modules.is_empty());
+    assert!(!roundtrip.expressions.is_empty());
+    assert!(!roundtrip.liveness.is_empty());
+    assert!(!roundtrip.spawn_boundaries.is_empty());
 }
 
 #[test]
