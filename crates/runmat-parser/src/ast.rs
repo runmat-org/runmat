@@ -169,6 +169,8 @@ pub enum Stmt {
         params: Vec<String>,
         outputs: Vec<String>,
         body: Vec<Stmt>,
+        isolated: bool,
+        is_async: bool,
         span: Span,
     },
     Import {

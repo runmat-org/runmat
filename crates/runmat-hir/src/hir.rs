@@ -371,6 +371,7 @@ pub struct ClassMethod {
     pub function: FunctionId,
     pub name: MethodName,
     pub is_static: bool,
+    pub attributes: MethodAttributes,
     pub span: Span,
 }
 
@@ -393,10 +394,29 @@ pub struct ClassArgumentBlock {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
 pub struct PropertyAttributes {
+    pub is_static: bool,
     pub is_constant: bool,
     pub is_dependent: bool,
     pub is_transient: bool,
     pub is_hidden: bool,
+    pub access: MemberAccess,
+    pub get_access: MemberAccess,
+    pub set_access: MemberAccess,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
+pub struct MethodAttributes {
+    pub access: MemberAccess,
+    pub is_hidden: bool,
+    pub is_abstract: bool,
+    pub is_sealed: bool,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
+pub enum MemberAccess {
+    #[default]
+    Public,
+    Private,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

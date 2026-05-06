@@ -1,8 +1,8 @@
 use runmat_hir::{
     lower, AssignmentCreationPolicy, BindingRole, BindingStorage, CallKind, CommandArgument,
-    FunctionKind, HirCallableRef, HirExprKind, HirPlace, HirStmtKind, IndexComponent,
-    IndexResultContext, LoweringContext, OutputTarget, PlaceMutationKind, RequestedOutputCount,
-    SourceUnitKind, WorkspaceVisibility,
+    FunctionKind, HirCallableRef, HirExprKind, HirPlace, HirStmtKind, IndexComponent, IndexKind,
+    IndexResultContext, LoweringContext, MemberAccess, OutputTarget, PlaceMutationKind,
+    RequestedOutputCount, SourceUnitKind, WorkspaceVisibility,
 };
 
 fn lower_result(src: &str) -> runmat_hir::LoweringResult {
@@ -64,6 +64,26 @@ fn top_level_function_lowers_to_module_owned_function_with_bindings() {
         .iter()
         .any(|binding| binding.id == function.params[0]
             && matches!(binding.role, BindingRole::Parameter)));
+}
+
+#[test]
+fn function_modifiers_lower_to_semantic_hir() {
+    let assembly = lower_semantic("isolated async function y = f(x); y = x; end");
+    let function = &assembly.functions[0];
+
+    assert!(function.modifiers.isolated);
+    assert!(function.modifiers.is_async);
+}
+
+#[test]
+fn isolated_function_cannot_capture_outer_binding() {
+    let ast = runmat_parser::parse(
+        "function y = outer(x); isolated function z = inner(); z = x; end; y = 1; end",
+    )
+    .unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+
+    assert!(err.message.contains("isolated functions cannot capture"));
 }
 
 #[test]
@@ -193,6 +213,26 @@ fn class_method_lowers_to_function_referenced_by_class() {
 }
 
 #[test]
+fn class_attributes_lower_to_semantic_metadata() {
+    let assembly = lower_semantic(
+        "classdef C\n properties(Constant, Hidden, Access=private)\n p\n end\n methods(Static, Access=private, Sealed)\n function y = f(x); y = x; end\n end\n end",
+    );
+    let class = &assembly.classes[0];
+
+    let prop_attrs = &class.properties[0].attributes;
+    assert!(prop_attrs.is_constant);
+    assert!(prop_attrs.is_hidden);
+    assert!(matches!(prop_attrs.access, MemberAccess::Private));
+    assert!(matches!(prop_attrs.get_access, MemberAccess::Private));
+    assert!(matches!(prop_attrs.set_access, MemberAccess::Private));
+
+    let method = &class.methods[0];
+    assert!(method.is_static);
+    assert!(matches!(method.attributes.access, MemberAccess::Private));
+    assert!(method.attributes.is_sealed);
+}
+
+#[test]
 fn varargin_varargout_populate_function_abi() {
     let assembly = lower_semantic("function varargout = f(x, varargin); varargout = varargin; end");
     let function = &assembly.functions[0];
@@ -271,6 +311,50 @@ fn command_syntax_lowers_to_semantic_command_call() {
 }
 
 #[test]
+fn brace_index_in_call_argument_records_expansion_context() {
+    let assembly = lower_semantic("function y = f(varargin); y = g(varargin{:}); end");
+    let function = &assembly.functions[0];
+    let HirStmtKind::Assign(_, expr, _) = &function.body.statements[0].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::Call(call) = &expr.kind else {
+        panic!("expected call");
+    };
+    let HirExprKind::Index(_, indexing) = &call.args[0].kind else {
+        panic!("expected brace index argument");
+    };
+
+    assert!(matches!(indexing.kind, IndexKind::Brace));
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::FunctionArgumentExpansion
+    ));
+}
+
+#[test]
+fn brace_index_expression_records_comma_list_read_context() {
+    let assembly = lower_semantic("C = {1}; x = C{:};");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+    let HirStmtKind::Assign(_, expr, _) = &function.body.statements[1].kind else {
+        panic!("expected assignment");
+    };
+    let HirExprKind::Index(_, indexing) = &expr.kind else {
+        panic!("expected brace index expression");
+    };
+
+    assert!(matches!(indexing.kind, IndexKind::Brace));
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::ReadCommaList
+    ));
+}
+
+#[test]
 fn await_and_spawn_lower_to_explicit_semantic_forms() {
     let assembly = lower_semantic("f = fetch(); t = spawn(f); y = await(t);");
     let entry = assembly.modules[0].synthetic_entry_function.unwrap();
@@ -289,6 +373,27 @@ fn await_and_spawn_lower_to_explicit_semantic_forms() {
         panic!("expected await assignment");
     };
     assert!(matches!(await_expr.kind, HirExprKind::Await(_)));
+}
+
+#[test]
+fn await_requires_async_function_or_top_level_script() {
+    let ast = runmat_parser::parse("function y = f(t); y = await(t); end").unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert!(err.message.contains("await is only allowed"));
+
+    let assembly = lower_semantic("async function y = f(t); y = await(t); end");
+    let function = &assembly.functions[0];
+    let HirStmtKind::Assign(_, await_expr, _) = &function.body.statements[0].kind else {
+        panic!("expected await assignment");
+    };
+    assert!(matches!(await_expr.kind, HirExprKind::Await(_)));
+}
+
+#[test]
+fn spawn_rejects_anonymous_function_with_lexical_capture() {
+    let ast = runmat_parser::parse("function y = f(x); y = spawn(@() x); end").unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert!(err.message.contains("spawn cannot capture"));
 }
 
 #[test]

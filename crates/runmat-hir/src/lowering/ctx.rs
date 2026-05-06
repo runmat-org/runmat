@@ -47,6 +47,8 @@ struct SemanticCtx {
     next_stmt: usize,
     next_function: usize,
     scopes: Vec<SemanticScope>,
+    function_modifiers: Vec<FunctionModifiers>,
+    top_level_await: Vec<bool>,
     function_names: HashMap<String, FunctionId>,
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
 }
@@ -117,6 +119,8 @@ impl SemanticCtx {
             next_stmt: 0,
             next_function: 0,
             scopes: Vec::new(),
+            function_modifiers: Vec::new(),
+            top_level_await: Vec::new(),
             function_names: HashMap::new(),
             captures: HashMap::new(),
         };
@@ -173,9 +177,13 @@ impl SemanticCtx {
                     top_level_await: true,
                 },
             });
-            let body = ctx.with_scope(entry_function, WorkspaceVisibility::TopLevel, |ctx| {
-                ctx.lower_stmt_refs(&executable)
-            })?;
+            let body = ctx.with_scope(
+                entry_function,
+                WorkspaceVisibility::TopLevel,
+                FunctionModifiers::default(),
+                true,
+                |ctx| ctx.lower_stmt_refs(&executable),
+            )?;
             let locals = ctx.binding_ids_for_owner(entry_function);
             ctx.assembly.functions.push(HirFunction {
                 id: entry_function,
@@ -206,6 +214,8 @@ impl SemanticCtx {
                     params,
                     outputs,
                     body,
+                    isolated,
+                    is_async,
                     span,
                 } => {
                     let id = ctx.function_names[name];
@@ -217,6 +227,10 @@ impl SemanticCtx {
                         body,
                         *span,
                         FunctionKind::Named,
+                        FunctionModifiers {
+                            isolated: *isolated,
+                            is_async: *is_async,
+                        },
                         None,
                         None,
                     )?;
@@ -273,6 +287,8 @@ impl SemanticCtx {
         &mut self,
         owner: FunctionId,
         workspace_visibility: WorkspaceVisibility,
+        modifiers: FunctionModifiers,
+        top_level_await: bool,
         f: impl FnOnce(&mut Self) -> Result<T, SemanticError>,
     ) -> Result<T, SemanticError> {
         self.scopes.push(SemanticScope {
@@ -280,9 +296,34 @@ impl SemanticCtx {
             bindings: HashMap::new(),
             workspace_visibility,
         });
+        self.function_modifiers.push(modifiers);
+        self.top_level_await.push(top_level_await);
         let result = f(self);
+        self.top_level_await.pop();
+        self.function_modifiers.pop();
         self.scopes.pop();
         result
+    }
+
+    fn current_allows_await(&self) -> bool {
+        self.function_modifiers
+            .last()
+            .map(|modifiers| modifiers.is_async)
+            .unwrap_or(false)
+            || self.top_level_await.last().copied().unwrap_or(false)
+    }
+
+    fn spawn_arg_captures_lexical_binding(&self, arg: &HirExpr) -> bool {
+        match &arg.kind {
+            HirExprKind::AnonymousFunction(function_id) => self
+                .assembly
+                .functions
+                .iter()
+                .find(|function| function.id == *function_id)
+                .map(|function| !function.captures.is_empty())
+                .unwrap_or(false),
+            _ => false,
+        }
     }
 
     fn current_scope(&self) -> &SemanticScope {
@@ -401,105 +442,129 @@ impl SemanticCtx {
         body: &[AstStmt],
         span: Span,
         kind: FunctionKind,
+        modifiers: FunctionModifiers,
         parent: Option<FunctionId>,
         enclosing_class: Option<ClassId>,
     ) -> Result<HirFunction, SemanticError> {
-        self.with_scope(id, WorkspaceVisibility::Hidden, |ctx| {
-            for stmt in body {
-                if let AstStmt::Function { name, .. } = stmt {
-                    ctx.reserve_function_name(name);
+        self.with_scope(
+            id,
+            WorkspaceVisibility::Hidden,
+            modifiers.clone(),
+            false,
+            |ctx| {
+                for stmt in body {
+                    if let AstStmt::Function { name, .. } = stmt {
+                        ctx.reserve_function_name(name);
+                    }
                 }
-            }
-            let mut param_ids = Vec::new();
-            for param in params {
-                param_ids.push(ctx.define_binding(
-                    param,
-                    BindingRole::Parameter,
+                let mut param_ids = Vec::new();
+                for param in params {
+                    param_ids.push(ctx.define_binding(
+                        param,
+                        BindingRole::Parameter,
+                        BindingStorage::Lexical,
+                        span,
+                    ));
+                }
+                let mut output_ids = Vec::new();
+                for output in outputs {
+                    output_ids.push(ctx.lookup_binding(output).unwrap_or_else(|| {
+                        ctx.define_binding(
+                            output,
+                            BindingRole::Output,
+                            BindingStorage::Lexical,
+                            span,
+                        )
+                    }));
+                }
+                let implicit_nargin = Some(ctx.define_binding(
+                    "nargin",
+                    BindingRole::Local,
                     BindingStorage::Lexical,
                     span,
                 ));
-            }
-            let mut output_ids = Vec::new();
-            for output in outputs {
-                output_ids.push(ctx.lookup_binding(output).unwrap_or_else(|| {
-                    ctx.define_binding(output, BindingRole::Output, BindingStorage::Lexical, span)
-                }));
-            }
-            let implicit_nargin = Some(ctx.define_binding(
-                "nargin",
-                BindingRole::Local,
-                BindingStorage::Lexical,
-                span,
-            ));
-            let implicit_nargout = Some(ctx.define_binding(
-                "nargout",
-                BindingRole::Local,
-                BindingStorage::Lexical,
-                span,
-            ));
-            let hir_body = ctx.lower_stmts_semantic(body)?;
-            for stmt in body {
-                if let AstStmt::Function {
-                    name,
-                    params,
-                    outputs,
-                    body,
+                let implicit_nargout = Some(ctx.define_binding(
+                    "nargout",
+                    BindingRole::Local,
+                    BindingStorage::Lexical,
                     span,
-                } = stmt
-                {
-                    let nested_id = ctx.function_names[name];
-                    let nested = ctx.lower_function(
-                        nested_id,
+                ));
+                let hir_body = ctx.lower_stmts_semantic(body)?;
+                for stmt in body {
+                    if let AstStmt::Function {
                         name,
                         params,
                         outputs,
                         body,
-                        *span,
-                        FunctionKind::Named,
-                        Some(id),
-                        enclosing_class,
-                    )?;
-                    ctx.assembly.functions.push(nested);
+                        isolated,
+                        is_async,
+                        span,
+                    } = stmt
+                    {
+                        let nested_id = ctx.function_names[name];
+                        let nested = ctx.lower_function(
+                            nested_id,
+                            name,
+                            params,
+                            outputs,
+                            body,
+                            *span,
+                            FunctionKind::Named,
+                            FunctionModifiers {
+                                isolated: *isolated,
+                                is_async: *is_async,
+                            },
+                            Some(id),
+                            enclosing_class,
+                        )?;
+                        ctx.assembly.functions.push(nested);
+                    }
                 }
-            }
-            let locals = ctx.binding_ids_for_owner(id);
-            let captures = ctx.captures.remove(&id).unwrap_or_default();
-            ctx.semantic_index.functions.push(FunctionResolution {
-                name: FunctionName(name.to_string()),
-                function: id,
-                parent,
-                span,
-            });
-            Ok(HirFunction {
-                id,
-                module: ctx.module,
-                parent,
-                enclosing_class,
-                name: FunctionName(name.to_string()),
-                kind,
-                params: param_ids.clone(),
-                outputs: output_ids.clone(),
-                abi: FunctionAbi {
-                    fixed_inputs: param_ids,
-                    varargin: params
-                        .last()
-                        .filter(|p| p.as_str() == "varargin")
-                        .and_then(|p| ctx.lookup_binding(p)),
-                    fixed_outputs: output_ids,
-                    varargout: outputs
-                        .last()
-                        .filter(|p| p.as_str() == "varargout")
-                        .and_then(|p| ctx.lookup_binding(p)),
-                    implicit_nargin,
-                    implicit_nargout,
-                },
-                locals,
-                captures,
-                modifiers: FunctionModifiers::default(),
-                body: hir_body,
-                span,
-            })
-        })
+                let locals = ctx.binding_ids_for_owner(id);
+                let captures = ctx.captures.remove(&id).unwrap_or_default();
+                if modifiers.isolated && !captures.is_empty() {
+                    return Err(SemanticError::new(
+                        "isolated functions cannot capture outer lexical bindings",
+                    )
+                    .with_span(span));
+                }
+                ctx.semantic_index.functions.push(FunctionResolution {
+                    name: FunctionName(name.to_string()),
+                    function: id,
+                    parent,
+                    span,
+                });
+                Ok(HirFunction {
+                    id,
+                    module: ctx.module,
+                    parent,
+                    enclosing_class,
+                    name: FunctionName(name.to_string()),
+                    kind,
+                    params: param_ids.clone(),
+                    outputs: output_ids.clone(),
+                    abi: FunctionAbi {
+                        fixed_inputs: param_ids,
+                        varargin: params
+                            .last()
+                            .filter(|p| p.as_str() == "varargin")
+                            .and_then(|p| ctx.lookup_binding(p)),
+                        fixed_outputs: output_ids,
+                        varargout: outputs
+                            .last()
+                            .filter(|p| p.as_str() == "varargout")
+                            .and_then(|p| ctx.lookup_binding(p)),
+                        implicit_nargin,
+                        implicit_nargout,
+                    },
+                    locals,
+                    captures,
+                    modifiers,
+                    body: hir_body,
+                    span,
+                })
+            },
+        )
     }
 
     fn lower_class(
@@ -519,10 +584,11 @@ impl SemanticCtx {
 
         for member in members {
             match member {
-                runmat_parser::ClassMember::Properties { names, .. } => {
+                runmat_parser::ClassMember::Properties { attributes, names } => {
+                    let attributes = property_attributes(attributes);
                     properties.extend(names.iter().map(|name| ClassProperty {
                         name: crate::MemberName(name.clone()),
-                        attributes: crate::PropertyAttributes::default(),
+                        attributes: attributes.clone(),
                         default: None,
                         span,
                     }));
@@ -531,12 +597,15 @@ impl SemanticCtx {
                     let is_static = attributes
                         .iter()
                         .any(|attr| attr.name.eq_ignore_ascii_case("Static"));
+                    let method_attributes = method_attributes(attributes);
                     for stmt in body {
                         if let AstStmt::Function {
                             name,
                             params,
                             outputs,
                             body,
+                            isolated,
+                            is_async,
                             span,
                         } = stmt
                         {
@@ -549,6 +618,10 @@ impl SemanticCtx {
                                 body,
                                 *span,
                                 FunctionKind::ClassMethod { is_static },
+                                FunctionModifiers {
+                                    isolated: *isolated,
+                                    is_async: *is_async,
+                                },
                                 None,
                                 Some(class_id),
                             )?;
@@ -557,6 +630,7 @@ impl SemanticCtx {
                                 function: function_id,
                                 name: crate::MethodName(name.clone()),
                                 is_static,
+                                attributes: method_attributes.clone(),
                                 span: *span,
                             });
                         }
@@ -918,12 +992,25 @@ impl SemanticCtx {
             AstExpr::FuncCall(name, args, _) => {
                 let args: Vec<HirExpr> = args
                     .iter()
-                    .map(|arg| self.lower_expr_semantic(arg))
+                    .map(|arg| self.lower_call_argument(arg))
                     .collect::<Result<_, _>>()?;
                 if name == "await" && args.len() == 1 {
+                    if !self.current_allows_await() {
+                        return Err(SemanticError::new(
+                            "await is only allowed in async functions or top-level script code",
+                        )
+                        .with_span(span));
+                    }
                     HirExprKind::Await(Box::new(args.into_iter().next().unwrap()))
                 } else if name == "spawn" && args.len() == 1 {
-                    HirExprKind::Spawn(Box::new(args.into_iter().next().unwrap()))
+                    let arg = args.into_iter().next().unwrap();
+                    if self.spawn_arg_captures_lexical_binding(&arg) {
+                        return Err(SemanticError::new(
+                            "spawn cannot capture outer lexical bindings in this context",
+                        )
+                        .with_span(span));
+                    }
+                    HirExprKind::Spawn(Box::new(arg))
                 } else if let Some(binding) = self.binding_for_read(name, span) {
                     let base = HirExpr {
                         id: self.alloc_expr_id(),
@@ -971,8 +1058,12 @@ impl SemanticCtx {
             }
             AstExpr::AnonFunc { params, body, span } => {
                 let function_id = self.take_function_id();
-                let function =
-                    self.with_scope(function_id, WorkspaceVisibility::Hidden, |ctx| {
+                let function = self.with_scope(
+                    function_id,
+                    WorkspaceVisibility::Hidden,
+                    FunctionModifiers::default(),
+                    false,
+                    |ctx| {
                         let param_ids = params
                             .iter()
                             .map(|param| {
@@ -1016,7 +1107,8 @@ impl SemanticCtx {
                             },
                             span: *span,
                         })
-                    })?;
+                    },
+                )?;
                 self.assembly.functions.push(function);
                 HirExprKind::AnonymousFunction(function_id)
             }
@@ -1052,7 +1144,11 @@ impl SemanticCtx {
             ),
             AstExpr::IndexCell(base, indices, _) => HirExprKind::Index(
                 Box::new(self.lower_expr_semantic(base)?),
-                self.lower_indexing(indices, IndexKind::Brace)?,
+                self.lower_indexing_with_context(
+                    indices,
+                    IndexKind::Brace,
+                    IndexResultContext::ReadCommaList,
+                )?,
             ),
             AstExpr::Range(start, step, end, _) => HirExprKind::Range(
                 Box::new(self.lower_expr_semantic(start)?),
@@ -1076,7 +1172,7 @@ impl SemanticCtx {
                 let mut call_args = vec![self.lower_expr_semantic(base)?];
                 call_args.extend(
                     args.iter()
-                        .map(|arg| self.lower_expr_semantic(arg))
+                        .map(|arg| self.lower_call_argument(arg))
                         .collect::<Result<Vec<_>, _>>()?,
                 );
                 HirExprKind::Call(self.call_for_name(
@@ -1104,6 +1200,24 @@ impl SemanticCtx {
         kind: IndexKind,
     ) -> Result<IndexingSemantics, SemanticError> {
         self.lower_indexing_with_context(indices, kind, IndexResultContext::ReadSingle)
+    }
+
+    fn lower_call_argument(&mut self, arg: &AstExpr) -> Result<HirExpr, SemanticError> {
+        if let AstExpr::IndexCell(base, indices, _) = arg {
+            return Ok(HirExpr {
+                id: self.alloc_expr_id(),
+                kind: HirExprKind::Index(
+                    Box::new(self.lower_expr_semantic(base)?),
+                    self.lower_indexing_with_context(
+                        indices,
+                        IndexKind::Brace,
+                        IndexResultContext::FunctionArgumentExpansion,
+                    )?,
+                ),
+                span: arg.span(),
+            });
+        }
+        self.lower_expr_semantic(arg)
     }
 
     fn lower_indexing_with_context(
@@ -1236,6 +1350,69 @@ fn creation_policy_for_place(place: &HirPlace, deletion: bool) -> AssignmentCrea
         HirPlace::Member(_, _) | HirPlace::MemberDynamic(_, _) => {
             AssignmentCreationPolicy::CreateStructFieldPath
         }
+    }
+}
+
+fn property_attributes(attrs: &[runmat_parser::Attr]) -> crate::PropertyAttributes {
+    let mut result = crate::PropertyAttributes::default();
+    for attr in attrs {
+        if attr.name.eq_ignore_ascii_case("Static") {
+            result.is_static = true;
+        } else if attr.name.eq_ignore_ascii_case("Constant") {
+            result.is_constant = true;
+        } else if attr.name.eq_ignore_ascii_case("Dependent") {
+            result.is_dependent = true;
+        } else if attr.name.eq_ignore_ascii_case("Transient") {
+            result.is_transient = true;
+        } else if attr.name.eq_ignore_ascii_case("Hidden") {
+            result.is_hidden = true;
+        } else if attr.name.eq_ignore_ascii_case("Access") {
+            if let Some(access) = attr.value.as_deref().and_then(member_access) {
+                result.access = access.clone();
+                result.get_access = access.clone();
+                result.set_access = access;
+            }
+        } else if attr.name.eq_ignore_ascii_case("GetAccess") {
+            if let Some(access) = attr.value.as_deref().and_then(member_access) {
+                result.get_access = access;
+            }
+        } else if attr.name.eq_ignore_ascii_case("SetAccess") {
+            if let Some(access) = attr.value.as_deref().and_then(member_access) {
+                result.set_access = access;
+            }
+        }
+    }
+    result
+}
+
+fn method_attributes(attrs: &[runmat_parser::Attr]) -> crate::MethodAttributes {
+    let mut result = crate::MethodAttributes::default();
+    for attr in attrs {
+        if attr.name.eq_ignore_ascii_case("Access") {
+            if let Some(access) = attr.value.as_deref().and_then(member_access) {
+                result.access = access;
+            }
+        } else if attr.name.eq_ignore_ascii_case("Hidden") {
+            result.is_hidden = true;
+        } else if attr.name.eq_ignore_ascii_case("Abstract") {
+            result.is_abstract = true;
+        } else if attr.name.eq_ignore_ascii_case("Sealed") {
+            result.is_sealed = true;
+        }
+    }
+    result
+}
+
+fn member_access(value: &str) -> Option<crate::MemberAccess> {
+    match value
+        .trim()
+        .trim_matches('\'')
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "public" => Some(crate::MemberAccess::Public),
+        "private" => Some(crate::MemberAccess::Private),
+        _ => None,
     }
 }
 

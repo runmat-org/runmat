@@ -107,12 +107,16 @@ fn strip_stmt(stmt: &Stmt) -> Stmt {
             params,
             outputs,
             body,
+            isolated,
+            is_async,
             ..
         } => Stmt::Function {
             name: name.clone(),
             params: params.clone(),
             outputs: outputs.clone(),
             body: body.iter().map(strip_stmt).collect(),
+            isolated: *isolated,
+            is_async: *is_async,
             span: Span::default(),
         },
         Stmt::Import { path, wildcard, .. } => Stmt::Import {
@@ -736,10 +740,26 @@ fn parse_function_definition() {
                     ),
                     true,
                 )],
+                isolated: false,
+                is_async: false,
                 span: span_value(),
             }],
         },
     );
+}
+
+#[test]
+fn parse_function_modifiers() {
+    let program = parse("isolated async function y=f(x); y=x; end").unwrap();
+    match &program.body[0] {
+        Stmt::Function {
+            isolated, is_async, ..
+        } => {
+            assert!(*isolated);
+            assert!(*is_async);
+        }
+        _ => panic!("expected function stmt"),
+    }
 }
 
 #[test]
