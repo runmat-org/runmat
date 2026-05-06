@@ -5,15 +5,16 @@ use crate::validation::classdefs::validate_classdefs;
 use crate::{
     BindingId, BindingName, BindingOwner, BindingRole, BindingStorage, BuiltinId, CallSyntax,
     CapturedBinding, ClassArgumentBlock, ClassEnumeration, ClassEvent, ClassId, ClassKind,
-    ClassMethod, ClassProperty, EntrypointId, EntrypointName, EntrypointOrigin, EntrypointPolicy,
-    ExprId, FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, HirAssembly,
-    HirBinding, HirBlock, HirCall, HirCallableRef, HirClass, HirEntrypoint, HirExpr, HirExprKind,
-    HirFunction, HirImport, HirModule, HirPlace, HirStmt as SemanticHirStmt, HirStmtKind,
-    IndexComponent, IndexKind, IndexResultContext, IndexingSemantics,
-    LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt, LoopIterationSemantics,
-    LoweringContext, LoweringResult, ModuleId, OperatorKind, QualifiedName, RequestedOutputCount,
-    SemanticError, SourceId, SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, Type, VarId,
-    WorkspaceExportPolicy, WorkspaceVisibility,
+    ClassMethod, ClassProperty, CommandArgument, EntrypointId, EntrypointName, EntrypointOrigin,
+    EntrypointPolicy, ExprId, FunctionAbi, FunctionId, FunctionKind, FunctionModifiers,
+    FunctionName, HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass,
+    HirCommandCall, HirEntrypoint, HirExpr, HirExprKind, HirFunction, HirImport, HirModule,
+    HirPlace, HirStmt as SemanticHirStmt, HirStmtKind, IndexComponent, IndexKind,
+    IndexResultContext, IndexingSemantics, LegacyHirProgram as HirProgram,
+    LegacyHirStmt as HirStmt, LoopIterationSemantics, LoweringContext, LoweringResult, ModuleId,
+    OperatorKind, QualifiedName, RequestedOutputCount, SemanticError, SourceId, SourceUnitKind,
+    Span, StmtId, StringLiteral, SymbolName, Type, VarId, WorkspaceExportPolicy,
+    WorkspaceVisibility,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use std::collections::HashMap;
@@ -819,7 +820,11 @@ impl SemanticCtx {
                     .iter()
                     .map(|arg| self.lower_expr_semantic(arg))
                     .collect::<Result<_, _>>()?;
-                if let Some(binding) = self.binding_for_read(name) {
+                if name == "await" && args.len() == 1 {
+                    HirExprKind::Await(Box::new(args.into_iter().next().unwrap()))
+                } else if name == "spawn" && args.len() == 1 {
+                    HirExprKind::Spawn(Box::new(args.into_iter().next().unwrap()))
+                } else if let Some(binding) = self.binding_for_read(name) {
                     let base = HirExpr {
                         id: self.alloc_expr_id(),
                         kind: HirExprKind::Binding(binding),
@@ -842,6 +847,17 @@ impl SemanticCtx {
                     ))
                 }
             }
+            AstExpr::CommandCall(name, args, _) => HirExprKind::CommandCall(HirCommandCall {
+                command: self
+                    .call_for_name(
+                        name,
+                        Vec::new(),
+                        CallSyntax::Plain,
+                        RequestedOutputCount::Zero,
+                    )
+                    .callee,
+                args: args.iter().map(command_argument).collect(),
+            }),
             AstExpr::FuncHandle(name, _) => {
                 HirExprKind::FunctionHandle(if let Some(function) = self.function_names.get(name) {
                     crate::FunctionHandleTarget::Function(*function)
@@ -1041,6 +1057,17 @@ impl FunctionAbi {
 
 fn qualified_name(parts: &[String]) -> QualifiedName {
     QualifiedName(parts.iter().cloned().map(SymbolName).collect())
+}
+
+fn command_argument(expr: &AstExpr) -> CommandArgument {
+    match expr {
+        AstExpr::Ident(word, _) | AstExpr::Number(word, _) => {
+            CommandArgument::Word(SymbolName(word.clone()))
+        }
+        AstExpr::String(value, _) => CommandArgument::StringLiteral(StringLiteral(value.clone())),
+        AstExpr::EndKeyword(_) => CommandArgument::Word(SymbolName("end".to_string())),
+        _ => CommandArgument::StringLiteral(StringLiteral(format!("{expr:?}"))),
+    }
 }
 
 fn is_builtin(name: &str) -> bool {

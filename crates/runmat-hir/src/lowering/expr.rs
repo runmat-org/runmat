@@ -178,6 +178,22 @@ impl Ctx {
                     (HirExprKind::FuncCall(name.clone(), arg_exprs), return_type)
                 }
             }
+            CommandCall(name, args, _) => {
+                let arg_exprs: Result<Vec<_>, _> = args
+                    .iter()
+                    .map(|arg| match arg {
+                        parser::Expr::Ident(word, span) => Ok(HirExpr {
+                            kind: HirExprKind::String(format!("\"{word}\"")),
+                            ty: Type::String,
+                            span: *span,
+                        }),
+                        _ => self.lower_expr(arg),
+                    })
+                    .collect();
+                let arg_exprs = arg_exprs?;
+                let return_type = self.infer_function_return_type(name, &arg_exprs);
+                (HirExprKind::FuncCall(name.clone(), arg_exprs), return_type)
+            }
             Tensor(rows, _) => {
                 let mut hir_rows = Vec::new();
                 for row in rows {

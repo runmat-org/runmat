@@ -124,7 +124,7 @@ impl Parser {
         let end = self.last_token_end();
         let span = self.span_from(name_token.position, end);
         Ok(crate::Stmt::ExprStmt(
-            Expr::FuncCall(name_token.lexeme, args, span),
+            Expr::CommandCall(name_token.lexeme, args, span),
             false,
             span,
         ))

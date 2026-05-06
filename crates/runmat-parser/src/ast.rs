@@ -17,6 +17,7 @@ pub enum Expr {
     Range(Box<Expr>, Option<Box<Expr>>, Box<Expr>, Span),
     Colon(Span),
     FuncCall(String, Vec<Expr>, Span),
+    CommandCall(String, Vec<Expr>, Span),
     Member(Box<Expr>, String, Span),
     // Dynamic field: s.(expr)
     MemberDynamic(Box<Expr>, Box<Expr>, Span),
@@ -47,6 +48,7 @@ impl Expr {
             | Expr::Range(_, _, _, span)
             | Expr::Colon(span)
             | Expr::FuncCall(_, _, span)
+            | Expr::CommandCall(_, _, span)
             | Expr::Member(_, _, span)
             | Expr::MemberDynamic(_, _, span)
             | Expr::DottedInvoke(_, _, _, span)
@@ -72,6 +74,7 @@ impl Expr {
             Expr::Range(start, step, end, _) => Expr::Range(start, step, end, span),
             Expr::Colon(_) => Expr::Colon(span),
             Expr::FuncCall(name, args, _) => Expr::FuncCall(name, args, span),
+            Expr::CommandCall(name, args, _) => Expr::CommandCall(name, args, span),
             Expr::Member(base, name, _) => Expr::Member(base, name, span),
             Expr::MemberDynamic(base, name, _) => Expr::MemberDynamic(base, name, span),
             Expr::DottedInvoke(base, name, args, _) => Expr::DottedInvoke(base, name, args, span),

@@ -7,13 +7,13 @@ use parse::parse;
 fn command_form_with_single_quoted_and_number_args() {
     let program = parse("echo 'hello world' 42").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), _, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), _, _) => {
             assert_eq!(name, "echo");
             assert_eq!(args.len(), 2);
             assert!(matches!(args[0], Expr::String(_, _)));
             assert!(matches!(args[1], Expr::Number(_, _)));
         }
-        _ => panic!("expected command-form func call"),
+        _ => panic!("expected command-form command call"),
     }
 }
 

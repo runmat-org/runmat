@@ -1,6 +1,7 @@
 use runmat_hir::{
-    lower, BindingRole, BindingStorage, FunctionKind, HirCallableRef, HirExprKind, HirStmtKind,
-    LoweringContext, OutputTarget, RequestedOutputCount, SourceUnitKind, WorkspaceVisibility,
+    lower, BindingRole, BindingStorage, CommandArgument, FunctionKind, HirCallableRef, HirExprKind,
+    HirStmtKind, LoweringContext, OutputTarget, RequestedOutputCount, SourceUnitKind,
+    WorkspaceVisibility,
 };
 
 fn lower_semantic(src: &str) -> runmat_hir::HirAssembly {
@@ -238,4 +239,49 @@ fn global_and_persistent_declarations_set_binding_storage() {
 
     assert!(matches!(global.storage, BindingStorage::Global));
     assert!(matches!(persistent.storage, BindingStorage::Persistent));
+}
+
+#[test]
+fn command_syntax_lowers_to_semantic_command_call() {
+    let assembly = lower_semantic("disp hello");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+
+    let HirStmtKind::ExprStmt(expr, _) = &function.body.statements[0].kind else {
+        panic!("expected expression statement");
+    };
+    let HirExprKind::CommandCall(call) = &expr.kind else {
+        panic!("expected semantic command call");
+    };
+    match &call.command {
+        HirCallableRef::Builtin(id) => assert_eq!(id.0, "disp"),
+        HirCallableRef::Unresolved(name) => assert_eq!(name.0[0].0, "disp"),
+        other => panic!("unexpected command callee: {other:?}"),
+    }
+    assert!(matches!(call.args[0], CommandArgument::Word(ref word) if word.0 == "hello"));
+}
+
+#[test]
+fn await_and_spawn_lower_to_explicit_semantic_forms() {
+    let assembly = lower_semantic("f = fetch(); t = spawn(f); y = await(t);");
+    let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+    let function = assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entry)
+        .unwrap();
+
+    let HirStmtKind::Assign(_, spawn_expr, _) = &function.body.statements[1].kind else {
+        panic!("expected spawn assignment");
+    };
+    assert!(matches!(spawn_expr.kind, HirExprKind::Spawn(_)));
+
+    let HirStmtKind::Assign(_, await_expr, _) = &function.body.statements[2].kind else {
+        panic!("expected await assignment");
+    };
+    assert!(matches!(await_expr.kind, HirExprKind::Await(_)));
 }

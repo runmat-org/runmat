@@ -8,7 +8,7 @@ fn command_form_with_escaped_double_quotes_and_end() {
     // Double-quoted string with doubled "" escapes and an end token as arg
     let program = parse("echo \"he said \"\"hi\"\"\" end").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), _, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), _, _) => {
             assert_eq!(name, "echo");
             assert_eq!(args.len(), 2);
             assert!(matches!(args[0], Expr::String(ref s, _) if s.contains("he said \"\"hi\"\"")));
@@ -27,7 +27,7 @@ fn command_form_with_ellipsis_and_end_then_ident() {
     // Ellipsis continues the command-form list; end and identifier come on next line
     let program = parse("foo 'a' ...\n end bar").unwrap();
     match &program.body[0] {
-        Stmt::ExprStmt(Expr::FuncCall(name, args, _), _, _) => {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), _, _) => {
             assert_eq!(name, "foo");
             assert_eq!(args.len(), 3);
             assert!(matches!(args[0], Expr::String(_, _)));

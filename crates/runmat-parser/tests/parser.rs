@@ -171,6 +171,11 @@ fn strip_expr(expr: &Expr) -> Expr {
             args.iter().map(strip_expr).collect(),
             Span::default(),
         ),
+        Expr::CommandCall(name, args, _) => Expr::CommandCall(
+            name.clone(),
+            args.iter().map(strip_expr).collect(),
+            Span::default(),
+        ),
         Expr::Member(base, name, _) => {
             Expr::Member(Box::new(strip_expr(base)), name.clone(), Span::default())
         }
