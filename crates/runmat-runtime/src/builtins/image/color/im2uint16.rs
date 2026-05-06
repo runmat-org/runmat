@@ -103,6 +103,7 @@ fn im2uint16_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::LogicalArray;
 
     fn call(value: Value) -> Value {
         block_on(im2uint16_builtin(value, Vec::new())).expect("im2uint16")
@@ -121,5 +122,26 @@ mod tests {
         };
         assert_eq!(out.dtype, NumericDType::U16);
         assert_eq!(out.data, vec![0.0, 65535.0]);
+    }
+
+    #[test]
+    fn clamps_and_rounds_float_tensor_to_uint16() {
+        let input = Tensor::new(vec![-0.1, 0.0, 0.5, 1.0, 1.2, f64::NAN], vec![2, 3]).unwrap();
+        let Value::Tensor(out) = call(Value::Tensor(input)) else {
+            panic!("expected tensor");
+        };
+        assert_eq!(out.dtype, NumericDType::U16);
+        assert_eq!(out.shape, vec![2, 3]);
+        assert_eq!(out.data, vec![0.0, 0.0, 32768.0, 65535.0, 65535.0, 0.0]);
+    }
+
+    #[test]
+    fn converts_logical_array_to_uint16_extrema() {
+        let logical = LogicalArray::new(vec![0, 1, 1, 0], vec![2, 2]).unwrap();
+        let Value::Tensor(out) = call(Value::LogicalArray(logical)) else {
+            panic!("expected tensor");
+        };
+        assert_eq!(out.dtype, NumericDType::U16);
+        assert_eq!(out.data, vec![0.0, 65535.0, 65535.0, 0.0]);
     }
 }

@@ -73,13 +73,15 @@ mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{NumericDType, Tensor};
 
+    fn call(value: Value) -> BuiltinResult<Value> {
+        block_on(gray2rgb_builtin(value, Vec::new()))
+    }
+
     #[test]
     fn replicates_grayscale_planes() {
         let gray =
             Tensor::new_with_dtype(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2], NumericDType::U8).unwrap();
-        let Value::Tensor(out) =
-            block_on(gray2rgb_builtin(Value::Tensor(gray), Vec::new())).expect("gray2rgb")
-        else {
+        let Value::Tensor(out) = call(Value::Tensor(gray)).expect("gray2rgb") else {
             panic!("expected tensor");
         };
         assert_eq!(out.shape, vec![2, 2, 3]);
@@ -88,5 +90,12 @@ mod tests {
             out.data,
             vec![1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 4.0]
         );
+    }
+
+    #[test]
+    fn rejects_truecolor_input() {
+        let rgb = Tensor::new(vec![1.0; 12], vec![2, 2, 3]).unwrap();
+        let err = call(Value::Tensor(rgb)).unwrap_err();
+        assert!(err.message().contains("expected an MxN grayscale image"));
     }
 }

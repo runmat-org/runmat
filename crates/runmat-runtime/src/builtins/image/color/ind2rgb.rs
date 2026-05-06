@@ -118,10 +118,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_builtins::Tensor;
 
-    #[test]
-    fn converts_one_based_double_indices() {
-        let indexed = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
-        let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
+    fn call(indexed: Tensor, map: Tensor) -> BuiltinResult<Tensor> {
         let Value::Tensor(out) = block_on(ind2rgb_builtin(
             Value::Tensor(indexed),
             Value::Tensor(map),
@@ -130,6 +127,14 @@ mod tests {
         .expect("ind2rgb") else {
             panic!("expected tensor");
         };
+        Ok(out)
+    }
+
+    #[test]
+    fn converts_one_based_double_indices() {
+        let indexed = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+        let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
+        let out = call(indexed, map).unwrap();
         assert_eq!(out.shape, vec![1, 2, 3]);
         assert_eq!(out.data, vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
     }
@@ -138,14 +143,48 @@ mod tests {
     fn converts_zero_based_uint8_indices() {
         let indexed = Tensor::new_with_dtype(vec![0.0, 1.0], vec![1, 2], NumericDType::U8).unwrap();
         let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
-        let Value::Tensor(out) = block_on(ind2rgb_builtin(
+        let out = call(indexed, map).unwrap();
+        assert_eq!(out.data, vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn scales_uint8_colormap_values_to_unit_rgb() {
+        let indexed = Tensor::new_with_dtype(vec![0.0, 1.0], vec![2, 1], NumericDType::U8).unwrap();
+        let map = Tensor::new_with_dtype(
+            vec![255.0, 0.0, 0.0, 128.0, 0.0, 255.0],
+            vec![2, 3],
+            NumericDType::U8,
+        )
+        .unwrap();
+        let out = call(indexed, map).unwrap();
+        assert_eq!(out.shape, vec![2, 1, 3]);
+        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.data, vec![1.0, 0.0, 0.0, 128.0 / 255.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn rejects_out_of_range_indices() {
+        let indexed = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
+        let map = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
+        let err = block_on(ind2rgb_builtin(
             Value::Tensor(indexed),
             Value::Tensor(map),
             Vec::new(),
         ))
-        .expect("ind2rgb") else {
-            panic!("expected tensor");
-        };
-        assert_eq!(out.data, vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        .unwrap_err();
+        assert!(err.message().contains("outside the colormap"));
+    }
+
+    #[test]
+    fn rejects_non_colormap_map_shape() {
+        let indexed = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let map = Tensor::new(vec![1.0; 12], vec![2, 2, 3]).unwrap();
+        let err = block_on(ind2rgb_builtin(
+            Value::Tensor(indexed),
+            Value::Tensor(map),
+            Vec::new(),
+        ))
+        .unwrap_err();
+        assert!(err.message().contains("map must be an Nx3 colormap"));
     }
 }

@@ -111,6 +111,29 @@ mod tests {
     }
 
     #[test]
+    fn converts_column_major_uint16_planes() {
+        let rgb = Tensor::new_with_dtype(
+            vec![65535.0, 0.0, 0.0, 65535.0, 0.0, 0.0],
+            vec![2, 1, 3],
+            NumericDType::U16,
+        )
+        .unwrap();
+        let Value::Tensor(out) = call(Value::Tensor(rgb)) else {
+            panic!("expected tensor");
+        };
+        assert_eq!(out.dtype, NumericDType::U16);
+        assert_eq!(out.shape, vec![2, 1]);
+        assert_eq!(out.data, vec![19588.0, 38469.0]);
+    }
+
+    #[test]
+    fn rejects_colormap_shape() {
+        let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
+        let err = block_on(rgb2gray_builtin(Value::Tensor(map), Vec::new())).unwrap_err();
+        assert!(err.message().contains("expected an MxNx3 RGB image"));
+    }
+
+    #[test]
     fn rgb2gray_is_registered_with_dispatcher() {
         let rgb = Tensor::new(vec![1.0, 1.0, 1.0], vec![1, 1, 3]).unwrap();
         let result = block_on(crate::call_builtin_async(NAME, &[Value::Tensor(rgb)]))

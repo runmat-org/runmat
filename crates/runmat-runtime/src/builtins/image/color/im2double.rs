@@ -96,6 +96,7 @@ fn im2double_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::LogicalArray;
 
     fn call(value: Value) -> Value {
         block_on(im2double_builtin(value, Vec::new())).expect("im2double")
@@ -117,5 +118,29 @@ mod tests {
     #[test]
     fn scales_uint16_scalar() {
         assert_eq!(call(Value::Int(IntValue::U16(65535))), Value::Num(1.0));
+    }
+
+    #[test]
+    fn preserves_float_values_and_shape() {
+        let input =
+            Tensor::new_with_dtype(vec![-0.25, 0.0, 0.5, 1.25], vec![2, 2], NumericDType::F32)
+                .unwrap();
+        let Value::Tensor(out) = call(Value::Tensor(input)) else {
+            panic!("expected tensor");
+        };
+        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.shape, vec![2, 2]);
+        assert_eq!(out.data, vec![-0.25, 0.0, 0.5, 1.25]);
+    }
+
+    #[test]
+    fn converts_logical_array_to_double_zeros_and_ones() {
+        let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
+        let Value::Tensor(out) = call(Value::LogicalArray(logical)) else {
+            panic!("expected tensor");
+        };
+        assert_eq!(out.dtype, NumericDType::F64);
+        assert_eq!(out.shape, vec![2, 2]);
+        assert_eq!(out.data, vec![1.0, 0.0, 1.0, 0.0]);
     }
 }

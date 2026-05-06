@@ -117,17 +117,77 @@ mod tests {
     use futures::executor::block_on;
     use runmat_builtins::Tensor;
 
-    #[test]
-    fn converts_red_to_hsv() {
-        let rgb = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 1, 3]).unwrap();
+    fn call(tensor: Tensor) -> BuiltinResult<Tensor> {
         let Value::Tensor(out) =
-            block_on(rgb2hsv_builtin(Value::Tensor(rgb), Vec::new())).expect("rgb2hsv")
+            block_on(rgb2hsv_builtin(Value::Tensor(tensor), Vec::new())).expect("rgb2hsv")
         else {
             panic!("expected tensor");
         };
+        Ok(out)
+    }
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn converts_red_to_hsv() {
+        let rgb = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 1, 3]).unwrap();
+        let out = call(rgb).unwrap();
         assert_eq!(out.shape, vec![1, 1, 3]);
-        assert!((out.data[0] - 0.0).abs() < 1e-12);
-        assert!((out.data[1] - 1.0).abs() < 1e-12);
-        assert!((out.data[2] - 1.0).abs() < 1e-12);
+        assert_close(out.data[0], 0.0);
+        assert_close(out.data[1], 1.0);
+        assert_close(out.data[2], 1.0);
+    }
+
+    #[test]
+    fn converts_colormap_secondary_and_gray_values() {
+        let rgb = Tensor::new(
+            vec![0.0, 1.0, 1.0, 0.5, 1.0, 0.0, 1.0, 0.5, 1.0, 1.0, 0.0, 0.5],
+            vec![4, 3],
+        )
+        .unwrap();
+        let out = call(rgb).unwrap();
+        assert_eq!(out.shape, vec![4, 3]);
+        let expected = vec![
+            0.5,
+            5.0 / 6.0,
+            1.0 / 6.0,
+            0.0,
+            1.0,
+            1.0,
+            1.0,
+            0.0,
+            1.0,
+            1.0,
+            1.0,
+            0.5,
+        ];
+        for (actual, expected) in out.data.iter().zip(expected) {
+            assert_close(*actual, expected);
+        }
+    }
+
+    #[test]
+    fn scales_uint8_rgb_before_conversion() {
+        let rgb = Tensor::new_with_dtype(vec![128.0, 64.0, 32.0], vec![1, 1, 3], NumericDType::U8)
+            .unwrap();
+        let out = call(rgb).unwrap();
+        assert_eq!(out.dtype, NumericDType::F64);
+        assert_close(out.data[0], 1.0 / 18.0);
+        assert_close(out.data[1], 0.75);
+        assert_close(out.data[2], 128.0 / 255.0);
+    }
+
+    #[test]
+    fn rejects_grayscale_shape() {
+        let gray = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let err = block_on(rgb2hsv_builtin(Value::Tensor(gray), Vec::new())).unwrap_err();
+        assert!(err
+            .message()
+            .contains("expected an MxNx3 RGB image or an Nx3 colormap"));
     }
 }

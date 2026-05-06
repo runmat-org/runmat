@@ -134,16 +134,57 @@ mod tests {
     use futures::executor::block_on;
     use runmat_builtins::Tensor;
 
-    #[test]
-    fn converts_white_to_lab_reference() {
-        let rgb = Tensor::new(vec![1.0, 1.0, 1.0], vec![1, 1, 3]).unwrap();
+    fn call(tensor: Tensor) -> BuiltinResult<Tensor> {
         let Value::Tensor(out) =
-            block_on(rgb2lab_builtin(Value::Tensor(rgb), Vec::new())).expect("rgb2lab")
+            block_on(rgb2lab_builtin(Value::Tensor(tensor), Vec::new())).expect("rgb2lab")
         else {
             panic!("expected tensor");
         };
-        assert!((out.data[0] - 100.0).abs() < 1e-4);
-        assert!(out.data[1].abs() < 1e-3);
-        assert!(out.data[2].abs() < 1e-3);
+        Ok(out)
+    }
+
+    fn assert_close(actual: f64, expected: f64, tolerance: f64) {
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn converts_white_to_lab_reference() {
+        let rgb = Tensor::new(vec![1.0, 1.0, 1.0], vec![1, 1, 3]).unwrap();
+        let out = call(rgb).unwrap();
+        assert_close(out.data[0], 100.0, 1e-4);
+        assert_close(out.data[1], 0.0, 1e-3);
+        assert_close(out.data[2], 0.0, 1e-3);
+    }
+
+    #[test]
+    fn converts_rgb_colormap_to_lab_references() {
+        let rgb = Tensor::new(
+            vec![0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            vec![4, 3],
+        )
+        .unwrap();
+        let out = call(rgb).unwrap();
+        assert_eq!(out.shape, vec![4, 3]);
+        let expected = vec![
+            0.0, 53.2408, 87.7347, 32.2970, 0.0, 80.0925, -86.1827, 79.1875, 0.0, 67.2032, 83.1793,
+            -107.8602,
+        ];
+        for (actual, expected) in out.data.iter().zip(expected) {
+            assert_close(*actual, expected, 1e-3);
+        }
+    }
+
+    #[test]
+    fn scales_uint8_rgb_before_lab_conversion() {
+        let rgb =
+            Tensor::new_with_dtype(vec![255.0, 0.0, 0.0], vec![1, 1, 3], NumericDType::U8).unwrap();
+        let out = call(rgb).unwrap();
+        assert_eq!(out.dtype, NumericDType::F64);
+        assert_close(out.data[0], 53.2408, 1e-3);
+        assert_close(out.data[1], 80.0925, 1e-3);
+        assert_close(out.data[2], 67.2032, 1e-3);
     }
 }
