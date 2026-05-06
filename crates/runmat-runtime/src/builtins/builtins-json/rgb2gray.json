@@ -1,0 +1,55 @@
+{
+  "title": "rgb2gray",
+  "category": "image/color",
+  "keywords": [
+    "rgb2gray",
+    "rgb",
+    "grayscale",
+    "luminance",
+    "image"
+  ],
+  "summary": "Convert an RGB image to grayscale using luminance weights.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/rgb2gray.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "GPU inputs gather to host so integer image dtype semantics are preserved."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::image::color::rgb2gray::tests"
+  },
+  "description": "`rgb2gray(RGB)` converts an MxNx3 truecolor image to an MxN grayscale image with the standard luminance weights.",
+  "behaviors": [
+    "Accepts MxNx3 truecolor images.",
+    "Uses weights 0.2989, 0.5870, and 0.1140 for red, green, and blue.",
+    "Preserves uint8, uint16, single, and double image class metadata on host tensors."
+  ],
+  "examples": [
+    {
+      "description": "Convert RGB To Gray",
+      "input": "I = rgb2gray(RGB);",
+      "output": "% I is MxN"
+    }
+  ],
+  "links": [
+    {
+      "label": "im2double",
+      "url": "./im2double"
+    }
+  ],
+  "source": {
+    "label": "crates/runmat-runtime/src/builtins/image/color/rgb2gray.rs",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/image/color/rgb2gray.rs"
+  }
+}
