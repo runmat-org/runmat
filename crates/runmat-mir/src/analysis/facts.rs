@@ -19,23 +19,26 @@ pub struct EffectSummary {
     pub async_behavior: Option<AsyncBehaviorFact>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum FusibilityFact {
+    #[default]
     Unknown,
     Fusible,
     NonFusible(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum ParallelSafetyFact {
+    #[default]
     Unknown,
     Safe,
     ReadsSharedState,
     WritesSharedState,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum AccelEligibilityFact {
+    #[default]
     Unknown,
     Ineligible(String),
     Eligible,

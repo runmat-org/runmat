@@ -2,8 +2,9 @@ use crate::{BasicBlockId, MirOperand};
 use runmat_hir::{AsyncValueFact, BindingId, Span, SpawnSafetyFact};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum AsyncBehaviorFact {
+    #[default]
     NeverSuspends,
     MaySuspend,
     RequiresAsyncRuntime,

@@ -1,9 +1,11 @@
 use runmat_hir::{lower, HirCallableRef, LoweringContext};
 use runmat_mir::{
-    analysis::{analyze_body, diagnose_uninitialized_reads, AnalysisStore, InitFact},
+    analysis::{
+        analyze_body, diagnose_uninitialized_reads, summarize_body, AnalysisStore, InitFact,
+    },
     lowering::lower_assembly,
-    MirBody, MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmtKind,
-    MirTerminatorKind,
+    AsyncBehaviorFact, MirBody, MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue,
+    MirStmtKind, MirTerminatorKind,
 };
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
@@ -112,6 +114,37 @@ fn diagnostics_report_maybe_assigned_local_read_after_branch() {
     assert!(diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-MIR0002"));
+}
+
+#[test]
+fn summary_records_function_outputs_and_store_entry() {
+    let mir = lower_mir("function y = f(x); y = x; end");
+    let body = mir.bodies.values().next().unwrap();
+    let mut store = AnalysisStore::default();
+
+    let summary = summarize_body(body, &mut store);
+
+    assert_eq!(summary.function, body.function);
+    assert_eq!(summary.outputs.len(), 1);
+    assert!(store.functions.contains_key(&body.function));
+    assert_eq!(
+        summary.effects.async_behavior,
+        Some(AsyncBehaviorFact::NeverSuspends)
+    );
+}
+
+#[test]
+fn summary_marks_spawn_as_requiring_async_runtime() {
+    let mir = lower_mir("function y = f(g); y = spawn(g); end");
+    let body = mir.bodies.values().next().unwrap();
+    let mut store = AnalysisStore::default();
+
+    let summary = summarize_body(body, &mut store);
+
+    assert_eq!(
+        summary.effects.async_behavior,
+        Some(AsyncBehaviorFact::RequiresAsyncRuntime)
+    );
 }
 
 #[test]
