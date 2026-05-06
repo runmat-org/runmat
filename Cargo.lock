@@ -5657,7 +5657,6 @@ dependencies = [
  "runmat-lexer",
  "runmat-parser",
  "runmat-runtime",
- "runmat-static-analysis",
  "serde",
  "serde_json",
  "tempfile",

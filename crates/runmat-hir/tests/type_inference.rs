@@ -1,8 +1,11 @@
 use runmat_hir::*;
+use runmat_hir::{
+    LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt,
+};
 
 use runmat_runtime as _;
 
-fn lower(code: &str) -> runmat_hir::HirProgram {
+fn lower(code: &str) -> HirProgram {
     let ast = runmat_parser::parse(code).unwrap();
     runmat_hir::lower(&ast, &LoweringContext::empty())
         .map(|result| result.hir)
@@ -47,7 +50,7 @@ fn infer_variable_types_env() {
     let envs = infer_function_variable_types(&prog);
     let env = envs.get("q").unwrap();
     // y should be Num after joins; x remains Unknown
-    let y_id = if let runmat_hir::HirStmt::Function { outputs, .. } = &prog.body[0] {
+    let y_id = if let HirStmt::Function { outputs, .. } = &prog.body[0] {
         outputs[0]
     } else {
         panic!("expected function")
@@ -106,9 +109,9 @@ fn multi_lhs_resolution_from_summary() {
     // Find VarIds for u and v by scanning Hir
     let mut u_id = None;
     let mut v_id = None;
-    if let runmat_hir::HirStmt::Function { body, .. } = &prog.body[1] {
+    if let HirStmt::Function { body, .. } = &prog.body[1] {
         for s in body {
-            if let runmat_hir::HirStmt::MultiAssign(vars, _, _, _) = s {
+            if let HirStmt::MultiAssign(vars, _, _, _) = s {
                 u_id = vars[0];
                 v_id = vars[1];
             }
@@ -131,7 +134,7 @@ fn infer_function_variable_types_tracks_struct_field_writes() {
     let prog = lower("function y = f(s); s.x = 1; y = 0; end");
     let envs = infer_function_variable_types(&prog);
     let env = envs.get("f").unwrap();
-    let s_id = if let runmat_hir::HirStmt::Function { params, .. } = &prog.body[0] {
+    let s_id = if let HirStmt::Function { params, .. } = &prog.body[0] {
         params[0]
     } else {
         panic!("expected function")
@@ -150,21 +153,21 @@ fn infer_function_variable_types_tracks_struct_field_writes() {
 fn infer_range_shape_in_globals() {
     let result = lower_result("x = 0:1:100; y = sin(x);");
     match &result.hir.body[0] {
-        runmat_hir::HirStmt::Assign(_, expr, _, _) => match &expr.kind {
-            runmat_hir::HirExprKind::Range(start, step, end) => {
+        HirStmt::Assign(_, expr, _, _) => match &expr.kind {
+            HirExprKind::Range(start, step, end) => {
                 let start_text = match &start.kind {
-                    runmat_hir::HirExprKind::Number(text) => text.as_str(),
+                    HirExprKind::Number(text) => text.as_str(),
                     other => panic!("unexpected range start: {other:?}"),
                 };
                 let step_text = match step {
                     Some(step) => match &step.kind {
-                        runmat_hir::HirExprKind::Number(text) => Some(text.as_str()),
+                        HirExprKind::Number(text) => Some(text.as_str()),
                         other => panic!("unexpected range step: {other:?}"),
                     },
                     None => None,
                 };
                 let end_text = match &end.kind {
-                    runmat_hir::HirExprKind::Number(text) => text.as_str(),
+                    HirExprKind::Number(text) => text.as_str(),
                     other => panic!("unexpected range end: {other:?}"),
                 };
                 assert_eq!(start_text, "0");

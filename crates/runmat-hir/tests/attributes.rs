@@ -1,4 +1,6 @@
-use runmat_hir::{lower, HirClassMember, HirStmt, LoweringContext};
+use runmat_hir::{
+    lower, LegacyHirClassMember as HirClassMember, LegacyHirStmt as HirStmt, LoweringContext,
+};
 use runmat_parser::parse;
 
 #[test]

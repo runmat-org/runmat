@@ -83,7 +83,7 @@ pub struct HirFunction {
     pub locals: Vec<BindingId>,
     pub captures: Vec<CapturedBinding>,
     pub modifiers: FunctionModifiers,
-    pub body: SemanticHirBlock,
+    pub body: HirBlock,
     pub span: Span,
 }
 
@@ -159,18 +159,18 @@ pub enum WorkspaceVisibility {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct SemanticHirBlock {
-    pub statements: Vec<SemanticHirStmt>,
+pub struct HirBlock {
+    pub statements: Vec<HirStmt>,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct SemanticHirStmt {
+pub struct HirStmt {
     pub id: StmtId,
     pub kind: HirStmtKind,
     pub span: Span,
 }
 
-impl SemanticHirStmt {
+impl HirStmt {
     pub fn span(&self) -> Span {
         self.span
     }
@@ -178,34 +178,34 @@ impl SemanticHirStmt {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirStmtKind {
-    ExprStmt(SemanticHirExpr, bool),
-    Assign(SemanticHirPlace, SemanticHirExpr, bool),
-    MultiAssign(OutputTargetList, SemanticHirExpr, bool),
+    ExprStmt(HirExpr, bool),
+    Assign(HirPlace, HirExpr, bool),
+    MultiAssign(OutputTargetList, HirExpr, bool),
     If {
-        cond: SemanticHirExpr,
-        then_body: SemanticHirBlock,
-        elseif_blocks: Vec<(SemanticHirExpr, SemanticHirBlock)>,
-        else_body: Option<SemanticHirBlock>,
+        cond: HirExpr,
+        then_body: HirBlock,
+        elseif_blocks: Vec<(HirExpr, HirBlock)>,
+        else_body: Option<HirBlock>,
     },
     While {
-        cond: SemanticHirExpr,
-        body: SemanticHirBlock,
+        cond: HirExpr,
+        body: HirBlock,
     },
     For {
         binding: BindingId,
-        range: SemanticHirExpr,
-        body: SemanticHirBlock,
+        range: HirExpr,
+        body: HirBlock,
         semantics: LoopIterationSemantics,
     },
     Switch {
-        expr: SemanticHirExpr,
-        cases: Vec<(SemanticHirExpr, SemanticHirBlock)>,
-        otherwise: Option<SemanticHirBlock>,
+        expr: HirExpr,
+        cases: Vec<(HirExpr, HirBlock)>,
+        otherwise: Option<HirBlock>,
     },
     TryCatch {
-        try_body: SemanticHirBlock,
+        try_body: HirBlock,
         catch_binding: Option<BindingId>,
-        catch_body: SemanticHirBlock,
+        catch_body: HirBlock,
     },
     Global(Vec<BindingId>),
     Persistent(Vec<BindingId>),
@@ -216,60 +216,56 @@ pub enum HirStmtKind {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct SemanticHirExpr {
+pub struct HirExpr {
     pub id: ExprId,
-    pub kind: SemanticHirExprKind,
+    pub kind: HirExprKind,
     pub span: Span,
 }
 
-impl SemanticHirExpr {
+impl HirExpr {
     pub fn span(&self) -> Span {
         self.span
     }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum SemanticHirExprKind {
+pub enum HirExprKind {
     Number(String),
     String(StringLiteral),
     Constant(SymbolName),
     Binding(BindingId),
-    Unary(OperatorKind, Box<SemanticHirExpr>),
-    Binary(Box<SemanticHirExpr>, OperatorKind, Box<SemanticHirExpr>),
-    Tensor(Vec<Vec<SemanticHirExpr>>),
-    Cell(Vec<Vec<SemanticHirExpr>>),
-    Range(
-        Box<SemanticHirExpr>,
-        Option<Box<SemanticHirExpr>>,
-        Box<SemanticHirExpr>,
-    ),
+    Unary(OperatorKind, Box<HirExpr>),
+    Binary(Box<HirExpr>, OperatorKind, Box<HirExpr>),
+    Tensor(Vec<Vec<HirExpr>>),
+    Cell(Vec<Vec<HirExpr>>),
+    Range(Box<HirExpr>, Option<Box<HirExpr>>, Box<HirExpr>),
     Colon,
     End,
-    Index(Box<SemanticHirExpr>, IndexingSemantics),
-    Member(Box<SemanticHirExpr>, MemberName),
-    MemberDynamic(Box<SemanticHirExpr>, Box<SemanticHirExpr>),
-    Call(SemanticHirCall),
-    CommandCall(SemanticHirCommandCall),
+    Index(Box<HirExpr>, IndexingSemantics),
+    Member(Box<HirExpr>, MemberName),
+    MemberDynamic(Box<HirExpr>, Box<HirExpr>),
+    Call(HirCall),
+    CommandCall(HirCommandCall),
     FunctionHandle(FunctionHandleTarget),
     AnonymousFunction(FunctionId),
     MetaClass(QualifiedName),
-    Await(Box<SemanticHirExpr>),
-    Spawn(Box<SemanticHirExpr>),
+    Await(Box<HirExpr>),
+    Spawn(Box<HirExpr>),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum SemanticHirPlace {
+pub enum HirPlace {
     Binding(BindingId),
-    Member(Box<SemanticHirExpr>, MemberName),
-    MemberDynamic(Box<SemanticHirExpr>, Box<SemanticHirExpr>),
-    Index(Box<SemanticHirExpr>, IndexingSemantics),
-    IndexCell(Box<SemanticHirExpr>, IndexingSemantics),
+    Member(Box<HirExpr>, MemberName),
+    MemberDynamic(Box<HirExpr>, Box<HirExpr>),
+    Index(Box<HirExpr>, IndexingSemantics),
+    IndexCell(Box<HirExpr>, IndexingSemantics),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct SemanticHirCall {
+pub struct HirCall {
     pub callee: HirCallableRef,
-    pub args: Vec<SemanticHirExpr>,
+    pub args: Vec<HirExpr>,
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
 }
@@ -280,7 +276,7 @@ pub enum HirCallableRef {
     ClassConstructor(ClassId),
     Builtin(BuiltinId),
     Imported(DefPath),
-    DynamicExpr(Box<SemanticHirExpr>),
+    DynamicExpr(Box<HirExpr>),
     Unresolved(QualifiedName),
 }
 
@@ -292,7 +288,7 @@ pub enum CallSyntax {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct SemanticHirCommandCall {
+pub struct HirCommandCall {
     pub command: HirCallableRef,
     pub args: Vec<CommandArgument>,
 }
@@ -336,7 +332,7 @@ pub enum ClassKind {
 pub struct ClassProperty {
     pub name: MemberName,
     pub attributes: PropertyAttributes,
-    pub default: Option<SemanticHirExpr>,
+    pub default: Option<HirExpr>,
     pub span: Span,
 }
 
@@ -380,7 +376,7 @@ pub struct OutputTargetList {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum OutputTarget {
-    Place(SemanticHirPlace),
+    Place(HirPlace),
     Discard,
     VarargoutExpansion,
 }
@@ -405,8 +401,8 @@ pub enum IndexKind {
 pub enum IndexComponent {
     Colon,
     End { dim: Option<usize>, offset: isize },
-    Expr(SemanticHirExpr),
-    Logical(SemanticHirExpr),
+    Expr(HirExpr),
+    Logical(HirExpr),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -532,6 +528,184 @@ pub enum CompatibilityMode {
     RunMatExtended,
     Interactive,
 }
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum EvaluationContext {
+    Statement,
+    Expression,
+    AssignmentRhs { targets: OutputTargetList },
+    FunctionArgument,
+    ConcatElement,
+    CellElement,
+    IndexOperand,
+    CommandArgument,
+    NameValueArgument,
+    LineSpecArgument,
+    DynamicFieldName,
+    ForRange,
+    Condition,
+    SwitchExpression,
+    CaseExpression,
+    ReturnValue { requested_outputs: RequestedOutputs },
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct RequestedOutputs {
+    pub count: RequestedOutputCount,
+    pub targets: OutputTargetList,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum ValueFlowFact {
+    NoValue,
+    Single(TypeFact),
+    CommaList(Vec<TypeFact>),
+    UnknownList,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum PlaceMutationKind {
+    BindOrAssign,
+    IndexedAssign,
+    CellAssign,
+    MemberAssign,
+    Delete,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct PlaceMutation {
+    pub place: HirPlace,
+    pub kind: PlaceMutationKind,
+    pub creation_policy: AssignmentCreationPolicy,
+    pub shape_policy: AssignmentShapePolicy,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum AssignmentCreationPolicy {
+    ExistingOnly,
+    CreateBinding,
+    CreateArrayByIndex,
+    CreateStructFieldPath,
+    Overloaded,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum AssignmentShapePolicy {
+    Exact,
+    ScalarExpansion,
+    MatlabCompatible,
+    Overloaded,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum ReferenceKind {
+    Binding(BindingId),
+    Function(FunctionId),
+    Builtin(BuiltinId),
+    Class(ClassId),
+    Package(QualifiedName),
+    Imported(DefPath),
+    RuntimeClass(QualifiedName),
+    Dynamic,
+    Unresolved,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum CallKind {
+    DirectFunction(FunctionId),
+    Builtin(BuiltinId),
+    Constructor(ClassId),
+    StaticMethod {
+        class: ClassId,
+        method: MethodId,
+    },
+    InstanceMethod {
+        receiver: Box<HirExpr>,
+        method: MethodId,
+    },
+    PackageFunction(DefPath),
+    FunctionHandle,
+    Dynamic,
+    OverloadedOperator,
+    OverloadedIndexing,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum SpawnSafetyFact {
+    SpawnSafe,
+    RequiresIsolation,
+    NotSpawnSafe { reason: SpawnSafetyReason },
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum SpawnSafetyReason {
+    MutableLexicalCapture,
+    NonSendableRuntimeHandle,
+    UnsynchronizedSharedMutation,
+    UnknownDynamicCapture,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum TypeFact {
+    Never,
+    Unknown,
+    Logical,
+    Numeric {
+        class: NumericClass,
+        domain: NumericDomain,
+    },
+    Tensor(TensorTypeFact),
+    String,
+    CharArray,
+    Cell,
+    Struct,
+    ClassInstance(ClassId),
+    ClassRef(ClassId),
+    Function(FunctionId),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct TensorTypeFact {
+    pub element: TensorElementDomainFact,
+    pub shape: ShapeFact,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum TensorElementDomainFact {
+    Unknown,
+    Logical,
+    Numeric {
+        class: NumericClass,
+        domain: NumericDomain,
+    },
+    Char,
+    Object(ClassId),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum NumericDomain {
+    Real,
+    Complex,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum ShapeFact {
+    Unreachable,
+    Unknown,
+    Scalar,
+    Ranked { rank: usize },
+    Shaped { dims: Vec<DimFact> },
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum DimFact {
+    Known(usize),
+    Symbolic(DimSymbol),
+    Unknown,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
+pub struct DimSymbol(pub String);
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct DefPath {
@@ -762,16 +936,6 @@ pub struct LegacyHirProgram {
     pub var_types: Vec<Type>,
 }
 
-// Compatibility aliases for the pre-Plan-0 lowering/inference API. The semantic
-// model above is the new target surface; these aliases keep existing tests and
-// consumers compiling until Plans 1-3 migrate them to semantic HIR/MIR products.
-pub type HirExpr = LegacyHirExpr;
-pub type HirExprKind = LegacyHirExprKind;
-pub type HirStmt = LegacyHirStmt;
-pub type HirClassMember = LegacyHirClassMember;
-pub type HirLValue = LegacyHirLValue;
-pub type HirProgram = LegacyHirProgram;
-
 #[derive(Debug, Clone)]
 pub struct LoweringResult {
     pub hir: LegacyHirProgram,
@@ -830,7 +994,7 @@ mod tests {
                 locals: vec![binding],
                 captures: vec![],
                 modifiers: FunctionModifiers::default(),
-                body: SemanticHirBlock { statements: vec![] },
+                body: HirBlock { statements: vec![] },
                 span: span(),
             }],
             classes: vec![],
@@ -912,12 +1076,41 @@ mod tests {
             locals: vec![],
             captures: vec![capture],
             modifiers: FunctionModifiers::default(),
-            body: SemanticHirBlock { statements: vec![] },
+            body: HirBlock { statements: vec![] },
             span: span(),
         };
 
         assert_eq!(child_function.parent, Some(parent));
         assert_eq!(child_function.captures[0].binding, binding);
         assert_eq!(child_function.captures[0].from_function, parent);
+    }
+
+    #[test]
+    fn semantic_facts_capture_value_flow_and_mutation_context() {
+        let binding = BindingId(0);
+        let mutation = PlaceMutation {
+            place: HirPlace::Binding(binding),
+            kind: PlaceMutationKind::BindOrAssign,
+            creation_policy: AssignmentCreationPolicy::CreateBinding,
+            shape_policy: AssignmentShapePolicy::MatlabCompatible,
+        };
+        let value = ValueFlowFact::Single(TypeFact::Tensor(TensorTypeFact {
+            element: TensorElementDomainFact::Numeric {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            },
+            shape: ShapeFact::Shaped {
+                dims: vec![DimFact::Known(1), DimFact::Symbolic(DimSymbol("n".into()))],
+            },
+        }));
+
+        assert!(matches!(mutation.place, HirPlace::Binding(id) if id == binding));
+        assert!(matches!(
+            value,
+            ValueFlowFact::Single(TypeFact::Tensor(TensorTypeFact {
+                shape: ShapeFact::Shaped { .. },
+                ..
+            }))
+        ));
     }
 }

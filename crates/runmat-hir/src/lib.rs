@@ -11,7 +11,10 @@ pub mod remapping;
 mod span;
 mod validation;
 
-pub use diagnostic::{HirDiagnostic, HirDiagnosticSeverity};
+pub use diagnostic::{
+    HirDiagnostic, HirDiagnosticNote, HirDiagnosticSeverity, HirDiagnosticSpan,
+    HirDiagnosticSuggestion,
+};
 pub use error::{set_error_namespace, SemanticError};
 pub use hir::*;
 pub use ids::{

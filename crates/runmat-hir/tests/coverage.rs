@@ -1,4 +1,7 @@
-use runmat_hir::{lower, HirExprKind, HirProgram, HirStmt, LoweringContext, Type};
+use runmat_hir::{
+    lower, LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram,
+    LegacyHirStmt as HirStmt, LoweringContext, Type,
+};
 use runmat_parser::parse;
 
 fn lower_src(src: &str) -> HirProgram {
