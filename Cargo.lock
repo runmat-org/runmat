@@ -5758,6 +5758,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-mir"
+version = "0.4.1"
+dependencies = [
+ "runmat-hir",
+ "serde",
+]
+
+[[package]]
 name = "runmat-parser"
 version = "0.4.1"
 dependencies = [
