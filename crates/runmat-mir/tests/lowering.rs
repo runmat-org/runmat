@@ -40,6 +40,9 @@ fn simple_function_lowers_to_single_block_with_binding_locals() {
 
     assert_eq!(body.blocks.len(), 1);
     assert_eq!(body.locals.len(), 4);
+    assert_eq!(body.source_map.function, Some(body.function));
+    assert!(body.source_map.module.is_some());
+    assert_eq!(body.source_map.enclosing_class, None);
     assert_eq!(body.source_map.locals.len(), body.locals.len());
     assert_eq!(body.blocks[0].statements.len(), 1);
     assert!(matches!(

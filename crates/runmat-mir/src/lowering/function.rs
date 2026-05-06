@@ -49,6 +49,8 @@ pub fn lower_function(function: &HirFunction) -> Result<MirBody, SemanticError> 
         blocks,
         source_map: MirSourceMap {
             function: Some(function.id),
+            module: Some(function.module),
+            enclosing_class: function.enclosing_class,
             statements: statement_sources,
             locals: local_sources,
         },
