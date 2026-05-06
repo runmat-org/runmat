@@ -14,7 +14,6 @@ pub struct AnalysisStore {
     pub functions: HashMap<FunctionId, FunctionSummary>,
     pub liveness: HashMap<FunctionId, LivenessFacts>,
     pub spawn_boundaries: HashMap<FunctionId, Vec<crate::SpawnBoundary>>,
-    #[serde(skip)]
     pub diagnostics: Vec<MirDiagnostic>,
 }
 

@@ -101,7 +101,7 @@ fn diagnostics_report_unassigned_local_read() {
 
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "RM-MIR0001"
-            && diagnostic.category == Some("definite-assignment")
+            && diagnostic.category.as_deref() == Some("definite-assignment")
             && diagnostic.primary.span.start < diagnostic.primary.span.end
     }));
 }
@@ -210,7 +210,18 @@ fn analyze_assembly_collects_structured_diagnostics() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-MIR0002"
-            && diagnostic.category == Some("definite-assignment")));
+            && diagnostic.category.as_deref() == Some("definite-assignment")));
+}
+
+#[test]
+fn analysis_store_diagnostics_serialize_with_store() {
+    let mir = lower_mir("function y = f(c); if c; y = 1; end; z = y; end");
+    let store = analyze_assembly(&mir);
+
+    let json = serde_json::to_string(&store).unwrap();
+
+    assert!(json.contains("RM-MIR0002"));
+    assert!(json.contains("definite-assignment"));
 }
 
 #[test]

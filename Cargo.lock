@@ -5764,6 +5764,7 @@ dependencies = [
  "runmat-hir",
  "runmat-parser",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

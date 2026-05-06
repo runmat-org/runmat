@@ -1,6 +1,7 @@
 use crate::Span;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HirDiagnosticSeverity {
     Error,
     Warning,
@@ -8,27 +9,27 @@ pub enum HirDiagnosticSeverity {
     Help,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HirDiagnosticSpan {
     pub span: Span,
     pub label: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HirDiagnosticNote {
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HirDiagnosticSuggestion {
     pub span: Span,
     pub replacement: String,
     pub message: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HirDiagnostic {
-    pub code: &'static str,
+    pub code: String,
     pub severity: HirDiagnosticSeverity,
     pub message: String,
     pub primary: HirDiagnosticSpan,
@@ -36,7 +37,7 @@ pub struct HirDiagnostic {
     pub notes: Vec<HirDiagnosticNote>,
     pub help: Option<String>,
     pub suggestions: Vec<HirDiagnosticSuggestion>,
-    pub category: Option<&'static str>,
+    pub category: Option<String>,
 }
 
 impl HirDiagnostic {
@@ -47,7 +48,7 @@ impl HirDiagnostic {
         span: Span,
     ) -> Self {
         Self {
-            code,
+            code: code.to_string(),
             severity,
             message: message.into(),
             primary: HirDiagnosticSpan { span, label: None },
@@ -99,7 +100,7 @@ impl HirDiagnostic {
     }
 
     pub fn with_category(mut self, category: &'static str) -> Self {
-        self.category = Some(category);
+        self.category = Some(category.to_string());
         self
     }
 }
@@ -139,6 +140,6 @@ mod tests {
             Some("declare the binding before use")
         );
         assert_eq!(diagnostic.suggestions[0].replacement, "x");
-        assert_eq!(diagnostic.category, Some("resolution"));
+        assert_eq!(diagnostic.category.as_deref(), Some("resolution"));
     }
 }
