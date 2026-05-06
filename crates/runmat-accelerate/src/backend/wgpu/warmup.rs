@@ -16,6 +16,42 @@ fn pop_validation_scope(device: &wgpu::Device) -> Option<wgpu::Error> {
     block_on(device.pop_error_scope())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+struct ValidationScopeGuard<'a> {
+    device: &'a wgpu::Device,
+    active: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl<'a> ValidationScopeGuard<'a> {
+    fn new(device: &'a wgpu::Device) -> Self {
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        Self {
+            device,
+            active: true,
+        }
+    }
+
+    fn pop(mut self) -> Option<wgpu::Error> {
+        self.active = false;
+        pop_validation_scope(self.device)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for ValidationScopeGuard<'_> {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        // Never leak validation scopes on unwind. Suppress any panic while
+        // draining to avoid aborting during double-panic.
+        let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+            let _ = pop_validation_scope(self.device);
+        }));
+    }
+}
+
 fn remove_cache_entry(meta_path: &Path, wgsl_path: &Path) {
     let _ = std::fs::remove_file(meta_path);
     let _ = std::fs::remove_file(wgsl_path);
@@ -112,7 +148,7 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop, FRemove>(
         let key = compute_hash(&wgsl_bytes, layout_tag, meta.workgroup_size);
         let compiled_pipeline = panic::catch_unwind(AssertUnwindSafe(|| -> bool {
             #[cfg(not(target_arch = "wasm32"))]
-            device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let validation_scope = ValidationScopeGuard::new(device);
             let pipeline = get_or_create(
                 key,
                 &pl,
@@ -124,7 +160,7 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop, FRemove>(
             );
 
             #[cfg(not(target_arch = "wasm32"))]
-            if let Some(err) = pop_validation_scope(device) {
+            if let Some(err) = validation_scope.pop() {
                 log::warn!(
                     "warmup: invalid cached compute pipeline {}: {}; removing incompatible cache entry",
                     stem,
@@ -136,11 +172,11 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop, FRemove>(
             }
 
             #[cfg(not(target_arch = "wasm32"))]
-            device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let noop_validation_scope = ValidationScopeGuard::new(device);
             after_create_noop(&pipeline);
 
             #[cfg(not(target_arch = "wasm32"))]
-            if let Some(err) = pop_validation_scope(device) {
+            if let Some(err) = noop_validation_scope.pop() {
                 log::warn!(
                     "warmup: cached pipeline {} failed noop validation: {}; removing incompatible cache entry",
                     stem,
