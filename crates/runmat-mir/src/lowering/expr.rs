@@ -26,6 +26,14 @@ pub(crate) fn lower_expr(
             op.clone(),
             lower_operand(ctx, right)?,
         ),
+        HirExprKind::Range(start, step, end) => MirRvalue::Range {
+            start: lower_operand(ctx, start)?,
+            step: step
+                .as_ref()
+                .map(|step| lower_operand(ctx, step))
+                .transpose()?,
+            end: lower_operand(ctx, end)?,
+        },
         HirExprKind::Call(call) => MirRvalue::Call(MirCall {
             callee: call.callee.clone(),
             args: call

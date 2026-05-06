@@ -1,7 +1,11 @@
 use crate::{BasicBlock, BasicBlockId, MirSourceRecord, MirTerminator, MirTerminatorKind};
 use runmat_hir::{HirBlock, HirStmtKind, SemanticError};
 
-use super::{expr::lower_operand, stmt::lower_stmt, MirLoweringContext};
+use super::{
+    expr::{lower_expr, lower_operand},
+    stmt::lower_stmt,
+    MirLoweringContext,
+};
 
 #[derive(Debug, Default)]
 pub(crate) struct ControlFlowBuilder {
@@ -123,6 +127,45 @@ impl ControlFlowBuilder {
                             cond: lower_operand(ctx, cond)?,
                             then_block: loop_body_id,
                             else_block: exit_id,
+                        },
+                        span: stmt.span,
+                    },
+                });
+            }
+            if let HirStmtKind::For {
+                binding,
+                range,
+                body,
+                semantics,
+            } = &stmt.kind
+            {
+                let body_id = self.fresh_block();
+                let exit_id = self.fresh_block();
+                let body_block = self.lower_block(
+                    ctx,
+                    body_id,
+                    body,
+                    MirTerminator {
+                        kind: MirTerminatorKind::Goto(id),
+                        span: stmt.span,
+                    },
+                )?;
+                self.blocks.push(body_block);
+                self.blocks.push(BasicBlock {
+                    id: exit_id,
+                    statements: Vec::new(),
+                    terminator: final_terminator,
+                });
+                return Ok(BasicBlock {
+                    id,
+                    statements,
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::For {
+                            binding: ctx.local_for_binding(*binding)?,
+                            iterable: lower_expr(ctx, range)?,
+                            semantics: semantics.clone(),
+                            body_block: body_id,
+                            exit_block: exit_id,
                         },
                         span: stmt.span,
                     },

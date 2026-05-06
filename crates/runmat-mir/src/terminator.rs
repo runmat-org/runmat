@@ -1,5 +1,5 @@
-use crate::{BasicBlockId, MirOperand};
-use runmat_hir::Span;
+use crate::{BasicBlockId, MirLocalId, MirOperand, MirRvalue};
+use runmat_hir::{LoopIterationSemantics, Span};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,6 +15,13 @@ pub enum MirTerminatorKind {
         cond: MirOperand,
         then_block: BasicBlockId,
         else_block: BasicBlockId,
+    },
+    For {
+        binding: MirLocalId,
+        iterable: MirRvalue,
+        semantics: LoopIterationSemantics,
+        body_block: BasicBlockId,
+        exit_block: BasicBlockId,
     },
     Return(Vec<MirOperand>),
     Await {

@@ -7,6 +7,11 @@ pub enum MirRvalue {
     Use(MirOperand),
     Unary(OperatorKind, MirOperand),
     Binary(MirOperand, OperatorKind, MirOperand),
+    Range {
+        start: MirOperand,
+        step: Option<MirOperand>,
+        end: MirOperand,
+    },
     Call(MirCall),
     Aggregate {
         kind: AggregateKind,

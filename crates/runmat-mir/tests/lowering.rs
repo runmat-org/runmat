@@ -106,3 +106,25 @@ fn while_loop_lowers_to_branch_body_backedge_and_exit() {
     ));
     assert_eq!(body.source_map.statements.len(), 2);
 }
+
+#[test]
+fn for_loop_lowers_to_iteration_terminator_body_backedge_and_exit() {
+    let mir = lower_mir("function y = sum_to(n); y = 0; for i = 1:n; y = y + i; end; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert_eq!(body.blocks.len(), 3);
+    assert!(matches!(
+        body.blocks[0].terminator.kind,
+        MirTerminatorKind::For { .. }
+    ));
+    assert!(matches!(
+        body.blocks[1].terminator.kind,
+        MirTerminatorKind::Goto(target) if target == body.blocks[0].id
+    ));
+    assert!(matches!(
+        body.blocks[2].terminator.kind,
+        MirTerminatorKind::Return(_)
+    ));
+    assert_eq!(body.blocks[0].statements.len(), 1);
+    assert_eq!(body.source_map.statements.len(), 3);
+}
