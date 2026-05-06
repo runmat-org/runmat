@@ -128,3 +128,28 @@ fn for_loop_lowers_to_iteration_terminator_body_backedge_and_exit() {
     assert_eq!(body.blocks[0].statements.len(), 1);
     assert_eq!(body.source_map.statements.len(), 3);
 }
+
+#[test]
+fn try_catch_lowers_to_try_catch_blocks_and_merge() {
+    let mir = lower_mir("function y = guarded(x); try; y = x; catch err; y = 0; end; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert_eq!(body.blocks.len(), 4);
+    assert!(matches!(
+        body.blocks[0].terminator.kind,
+        MirTerminatorKind::TryCatch { .. }
+    ));
+    assert!(matches!(
+        body.blocks[1].terminator.kind,
+        MirTerminatorKind::Goto(_)
+    ));
+    assert!(matches!(
+        body.blocks[2].terminator.kind,
+        MirTerminatorKind::Goto(_)
+    ));
+    assert!(matches!(
+        body.blocks[3].terminator.kind,
+        MirTerminatorKind::Return(_)
+    ));
+    assert_eq!(body.source_map.statements.len(), 3);
+}

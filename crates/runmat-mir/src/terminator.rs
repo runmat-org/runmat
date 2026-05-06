@@ -23,6 +23,10 @@ pub enum MirTerminatorKind {
         body_block: BasicBlockId,
         exit_block: BasicBlockId,
     },
+    TryCatch {
+        try_block: BasicBlockId,
+        catch_block: BasicBlockId,
+    },
     Return(Vec<MirOperand>),
     Await {
         future: MirOperand,

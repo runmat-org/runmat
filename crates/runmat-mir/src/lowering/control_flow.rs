@@ -171,6 +171,41 @@ impl ControlFlowBuilder {
                     },
                 });
             }
+            if let HirStmtKind::TryCatch {
+                try_body,
+                catch_body,
+                ..
+            } = &stmt.kind
+            {
+                let try_id = self.fresh_block();
+                let catch_id = self.fresh_block();
+                let merge_id = self.fresh_block();
+                let merge_terminator = MirTerminator {
+                    kind: MirTerminatorKind::Goto(merge_id),
+                    span: stmt.span,
+                };
+                let try_block =
+                    self.lower_block(ctx, try_id, try_body, merge_terminator.clone())?;
+                let catch_block = self.lower_block(ctx, catch_id, catch_body, merge_terminator)?;
+                self.blocks.push(try_block);
+                self.blocks.push(catch_block);
+                self.blocks.push(BasicBlock {
+                    id: merge_id,
+                    statements: Vec::new(),
+                    terminator: final_terminator,
+                });
+                return Ok(BasicBlock {
+                    id,
+                    statements,
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::TryCatch {
+                            try_block: try_id,
+                            catch_block: catch_id,
+                        },
+                        span: stmt.span,
+                    },
+                });
+            }
             statements.extend(lower_stmt(ctx, stmt)?);
         }
         Ok(BasicBlock {
