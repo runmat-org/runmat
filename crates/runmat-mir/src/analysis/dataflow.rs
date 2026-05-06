@@ -7,8 +7,8 @@ use runmat_hir::{ShapeFact, Span, TypeFact, ValueFlowFact};
 use std::collections::{HashMap, VecDeque};
 
 use super::{
-    analyze_liveness, analyze_spawn_boundaries, summarize_body, AnalysisStore, InitFact,
-    MirLocalFact, MirLocalKey,
+    analyze_liveness, analyze_spawn_boundaries, summarize_body, AnalysisStore, BindingFact,
+    InitFact, MirLocalFact, MirLocalKey,
 };
 
 #[derive(Debug, Clone)]
@@ -21,6 +21,7 @@ pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
     let result = compute_init_dataflow(body);
 
     for local in &body.locals {
+        let initialized = result.final_state[local.id.0];
         store.mir_locals.insert(
             MirLocalKey {
                 function: body.function,
@@ -30,10 +31,31 @@ pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
                 ty: TypeFact::Unknown,
                 shape: ShapeFact::Unknown,
                 value_flow: ValueFlowFact::UnknownList,
-                initialized: result.final_state[local.id.0],
+                initialized,
             },
         );
+        if let Some(binding) = local.binding {
+            insert_binding_fact(store, binding, initialized);
+        }
     }
+}
+
+fn insert_binding_fact(
+    store: &mut AnalysisStore,
+    binding: runmat_hir::BindingId,
+    initialized: InitFact,
+) {
+    let incoming = BindingFact {
+        ty: TypeFact::Unknown,
+        initialized,
+    };
+    store
+        .bindings
+        .entry(binding)
+        .and_modify(|existing| {
+            existing.initialized = join_init(existing.initialized, incoming.initialized)
+        })
+        .or_insert(incoming);
 }
 
 pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {

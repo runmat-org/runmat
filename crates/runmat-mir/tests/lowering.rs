@@ -82,6 +82,17 @@ fn dataflow_marks_parameters_and_assigned_outputs_definitely_assigned() {
             .initialized,
         InitFact::DefinitelyAssigned
     );
+    let output_binding = body
+        .locals
+        .iter()
+        .find(|local| local.id == output)
+        .unwrap()
+        .binding
+        .unwrap();
+    assert_eq!(
+        store.bindings.get(&output_binding).unwrap().initialized,
+        InitFact::DefinitelyAssigned
+    );
 }
 
 #[test]
@@ -98,6 +109,36 @@ fn dataflow_joins_branch_assignment_as_maybe_assigned() {
             })
             .unwrap()
             .initialized,
+        InitFact::MaybeAssigned
+    );
+    let output_binding = body
+        .locals
+        .iter()
+        .find(|local| local.id == output)
+        .unwrap()
+        .binding
+        .unwrap();
+    assert_eq!(
+        store.bindings.get(&output_binding).unwrap().initialized,
+        InitFact::MaybeAssigned
+    );
+}
+
+#[test]
+fn analyze_assembly_populates_binding_facts_by_semantic_id() {
+    let mir = lower_mir("function y = f(c); if c; y = 1; end; end");
+    let store = analyze_assembly(&mir);
+    let body = mir.bodies.values().next().unwrap();
+    let output_binding = body
+        .locals
+        .iter()
+        .find(|local| matches!(local.kind, MirLocalKind::Output))
+        .unwrap()
+        .binding
+        .unwrap();
+
+    assert_eq!(
+        store.bindings.get(&output_binding).unwrap().initialized,
         InitFact::MaybeAssigned
     );
 }
