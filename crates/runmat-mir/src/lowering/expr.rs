@@ -1,7 +1,10 @@
 use crate::{
     MirCall, MirConstant, MirIndexing, MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind,
 };
-use runmat_hir::{HirExpr, HirExprKind, SemanticError};
+use runmat_hir::{
+    CommandArgument, HirCommandCall, HirExpr, HirExprKind, RequestedOutputCount, SemanticError,
+    StringLiteral,
+};
 
 use super::MirLoweringContext;
 
@@ -49,6 +52,7 @@ pub(crate) fn lower_expr(
             syntax: call.syntax.clone(),
             requested_outputs: call.requested_outputs.clone(),
         }),
+        HirExprKind::CommandCall(call) => lower_command_call(call),
         HirExprKind::Index(base, indexing) => MirRvalue::Index {
             base: lower_operand(ctx, base, temps)?,
             indexing: MirIndexing {
@@ -68,6 +72,31 @@ pub(crate) fn lower_expr(
             ))
         }
     })
+}
+
+fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
+    MirRvalue::Call(MirCall {
+        callee: call.command.clone(),
+        args: call
+            .args
+            .iter()
+            .map(|arg| MirOperand::Constant(command_arg_constant(arg)))
+            .collect(),
+        syntax: runmat_hir::CallSyntax::Plain,
+        requested_outputs: RequestedOutputCount::Zero,
+    })
+}
+
+fn command_arg_constant(arg: &CommandArgument) -> MirConstant {
+    match arg {
+        CommandArgument::Word(word) => MirConstant::String(StringLiteral(word.0.clone())),
+        CommandArgument::StringLiteral(value) => {
+            MirConstant::String(StringLiteral(value.0.trim_matches('"').to_string()))
+        }
+        CommandArgument::OptionToken(option) => {
+            MirConstant::String(StringLiteral(option.0.clone()))
+        }
+    }
 }
 
 pub(crate) fn lower_operand(

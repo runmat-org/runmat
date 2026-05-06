@@ -208,6 +208,26 @@ fn direct_function_call_preserves_callee_and_requested_outputs() {
 }
 
 #[test]
+fn command_call_lowers_to_zero_output_call_with_string_args() {
+    let mir = lower_mir("function y = f()\nformat long\ny = 1\nend");
+    let body = mir.bodies.values().next().unwrap();
+
+    let MirStmtKind::Expr(MirRvalue::Call(call)) = &body.blocks[0].statements[0].kind else {
+        panic!("expected command call expression");
+    };
+
+    assert!(matches!(
+        call.requested_outputs,
+        runmat_hir::RequestedOutputCount::Zero
+    ));
+    assert_eq!(call.args.len(), 1);
+    assert!(matches!(
+        call.args[0],
+        MirOperand::Constant(runmat_mir::MirConstant::String(ref value)) if value.0 == "long"
+    ));
+}
+
+#[test]
 fn complex_call_arguments_lower_through_temporary_locals() {
     let mir = lower_mir("function y = g(x); y = f(x + 1); end\nfunction z = f(a); z = a; end");
     let body = mir
