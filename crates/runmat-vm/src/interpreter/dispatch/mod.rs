@@ -9,7 +9,7 @@ mod stack;
 
 use crate::bytecode::Instr;
 use crate::interpreter::debug;
-use crate::runtime::workspace::refresh_workspace_state;
+use crate::runtime::workspace::{refresh_workspace_state, workspace_slot_assigned};
 use runmat_builtins::Value;
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
@@ -248,6 +248,26 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::LoadVar(index) => {
+            if call_counts.is_empty() {
+                if let Some(name) = var_names.get(index) {
+                    if matches!(workspace_slot_assigned(*index), Some(false)) {
+                        return Err(crate::interpreter::errors::mex(
+                            "UndefinedVariable",
+                            &format!("Undefined variable: {name}"),
+                        ));
+                    }
+                }
+            }
+            if *index >= vars.len() {
+                let name = var_names
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| format!("#{index}"));
+                return Err(crate::interpreter::errors::mex(
+                    "UndefinedVariable",
+                    &format!("Undefined variable: {name}"),
+                ));
+            }
             let value = vars[*index].clone();
             debug::trace_load_var(*pc, *index, &value);
             load_var(stack, vars, *index);
