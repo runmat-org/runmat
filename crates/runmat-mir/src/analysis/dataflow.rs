@@ -1,12 +1,15 @@
 use crate::{
-    BasicBlock, BasicBlockId, MirBody, MirDiagnostic, MirDiagnosticSeverity, MirIndexComponent,
-    MirIndexing, MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue, MirStmtKind,
-    MirTerminatorKind,
+    BasicBlock, BasicBlockId, MirAssembly, MirBody, MirDiagnostic, MirDiagnosticSeverity,
+    MirIndexComponent, MirIndexing, MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue,
+    MirStmtKind, MirTerminatorKind,
 };
 use runmat_hir::{ShapeFact, Span, TypeFact, ValueFlowFact};
 use std::collections::{HashMap, VecDeque};
 
-use super::{AnalysisStore, InitFact, MirLocalFact};
+use super::{
+    analyze_liveness, analyze_spawn_boundaries, summarize_body, AnalysisStore, InitFact,
+    MirLocalFact,
+};
 
 #[derive(Debug, Clone)]
 struct InitDataflowResult {
@@ -28,6 +31,19 @@ pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
             },
         );
     }
+}
+
+pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
+    let mut store = AnalysisStore::default();
+    for body in assembly.bodies.values() {
+        analyze_body(body, &mut store);
+        summarize_body(body, &mut store);
+        store.liveness.insert(body.function, analyze_liveness(body));
+        store
+            .spawn_boundaries
+            .insert(body.function, analyze_spawn_boundaries(body));
+    }
+    store
 }
 
 pub fn diagnose_uninitialized_reads(body: &MirBody) -> Vec<MirDiagnostic> {
