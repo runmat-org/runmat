@@ -206,6 +206,11 @@ fn analyze_body_records_simple_string_value_flow_fact() {
 fn analyze_body_records_function_handle_value_flow_fact() {
     let mir = lower_mir("function h = f(); h = @target; end\nfunction y = target(x); y = x; end");
     let store = analyze_assembly(&mir);
+    let summary = store
+        .functions
+        .values()
+        .find(|summary| !summary.function_handles.is_empty())
+        .unwrap();
     let function_fact = store
         .mir_locals
         .values()
@@ -215,6 +220,10 @@ fn analyze_body_records_function_handle_value_flow_fact() {
     assert!(matches!(
         function_fact.value_flow,
         runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::Function(_))
+    ));
+    assert!(matches!(
+        summary.function_handles[0],
+        runmat_hir::FunctionHandleTarget::Function(_)
     ));
 }
 
@@ -446,6 +455,17 @@ fn analyze_assembly_projects_output_type_facts_into_summary() {
             domain: runmat_hir::NumericDomain::Real,
         }]
     );
+    assert_eq!(summary.output_shapes, vec![runmat_hir::ShapeFact::Scalar]);
+    assert_eq!(
+        summary.output_value_flows,
+        vec![runmat_hir::ValueFlowFact::Single(
+            runmat_hir::TypeFact::Numeric {
+                class: runmat_hir::NumericClass::Double,
+                domain: runmat_hir::NumericDomain::Real,
+            }
+        )]
+    );
+    assert_eq!(summary.output_async_values, vec![None]);
 }
 
 #[test]

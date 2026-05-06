@@ -3,8 +3,8 @@ use crate::{
     MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
 };
 use runmat_hir::{
-    BindingId, FunctionId, HirCallableRef, PlaceMutation, RequestedOutputCount, SpawnSafetyFact,
-    TypeFact, WorkspaceEffect,
+    AsyncValueFact, BindingId, FunctionHandleTarget, FunctionId, HirCallableRef, PlaceMutation,
+    RequestedOutputCount, ShapeFact, SpawnSafetyFact, TypeFact, ValueFlowFact, WorkspaceEffect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -19,6 +19,9 @@ pub struct FunctionSummary {
     pub function: FunctionId,
     pub abi: FunctionAbiSummary,
     pub outputs: Vec<TypeFact>,
+    pub output_shapes: Vec<ShapeFact>,
+    pub output_value_flows: Vec<ValueFlowFact>,
+    pub output_async_values: Vec<Option<AsyncValueFact>>,
     pub requested_output_sensitive: Vec<(RequestedOutputCount, Vec<TypeFact>)>,
     pub effects: EffectSummary,
     pub reads_captures: BTreeSet<BindingId>,
@@ -27,11 +30,31 @@ pub struct FunctionSummary {
     pub writes_persistents: BTreeSet<BindingId>,
     pub may_call_unknown: bool,
     pub place_mutations: Vec<PlaceMutation>,
+    pub function_handles: Vec<FunctionHandleTarget>,
     pub calls: Vec<CallSummary>,
     pub spawn_safety: SpawnSafetyFact,
     pub fusibility: FusibilityFact,
     pub parallel_safety: ParallelSafetyFact,
     pub accel_eligibility: AccelEligibilityFact,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct OutputFact {
+    ty: TypeFact,
+    shape: ShapeFact,
+    value_flow: ValueFlowFact,
+    async_value: Option<AsyncValueFact>,
+}
+
+impl Default for OutputFact {
+    fn default() -> Self {
+        Self {
+            ty: TypeFact::Unknown,
+            shape: ShapeFact::Unknown,
+            value_flow: ValueFlowFact::UnknownList,
+            async_value: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -65,6 +88,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
     let mut may_call_unknown = false;
     let mut place_mutations = Vec::new();
     let mut outputs = Vec::new();
+    let mut function_handles = Vec::new();
 
     for block in &body.blocks {
         for stmt in &block.statements {
@@ -77,6 +101,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
                         &mut async_behavior,
                         &mut calls,
                         &mut may_call_unknown,
+                        &mut function_handles,
                     );
                     scan_place_write(body, place, &mut writes_captures);
                 }
@@ -88,6 +113,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
                         &mut async_behavior,
                         &mut calls,
                         &mut may_call_unknown,
+                        &mut function_handles,
                     );
                     for target in &targets.targets {
                         if let crate::MirOutputTarget::Place(place) = target {
@@ -103,6 +129,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
                         &mut async_behavior,
                         &mut calls,
                         &mut may_call_unknown,
+                        &mut function_handles,
                     );
                 }
                 MirStmtKind::PlaceMutation(mutation) => place_mutations.push(mutation.clone()),
@@ -122,12 +149,12 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
 
         match &block.terminator.kind {
             MirTerminatorKind::Branch { cond, .. } => {
-                scan_operand(body, cond, &mut reads_captures);
+                scan_operand(body, cond, &mut reads_captures, &mut function_handles);
             }
             MirTerminatorKind::Switch { discr, cases, .. } => {
-                scan_operand(body, discr, &mut reads_captures);
+                scan_operand(body, discr, &mut reads_captures, &mut function_handles);
                 for (case, _) in cases {
-                    scan_operand(body, case, &mut reads_captures);
+                    scan_operand(body, case, &mut reads_captures, &mut function_handles);
                 }
             }
             MirTerminatorKind::For {
@@ -140,19 +167,20 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
                     &mut async_behavior,
                     &mut calls,
                     &mut may_call_unknown,
+                    &mut function_handles,
                 );
                 scan_local_write(body, *binding, &mut writes_captures);
             }
             MirTerminatorKind::Return(return_outputs) => {
                 output_count = output_count.max(return_outputs.len());
                 for (idx, output) in return_outputs.iter().enumerate() {
-                    scan_operand(body, output, &mut reads_captures);
-                    merge_output_fact(&mut outputs, idx, operand_type_fact(body, store, output));
+                    scan_operand(body, output, &mut reads_captures, &mut function_handles);
+                    merge_output_fact(&mut outputs, idx, operand_output_fact(body, store, output));
                 }
             }
             MirTerminatorKind::Await { future, .. } => {
                 async_behavior = AsyncBehaviorFact::RequiresAsyncRuntime;
-                scan_operand(body, future, &mut reads_captures);
+                scan_operand(body, future, &mut reads_captures, &mut function_handles);
             }
             MirTerminatorKind::Goto(_)
             | MirTerminatorKind::TryCatch { .. }
@@ -164,6 +192,8 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
     let parallel_safety = classify_parallel_safety(&workspace, &environment, may_call_unknown);
     let accel_eligibility = classify_accel_eligibility(&workspace, &environment, may_call_unknown);
 
+    let finalized_outputs = finalize_output_facts(outputs, output_count);
+
     let summary = FunctionSummary {
         function: body.function,
         abi: FunctionAbiSummary {
@@ -174,7 +204,22 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
             implicit_nargin: body.abi.implicit_nargin,
             implicit_nargout: body.abi.implicit_nargout,
         },
-        outputs: finalize_output_facts(outputs, output_count),
+        outputs: finalized_outputs
+            .iter()
+            .map(|fact| fact.ty.clone())
+            .collect(),
+        output_shapes: finalized_outputs
+            .iter()
+            .map(|fact| fact.shape.clone())
+            .collect(),
+        output_value_flows: finalized_outputs
+            .iter()
+            .map(|fact| fact.value_flow.clone())
+            .collect(),
+        output_async_values: finalized_outputs
+            .iter()
+            .map(|fact| fact.async_value.clone())
+            .collect(),
         requested_output_sensitive: Vec::new(),
         effects: EffectSummary {
             workspace,
@@ -187,6 +232,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
         writes_persistents,
         may_call_unknown,
         place_mutations,
+        function_handles,
         calls,
         spawn_safety: SpawnSafetyFact::RequiresIsolation,
         fusibility,
@@ -255,28 +301,23 @@ fn classify_accel_eligibility(
     AccelEligibilityFact::Unknown
 }
 
-fn merge_output_fact(outputs: &mut Vec<Option<TypeFact>>, idx: usize, incoming: TypeFact) {
+fn merge_output_fact(outputs: &mut Vec<Option<OutputFact>>, idx: usize, incoming: OutputFact) {
     if outputs.len() <= idx {
         outputs.resize_with(idx + 1, || None);
     }
     match &mut outputs[idx] {
-        Some(existing) => *existing = join_output_type(existing, &incoming),
+        Some(existing) => *existing = join_output_fact(existing, &incoming),
         slot @ None => *slot = Some(incoming),
     }
 }
 
-fn finalize_output_facts(outputs: Vec<Option<TypeFact>>, output_count: usize) -> Vec<TypeFact> {
+fn finalize_output_facts(outputs: Vec<Option<OutputFact>>, output_count: usize) -> Vec<OutputFact> {
     (0..output_count)
-        .map(|idx| {
-            outputs
-                .get(idx)
-                .and_then(Clone::clone)
-                .unwrap_or(TypeFact::Unknown)
-        })
+        .map(|idx| outputs.get(idx).and_then(Clone::clone).unwrap_or_default())
         .collect()
 }
 
-fn operand_type_fact(body: &MirBody, store: &AnalysisStore, operand: &MirOperand) -> TypeFact {
+fn operand_output_fact(body: &MirBody, store: &AnalysisStore, operand: &MirOperand) -> OutputFact {
     match operand {
         MirOperand::Local(local) => store
             .mir_locals
@@ -284,18 +325,45 @@ fn operand_type_fact(body: &MirBody, store: &AnalysisStore, operand: &MirOperand
                 function: body.function,
                 local: *local,
             })
-            .map(|fact| fact.ty.clone())
-            .unwrap_or(TypeFact::Unknown),
-        MirOperand::Constant(crate::MirConstant::Number(_)) => TypeFact::Numeric {
-            class: runmat_hir::NumericClass::Double,
-            domain: runmat_hir::NumericDomain::Real,
-        },
-        MirOperand::Constant(crate::MirConstant::String(_)) => TypeFact::CharArray,
+            .map(|fact| OutputFact {
+                ty: fact.ty.clone(),
+                shape: fact.shape.clone(),
+                value_flow: fact.value_flow.clone(),
+                async_value: fact.async_value.clone(),
+            })
+            .unwrap_or_default(),
+        MirOperand::Constant(crate::MirConstant::Number(_)) => {
+            scalar_output_fact(TypeFact::Numeric {
+                class: runmat_hir::NumericClass::Double,
+                domain: runmat_hir::NumericDomain::Real,
+            })
+        }
+        MirOperand::Constant(crate::MirConstant::String(_)) => {
+            scalar_output_fact(TypeFact::CharArray)
+        }
         MirOperand::FunctionHandle(runmat_hir::FunctionHandleTarget::Function(function))
         | MirOperand::FunctionHandle(runmat_hir::FunctionHandleTarget::Anonymous(function)) => {
-            TypeFact::Function(*function)
+            scalar_output_fact(TypeFact::Function(*function))
         }
-        _ => TypeFact::Unknown,
+        _ => OutputFact::default(),
+    }
+}
+
+fn scalar_output_fact(ty: TypeFact) -> OutputFact {
+    OutputFact {
+        ty: ty.clone(),
+        shape: ShapeFact::Scalar,
+        value_flow: ValueFlowFact::Single(ty),
+        async_value: None,
+    }
+}
+
+fn join_output_fact(left: &OutputFact, right: &OutputFact) -> OutputFact {
+    OutputFact {
+        ty: join_output_type(&left.ty, &right.ty),
+        shape: join_output_shape(&left.shape, &right.shape),
+        value_flow: join_output_value_flow(&left.value_flow, &right.value_flow),
+        async_value: join_output_async_value(&left.async_value, &right.async_value),
     }
 }
 
@@ -307,6 +375,33 @@ fn join_output_type(left: &TypeFact, right: &TypeFact) -> TypeFact {
     }
 }
 
+fn join_output_shape(left: &ShapeFact, right: &ShapeFact) -> ShapeFact {
+    if left == right {
+        left.clone()
+    } else {
+        ShapeFact::Unknown
+    }
+}
+
+fn join_output_value_flow(left: &ValueFlowFact, right: &ValueFlowFact) -> ValueFlowFact {
+    if left == right {
+        left.clone()
+    } else {
+        ValueFlowFact::UnknownList
+    }
+}
+
+fn join_output_async_value(
+    left: &Option<AsyncValueFact>,
+    right: &Option<AsyncValueFact>,
+) -> Option<AsyncValueFact> {
+    if left == right {
+        left.clone()
+    } else {
+        None
+    }
+}
+
 fn scan_rvalue(
     body: &MirBody,
     value: &MirRvalue,
@@ -314,21 +409,22 @@ fn scan_rvalue(
     async_behavior: &mut AsyncBehaviorFact,
     calls: &mut Vec<CallSummary>,
     may_call_unknown: &mut bool,
+    function_handles: &mut Vec<FunctionHandleTarget>,
 ) {
     match value {
         MirRvalue::Use(operand) | MirRvalue::Unary(_, operand) => {
-            scan_operand(body, operand, reads_captures);
+            scan_operand(body, operand, reads_captures, function_handles);
         }
         MirRvalue::Binary(left, _, right) => {
-            scan_operand(body, left, reads_captures);
-            scan_operand(body, right, reads_captures);
+            scan_operand(body, left, reads_captures, function_handles);
+            scan_operand(body, right, reads_captures, function_handles);
         }
         MirRvalue::Range { start, step, end } => {
-            scan_operand(body, start, reads_captures);
+            scan_operand(body, start, reads_captures, function_handles);
             if let Some(step) = step {
-                scan_operand(body, step, reads_captures);
+                scan_operand(body, step, reads_captures, function_handles);
             }
-            scan_operand(body, end, reads_captures);
+            scan_operand(body, end, reads_captures, function_handles);
         }
         MirRvalue::Call(call) => {
             if is_unknown_call(&call.callee) {
@@ -336,22 +432,22 @@ fn scan_rvalue(
             }
             calls.push(call_summary(call));
             for arg in &call.args {
-                scan_operand(body, arg.operand(), reads_captures);
+                scan_operand(body, arg.operand(), reads_captures, function_handles);
             }
         }
         MirRvalue::Aggregate { elements, .. } => {
             for element in elements {
-                scan_operand(body, element, reads_captures);
+                scan_operand(body, element, reads_captures, function_handles);
             }
         }
         MirRvalue::Index { base, indexing } => {
-            scan_operand(body, base, reads_captures);
-            scan_indexing(body, indexing, reads_captures);
+            scan_operand(body, base, reads_captures, function_handles);
+            scan_indexing(body, indexing, reads_captures, function_handles);
         }
         MirRvalue::Future(_) => {}
         MirRvalue::Spawn(future) => {
             *async_behavior = AsyncBehaviorFact::RequiresAsyncRuntime;
-            scan_operand(body, future, reads_captures);
+            scan_operand(body, future, reads_captures, function_handles);
         }
     }
 }
@@ -403,11 +499,16 @@ fn scan_place_write(body: &MirBody, place: &MirPlace, writes_captures: &mut BTre
     }
 }
 
-fn scan_indexing(body: &MirBody, indexing: &MirIndexing, reads_captures: &mut BTreeSet<BindingId>) {
+fn scan_indexing(
+    body: &MirBody,
+    indexing: &MirIndexing,
+    reads_captures: &mut BTreeSet<BindingId>,
+    function_handles: &mut Vec<FunctionHandleTarget>,
+) {
     for component in &indexing.components {
         match component {
             MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
-                scan_operand(body, operand, reads_captures);
+                scan_operand(body, operand, reads_captures, function_handles);
             }
             MirIndexComponent::Colon | MirIndexComponent::End { .. } => {}
         }
@@ -424,11 +525,24 @@ fn place_root(place: &MirPlace) -> Option<MirLocalId> {
     }
 }
 
-fn scan_operand(body: &MirBody, operand: &MirOperand, reads_captures: &mut BTreeSet<BindingId>) {
-    if let MirOperand::Local(local) = operand {
-        if let Some(binding) = capture_binding(body, *local) {
-            reads_captures.insert(binding);
+fn scan_operand(
+    body: &MirBody,
+    operand: &MirOperand,
+    reads_captures: &mut BTreeSet<BindingId>,
+    function_handles: &mut Vec<FunctionHandleTarget>,
+) {
+    match operand {
+        MirOperand::Local(local) => {
+            if let Some(binding) = capture_binding(body, *local) {
+                reads_captures.insert(binding);
+            }
         }
+        MirOperand::FunctionHandle(target) => {
+            if !function_handles.contains(target) {
+                function_handles.push(target.clone());
+            }
+        }
+        MirOperand::Temp(_) | MirOperand::Constant(_) => {}
     }
 }
 
