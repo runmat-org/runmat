@@ -11,7 +11,7 @@ use std::collections::{HashMap, VecDeque};
 
 use super::{
     analyze_liveness, analyze_spawn_boundaries, summarize_body, AnalysisStore, BindingFact,
-    ExprFact, InitFact, MirLocalFact, MirLocalKey,
+    ExprFact, InitFact, MirLocalFact, MirLocalKey, ModuleSummary,
 };
 
 #[derive(Debug, Clone)]
@@ -45,9 +45,10 @@ pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
 
     for record in &body.source_map.statements {
         if let Some(expr) = record.expr {
-            store.expressions.entry(expr).or_insert(ExprFact {
-                ty: TypeFact::Unknown,
-            });
+            store
+                .expressions
+                .entry(expr)
+                .or_insert_with(default_expr_fact);
         }
     }
 
@@ -80,6 +81,30 @@ pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
                 local_facts[local.id.0].clone().unwrap_or_default().ty,
             );
         }
+    }
+
+    for source in &body.source_map.locals {
+        if let Some(expr) = source.expr {
+            let fact = local_facts[source.local.0].clone().unwrap_or_default();
+            store.expressions.insert(
+                expr,
+                ExprFact {
+                    ty: fact.ty,
+                    shape: fact.shape,
+                    value_flow: fact.value_flow,
+                    async_value: fact.async_value,
+                },
+            );
+        }
+    }
+}
+
+fn default_expr_fact() -> ExprFact {
+    ExprFact {
+        ty: TypeFact::Unknown,
+        shape: ShapeFact::Unknown,
+        value_flow: ValueFlowFact::UnknownList,
+        async_value: None,
     }
 }
 
@@ -230,7 +255,10 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     let mut store = AnalysisStore::default();
     for body in assembly.bodies.values() {
         analyze_body(body, &mut store);
-        summarize_body(body, &mut store);
+        let summary = summarize_body(body, &mut store);
+        if let Some(module) = body.source_map.module {
+            insert_module_summary(&mut store, module, &summary);
+        }
         store.liveness.insert(body.function, analyze_liveness(body));
         store
             .spawn_boundaries
@@ -238,6 +266,33 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
         store.diagnostics.extend(diagnose_uninitialized_reads(body));
     }
     store
+}
+
+fn insert_module_summary(
+    store: &mut AnalysisStore,
+    module: runmat_hir::ModuleId,
+    summary: &super::FunctionSummary,
+) {
+    store
+        .modules
+        .entry(module)
+        .and_modify(|existing| {
+            if !existing.functions.contains(&summary.function) {
+                existing.functions.push(summary.function);
+            }
+            existing.workspace.extend(summary.effects.workspace.clone());
+            existing
+                .environment
+                .extend(summary.effects.environment.clone());
+            existing.may_call_unknown |= summary.may_call_unknown;
+        })
+        .or_insert_with(|| ModuleSummary {
+            module,
+            functions: vec![summary.function],
+            workspace: summary.effects.workspace.clone(),
+            environment: summary.effects.environment.clone(),
+            may_call_unknown: summary.may_call_unknown,
+        });
 }
 
 pub fn diagnose_uninitialized_reads(body: &MirBody) -> Vec<MirDiagnostic> {

@@ -3,8 +3,8 @@ use crate::{
     MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
 };
 use runmat_hir::{
-    BindingId, FunctionId, HirCallableRef, RequestedOutputCount, SpawnSafetyFact, TypeFact,
-    WorkspaceEffect,
+    BindingId, FunctionId, HirCallableRef, PlaceMutation, RequestedOutputCount, SpawnSafetyFact,
+    TypeFact, WorkspaceEffect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -25,6 +25,7 @@ pub struct FunctionSummary {
     pub writes_globals: BTreeSet<BindingId>,
     pub writes_persistents: BTreeSet<BindingId>,
     pub may_call_unknown: bool,
+    pub place_mutations: Vec<PlaceMutation>,
     pub calls: Vec<CallSummary>,
     pub spawn_safety: SpawnSafetyFact,
     pub fusibility: FusibilityFact,
@@ -61,6 +62,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
     let mut writes_persistents = BTreeSet::new();
     let mut calls = Vec::new();
     let mut may_call_unknown = false;
+    let mut place_mutations = Vec::new();
 
     for block in &body.blocks {
         for stmt in &block.statements {
@@ -101,7 +103,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
                         &mut may_call_unknown,
                     );
                 }
-                MirStmtKind::PlaceMutation(_) => {}
+                MirStmtKind::PlaceMutation(mutation) => place_mutations.push(mutation.clone()),
                 MirStmtKind::WorkspaceEffect { effect, bindings } => {
                     scan_workspace_effect(
                         body,
@@ -181,6 +183,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
         writes_globals,
         writes_persistents,
         may_call_unknown,
+        place_mutations,
         calls,
         spawn_safety: SpawnSafetyFact::RequiresIsolation,
         fusibility,

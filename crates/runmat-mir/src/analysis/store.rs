@@ -1,4 +1,7 @@
-use runmat_hir::{BindingId, ExprId, FunctionId, TypeFact};
+use runmat_hir::{
+    AsyncValueFact, BindingId, EnvironmentEffect, ExprId, FunctionId, ModuleId, ShapeFact,
+    TypeFact, ValueFlowFact, WorkspaceEffect,
+};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 
@@ -12,9 +15,19 @@ pub struct AnalysisStore {
     pub expressions: HashMap<ExprId, ExprFact>,
     pub mir_locals: HashMap<MirLocalKey, MirLocalFact>,
     pub functions: HashMap<FunctionId, FunctionSummary>,
+    pub modules: HashMap<ModuleId, ModuleSummary>,
     pub liveness: HashMap<FunctionId, LivenessFacts>,
     pub spawn_boundaries: HashMap<FunctionId, Vec<crate::SpawnBoundary>>,
     pub diagnostics: Vec<MirDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModuleSummary {
+    pub module: ModuleId,
+    pub functions: Vec<FunctionId>,
+    pub workspace: Vec<WorkspaceEffect>,
+    pub environment: Vec<EnvironmentEffect>,
+    pub may_call_unknown: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -59,6 +72,9 @@ pub struct BindingFact {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExprFact {
     pub ty: TypeFact,
+    pub shape: ShapeFact,
+    pub value_flow: ValueFlowFact,
+    pub async_value: Option<AsyncValueFact>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

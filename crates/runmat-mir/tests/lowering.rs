@@ -240,6 +240,7 @@ fn analyze_body_records_future_and_task_async_value_facts() {
 #[test]
 fn direct_spawn_of_anonymous_function_uses_future_temp_operand() {
     let mir = lower_mir("function y = f(); task = spawn(@(x) x); y = 1; end");
+    let store = analyze_assembly(&mir);
     let body = mir
         .bodies
         .values()
@@ -277,6 +278,28 @@ fn direct_spawn_of_anonymous_function_uses_future_temp_operand() {
 
     assert!(saw_future_temp);
     assert!(matches!(spawn_operand, Some(MirOperand::Local(_))));
+
+    let future_expr = body
+        .source_map
+        .locals
+        .iter()
+        .find_map(|source| {
+            source.expr.filter(|_| {
+                body.locals[source.local.0].kind == MirLocalKind::Temporary
+                    && store.mir_locals[&MirLocalKey {
+                        function: body.function,
+                        local: source.local,
+                    }]
+                        .async_value
+                        .as_ref()
+                        .is_some_and(|fact| matches!(fact, runmat_hir::AsyncValueFact::Future(_)))
+            })
+        })
+        .unwrap();
+    assert!(matches!(
+        store.expressions[&future_expr].async_value,
+        Some(runmat_hir::AsyncValueFact::Future(_))
+    ));
 }
 
 #[test]
@@ -456,6 +479,9 @@ fn analyze_assembly_populates_store_products_by_function() {
     let body = mir.bodies.values().next().unwrap();
 
     assert!(store.functions.contains_key(&body.function));
+    let module = body.source_map.module.unwrap();
+    assert!(store.modules.contains_key(&module));
+    assert!(store.modules[&module].functions.contains(&body.function));
     assert!(store.liveness.contains_key(&body.function));
     assert!(store.spawn_boundaries.contains_key(&body.function));
     assert_eq!(store.spawn_boundaries.get(&body.function).unwrap().len(), 1);
@@ -529,6 +555,21 @@ fn product_cache_key_serializes_semantic_product_dependencies() {
     assert_eq!(roundtrip, key);
     assert!(json.contains("FunctionSummary"));
     assert!(json.contains("dependency_graph_hash"));
+
+    let module_key = ProductCacheKey {
+        product: CacheProduct::ModuleSummary(runmat_hir::ModuleId(3)),
+        source_hash: "source".into(),
+        manifest_hash: "manifest".into(),
+        dependency_graph_hash: "deps".into(),
+        config_hash: "config".into(),
+        compiler_version: "compiler".into(),
+    };
+
+    let module_json = serde_json::to_string(&module_key).unwrap();
+    let module_roundtrip: ProductCacheKey = serde_json::from_str(&module_json).unwrap();
+
+    assert_eq!(module_roundtrip, module_key);
+    assert!(module_json.contains("ModuleSummary"));
 }
 
 #[test]
@@ -639,6 +680,22 @@ fn global_statement_lowers_to_workspace_effect() {
         summary.accel_eligibility,
         AccelEligibilityFact::Ineligible(_)
     ));
+}
+
+#[test]
+fn analyze_assembly_aggregates_module_effect_summaries() {
+    let mir = lower_mir("function y = f(); global g; y = unresolved_target(g); end");
+
+    let store = analyze_assembly(&mir);
+    let body = mir.bodies.values().next().unwrap();
+    let module = body.source_map.module.unwrap();
+    let summary = store.modules.get(&module).unwrap();
+
+    assert!(summary.functions.contains(&body.function));
+    assert!(summary
+        .workspace
+        .contains(&runmat_hir::WorkspaceEffect::MutatesGlobal));
+    assert!(summary.may_call_unknown);
 }
 
 #[test]
@@ -903,6 +960,7 @@ fn multi_assign_preserves_discard_targets_and_requested_outputs() {
 fn indexed_assignment_lowers_to_index_place() {
     let mir = lower_mir("function y = write_index(x); x(1) = 2; y = x; end");
     let body = mir.bodies.values().next().unwrap();
+    let mut store = AnalysisStore::default();
 
     assert!(matches!(
         body.blocks[0].statements[0].kind,
@@ -917,6 +975,11 @@ fn indexed_assignment_lowers_to_index_place() {
             ..
         }
     ));
+    let summary = summarize_body(body, &mut store);
+    assert!(summary.place_mutations.iter().any(|mutation| {
+        mutation.kind == runmat_hir::PlaceMutationKind::IndexedAssign
+            && mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::CreateArrayByIndex
+    }));
 }
 
 #[test]

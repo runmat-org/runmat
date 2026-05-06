@@ -16,6 +16,7 @@ pub enum CacheProduct {
     HirModule(ModuleId),
     MirBody(FunctionId),
     FunctionSummary(FunctionId),
+    ModuleSummary(ModuleId),
     ClassMetadata(ClassId),
     AnalysisFacts(QualifiedName),
 }
