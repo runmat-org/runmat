@@ -44,6 +44,7 @@ pub fn lower_function(function: &HirFunction) -> Result<MirBody, SemanticError> 
 
     Ok(MirBody {
         function: function.id,
+        abi: function.abi.clone(),
         locals,
         blocks,
         source_map: MirSourceMap {

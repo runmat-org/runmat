@@ -13,6 +13,7 @@ use super::{
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FunctionSummary {
     pub function: FunctionId,
+    pub abi: FunctionAbiSummary,
     pub outputs: Vec<TypeFact>,
     pub requested_output_sensitive: Vec<(RequestedOutputCount, Vec<TypeFact>)>,
     pub effects: EffectSummary,
@@ -22,6 +23,16 @@ pub struct FunctionSummary {
     pub fusibility: FusibilityFact,
     pub parallel_safety: ParallelSafetyFact,
     pub accel_eligibility: AccelEligibilityFact,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FunctionAbiSummary {
+    pub fixed_inputs: Vec<BindingId>,
+    pub varargin: Option<BindingId>,
+    pub fixed_outputs: Vec<BindingId>,
+    pub varargout: Option<BindingId>,
+    pub implicit_nargin: Option<BindingId>,
+    pub implicit_nargout: Option<BindingId>,
 }
 
 pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSummary {
@@ -88,6 +99,14 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
 
     let summary = FunctionSummary {
         function: body.function,
+        abi: FunctionAbiSummary {
+            fixed_inputs: body.abi.fixed_inputs.clone(),
+            varargin: body.abi.varargin,
+            fixed_outputs: body.abi.fixed_outputs.clone(),
+            varargout: body.abi.varargout,
+            implicit_nargin: body.abi.implicit_nargin,
+            implicit_nargout: body.abi.implicit_nargout,
+        },
         outputs: vec![TypeFact::Unknown; output_count],
         requested_output_sensitive: Vec::new(),
         effects: EffectSummary {

@@ -1,10 +1,11 @@
 use crate::{BasicBlock, MirLocalId, MirSourceMap};
-use runmat_hir::{BindingId, FunctionId, Span};
+use runmat_hir::{BindingId, FunctionAbi, FunctionId, Span};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MirBody {
     pub function: FunctionId,
+    pub abi: FunctionAbi,
     pub locals: Vec<MirLocal>,
     pub blocks: Vec<BasicBlock>,
     pub source_map: MirSourceMap,

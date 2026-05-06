@@ -155,12 +155,30 @@ fn summary_records_function_outputs_and_store_entry() {
     let summary = summarize_body(body, &mut store);
 
     assert_eq!(summary.function, body.function);
+    assert_eq!(summary.abi.fixed_inputs.len(), 1);
+    assert_eq!(summary.abi.fixed_outputs.len(), 1);
+    assert!(summary.abi.implicit_nargin.is_some());
+    assert!(summary.abi.implicit_nargout.is_some());
     assert_eq!(summary.outputs.len(), 1);
     assert!(store.functions.contains_key(&body.function));
     assert_eq!(
         summary.effects.async_behavior,
         Some(AsyncBehaviorFact::NeverSuspends)
     );
+}
+
+#[test]
+fn summary_preserves_variadic_function_abi() {
+    let mir = lower_mir("function varargout = f(x, varargin); varargout = varargin; end");
+    let body = mir.bodies.values().next().unwrap();
+    let mut store = AnalysisStore::default();
+
+    let summary = summarize_body(body, &mut store);
+
+    assert_eq!(summary.abi.fixed_inputs.len(), 2);
+    assert_eq!(summary.abi.varargin, Some(summary.abi.fixed_inputs[1]));
+    assert_eq!(summary.abi.fixed_outputs.len(), 1);
+    assert_eq!(summary.abi.varargout, Some(summary.abi.fixed_outputs[0]));
 }
 
 #[test]
