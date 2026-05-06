@@ -176,6 +176,12 @@ fn diagnose_block(
         MirTerminatorKind::Branch { cond, .. } => {
             diagnose_operand_read(cond, state, block.terminator.span, diagnostics);
         }
+        MirTerminatorKind::Switch { discr, cases, .. } => {
+            diagnose_operand_read(discr, state, block.terminator.span, diagnostics);
+            for (case, _) in cases {
+                diagnose_operand_read(case, state, block.terminator.span, diagnostics);
+            }
+        }
         MirTerminatorKind::For {
             binding, iterable, ..
         } => {
@@ -330,6 +336,13 @@ fn successors(kind: &MirTerminatorKind) -> Vec<BasicBlockId> {
             else_block,
             ..
         } => vec![*then_block, *else_block],
+        MirTerminatorKind::Switch {
+            cases, otherwise, ..
+        } => cases
+            .iter()
+            .map(|(_, block)| *block)
+            .chain(std::iter::once(*otherwise))
+            .collect(),
         MirTerminatorKind::For {
             body_block,
             exit_block,

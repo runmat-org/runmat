@@ -212,6 +212,65 @@ impl ControlFlowBuilder {
                     },
                 });
             }
+            if let HirStmtKind::Switch {
+                expr,
+                cases,
+                otherwise,
+            } = &stmt.kind
+            {
+                let merge_id = self.lower_continuation_target(
+                    ctx,
+                    body,
+                    idx + 1,
+                    final_terminator,
+                    return_terminator,
+                    loop_targets,
+                )?;
+                let merge_terminator = MirTerminator {
+                    kind: MirTerminatorKind::Goto(merge_id),
+                    span: stmt.span,
+                };
+                let mut lowered_cases = Vec::new();
+                for (case_expr, case_body) in cases {
+                    let case_id = self.fresh_block();
+                    let case_block = self.lower_block_from(
+                        ctx,
+                        case_id,
+                        case_body,
+                        0,
+                        merge_terminator.clone(),
+                        return_terminator,
+                        loop_targets,
+                    )?;
+                    self.blocks.push(case_block);
+                    lowered_cases.push((lower_operand(ctx, case_expr, &mut statements)?, case_id));
+                }
+                let otherwise_id = self.fresh_block();
+                let empty_otherwise = HirBlock { statements: vec![] };
+                let otherwise_block = self.lower_block_from(
+                    ctx,
+                    otherwise_id,
+                    otherwise.as_ref().unwrap_or(&empty_otherwise),
+                    0,
+                    merge_terminator,
+                    return_terminator,
+                    loop_targets,
+                )?;
+                self.blocks.push(otherwise_block);
+                let discr = lower_operand(ctx, expr, &mut statements)?;
+                return Ok(BasicBlock {
+                    id,
+                    statements,
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::Switch {
+                            discr,
+                            cases: lowered_cases,
+                            otherwise: otherwise_id,
+                        },
+                        span: stmt.span,
+                    },
+                });
+            }
             if let HirStmtKind::TryCatch {
                 try_body,
                 catch_body,

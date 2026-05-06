@@ -568,6 +568,41 @@ fn if_statement_flows_to_following_statements() {
 }
 
 #[test]
+fn switch_statement_lowers_to_switch_blocks_and_continuation() {
+    let mir = lower_mir(
+        "function y = choose(x); switch x; case 1; y = 1; otherwise; y = 2; end; y = y + 1; end",
+    );
+    let body = mir.bodies.values().next().unwrap();
+
+    let MirTerminatorKind::Switch {
+        cases, otherwise, ..
+    } = &body.blocks[0].terminator.kind
+    else {
+        panic!("expected switch terminator");
+    };
+    assert_eq!(cases.len(), 1);
+    assert!(body.blocks.iter().any(|block| block.id == *otherwise));
+    assert_eq!(body.blocks[1].statements.len(), 1);
+    assert!(matches!(
+        body.blocks[1].terminator.kind,
+        MirTerminatorKind::Return(_)
+    ));
+}
+
+#[test]
+fn diagnostics_report_maybe_assigned_local_read_after_switch() {
+    let mir =
+        lower_mir("function y = choose(x); switch x; case 1; y = 1; otherwise; end; z = y; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let diagnostics = diagnose_uninitialized_reads(body);
+
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-MIR0002"));
+}
+
+#[test]
 fn while_loop_lowers_to_branch_body_backedge_and_exit() {
     let mir = lower_mir("function y = spin(c, x); while c; y = x; end; end");
     let body = mir.bodies.values().next().unwrap();

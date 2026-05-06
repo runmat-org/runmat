@@ -58,6 +58,12 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
             MirTerminatorKind::Branch { cond, .. } => {
                 scan_operand(body, cond, &mut reads_captures);
             }
+            MirTerminatorKind::Switch { discr, cases, .. } => {
+                scan_operand(body, discr, &mut reads_captures);
+                for (case, _) in cases {
+                    scan_operand(body, case, &mut reads_captures);
+                }
+            }
             MirTerminatorKind::For {
                 binding, iterable, ..
             } => {

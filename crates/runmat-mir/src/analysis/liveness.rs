@@ -77,6 +77,12 @@ fn collect_reachable_reads(
 fn collect_terminator_reads(kind: &MirTerminatorKind, live: &mut HashSet<MirLocalId>) {
     match kind {
         MirTerminatorKind::Branch { cond, .. } => collect_operand_read(cond, live),
+        MirTerminatorKind::Switch { discr, cases, .. } => {
+            collect_operand_read(discr, live);
+            for (case, _) in cases {
+                collect_operand_read(case, live);
+            }
+        }
         MirTerminatorKind::For { iterable, .. } => collect_rvalue_reads(iterable, live),
         MirTerminatorKind::Return(outputs) => {
             for output in outputs {
@@ -165,6 +171,13 @@ fn successors(kind: &MirTerminatorKind) -> Vec<BasicBlockId> {
             else_block,
             ..
         } => vec![*then_block, *else_block],
+        MirTerminatorKind::Switch {
+            cases, otherwise, ..
+        } => cases
+            .iter()
+            .map(|(_, block)| *block)
+            .chain(std::iter::once(*otherwise))
+            .collect(),
         MirTerminatorKind::For {
             body_block,
             exit_block,

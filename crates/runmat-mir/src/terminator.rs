@@ -16,6 +16,11 @@ pub enum MirTerminatorKind {
         then_block: BasicBlockId,
         else_block: BasicBlockId,
     },
+    Switch {
+        discr: MirOperand,
+        cases: Vec<(MirOperand, BasicBlockId)>,
+        otherwise: BasicBlockId,
+    },
     For {
         binding: MirLocalId,
         iterable: MirRvalue,
