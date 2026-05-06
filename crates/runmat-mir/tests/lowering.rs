@@ -181,21 +181,13 @@ fn analyze_body_records_simple_numeric_local_and_binding_facts() {
 
 #[test]
 fn analyze_body_records_future_and_task_async_value_facts() {
-    let (body, store) =
-        analyze_single_body("function y = f(); fut = @(x) x; task = spawn(fut); y = 1; end");
+    let mir = lower_mir("function y = f(); fut = @(x) x; task = spawn(fut); y = 1; end");
+    let store = analyze_assembly(&mir);
 
-    let async_values: Vec<_> = body
-        .locals
-        .iter()
-        .filter_map(|local| {
-            store
-                .mir_locals
-                .get(&MirLocalKey {
-                    function: body.function,
-                    local: local.id,
-                })
-                .and_then(|fact| fact.async_value.as_ref())
-        })
+    let async_values: Vec<_> = store
+        .mir_locals
+        .values()
+        .filter_map(|fact| fact.async_value.as_ref())
         .collect();
 
     assert!(async_values
@@ -204,6 +196,48 @@ fn analyze_body_records_future_and_task_async_value_facts() {
     assert!(async_values
         .iter()
         .any(|fact| matches!(fact, runmat_hir::AsyncValueFact::TaskHandle(_))));
+}
+
+#[test]
+fn direct_spawn_of_anonymous_function_uses_future_temp_operand() {
+    let mir = lower_mir("function y = f(); task = spawn(@(x) x); y = 1; end");
+    let body = mir
+        .bodies
+        .values()
+        .find(|body| {
+            body.blocks
+                .iter()
+                .flat_map(|block| &block.statements)
+                .any(|stmt| {
+                    matches!(
+                        stmt.kind,
+                        MirStmtKind::Assign {
+                            value: MirRvalue::Spawn(_),
+                            ..
+                        }
+                    )
+                })
+        })
+        .unwrap();
+
+    let mut saw_future_temp = false;
+    let mut spawn_operand = None;
+    for stmt in &body.blocks[0].statements {
+        match &stmt.kind {
+            MirStmtKind::Assign {
+                place: MirPlace::Local(local),
+                value: MirRvalue::Future(_),
+            } => saw_future_temp = body.locals[local.0].kind == MirLocalKind::Temporary,
+            MirStmtKind::Assign {
+                value: MirRvalue::Spawn(operand),
+                ..
+            } => spawn_operand = Some(operand),
+            _ => {}
+        }
+    }
+
+    assert!(saw_future_temp);
+    assert!(matches!(spawn_operand, Some(MirOperand::Local(_))));
 }
 
 #[test]

@@ -197,9 +197,6 @@ pub(crate) fn lower_simple_operand(
         HirExprKind::Constant(name) => MirOperand::Constant(MirConstant::Symbol(name.clone())),
         HirExprKind::Binding(binding) => MirOperand::Local(ctx.local_for_binding(*binding)?),
         HirExprKind::FunctionHandle(target) => MirOperand::FunctionHandle(target.clone()),
-        HirExprKind::AnonymousFunction(function) => MirOperand::Constant(MirConstant::Symbol(
-            runmat_hir::SymbolName(format!("anonymous#{}", function.0)),
-        )),
         _ => return Ok(None),
     }))
 }
