@@ -1,4 +1,4 @@
-use crate::{BasicBlockId, MirLocalId, MirOperand, MirRvalue};
+use crate::{BasicBlockId, MirLocalId, MirOperand, MirPlace, MirRvalue};
 use runmat_hir::{LoopIterationSemantics, Span};
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +30,7 @@ pub enum MirTerminatorKind {
     Return(Vec<MirOperand>),
     Await {
         future: MirOperand,
+        result: Option<MirPlace>,
         resume: BasicBlockId,
         cleanup: Option<BasicBlockId>,
     },

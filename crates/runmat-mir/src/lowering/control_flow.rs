@@ -3,6 +3,7 @@ use runmat_hir::{HirBlock, HirExprKind, HirStmtKind, SemanticError};
 
 use super::{
     expr::{lower_expr, lower_operand},
+    place::lower_place,
     stmt::lower_stmt,
     MirLoweringContext,
 };
@@ -306,6 +307,34 @@ impl ControlFlowBuilder {
                         terminator: MirTerminator {
                             kind: MirTerminatorKind::Await {
                                 future,
+                                result: None,
+                                resume,
+                                cleanup: None,
+                            },
+                            span: stmt.span,
+                        },
+                    });
+                }
+            }
+            if let HirStmtKind::Assign(place, expr, _) = &stmt.kind {
+                if let HirExprKind::Await(future) = &expr.kind {
+                    let resume = self.lower_continuation_target(
+                        ctx,
+                        body,
+                        idx + 1,
+                        final_terminator,
+                        return_terminator,
+                        loop_targets,
+                    )?;
+                    let future = lower_operand(ctx, future, &mut statements)?;
+                    let result = lower_place(ctx, place, &mut statements)?;
+                    return Ok(BasicBlock {
+                        id,
+                        statements,
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Await {
+                                future,
+                                result: Some(result),
                                 resume,
                                 cleanup: None,
                             },

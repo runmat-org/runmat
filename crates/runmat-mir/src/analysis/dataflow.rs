@@ -132,8 +132,16 @@ fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<In
         }
     }
 
-    if let MirTerminatorKind::For { binding, .. } = block.terminator.kind {
-        state[binding.0] = InitFact::DefinitelyAssigned;
+    match &block.terminator.kind {
+        MirTerminatorKind::For { binding, .. } => {
+            state[binding.0] = InitFact::DefinitelyAssigned;
+        }
+        MirTerminatorKind::Await { result, .. } => {
+            if let Some(place) = result {
+                mark_place_assigned(place, &mut state);
+            }
+        }
+        _ => {}
     }
     state
 }
@@ -179,8 +187,12 @@ fn diagnose_block(
                 diagnose_operand_read(output, state, block.terminator.span, diagnostics);
             }
         }
-        MirTerminatorKind::Await { future, .. } => {
+        MirTerminatorKind::Await { future, result, .. } => {
             diagnose_operand_read(future, state, block.terminator.span, diagnostics);
+            if let Some(place) = result {
+                diagnose_place_reads(place, state, block.terminator.span, diagnostics);
+                mark_place_assigned(place, state);
+            }
         }
         MirTerminatorKind::Goto(_)
         | MirTerminatorKind::TryCatch { .. }

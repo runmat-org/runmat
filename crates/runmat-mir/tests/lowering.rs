@@ -178,6 +178,29 @@ fn await_terminator_marks_summary_as_requiring_async_runtime() {
 }
 
 #[test]
+fn await_assignment_lowers_to_result_place() {
+    let mir = lower_mir("async function y = f(g); y = await(g); end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let MirTerminatorKind::Await { result, resume, .. } = &body.blocks[0].terminator.kind else {
+        panic!("expected await terminator");
+    };
+    assert!(matches!(result, Some(MirPlace::Local(_))));
+    assert_eq!(*resume, body.blocks[1].id);
+}
+
+#[test]
+fn dataflow_marks_await_assignment_output_definitely_assigned() {
+    let (body, store) = analyze_single_body("async function y = f(g); y = await(g); end");
+    let output = first_local_of_kind(&body, MirLocalKind::Output);
+
+    assert_eq!(
+        store.mir_locals.get(&output).unwrap().initialized,
+        InitFact::DefinitelyAssigned
+    );
+}
+
+#[test]
 fn global_statement_lowers_to_workspace_effect() {
     let mir = lower_mir("function y = f(); global g; y = 1; end");
     let body = mir.bodies.values().next().unwrap();
