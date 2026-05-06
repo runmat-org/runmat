@@ -1,9 +1,10 @@
 use crate::{
-    MirCall, MirConstant, MirIndexing, MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind,
+    MirCall, MirConstant, MirIndexComponent, MirIndexing, MirOperand, MirPlace, MirRvalue, MirStmt,
+    MirStmtKind,
 };
 use runmat_hir::{
-    CommandArgument, HirCommandCall, HirExpr, HirExprKind, RequestedOutputCount, SemanticError,
-    StringLiteral,
+    CommandArgument, HirCommandCall, HirExpr, HirExprKind, IndexComponent, IndexingSemantics,
+    RequestedOutputCount, SemanticError, StringLiteral,
 };
 
 use super::MirLoweringContext;
@@ -55,11 +56,7 @@ pub(crate) fn lower_expr(
         HirExprKind::CommandCall(call) => lower_command_call(call),
         HirExprKind::Index(base, indexing) => MirRvalue::Index {
             base: lower_operand(ctx, base, temps)?,
-            indexing: MirIndexing {
-                kind: indexing.kind.clone(),
-                components: indexing.components.clone(),
-                result_context: indexing.result_context.clone(),
-            },
+            indexing: lower_indexing(ctx, indexing, temps)?,
         },
         HirExprKind::Spawn(inner) => MirRvalue::Spawn(lower_operand(ctx, inner, temps)?),
         HirExprKind::FunctionHandle(target) => {
@@ -70,6 +67,40 @@ pub(crate) fn lower_expr(
             return Err(SemanticError::new(
                 "MIR lowering for expression is not implemented yet",
             ))
+        }
+    })
+}
+
+pub(crate) fn lower_indexing(
+    ctx: &MirLoweringContext,
+    indexing: &IndexingSemantics,
+    temps: &mut Vec<MirStmt>,
+) -> Result<MirIndexing, SemanticError> {
+    Ok(MirIndexing {
+        kind: indexing.kind.clone(),
+        components: indexing
+            .components
+            .iter()
+            .map(|component| lower_index_component(ctx, component, temps))
+            .collect::<Result<_, _>>()?,
+        result_context: indexing.result_context.clone(),
+    })
+}
+
+fn lower_index_component(
+    ctx: &MirLoweringContext,
+    component: &IndexComponent,
+    temps: &mut Vec<MirStmt>,
+) -> Result<MirIndexComponent, SemanticError> {
+    Ok(match component {
+        IndexComponent::Colon => MirIndexComponent::Colon,
+        IndexComponent::End { dim, offset } => MirIndexComponent::End {
+            dim: *dim,
+            offset: *offset,
+        },
+        IndexComponent::Expr(expr) => MirIndexComponent::Expr(lower_operand(ctx, expr, temps)?),
+        IndexComponent::Logical(expr) => {
+            MirIndexComponent::Logical(lower_operand(ctx, expr, temps)?)
         }
     })
 }

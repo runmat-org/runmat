@@ -1,6 +1,7 @@
 use crate::{
-    BasicBlock, BasicBlockId, MirBody, MirDiagnostic, MirDiagnosticSeverity, MirLocalId,
-    MirLocalKind, MirOperand, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
+    BasicBlock, BasicBlockId, MirBody, MirDiagnostic, MirDiagnosticSeverity, MirIndexComponent,
+    MirIndexing, MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue, MirStmtKind,
+    MirTerminatorKind,
 };
 use runmat_hir::{ShapeFact, Span, TypeFact, ValueFlowFact};
 use std::collections::{HashMap, VecDeque};
@@ -146,12 +147,14 @@ fn diagnose_block(
         match &stmt.kind {
             MirStmtKind::Assign { place, value } => {
                 diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
+                diagnose_place_reads(place, state, stmt.span, diagnostics);
                 mark_place_assigned(place, state);
             }
             MirStmtKind::MultiAssign { targets, value } => {
                 diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
                 for target in &targets.targets {
                     if let crate::MirOutputTarget::Place(place) = target {
+                        diagnose_place_reads(place, state, stmt.span, diagnostics);
                         mark_place_assigned(place, state);
                     }
                 }
@@ -216,8 +219,43 @@ fn diagnose_rvalue_reads(
                 diagnose_operand_read(element, state, span, diagnostics);
             }
         }
-        MirRvalue::Index { base, .. } => diagnose_operand_read(base, state, span, diagnostics),
+        MirRvalue::Index { base, indexing } => {
+            diagnose_operand_read(base, state, span, diagnostics);
+            diagnose_indexing_reads(indexing, state, span, diagnostics);
+        }
         MirRvalue::Future(_) => {}
+    }
+}
+
+fn diagnose_place_reads(
+    place: &MirPlace,
+    state: &[InitFact],
+    span: Span,
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    match place {
+        MirPlace::Local(_) | MirPlace::Binding(_) => {}
+        MirPlace::Member(base, _) => diagnose_place_reads(base, state, span, diagnostics),
+        MirPlace::Index(base, indexing) => {
+            diagnose_place_reads(base, state, span, diagnostics);
+            diagnose_indexing_reads(indexing, state, span, diagnostics);
+        }
+    }
+}
+
+fn diagnose_indexing_reads(
+    indexing: &MirIndexing,
+    state: &[InitFact],
+    span: Span,
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
+    for component in &indexing.components {
+        match component {
+            MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
+                diagnose_operand_read(operand, state, span, diagnostics);
+            }
+            MirIndexComponent::Colon | MirIndexComponent::End { .. } => {}
+        }
     }
 }
 

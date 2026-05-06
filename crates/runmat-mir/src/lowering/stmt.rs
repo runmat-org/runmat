@@ -11,11 +11,9 @@ pub(crate) fn lower_stmt(
         HirStmtKind::Assign(place, expr, _) => {
             let mut stmts = Vec::new();
             let value = lower_expr(ctx, expr, &mut stmts)?;
+            let place = lower_place(ctx, place, &mut stmts)?;
             stmts.push(MirStmt {
-                kind: MirStmtKind::Assign {
-                    place: lower_place(ctx, place)?,
-                    value,
-                },
+                kind: MirStmtKind::Assign { place, value },
                 span: stmt.span,
             });
             stmts
@@ -81,7 +79,16 @@ fn lower_output_target(
     target: &OutputTarget,
 ) -> Result<MirOutputTarget, SemanticError> {
     Ok(match target {
-        OutputTarget::Place(place) => MirOutputTarget::Place(lower_place(ctx, place)?),
+        OutputTarget::Place(place) => {
+            let mut temps = Vec::new();
+            let place = lower_place(ctx, place, &mut temps)?;
+            if !temps.is_empty() {
+                return Err(SemanticError::new(
+                    "MIR temporaries in output targets are not supported yet",
+                ));
+            }
+            MirOutputTarget::Place(place)
+        }
         OutputTarget::Discard => MirOutputTarget::Discard,
         OutputTarget::VarargoutExpansion => MirOutputTarget::VarargoutExpansion,
     })

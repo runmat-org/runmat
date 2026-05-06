@@ -1,6 +1,6 @@
 use crate::{
-    AsyncBehaviorFact, MirBody, MirLocal, MirLocalId, MirLocalKind, MirOperand, MirPlace,
-    MirRvalue, MirStmtKind, MirTerminatorKind,
+    AsyncBehaviorFact, MirBody, MirIndexComponent, MirIndexing, MirLocal, MirLocalId, MirLocalKind,
+    MirOperand, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
 };
 use runmat_hir::{BindingId, FunctionId, RequestedOutputCount, SpawnSafetyFact, TypeFact};
 use serde::{Deserialize, Serialize};
@@ -131,7 +131,10 @@ fn scan_rvalue(
                 scan_operand(body, element, reads_captures);
             }
         }
-        MirRvalue::Index { base, .. } => scan_operand(body, base, reads_captures),
+        MirRvalue::Index { base, indexing } => {
+            scan_operand(body, base, reads_captures);
+            scan_indexing(body, indexing, reads_captures);
+        }
         MirRvalue::Future(_) => {}
         MirRvalue::Spawn(future) => {
             *async_behavior = AsyncBehaviorFact::RequiresAsyncRuntime;
@@ -143,6 +146,17 @@ fn scan_rvalue(
 fn scan_place_write(body: &MirBody, place: &MirPlace, writes_captures: &mut BTreeSet<BindingId>) {
     if let Some(local) = place_root(place) {
         scan_local_write(body, local, writes_captures);
+    }
+}
+
+fn scan_indexing(body: &MirBody, indexing: &MirIndexing, reads_captures: &mut BTreeSet<BindingId>) {
+    for component in &indexing.components {
+        match component {
+            MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
+                scan_operand(body, operand, reads_captures);
+            }
+            MirIndexComponent::Colon | MirIndexComponent::End { .. } => {}
+        }
     }
 }
 

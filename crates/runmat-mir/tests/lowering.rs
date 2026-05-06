@@ -317,6 +317,36 @@ fn indexed_assignment_lowers_to_index_place() {
 }
 
 #[test]
+fn index_components_lower_to_mir_operands() {
+    let mir = lower_mir("function y = read_index(a, i); y = a(i + 1); end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(body
+        .locals
+        .iter()
+        .any(|local| matches!(local.kind, MirLocalKind::Temporary)));
+    assert!(matches!(
+        body.blocks[0].statements[1].kind,
+        MirStmtKind::Assign {
+            value: MirRvalue::Index { .. },
+            ..
+        }
+    ));
+}
+
+#[test]
+fn diagnostics_report_unassigned_index_operand_read() {
+    let mir = lower_mir("function y = read_index(a); y = a(y); end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let diagnostics = diagnose_uninitialized_reads(body);
+
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-MIR0001"));
+}
+
+#[test]
 fn member_assignment_lowers_to_member_place() {
     let mir = lower_mir("function s = write_member(s); s.value = 2; end");
     let body = mir.bodies.values().next().unwrap();
