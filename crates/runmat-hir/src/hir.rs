@@ -998,6 +998,7 @@ pub struct LegacyHirProgram {
 
 #[derive(Debug, Clone)]
 pub struct LoweringResult {
+    pub assembly: HirAssembly,
     pub hir: LegacyHirProgram,
     pub variables: HashMap<String, usize>,
     pub functions: HashMap<String, LegacyHirStmt>,
