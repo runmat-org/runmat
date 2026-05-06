@@ -8,7 +8,7 @@ use std::collections::{HashMap, VecDeque};
 
 use super::{
     analyze_liveness, analyze_spawn_boundaries, summarize_body, AnalysisStore, InitFact,
-    MirLocalFact,
+    MirLocalFact, MirLocalKey,
 };
 
 #[derive(Debug, Clone)]
@@ -22,7 +22,10 @@ pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
 
     for local in &body.locals {
         store.mir_locals.insert(
-            local.id,
+            MirLocalKey {
+                function: body.function,
+                local: local.id,
+            },
             MirLocalFact {
                 ty: TypeFact::Unknown,
                 shape: ShapeFact::Unknown,

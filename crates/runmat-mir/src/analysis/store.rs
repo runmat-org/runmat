@@ -1,8 +1,8 @@
 use runmat_hir::{BindingId, ExprId, FunctionId, TypeFact};
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 
-use crate::MirDiagnostic;
+use crate::{MirDiagnostic, MirLocalId};
 
 use super::{FunctionSummary, LivenessFacts, MirLocalFact};
 
@@ -10,11 +10,44 @@ use super::{FunctionSummary, LivenessFacts, MirLocalFact};
 pub struct AnalysisStore {
     pub bindings: HashMap<BindingId, BindingFact>,
     pub expressions: HashMap<ExprId, ExprFact>,
-    pub mir_locals: HashMap<crate::MirLocalId, MirLocalFact>,
+    pub mir_locals: HashMap<MirLocalKey, MirLocalFact>,
     pub functions: HashMap<FunctionId, FunctionSummary>,
     pub liveness: HashMap<FunctionId, LivenessFacts>,
     pub spawn_boundaries: HashMap<FunctionId, Vec<crate::SpawnBoundary>>,
     pub diagnostics: Vec<MirDiagnostic>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MirLocalKey {
+    pub function: FunctionId,
+    pub local: MirLocalId,
+}
+
+impl Serialize for MirLocalKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("{}:{}", self.function.0, self.local.0))
+    }
+}
+
+impl<'de> Deserialize<'de> for MirLocalKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        let Some((function, local)) = value.split_once(':') else {
+            return Err(de::Error::custom(
+                "expected MIR local key as function:local",
+            ));
+        };
+        Ok(Self {
+            function: FunctionId(function.parse().map_err(de::Error::custom)?),
+            local: MirLocalId(local.parse().map_err(de::Error::custom)?),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

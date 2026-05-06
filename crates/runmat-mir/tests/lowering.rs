@@ -3,7 +3,7 @@ use runmat_mir::{
     analysis::{
         analyze_assembly, analyze_body, analyze_liveness, analyze_spawn_boundaries,
         diagnose_uninitialized_reads, summarize_body, summarize_spawn_safety, AnalysisStore,
-        InitFact,
+        InitFact, MirLocalKey,
     },
     lowering::lower_assembly,
     AsyncBehaviorFact, MirAggregateKind, MirBody, MirLocalKind, MirOperand, MirOutputTarget,
@@ -61,11 +61,25 @@ fn dataflow_marks_parameters_and_assigned_outputs_definitely_assigned() {
     let output = first_local_of_kind(&body, MirLocalKind::Output);
 
     assert_eq!(
-        store.mir_locals.get(&param).unwrap().initialized,
+        store
+            .mir_locals
+            .get(&MirLocalKey {
+                function: body.function,
+                local: param,
+            })
+            .unwrap()
+            .initialized,
         InitFact::DefinitelyAssigned
     );
     assert_eq!(
-        store.mir_locals.get(&output).unwrap().initialized,
+        store
+            .mir_locals
+            .get(&MirLocalKey {
+                function: body.function,
+                local: output,
+            })
+            .unwrap()
+            .initialized,
         InitFact::DefinitelyAssigned
     );
 }
@@ -76,7 +90,14 @@ fn dataflow_joins_branch_assignment_as_maybe_assigned() {
     let output = first_local_of_kind(&body, MirLocalKind::Output);
 
     assert_eq!(
-        store.mir_locals.get(&output).unwrap().initialized,
+        store
+            .mir_locals
+            .get(&MirLocalKey {
+                function: body.function,
+                local: output,
+            })
+            .unwrap()
+            .initialized,
         InitFact::MaybeAssigned
     );
 }
@@ -87,7 +108,14 @@ fn dataflow_widens_loop_assignment_as_maybe_assigned() {
     let output = first_local_of_kind(&body, MirLocalKind::Output);
 
     assert_eq!(
-        store.mir_locals.get(&output).unwrap().initialized,
+        store
+            .mir_locals
+            .get(&MirLocalKey {
+                function: body.function,
+                local: output,
+            })
+            .unwrap()
+            .initialized,
         InitFact::MaybeAssigned
     );
 }
@@ -201,6 +229,24 @@ fn analyze_assembly_populates_store_products_by_function() {
 }
 
 #[test]
+fn analyze_assembly_scopes_mir_local_facts_by_function() {
+    let mir = lower_mir("function y = f(x); y = x; end\nfunction z = g(a); z = a; end");
+
+    let store = analyze_assembly(&mir);
+    let expected_locals: usize = mir.bodies.values().map(|body| body.locals.len()).sum();
+
+    assert_eq!(store.mir_locals.len(), expected_locals);
+    for body in mir.bodies.values() {
+        for local in &body.locals {
+            assert!(store.mir_locals.contains_key(&MirLocalKey {
+                function: body.function,
+                local: local.id,
+            }));
+        }
+    }
+}
+
+#[test]
 fn analyze_assembly_collects_structured_diagnostics() {
     let mir = lower_mir("function y = f(c); if c; y = 1; end; z = y; end");
 
@@ -272,7 +318,14 @@ fn dataflow_marks_await_assignment_output_definitely_assigned() {
     let output = first_local_of_kind(&body, MirLocalKind::Output);
 
     assert_eq!(
-        store.mir_locals.get(&output).unwrap().initialized,
+        store
+            .mir_locals
+            .get(&MirLocalKey {
+                function: body.function,
+                local: output,
+            })
+            .unwrap()
+            .initialized,
         InitFact::DefinitelyAssigned
     );
 }
