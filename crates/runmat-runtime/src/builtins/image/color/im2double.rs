@@ -10,6 +10,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 use crate::builtins::image::color::common;
 use crate::builtins::image::color::type_resolvers::same_shape_type;
+use crate::builtins::introspection::class::class_name_for_value;
 use crate::BuiltinResult;
 
 const NAME: &str = "im2double";
@@ -75,7 +76,7 @@ async fn im2double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Valu
             NAME,
             format!(
                 "im2double: unsupported input type {}",
-                common::value_type_name(&other)
+                class_name_for_value(&other)
             ),
         )),
     }

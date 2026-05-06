@@ -176,30 +176,6 @@ pub(crate) fn image_output_dtype(input: NumericDType) -> NumericDType {
     }
 }
 
-pub(crate) fn value_type_name(value: &Value) -> String {
-    match value {
-        Value::Int(i) => i.class_name().to_string(),
-        Value::Num(_) => "double".to_string(),
-        Value::Complex(_, _) => "complex double".to_string(),
-        Value::Bool(_) => "logical".to_string(),
-        Value::LogicalArray(_) => "logical".to_string(),
-        Value::String(_) | Value::StringArray(_) => "string".to_string(),
-        Value::CharArray(_) => "char".to_string(),
-        Value::Tensor(t) => t.dtype.class_name().to_string(),
-        Value::ComplexTensor(_) => "complex double".to_string(),
-        Value::Cell(_) => "cell".to_string(),
-        Value::Struct(_) => "struct".to_string(),
-        Value::GpuTensor(_) => "gpuArray".to_string(),
-        Value::Object(obj) => obj.class_name.clone(),
-        Value::HandleObject(handle) => handle.class_name.clone(),
-        Value::Listener(_) => "event.listener".to_string(),
-        Value::OutputList(_) => "OutputList".to_string(),
-        Value::FunctionHandle(_) | Value::Closure(_) => "function_handle".to_string(),
-        Value::ClassRef(_) => "meta.class".to_string(),
-        Value::MException(_) => "MException".to_string(),
-    }
-}
-
 pub(crate) fn same_shape_type(args: &[Type]) -> Type {
     match args.first() {
         Some(Type::Tensor { shape }) | Some(Type::Logical { shape }) => Type::Tensor {
