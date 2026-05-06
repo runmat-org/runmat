@@ -2,6 +2,8 @@ use runmat_hir::{BindingId, ExprId, FunctionId, TypeFact};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::MirDiagnostic;
+
 use super::{FunctionSummary, LivenessFacts, MirLocalFact};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -12,6 +14,8 @@ pub struct AnalysisStore {
     pub functions: HashMap<FunctionId, FunctionSummary>,
     pub liveness: HashMap<FunctionId, LivenessFacts>,
     pub spawn_boundaries: HashMap<FunctionId, Vec<crate::SpawnBoundary>>,
+    #[serde(skip)]
+    pub diagnostics: Vec<MirDiagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

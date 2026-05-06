@@ -42,6 +42,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
         store
             .spawn_boundaries
             .insert(body.function, analyze_spawn_boundaries(body));
+        store.diagnostics.extend(diagnose_uninitialized_reads(body));
     }
     store
 }

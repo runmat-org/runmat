@@ -201,6 +201,19 @@ fn analyze_assembly_populates_store_products_by_function() {
 }
 
 #[test]
+fn analyze_assembly_collects_structured_diagnostics() {
+    let mir = lower_mir("function y = f(c); if c; y = 1; end; z = y; end");
+
+    let store = analyze_assembly(&mir);
+
+    assert!(store
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-MIR0002"
+            && diagnostic.category == Some("definite-assignment")));
+}
+
+#[test]
 fn await_statement_lowers_to_await_terminator_with_resume_block() {
     let mir = lower_mir("async function y = f(g); await(g); y = 1; end");
     let body = mir.bodies.values().next().unwrap();
