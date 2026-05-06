@@ -139,6 +139,23 @@ fn if_statement_lowers_to_branch_blocks_and_merge() {
 }
 
 #[test]
+fn if_statement_flows_to_following_statements() {
+    let mir = lower_mir("function y = choose(c); if c; y = 1; else; y = 2; end; y = y + 1; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert_eq!(body.blocks.len(), 4);
+    assert_eq!(body.blocks[3].statements.len(), 1);
+    assert!(matches!(
+        body.blocks[3].statements[0].kind,
+        MirStmtKind::Assign { .. }
+    ));
+    assert!(matches!(
+        body.blocks[3].terminator.kind,
+        MirTerminatorKind::Return(_)
+    ));
+}
+
+#[test]
 fn while_loop_lowers_to_branch_body_backedge_and_exit() {
     let mir = lower_mir("function y = spin(c, x); while c; y = x; end; end");
     let body = mir.bodies.values().next().unwrap();
@@ -157,6 +174,22 @@ fn while_loop_lowers_to_branch_body_backedge_and_exit() {
         MirTerminatorKind::Return(_)
     ));
     assert_eq!(body.source_map.statements.len(), 2);
+}
+
+#[test]
+fn while_loop_exit_flows_to_following_statements() {
+    let mir = lower_mir("function y = after_loop(c); while c; y = 1; end; y = y + 1; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let MirTerminatorKind::Branch { else_block, .. } = body.blocks[0].terminator.kind else {
+        panic!("expected while branch");
+    };
+    assert_eq!(else_block, body.blocks[2].id);
+    assert_eq!(body.blocks[2].statements.len(), 1);
+    assert!(matches!(
+        body.blocks[2].terminator.kind,
+        MirTerminatorKind::Return(_)
+    ));
 }
 
 #[test]
@@ -204,6 +237,20 @@ fn try_catch_lowers_to_try_catch_blocks_and_merge() {
         MirTerminatorKind::Return(_)
     ));
     assert_eq!(body.source_map.statements.len(), 3);
+}
+
+#[test]
+fn try_catch_flows_to_following_statements() {
+    let mir =
+        lower_mir("function y = guarded(x); try; y = x; catch err; y = 0; end; y = y + 1; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert_eq!(body.blocks.len(), 4);
+    assert_eq!(body.blocks[3].statements.len(), 1);
+    assert!(matches!(
+        body.blocks[3].terminator.kind,
+        MirTerminatorKind::Return(_)
+    ));
 }
 
 #[test]

@@ -32,10 +32,11 @@ impl ControlFlowBuilder {
         return_terminator: MirTerminator,
     ) -> Result<(Vec<BasicBlock>, Vec<MirSourceRecord>), SemanticError> {
         let entry = self.fresh_block();
-        let entry = self.lower_block(
+        let entry = self.lower_block_from(
             ctx,
             entry,
             body,
+            0,
             return_terminator.clone(),
             &return_terminator,
             None,
@@ -45,17 +46,18 @@ impl ControlFlowBuilder {
         Ok((self.blocks, self.source_records))
     }
 
-    fn lower_block(
+    fn lower_block_from(
         &mut self,
         ctx: &MirLoweringContext,
         id: BasicBlockId,
         body: &HirBlock,
+        start: usize,
         final_terminator: MirTerminator,
         return_terminator: &MirTerminator,
         loop_targets: Option<(BasicBlockId, BasicBlockId)>,
     ) -> Result<BasicBlock, SemanticError> {
         let mut statements = Vec::new();
-        for stmt in &body.statements {
+        for (idx, stmt) in body.statements.iter().enumerate().skip(start) {
             self.source_records.push(MirSourceRecord {
                 block: id,
                 stmt: Some(stmt.id),
@@ -76,35 +78,39 @@ impl ControlFlowBuilder {
                 }
                 let then_id = self.fresh_block();
                 let else_id = self.fresh_block();
-                let merge_id = self.fresh_block();
+                let merge_id = self.lower_continuation_target(
+                    ctx,
+                    body,
+                    idx + 1,
+                    final_terminator,
+                    return_terminator,
+                    loop_targets,
+                )?;
                 let merge_terminator = MirTerminator {
                     kind: MirTerminatorKind::Goto(merge_id),
                     span: stmt.span,
                 };
-                let then_block = self.lower_block(
+                let then_block = self.lower_block_from(
                     ctx,
                     then_id,
                     then_body,
+                    0,
                     merge_terminator.clone(),
                     return_terminator,
                     loop_targets,
                 )?;
                 let empty_else = HirBlock { statements: vec![] };
-                let else_block = self.lower_block(
+                let else_block = self.lower_block_from(
                     ctx,
                     else_id,
                     else_body.as_ref().unwrap_or(&empty_else),
+                    0,
                     merge_terminator,
                     return_terminator,
                     loop_targets,
                 )?;
                 self.blocks.push(then_block);
                 self.blocks.push(else_block);
-                self.blocks.push(BasicBlock {
-                    id: merge_id,
-                    statements: Vec::new(),
-                    terminator: final_terminator,
-                });
                 return Ok(BasicBlock {
                     id,
                     statements,
@@ -118,13 +124,25 @@ impl ControlFlowBuilder {
                     },
                 });
             }
-            if let HirStmtKind::While { cond, body } = &stmt.kind {
+            if let HirStmtKind::While {
+                cond,
+                body: loop_body,
+            } = &stmt.kind
+            {
                 let loop_body_id = self.fresh_block();
-                let exit_id = self.fresh_block();
-                let body_block = self.lower_block(
+                let exit_id = self.lower_continuation_target(
+                    ctx,
+                    body,
+                    idx + 1,
+                    final_terminator,
+                    return_terminator,
+                    loop_targets,
+                )?;
+                let body_block = self.lower_block_from(
                     ctx,
                     loop_body_id,
-                    body,
+                    loop_body,
+                    0,
                     MirTerminator {
                         kind: MirTerminatorKind::Goto(id),
                         span: stmt.span,
@@ -133,11 +151,6 @@ impl ControlFlowBuilder {
                     Some((id, exit_id)),
                 )?;
                 self.blocks.push(body_block);
-                self.blocks.push(BasicBlock {
-                    id: exit_id,
-                    statements: Vec::new(),
-                    terminator: final_terminator,
-                });
                 return Ok(BasicBlock {
                     id,
                     statements,
@@ -159,11 +172,19 @@ impl ControlFlowBuilder {
             } = &stmt.kind
             {
                 let body_id = self.fresh_block();
-                let exit_id = self.fresh_block();
-                let body_block = self.lower_block(
+                let exit_id = self.lower_continuation_target(
+                    ctx,
+                    body,
+                    idx + 1,
+                    final_terminator,
+                    return_terminator,
+                    loop_targets,
+                )?;
+                let body_block = self.lower_block_from(
                     ctx,
                     body_id,
                     body,
+                    0,
                     MirTerminator {
                         kind: MirTerminatorKind::Goto(id),
                         span: stmt.span,
@@ -172,11 +193,6 @@ impl ControlFlowBuilder {
                     Some((id, exit_id)),
                 )?;
                 self.blocks.push(body_block);
-                self.blocks.push(BasicBlock {
-                    id: exit_id,
-                    statements: Vec::new(),
-                    terminator: final_terminator,
-                });
                 return Ok(BasicBlock {
                     id,
                     statements,
@@ -200,34 +216,38 @@ impl ControlFlowBuilder {
             {
                 let try_id = self.fresh_block();
                 let catch_id = self.fresh_block();
-                let merge_id = self.fresh_block();
+                let merge_id = self.lower_continuation_target(
+                    ctx,
+                    body,
+                    idx + 1,
+                    final_terminator,
+                    return_terminator,
+                    loop_targets,
+                )?;
                 let merge_terminator = MirTerminator {
                     kind: MirTerminatorKind::Goto(merge_id),
                     span: stmt.span,
                 };
-                let try_block = self.lower_block(
+                let try_block = self.lower_block_from(
                     ctx,
                     try_id,
                     try_body,
+                    0,
                     merge_terminator.clone(),
                     return_terminator,
                     loop_targets,
                 )?;
-                let catch_block = self.lower_block(
+                let catch_block = self.lower_block_from(
                     ctx,
                     catch_id,
                     catch_body,
+                    0,
                     merge_terminator,
                     return_terminator,
                     loop_targets,
                 )?;
                 self.blocks.push(try_block);
                 self.blocks.push(catch_block);
-                self.blocks.push(BasicBlock {
-                    id: merge_id,
-                    statements: Vec::new(),
-                    terminator: final_terminator,
-                });
                 return Ok(BasicBlock {
                     id,
                     statements,
@@ -283,5 +303,28 @@ impl ControlFlowBuilder {
             statements,
             terminator: final_terminator,
         })
+    }
+
+    fn lower_continuation_target(
+        &mut self,
+        ctx: &MirLoweringContext,
+        body: &HirBlock,
+        start: usize,
+        final_terminator: MirTerminator,
+        return_terminator: &MirTerminator,
+        loop_targets: Option<(BasicBlockId, BasicBlockId)>,
+    ) -> Result<BasicBlockId, SemanticError> {
+        let id = self.fresh_block();
+        let block = self.lower_block_from(
+            ctx,
+            id,
+            body,
+            start,
+            final_terminator,
+            return_terminator,
+            loop_targets,
+        )?;
+        self.blocks.push(block);
+        Ok(id)
     }
 }
