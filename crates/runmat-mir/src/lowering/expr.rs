@@ -1,6 +1,6 @@
 use crate::{
-    MirCall, MirConstant, MirIndexComponent, MirIndexing, MirOperand, MirPlace, MirRvalue, MirStmt,
-    MirStmtKind,
+    MirAggregateKind, MirCall, MirConstant, MirIndexComponent, MirIndexing, MirOperand, MirPlace,
+    MirRvalue, MirStmt, MirStmtKind,
 };
 use runmat_hir::{
     CommandArgument, HirCommandCall, HirExpr, HirExprKind, IndexComponent, IndexingSemantics,
@@ -43,6 +43,14 @@ pub(crate) fn lower_expr(
                 .transpose()?,
             end: lower_operand(ctx, end, temps)?,
         },
+        HirExprKind::Tensor(rows) => MirRvalue::Aggregate {
+            kind: MirAggregateKind::Tensor,
+            elements: lower_aggregate_elements(ctx, rows, temps)?,
+        },
+        HirExprKind::Cell(rows) => MirRvalue::Aggregate {
+            kind: MirAggregateKind::Cell,
+            elements: lower_aggregate_elements(ctx, rows, temps)?,
+        },
         HirExprKind::Call(call) => MirRvalue::Call(MirCall {
             callee: call.callee.clone(),
             args: call
@@ -69,6 +77,17 @@ pub(crate) fn lower_expr(
             ))
         }
     })
+}
+
+fn lower_aggregate_elements(
+    ctx: &MirLoweringContext,
+    rows: &[Vec<HirExpr>],
+    temps: &mut Vec<MirStmt>,
+) -> Result<Vec<MirOperand>, SemanticError> {
+    rows.iter()
+        .flat_map(|row| row.iter())
+        .map(|element| lower_operand(ctx, element, temps))
+        .collect()
 }
 
 pub(crate) fn lower_indexing(

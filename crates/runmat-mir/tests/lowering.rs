@@ -4,8 +4,8 @@ use runmat_mir::{
         analyze_body, diagnose_uninitialized_reads, summarize_body, AnalysisStore, InitFact,
     },
     lowering::lower_assembly,
-    AsyncBehaviorFact, MirBody, MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue,
-    MirStmtKind, MirTerminatorKind,
+    AsyncBehaviorFact, MirAggregateKind, MirBody, MirLocalKind, MirOperand, MirOutputTarget,
+    MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
 };
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
@@ -224,6 +224,44 @@ fn command_call_lowers_to_zero_output_call_with_string_args() {
     assert!(matches!(
         call.args[0],
         MirOperand::Constant(runmat_mir::MirConstant::String(ref value)) if value.0 == "long"
+    ));
+}
+
+#[test]
+fn tensor_literal_lowers_to_mir_aggregate() {
+    let mir = lower_mir("function y = make_tensor(x); y = [x, x + 1]; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(body
+        .locals
+        .iter()
+        .any(|local| matches!(local.kind, MirLocalKind::Temporary)));
+    assert!(matches!(
+        body.blocks[0].statements[1].kind,
+        MirStmtKind::Assign {
+            value: MirRvalue::Aggregate {
+                kind: MirAggregateKind::Tensor,
+                ref elements,
+            },
+            ..
+        } if elements.len() == 2
+    ));
+}
+
+#[test]
+fn cell_literal_lowers_to_mir_aggregate() {
+    let mir = lower_mir("function y = make_cell(x); y = {x, x + 1}; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(matches!(
+        body.blocks[0].statements[1].kind,
+        MirStmtKind::Assign {
+            value: MirRvalue::Aggregate {
+                kind: MirAggregateKind::Cell,
+                ref elements,
+            },
+            ..
+        } if elements.len() == 2
     ));
 }
 

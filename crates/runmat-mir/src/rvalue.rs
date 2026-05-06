@@ -1,5 +1,5 @@
 use crate::{MirCall, MirIndexing, MirOperand};
-use runmat_hir::{AggregateKind, FunctionId, OperatorKind};
+use runmat_hir::{ClassId, FunctionId, OperatorKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -14,7 +14,7 @@ pub enum MirRvalue {
     },
     Call(MirCall),
     Aggregate {
-        kind: AggregateKind,
+        kind: MirAggregateKind,
         elements: Vec<MirOperand>,
     },
     Index {
@@ -23,4 +23,12 @@ pub enum MirRvalue {
     },
     Future(FunctionId),
     Spawn(MirOperand),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MirAggregateKind {
+    Tensor,
+    Cell,
+    Struct,
+    ObjectArray(ClassId),
 }
