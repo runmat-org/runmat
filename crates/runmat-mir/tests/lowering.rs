@@ -524,7 +524,9 @@ fn analyze_assembly_collects_structured_diagnostics() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-MIR0002"
-            && diagnostic.category.as_deref() == Some("definite-assignment")));
+            && diagnostic.category.as_deref() == Some("definite-assignment")
+            && diagnostic.help.as_deref()
+                == Some("assign this local on every control-flow path before reading it")));
 }
 
 #[test]

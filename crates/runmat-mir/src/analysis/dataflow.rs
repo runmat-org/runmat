@@ -581,8 +581,14 @@ fn init_diagnostic(
     label: &'static str,
     span: Span,
 ) -> MirDiagnostic {
+    let help = match code {
+        "RM-MIR0001" => "assign this local before reading it",
+        "RM-MIR0002" => "assign this local on every control-flow path before reading it",
+        _ => "ensure the local is initialized before use",
+    };
     MirDiagnostic::new(code, MirDiagnosticSeverity::Error, message, span)
         .with_primary_label(label)
+        .with_help(help)
         .with_category("definite-assignment")
 }
 
