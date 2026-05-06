@@ -1,5 +1,5 @@
 use crate::{BasicBlock, BasicBlockId, MirSourceRecord, MirTerminator, MirTerminatorKind};
-use runmat_hir::{HirBlock, HirStmtKind, SemanticError};
+use runmat_hir::{HirBlock, HirExprKind, HirStmtKind, SemanticError};
 
 use super::{
     expr::{lower_expr, lower_operand},
@@ -288,6 +288,31 @@ impl ControlFlowBuilder {
                         span: stmt.span,
                     },
                 });
+            }
+            if let HirStmtKind::ExprStmt(expr, _) = &stmt.kind {
+                if let HirExprKind::Await(future) = &expr.kind {
+                    let resume = self.lower_continuation_target(
+                        ctx,
+                        body,
+                        idx + 1,
+                        final_terminator,
+                        return_terminator,
+                        loop_targets,
+                    )?;
+                    let future = lower_operand(ctx, future, &mut statements)?;
+                    return Ok(BasicBlock {
+                        id,
+                        statements,
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Await {
+                                future,
+                                resume,
+                                cleanup: None,
+                            },
+                            span: stmt.span,
+                        },
+                    });
+                }
             }
             if matches!(stmt.kind, HirStmtKind::Return) {
                 return Ok(BasicBlock {

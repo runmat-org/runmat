@@ -148,6 +148,36 @@ fn summary_marks_spawn_as_requiring_async_runtime() {
 }
 
 #[test]
+fn await_statement_lowers_to_await_terminator_with_resume_block() {
+    let mir = lower_mir("async function y = f(g); await(g); y = 1; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let MirTerminatorKind::Await { resume, .. } = body.blocks[0].terminator.kind else {
+        panic!("expected await terminator");
+    };
+    assert_eq!(resume, body.blocks[1].id);
+    assert_eq!(body.blocks[1].statements.len(), 1);
+    assert!(matches!(
+        body.blocks[1].terminator.kind,
+        MirTerminatorKind::Return(_)
+    ));
+}
+
+#[test]
+fn await_terminator_marks_summary_as_requiring_async_runtime() {
+    let mir = lower_mir("async function y = f(g); await(g); y = 1; end");
+    let body = mir.bodies.values().next().unwrap();
+    let mut store = AnalysisStore::default();
+
+    let summary = summarize_body(body, &mut store);
+
+    assert_eq!(
+        summary.effects.async_behavior,
+        Some(AsyncBehaviorFact::RequiresAsyncRuntime)
+    );
+}
+
+#[test]
 fn global_statement_lowers_to_workspace_effect() {
     let mir = lower_mir("function y = f(); global g; y = 1; end");
     let body = mir.bodies.values().next().unwrap();
