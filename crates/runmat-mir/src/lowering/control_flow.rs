@@ -1,16 +1,139 @@
-use crate::BasicBlockId;
+use crate::{BasicBlock, BasicBlockId, MirSourceRecord, MirTerminator, MirTerminatorKind};
+use runmat_hir::{HirBlock, HirStmtKind, SemanticError};
+
+use super::{expr::lower_operand, stmt::lower_stmt, MirLoweringContext};
 
 #[derive(Debug, Default)]
-#[allow(dead_code)]
 pub(crate) struct ControlFlowBuilder {
     next_block: usize,
+    blocks: Vec<BasicBlock>,
+    source_records: Vec<MirSourceRecord>,
 }
 
 impl ControlFlowBuilder {
-    #[allow(dead_code)]
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
     pub(crate) fn fresh_block(&mut self) -> BasicBlockId {
         let id = BasicBlockId(self.next_block);
         self.next_block += 1;
         id
+    }
+
+    pub(crate) fn lower_function_body(
+        mut self,
+        ctx: &MirLoweringContext,
+        body: &HirBlock,
+        return_terminator: MirTerminator,
+    ) -> Result<(Vec<BasicBlock>, Vec<MirSourceRecord>), SemanticError> {
+        let entry = self.fresh_block();
+        let entry = self.lower_block(ctx, entry, body, return_terminator)?;
+        self.blocks.push(entry);
+        self.blocks.sort_by_key(|block| block.id.0);
+        Ok((self.blocks, self.source_records))
+    }
+
+    fn lower_block(
+        &mut self,
+        ctx: &MirLoweringContext,
+        id: BasicBlockId,
+        body: &HirBlock,
+        final_terminator: MirTerminator,
+    ) -> Result<BasicBlock, SemanticError> {
+        let mut statements = Vec::new();
+        for stmt in &body.statements {
+            self.source_records.push(MirSourceRecord {
+                block: id,
+                stmt: Some(stmt.id),
+                expr: None,
+                span: stmt.span,
+            });
+            if let HirStmtKind::If {
+                cond,
+                then_body,
+                elseif_blocks,
+                else_body,
+            } = &stmt.kind
+            {
+                if !elseif_blocks.is_empty() {
+                    return Err(SemanticError::new(
+                        "MIR lowering for elseif is not implemented yet",
+                    ));
+                }
+                let then_id = self.fresh_block();
+                let else_id = self.fresh_block();
+                let merge_id = self.fresh_block();
+                let merge_terminator = MirTerminator {
+                    kind: MirTerminatorKind::Goto(merge_id),
+                    span: stmt.span,
+                };
+                let then_block =
+                    self.lower_block(ctx, then_id, then_body, merge_terminator.clone())?;
+                let empty_else = HirBlock { statements: vec![] };
+                let else_block = self.lower_block(
+                    ctx,
+                    else_id,
+                    else_body.as_ref().unwrap_or(&empty_else),
+                    merge_terminator,
+                )?;
+                self.blocks.push(then_block);
+                self.blocks.push(else_block);
+                self.blocks.push(BasicBlock {
+                    id: merge_id,
+                    statements: Vec::new(),
+                    terminator: final_terminator,
+                });
+                return Ok(BasicBlock {
+                    id,
+                    statements,
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::Branch {
+                            cond: lower_operand(ctx, cond)?,
+                            then_block: then_id,
+                            else_block: else_id,
+                        },
+                        span: stmt.span,
+                    },
+                });
+            }
+            if let HirStmtKind::While { cond, body } = &stmt.kind {
+                let loop_body_id = self.fresh_block();
+                let exit_id = self.fresh_block();
+                let body_block = self.lower_block(
+                    ctx,
+                    loop_body_id,
+                    body,
+                    MirTerminator {
+                        kind: MirTerminatorKind::Goto(id),
+                        span: stmt.span,
+                    },
+                )?;
+                self.blocks.push(body_block);
+                self.blocks.push(BasicBlock {
+                    id: exit_id,
+                    statements: Vec::new(),
+                    terminator: final_terminator,
+                });
+                return Ok(BasicBlock {
+                    id,
+                    statements,
+                    terminator: MirTerminator {
+                        kind: MirTerminatorKind::Branch {
+                            cond: lower_operand(ctx, cond)?,
+                            then_block: loop_body_id,
+                            else_block: exit_id,
+                        },
+                        span: stmt.span,
+                    },
+                });
+            }
+            statements.extend(lower_stmt(ctx, stmt)?);
+        }
+        Ok(BasicBlock {
+            id,
+            statements,
+            terminator: final_terminator,
+        })
     }
 }

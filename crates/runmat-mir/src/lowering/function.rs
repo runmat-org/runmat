@@ -1,10 +1,7 @@
-use crate::{
-    BasicBlock, BasicBlockId, MirAssembly, MirBody, MirOperand, MirSourceMap, MirSourceRecord,
-    MirTerminator, MirTerminatorKind,
-};
+use crate::{MirAssembly, MirBody, MirOperand, MirSourceMap, MirTerminator, MirTerminatorKind};
 use runmat_hir::{HirAssembly, HirFunction, SemanticError};
 
-use super::{expr::lower_operand, stmt::lower_stmt, MirLoweringContext};
+use super::{control_flow::ControlFlowBuilder, expr::lower_operand, MirLoweringContext};
 
 pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, SemanticError> {
     let mut assembly = MirAssembly::default();
@@ -19,18 +16,6 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, SemanticError> {
 pub fn lower_function(function: &HirFunction) -> Result<MirBody, SemanticError> {
     let mut ctx = MirLoweringContext::new();
     let (locals, local_sources) = ctx.locals_for_function(function);
-    let entry = BasicBlockId(0);
-    let mut statements = Vec::new();
-    let mut source_records = Vec::new();
-    for stmt in &function.body.statements {
-        source_records.push(MirSourceRecord {
-            block: entry,
-            stmt: Some(stmt.id),
-            expr: None,
-            span: stmt.span,
-        });
-        statements.extend(lower_stmt(&ctx, stmt)?);
-    }
     let returns: Vec<MirOperand> = function
         .outputs
         .iter()
@@ -43,20 +28,19 @@ pub fn lower_function(function: &HirFunction) -> Result<MirBody, SemanticError> 
             lower_operand(&ctx, &expr)
         })
         .collect::<Result<_, _>>()?;
+    let return_terminator = MirTerminator {
+        kind: MirTerminatorKind::Return(returns),
+        span: function.span,
+    };
+    let (blocks, statement_sources) =
+        ControlFlowBuilder::new().lower_function_body(&ctx, &function.body, return_terminator)?;
     Ok(MirBody {
         function: function.id,
         locals,
-        blocks: vec![BasicBlock {
-            id: entry,
-            statements,
-            terminator: MirTerminator {
-                kind: MirTerminatorKind::Return(returns),
-                span: function.span,
-            },
-        }],
+        blocks,
         source_map: MirSourceMap {
             function: Some(function.id),
-            statements: source_records,
+            statements: statement_sources,
             locals: local_sources,
         },
     })
