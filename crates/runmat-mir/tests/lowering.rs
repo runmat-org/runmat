@@ -568,6 +568,40 @@ fn if_statement_flows_to_following_statements() {
 }
 
 #[test]
+fn elseif_statement_lowers_to_nested_branch_cfg() {
+    let mir = lower_mir(
+        "function y = choose(c, d); if c; y = 1; elseif d; y = 2; else; y = 3; end; y = y + 1; end",
+    );
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(matches!(
+        body.blocks[0].terminator.kind,
+        MirTerminatorKind::Branch { .. }
+    ));
+    assert!(
+        body.blocks
+            .iter()
+            .filter(|block| matches!(block.terminator.kind, MirTerminatorKind::Branch { .. }))
+            .count()
+            >= 2
+    );
+    assert!(body.blocks.iter().any(|block| block.statements.len() == 1
+        && matches!(block.terminator.kind, MirTerminatorKind::Return(_))));
+}
+
+#[test]
+fn diagnostics_report_maybe_assigned_local_read_after_elseif_without_else() {
+    let mir = lower_mir("function y = choose(c, d); if c; y = 1; elseif d; y = 2; end; z = y; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let diagnostics = diagnose_uninitialized_reads(body);
+
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-MIR0002"));
+}
+
+#[test]
 fn switch_statement_lowers_to_switch_blocks_and_continuation() {
     let mir = lower_mir(
         "function y = choose(x); switch x; case 1; y = 1; otherwise; y = 2; end; y = y + 1; end",

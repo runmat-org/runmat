@@ -1,5 +1,7 @@
 use crate::{BasicBlock, BasicBlockId, MirSourceRecord, MirTerminator, MirTerminatorKind};
-use runmat_hir::{HirBlock, HirExprKind, HirStmtKind, SemanticError};
+use runmat_hir::{
+    HirBlock, HirExpr, HirExprKind, HirStmt, HirStmtKind, SemanticError, Span, StmtId,
+};
 
 use super::{
     expr::{lower_expr, lower_operand},
@@ -72,11 +74,6 @@ impl ControlFlowBuilder {
                 else_body,
             } = &stmt.kind
             {
-                if !elseif_blocks.is_empty() {
-                    return Err(SemanticError::new(
-                        "MIR lowering for elseif is not implemented yet",
-                    ));
-                }
                 let then_id = self.fresh_block();
                 let else_id = self.fresh_block();
                 let merge_id = self.lower_continuation_target(
@@ -100,11 +97,14 @@ impl ControlFlowBuilder {
                     return_terminator,
                     loop_targets,
                 )?;
+                let nested_elseif_else =
+                    lower_elseif_blocks(elseif_blocks, else_body.as_ref(), stmt.id, stmt.span);
                 let empty_else = HirBlock { statements: vec![] };
+                let else_body = nested_elseif_else.as_ref().or(else_body.as_ref());
                 let else_block = self.lower_block_from(
                     ctx,
                     else_id,
-                    else_body.as_ref().unwrap_or(&empty_else),
+                    else_body.unwrap_or(&empty_else),
                     0,
                     merge_terminator,
                     return_terminator,
@@ -443,4 +443,27 @@ impl ControlFlowBuilder {
         self.blocks.push(block);
         Ok(id)
     }
+}
+
+fn lower_elseif_blocks(
+    elseif_blocks: &[(HirExpr, HirBlock)],
+    else_body: Option<&HirBlock>,
+    stmt_id: StmtId,
+    span: Span,
+) -> Option<HirBlock> {
+    let ((cond, then_body), rest) = elseif_blocks.split_first()?;
+    let nested_else =
+        lower_elseif_blocks(rest, else_body, stmt_id, span).or_else(|| else_body.cloned());
+    Some(HirBlock {
+        statements: vec![HirStmt {
+            id: stmt_id,
+            kind: HirStmtKind::If {
+                cond: cond.clone(),
+                then_body: then_body.clone(),
+                elseif_blocks: Vec::new(),
+                else_body: nested_else,
+            },
+            span,
+        }],
+    })
 }
