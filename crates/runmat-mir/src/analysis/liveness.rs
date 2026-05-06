@@ -64,7 +64,9 @@ fn collect_reachable_reads(
                     }
                 }
                 MirStmtKind::Expr(value) => collect_rvalue_reads(value, live),
-                MirStmtKind::PlaceMutation(_) | MirStmtKind::WorkspaceEffect { .. } => {}
+                MirStmtKind::PlaceMutation(_)
+                | MirStmtKind::WorkspaceEffect { .. }
+                | MirStmtKind::EnvironmentEffect(_) => {}
             }
         }
         collect_terminator_reads(&block.terminator.kind, live);
@@ -139,6 +141,10 @@ fn collect_place_reads(place: &MirPlace, live: &mut HashSet<MirLocalId>) {
     match place {
         MirPlace::Local(_) | MirPlace::Binding(_) => {}
         MirPlace::Member(base, _) => collect_place_reads(base, live),
+        MirPlace::DynamicMember(base, member) => {
+            collect_place_reads(base, live);
+            collect_operand_read(member, live);
+        }
         MirPlace::Index(base, indexing) => {
             collect_place_reads(base, live);
             collect_indexing_reads(indexing, live);

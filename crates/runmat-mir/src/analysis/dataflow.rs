@@ -8,7 +8,7 @@ use std::collections::{HashMap, VecDeque};
 
 use super::{
     analyze_liveness, analyze_spawn_boundaries, summarize_body, AnalysisStore, BindingFact,
-    InitFact, MirLocalFact, MirLocalKey,
+    ExprFact, InitFact, MirLocalFact, MirLocalKey,
 };
 
 #[derive(Debug, Clone)]
@@ -19,6 +19,14 @@ struct InitDataflowResult {
 
 pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
     let result = compute_init_dataflow(body);
+
+    for record in &body.source_map.statements {
+        if let Some(expr) = record.expr {
+            store.expressions.entry(expr).or_insert(ExprFact {
+                ty: TypeFact::Unknown,
+            });
+        }
+    }
 
     for local in &body.locals {
         let initialized = result.final_state[local.id.0];
@@ -170,7 +178,8 @@ fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<In
             }
             MirStmtKind::Expr(_)
             | MirStmtKind::PlaceMutation(_)
-            | MirStmtKind::WorkspaceEffect { .. } => {}
+            | MirStmtKind::WorkspaceEffect { .. }
+            | MirStmtKind::EnvironmentEffect(_) => {}
         }
     }
 
@@ -210,7 +219,9 @@ fn diagnose_block(
                 }
             }
             MirStmtKind::Expr(value) => diagnose_rvalue_reads(value, state, stmt.span, diagnostics),
-            MirStmtKind::PlaceMutation(_) | MirStmtKind::WorkspaceEffect { .. } => {}
+            MirStmtKind::PlaceMutation(_)
+            | MirStmtKind::WorkspaceEffect { .. }
+            | MirStmtKind::EnvironmentEffect(_) => {}
         }
     }
 
@@ -296,6 +307,10 @@ fn diagnose_place_reads(
     match place {
         MirPlace::Local(_) | MirPlace::Binding(_) => {}
         MirPlace::Member(base, _) => diagnose_place_reads(base, state, span, diagnostics),
+        MirPlace::DynamicMember(base, member) => {
+            diagnose_place_reads(base, state, span, diagnostics);
+            diagnose_operand_read(member, state, span, diagnostics);
+        }
         MirPlace::Index(base, indexing) => {
             diagnose_place_reads(base, state, span, diagnostics);
             diagnose_indexing_reads(indexing, state, span, diagnostics);
@@ -365,7 +380,9 @@ fn mark_place_assigned(place: &MirPlace, state: &mut [InitFact]) {
 fn place_root(place: &MirPlace) -> Option<MirLocalId> {
     match place {
         MirPlace::Local(local) => Some(*local),
-        MirPlace::Member(base, _) | MirPlace::Index(base, _) => place_root(base),
+        MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) | MirPlace::Index(base, _) => {
+            place_root(base)
+        }
         MirPlace::Binding(_) => None,
     }
 }

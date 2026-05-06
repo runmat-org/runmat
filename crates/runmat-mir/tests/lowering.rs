@@ -1,4 +1,4 @@
-use runmat_hir::{lower, HirCallableRef, LoweringContext};
+use runmat_hir::{lower, EnvironmentEffect, HirCallableRef, LoweringContext};
 use runmat_mir::{
     analysis::{
         analyze_assembly, analyze_body, analyze_liveness, analyze_spawn_boundaries,
@@ -6,8 +6,9 @@ use runmat_mir::{
         InitFact, MirLocalKey,
     },
     lowering::lower_assembly,
-    AsyncBehaviorFact, MirAggregateKind, MirBody, MirCallArg, MirLocalKind, MirOperand,
-    MirOutputTarget, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
+    AsyncBehaviorFact, CacheProduct, MirAggregateKind, MirBody, MirCallArg, MirLocalKind,
+    MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
+    ProductCacheKey,
 };
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
@@ -144,6 +145,20 @@ fn analyze_assembly_populates_binding_facts_by_semantic_id() {
 }
 
 #[test]
+fn analyze_body_populates_expression_facts_from_source_map() {
+    let (body, store) = analyze_single_body("function y = f(x); y = x + 1; end");
+    let expr = body
+        .source_map
+        .statements
+        .iter()
+        .find_map(|record| record.expr)
+        .unwrap();
+
+    assert!(store.expressions.contains_key(&expr));
+    assert_eq!(store.expressions[&expr].ty, runmat_hir::TypeFact::Unknown);
+}
+
+#[test]
 fn dataflow_widens_loop_assignment_as_maybe_assigned() {
     let (body, store) = analyze_single_body("function y = f(c); while c; y = 1; end; end");
     let output = first_local_of_kind(&body, MirLocalKind::Output);
@@ -220,6 +235,23 @@ fn summary_preserves_variadic_function_abi() {
     assert_eq!(summary.abi.varargin, Some(summary.abi.fixed_inputs[1]));
     assert_eq!(summary.abi.fixed_outputs.len(), 1);
     assert_eq!(summary.abi.varargout, Some(summary.abi.fixed_outputs[0]));
+}
+
+#[test]
+fn summary_records_requested_output_sensitive_call_facts() {
+    let mir = lower_mir("function y = f(varargin); [a, b] = g(varargin{:}); y = a; end");
+    let body = mir.bodies.values().next().unwrap();
+    let mut store = AnalysisStore::default();
+
+    let summary = summarize_body(body, &mut store);
+
+    assert_eq!(summary.calls.len(), 1);
+    assert!(matches!(
+        summary.calls[0].requested_outputs,
+        runmat_hir::RequestedOutputCount::Exactly(2)
+    ));
+    assert_eq!(summary.calls[0].arg_count, 1);
+    assert_eq!(summary.calls[0].expansion_arg_count, 1);
 }
 
 #[test]
@@ -330,6 +362,25 @@ fn analysis_store_diagnostics_serialize_with_store() {
 }
 
 #[test]
+fn product_cache_key_serializes_semantic_product_dependencies() {
+    let key = ProductCacheKey {
+        product: CacheProduct::FunctionSummary(runmat_hir::FunctionId(7)),
+        source_hash: "source".into(),
+        manifest_hash: "manifest".into(),
+        dependency_graph_hash: "deps".into(),
+        config_hash: "config".into(),
+        compiler_version: "compiler".into(),
+    };
+
+    let json = serde_json::to_string(&key).unwrap();
+    let roundtrip: ProductCacheKey = serde_json::from_str(&json).unwrap();
+
+    assert_eq!(roundtrip, key);
+    assert!(json.contains("FunctionSummary"));
+    assert!(json.contains("dependency_graph_hash"));
+}
+
+#[test]
 fn await_statement_lowers_to_await_terminator_with_resume_block() {
     let mir = lower_mir("async function y = f(g); await(g); y = 1; end");
     let body = mir.bodies.values().next().unwrap();
@@ -434,6 +485,28 @@ fn persistent_statement_lowers_to_summary_workspace_effect() {
         .effects
         .workspace
         .contains(&runmat_hir::WorkspaceEffect::MutatesPersistent));
+}
+
+#[test]
+fn summary_records_explicit_environment_effects() {
+    let mir = lower_mir("function y = f(x); y = x; end");
+    let mut body = mir.bodies.values().next().unwrap().clone();
+    let span = body.blocks[0].statements[0].span;
+    body.blocks[0].statements.insert(
+        0,
+        MirStmt {
+            kind: MirStmtKind::EnvironmentEffect(EnvironmentEffect::FunctionCacheInvalidation),
+            span,
+        },
+    );
+    let mut store = AnalysisStore::default();
+
+    let summary = summarize_body(&body, &mut store);
+
+    assert_eq!(
+        summary.effects.environment,
+        vec![EnvironmentEffect::FunctionCacheInvalidation]
+    );
 }
 
 #[test]
@@ -716,6 +789,20 @@ fn member_assignment_lowers_to_member_place() {
         body.blocks[0].statements[1].kind,
         MirStmtKind::Assign {
             place: MirPlace::Member(_, _),
+            ..
+        }
+    ));
+}
+
+#[test]
+fn dynamic_member_assignment_lowers_to_dynamic_member_place() {
+    let mir = lower_mir("function s = write_member(s, name); s.(name) = 2; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(matches!(
+        body.blocks[0].statements[1].kind,
+        MirStmtKind::Assign {
+            place: MirPlace::DynamicMember(_, MirOperand::Local(_)),
             ..
         }
     ));

@@ -1,7 +1,10 @@
 use crate::{MirPlace, MirStmt};
 use runmat_hir::{HirExpr, HirExprKind, HirPlace, SemanticError};
 
-use super::{expr::lower_indexing, MirLoweringContext};
+use super::{
+    expr::{lower_indexing, lower_operand},
+    MirLoweringContext,
+};
 
 pub(crate) fn lower_place(
     ctx: &MirLoweringContext,
@@ -14,15 +17,14 @@ pub(crate) fn lower_place(
             Box::new(lower_expr_place(ctx, base, temps)?),
             member.clone(),
         ),
+        HirPlace::MemberDynamic(base, member) => MirPlace::DynamicMember(
+            Box::new(lower_expr_place(ctx, base, temps)?),
+            lower_operand(ctx, member, temps)?,
+        ),
         HirPlace::Index(base, indexing) | HirPlace::IndexCell(base, indexing) => MirPlace::Index(
             Box::new(lower_expr_place(ctx, base, temps)?),
             lower_indexing(ctx, indexing, temps)?,
         ),
-        _ => {
-            return Err(SemanticError::new(
-                "MIR lowering for place is not implemented yet",
-            ))
-        }
     })
 }
 
@@ -36,6 +38,10 @@ fn lower_expr_place(
         HirExprKind::Member(base, member) => MirPlace::Member(
             Box::new(lower_expr_place(ctx, base, temps)?),
             member.clone(),
+        ),
+        HirExprKind::MemberDynamic(base, member) => MirPlace::DynamicMember(
+            Box::new(lower_expr_place(ctx, base, temps)?),
+            lower_operand(ctx, member, temps)?,
         ),
         HirExprKind::Index(base, indexing) => MirPlace::Index(
             Box::new(lower_expr_place(ctx, base, temps)?),

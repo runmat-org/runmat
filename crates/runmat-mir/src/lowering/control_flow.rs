@@ -1,6 +1,6 @@
 use crate::{BasicBlock, BasicBlockId, MirSourceRecord, MirTerminator, MirTerminatorKind};
 use runmat_hir::{
-    HirBlock, HirExpr, HirExprKind, HirStmt, HirStmtKind, SemanticError, Span, StmtId,
+    ExprId, HirBlock, HirExpr, HirExprKind, HirStmt, HirStmtKind, SemanticError, Span, StmtId,
 };
 
 use super::{
@@ -64,7 +64,7 @@ impl ControlFlowBuilder {
             self.source_records.push(MirSourceRecord {
                 block: id,
                 stmt: Some(stmt.id),
-                expr: None,
+                expr: stmt_expr_id(stmt),
                 span: stmt.span,
             });
             if let HirStmtKind::If {
@@ -465,5 +465,23 @@ fn lower_elseif_blocks(
             },
             span,
         }],
+    })
+}
+
+fn stmt_expr_id(stmt: &HirStmt) -> Option<ExprId> {
+    Some(match &stmt.kind {
+        HirStmtKind::ExprStmt(expr, _)
+        | HirStmtKind::Assign(_, expr, _)
+        | HirStmtKind::MultiAssign(_, expr, _) => expr.id,
+        HirStmtKind::If { cond, .. } | HirStmtKind::While { cond, .. } => cond.id,
+        HirStmtKind::For { range, .. } => range.id,
+        HirStmtKind::Switch { expr, .. } => expr.id,
+        HirStmtKind::TryCatch { .. }
+        | HirStmtKind::Global(_)
+        | HirStmtKind::Persistent(_)
+        | HirStmtKind::Break
+        | HirStmtKind::Continue
+        | HirStmtKind::Return
+        | HirStmtKind::Import(_) => return None,
     })
 }

@@ -1,8 +1,10 @@
 use crate::{
-    AsyncBehaviorFact, MirBody, MirIndexComponent, MirIndexing, MirLocal, MirLocalId, MirLocalKind,
-    MirOperand, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
+    AsyncBehaviorFact, MirBody, MirCall, MirCallArg, MirIndexComponent, MirIndexing, MirLocal,
+    MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
 };
-use runmat_hir::{BindingId, FunctionId, RequestedOutputCount, SpawnSafetyFact, TypeFact};
+use runmat_hir::{
+    BindingId, FunctionId, HirCallableRef, RequestedOutputCount, SpawnSafetyFact, TypeFact,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -19,10 +21,19 @@ pub struct FunctionSummary {
     pub effects: EffectSummary,
     pub reads_captures: BTreeSet<BindingId>,
     pub writes_captures: BTreeSet<BindingId>,
+    pub calls: Vec<CallSummary>,
     pub spawn_safety: SpawnSafetyFact,
     pub fusibility: FusibilityFact,
     pub parallel_safety: ParallelSafetyFact,
     pub accel_eligibility: AccelEligibilityFact,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CallSummary {
+    pub callee: HirCallableRef,
+    pub requested_outputs: RequestedOutputCount,
+    pub arg_count: usize,
+    pub expansion_arg_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -39,18 +50,32 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
     let mut output_count = 0;
     let mut async_behavior = AsyncBehaviorFact::NeverSuspends;
     let mut workspace = Vec::new();
+    let mut environment = Vec::new();
     let mut reads_captures = BTreeSet::new();
     let mut writes_captures = BTreeSet::new();
+    let mut calls = Vec::new();
 
     for block in &body.blocks {
         for stmt in &block.statements {
             match &stmt.kind {
                 MirStmtKind::Assign { place, value } => {
-                    scan_rvalue(body, value, &mut reads_captures, &mut async_behavior);
+                    scan_rvalue(
+                        body,
+                        value,
+                        &mut reads_captures,
+                        &mut async_behavior,
+                        &mut calls,
+                    );
                     scan_place_write(body, place, &mut writes_captures);
                 }
                 MirStmtKind::MultiAssign { targets, value } => {
-                    scan_rvalue(body, value, &mut reads_captures, &mut async_behavior);
+                    scan_rvalue(
+                        body,
+                        value,
+                        &mut reads_captures,
+                        &mut async_behavior,
+                        &mut calls,
+                    );
                     for target in &targets.targets {
                         if let crate::MirOutputTarget::Place(place) = target {
                             scan_place_write(body, place, &mut writes_captures);
@@ -58,10 +83,17 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
                     }
                 }
                 MirStmtKind::Expr(value) => {
-                    scan_rvalue(body, value, &mut reads_captures, &mut async_behavior);
+                    scan_rvalue(
+                        body,
+                        value,
+                        &mut reads_captures,
+                        &mut async_behavior,
+                        &mut calls,
+                    );
                 }
                 MirStmtKind::PlaceMutation(_) => {}
                 MirStmtKind::WorkspaceEffect { effect, .. } => workspace.push(effect.clone()),
+                MirStmtKind::EnvironmentEffect(effect) => environment.push(effect.clone()),
             }
         }
 
@@ -78,7 +110,13 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
             MirTerminatorKind::For {
                 binding, iterable, ..
             } => {
-                scan_rvalue(body, iterable, &mut reads_captures, &mut async_behavior);
+                scan_rvalue(
+                    body,
+                    iterable,
+                    &mut reads_captures,
+                    &mut async_behavior,
+                    &mut calls,
+                );
                 scan_local_write(body, *binding, &mut writes_captures);
             }
             MirTerminatorKind::Return(outputs) => {
@@ -111,11 +149,12 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
         requested_output_sensitive: Vec::new(),
         effects: EffectSummary {
             workspace,
-            environment: Vec::new(),
+            environment,
             async_behavior: Some(async_behavior),
         },
         reads_captures,
         writes_captures,
+        calls,
         spawn_safety: SpawnSafetyFact::RequiresIsolation,
         fusibility: FusibilityFact::Unknown,
         parallel_safety: ParallelSafetyFact::Unknown,
@@ -130,6 +169,7 @@ fn scan_rvalue(
     value: &MirRvalue,
     reads_captures: &mut BTreeSet<BindingId>,
     async_behavior: &mut AsyncBehaviorFact,
+    calls: &mut Vec<CallSummary>,
 ) {
     match value {
         MirRvalue::Use(operand) | MirRvalue::Unary(_, operand) => {
@@ -147,6 +187,7 @@ fn scan_rvalue(
             scan_operand(body, end, reads_captures);
         }
         MirRvalue::Call(call) => {
+            calls.push(call_summary(call));
             for arg in &call.args {
                 scan_operand(body, arg.operand(), reads_captures);
             }
@@ -165,6 +206,19 @@ fn scan_rvalue(
             *async_behavior = AsyncBehaviorFact::RequiresAsyncRuntime;
             scan_operand(body, future, reads_captures);
         }
+    }
+}
+
+fn call_summary(call: &MirCall) -> CallSummary {
+    CallSummary {
+        callee: call.callee.clone(),
+        requested_outputs: call.requested_outputs.clone(),
+        arg_count: call.args.len(),
+        expansion_arg_count: call
+            .args
+            .iter()
+            .filter(|arg| matches!(arg, MirCallArg::Expansion(_)))
+            .count(),
     }
 }
 
@@ -188,7 +242,9 @@ fn scan_indexing(body: &MirBody, indexing: &MirIndexing, reads_captures: &mut BT
 fn place_root(place: &MirPlace) -> Option<MirLocalId> {
     match place {
         MirPlace::Local(local) => Some(*local),
-        MirPlace::Member(base, _) | MirPlace::Index(base, _) => place_root(base),
+        MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) | MirPlace::Index(base, _) => {
+            place_root(base)
+        }
         MirPlace::Binding(_) => None,
     }
 }

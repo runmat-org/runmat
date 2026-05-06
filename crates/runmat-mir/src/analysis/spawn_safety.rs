@@ -18,7 +18,9 @@ pub fn analyze_spawn_boundaries(body: &MirBody) -> Vec<SpawnBoundary> {
                 | MirStmtKind::Expr(value) => {
                     collect_spawn_rvalue(value, stmt.span, &mut boundaries)
                 }
-                MirStmtKind::PlaceMutation(_) | MirStmtKind::WorkspaceEffect { .. } => {}
+                MirStmtKind::PlaceMutation(_)
+                | MirStmtKind::WorkspaceEffect { .. }
+                | MirStmtKind::EnvironmentEffect(_) => {}
             }
         }
     }

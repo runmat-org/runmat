@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 pub struct ProductCacheKey {
     pub product: CacheProduct,
     pub source_hash: String,
+    pub manifest_hash: String,
+    pub dependency_graph_hash: String,
+    pub config_hash: String,
     pub compiler_version: String,
 }
 
