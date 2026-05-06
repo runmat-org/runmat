@@ -1,5 +1,8 @@
 use super::ctx::Ctx;
-use crate::{HirClassMember, HirLValue, HirStmt, SemanticError, VarId};
+use crate::{
+    LegacyHirClassMember as HirClassMember, LegacyHirLValue as HirLValue, LegacyHirStmt as HirStmt,
+    SemanticError, VarId,
+};
 use runmat_parser::{self as parser, Stmt as AstStmt};
 
 impl Ctx {

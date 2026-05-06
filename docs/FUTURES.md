@@ -89,23 +89,38 @@ This is not MATLAB-compatible; it’s fine. It does not break MATLAB parsing bec
 Desugaring:
 
 * `async function f(args) body end`
-* becomes: `function f(args) f = async @() do body end; end`
-  (or returns a Task directly if you want `f(args)` to be a Task—see below).
+* becomes a function whose call produces a lazy future state machine for `body`.
+* The function body does not run until that future is awaited or spawned.
 
 ### 2.3 Return types and calling conventions
 
-Two viable models:
+Target model:
 
-**Model A: async functions return Task**
+* `async function y = f(...)` means calling `f(...)` yields a lazy future resolving to `y`.
+* `await(f(...))` polls that future and returns the value.
+* `spawn(f(...))` schedules that future for concurrent execution and returns a task handle.
+* Async functions are not implicitly awaited in synchronous contexts.
 
-* `async function y = f(...)` means calling `f(...)` yields a Task resolving to `y`.
-* `await(f(...))` returns the value.
+This maps cleanly to Rust and avoids JavaScript-style eager promise execution.
 
-**Model B: async functions are “implicitly awaited” in sync contexts**
+Direct await does not require spawning:
 
-* Avoid. It’s magic, and it complicates determinism and tooling.
+```matlab
+result = await(fetch_and_process(url));
+```
 
-**Recommendation: Model A**. It’s explicit and maps cleanly to Rust.
+This polls the future in the current execution context. It may suspend, but it does not create concurrent access to another task.
+
+Spawn is only for concurrency:
+
+```matlab
+t1 = spawn(fetch_and_process(url1));
+t2 = spawn(fetch_and_process(url2));
+a = await(t1);
+b = await(t2);
+```
+
+Futures passed to `spawn` must be spawn-safe. Mutable lexical captures from the spawning frame are rejected unless wrapped in an explicit synchronized/runtime-managed object.
 
 #### Builtins are language-synchronous
 
@@ -115,22 +130,22 @@ signatures/return types:
 - `webread(url)` returns the downloaded value (sequential semantics).
 - When executed under the futures-based engine, the evaluator may internally suspend while the
   request completes, but the *language* remains sequential.
-- Users opt into concurrency via tasks (`async`/`spawn`) and `await`, not by choosing different
+- Users opt into concurrency via futures, `spawn`, and `await`, not by choosing different
   builtin names.
 
 ### 2.4 Core library async utilities (v1 set)
 
-Provide builtins returning Tasks:
+Provide utilities around futures and task handles:
 
-* `sleep_ms(ms) -> Task<void>`
-* `read_text_async(path) -> Task<string>`
-* `write_text_async(path, s) -> Task<void>`
-* `spawn(block) -> Task<T>` (alias of `async` or wrapper)
-* `join(tasks...) -> Task<tuple>` (fan-in)
-* `race(tasks...) -> Task<first>` (optional)
-* `with_timeout_ms(ms, task) -> Task<T>`
+* `sleep_ms(ms) -> Future<void>`
+* `read_text_async(path) -> Future<string>`
+* `write_text_async(path, s) -> Future<void>`
+* `spawn(future) -> Task<T>`
+* `join(awaitables...) -> Future<tuple>` (fan-in)
+* `race(awaitables...) -> Future<first>` (optional)
+* `with_timeout_ms(ms, awaitable) -> Future<T>`
 * `cancellation_token() -> [cancel_fn, token]`
-* `with_cancel(token, task) -> Task<T>`
+* `with_cancel(token, awaitable) -> Future<T>`
 
 These allow real use without forcing users into raw polling loops.
 
@@ -252,15 +267,16 @@ Add:
 
 * `AsyncBlock { body, captures }`
 * `Await { expr }`
-* `Spawn { closure }` (if you keep `async` and `spawn` distinct)
+* `Spawn { future }`
 * Optional: `Join`, `Race`, `Timeout` as library calls (not IR nodes)
 
 ### 5.2 Bytecode opcodes
 
 Minimum set:
 
-* `ASYNC_CREATE <closure>` → pushes `TaskHandle` (task scheduled but not necessarily run yet)
-* `AWAIT` → pops `TaskHandle` or awaitable Value, and:
+* `FUTURE_CREATE <closure/body>` → pushes a lazy future without running user code
+* `SPAWN` → pops a future, schedules it, and pushes a `TaskHandle`
+* `AWAIT` → pops a future, `TaskHandle`, or awaitable Value, and:
 
   * if ready: pushes resolved Value
   * if pending: saves current frame state and returns Pending from the interpreter future
@@ -272,15 +288,16 @@ Also helpful:
 
 ### 5.3 Awaitable protocol
 
-Not everything is a TaskHandle. Users may get “awaitables” from builtins. Define a protocol:
+Not everything is a TaskHandle. Users may get futures from async functions or native awaitables from runtime services. Define a protocol:
 
 * `await(x)` checks:
 
-  1. if `x` is `TaskHandle`, poll that task
-  2. else if `x` is a runtime “native future wrapper” (Value::NativeFuture), poll it
-  3. else error: “not awaitable”
+  1. if `x` is a language future, poll that future in the current task/frame
+  2. else if `x` is `TaskHandle`, poll or join that task
+  3. else if `x` is a runtime “native future wrapper” (Value::NativeFuture), poll it
+  4. else error: “not awaitable”
 
-This allows returning “native future” from builtins without spawning a separate task object, if desired.
+This allows returning “native future” from runtime services without spawning a separate task object, if desired. Ordinary MATLAB-compatible builtins should usually remain language-synchronous and return ordinary values.
 
 ---
 
@@ -370,22 +387,43 @@ Under the hood:
 
 Encourage patterns that avoid “fire and forget” leaks:
 
-* `async` creates a task
-* tasks are values; if user discards them, they still run (maybe) — that’s dangerous
+* async functions and async blocks create lazy futures
+* discarding an unpolled future means the user code never ran
+* `spawn(...)` is required for detached/concurrent execution
+* spawned tasks are values with explicit lifetime/cancellation behavior
 
-Options:
+Target decision:
 
-* require `spawn(...)` for detached tasks; `async` alone creates a “lazy task” that runs only when awaited
-* or keep eager semantics but warn in lint/tooling
-
-**Recommendation**: make tasks **lazy-by-default**:
-
-* `async @() do ... end` creates a suspended task that starts on first `await` or `spawn`
-* `spawn(task)` schedules it immediately and returns a handle
+* `async ...` creates a suspended future that starts on first `await` or `spawn`
+* `spawn(future)` schedules it immediately and returns a handle
+* `spawn(future)` requires a spawn-safe future
+* mutable lexical captures from the spawning frame are rejected unless represented by an explicit synchronized/runtime-managed handle
+* spawned tasks cannot hold raw references into another task's stack/frame or unrooted GC storage
 
 This mirrors some structured concurrency designs and reduces accidental background tasks.
 
-### 8.3 Timeout
+### 8.3 Spawn safety and shared mutation
+
+Direct await is sequential async:
+
+```matlab
+await(bump());
+```
+
+If `bump` captures and mutates a parent binding, this is still one execution context. It may suspend, but it is not concurrent by itself.
+
+Spawned execution is different:
+
+```matlab
+t1 = spawn(bump());
+t2 = spawn(bump());
+```
+
+If `bump` mutates a captured parent binding, this must be rejected. Otherwise the result would depend on interleaving and could also violate VM frame/GC ownership assumptions.
+
+Intentional shared mutable state should go through explicit synchronized/runtime-managed objects. Provider/GPU handles need metadata that says whether they are immutable-shareable, copy-on-write, synchronized, or not spawn-safe.
+
+### 8.4 Timeout
 
 `with_timeout_ms(ms, task)`:
 
@@ -462,9 +500,9 @@ Notebook cells can naturally be async:
 
 ### Phase 1: async runtime + opcodes
 
-* Add `Value::Task`
-* Add `ASYNC_CREATE`, `AWAIT` opcodes
-* Add `async @() do ... end` and `await(expr)` parsing + HIR nodes
+* Add `Value::Future` and `Value::Task`
+* Add `FUTURE_CREATE`, `SPAWN`, `AWAIT` opcodes
+* Add async function/block, `await(expr)`, and `spawn(expr)` parsing + HIR nodes
 * Implement interpreter as a future state machine (poll loop that can return Pending)
 
 ### Phase 2: async builtins
@@ -490,9 +528,9 @@ Notebook cells can naturally be async:
 
 ## 13) Key design decisions to lock down early
 
-1. **Lazy vs eager tasks**
+1. **Future execution semantics**
 
-   * Lazy (`async` creates suspended task; `spawn` starts it) is safer.
+   * Locked: async functions/blocks create lazy futures; `spawn` starts concurrent execution.
 2. **Allowed await contexts**
 
    * Only inside async blocks/functions (strict) vs allow top-level await (REPL convenience).

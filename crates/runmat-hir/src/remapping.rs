@@ -1,4 +1,8 @@
-use crate::{HirClassMember, HirExpr, HirExprKind, HirLValue, HirStmt, VarId};
+use crate::{
+    LegacyHirClassMember as HirClassMember, LegacyHirExpr as HirExpr,
+    LegacyHirExprKind as HirExprKind, LegacyHirLValue as HirLValue, LegacyHirStmt as HirStmt,
+    VarId,
+};
 use std::collections::{HashMap, HashSet};
 
 pub fn remap_function_body(body: &[HirStmt], var_map: &HashMap<VarId, VarId>) -> Vec<HirStmt> {

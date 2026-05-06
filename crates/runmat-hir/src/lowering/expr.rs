@@ -1,7 +1,10 @@
 use super::ctx::Ctx;
 use crate::error::error_namespace;
 use crate::inference::shared::resolve_context_from_args;
-use crate::{HirExpr, HirExprKind, HirLValue, HirStmt, SemanticError, Type, VarId};
+use crate::{
+    LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, LegacyHirLValue as HirLValue,
+    LegacyHirStmt as HirStmt, SemanticError, Type, VarId,
+};
 use runmat_parser::{self as parser, BinOp, Expr as AstExpr};
 use std::collections::HashMap;
 

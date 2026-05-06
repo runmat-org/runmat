@@ -2,7 +2,10 @@ use crate::inference::function_outputs::infer_function_output_types;
 use crate::inference::function_vars::infer_function_variable_types;
 use crate::inference::globals::infer_global_variable_types;
 use crate::validation::classdefs::validate_classdefs;
-use crate::{HirProgram, HirStmt, LoweringContext, LoweringResult, SemanticError, Type, VarId};
+use crate::{
+    LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt, LoweringContext, LoweringResult,
+    SemanticError, Type, VarId,
+};
 use runmat_parser::Program as AstProgram;
 use std::collections::HashMap;
 

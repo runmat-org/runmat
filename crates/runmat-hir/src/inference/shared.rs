@@ -1,4 +1,8 @@
-use crate::{HirClassMember, HirExpr, HirExprKind, HirLValue, HirProgram, HirStmt, Type, VarId};
+use crate::{
+    LegacyHirClassMember as HirClassMember, LegacyHirExpr as HirExpr,
+    LegacyHirExprKind as HirExprKind, LegacyHirLValue as HirLValue, LegacyHirProgram as HirProgram,
+    LegacyHirStmt as HirStmt, Type, VarId,
+};
 use runmat_parser as parser;
 use std::collections::HashMap;
 use std::sync::OnceLock;

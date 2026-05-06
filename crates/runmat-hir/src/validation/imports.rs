@@ -1,4 +1,4 @@
-use crate::{HirProgram, HirStmt, SemanticError};
+use crate::{LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt, SemanticError};
 
 pub fn collect_imports(prog: &HirProgram) -> Vec<(Vec<String>, bool)> {
     let mut imports = Vec::new();

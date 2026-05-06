@@ -13,10 +13,10 @@ mod validation;
 
 pub use diagnostic::{HirDiagnostic, HirDiagnosticSeverity};
 pub use error::{set_error_namespace, SemanticError};
-pub use hir::{
-    HirClassMember, HirExpr, HirExprKind, HirLValue, HirProgram, HirStmt, LoweringResult,
+pub use hir::*;
+pub use ids::{
+    BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, StmtId, VarId,
 };
-pub use ids::{SourceId, VarId};
 pub use inference::expr::infer_expr_type_with_env;
 pub use inference::function_outputs::infer_function_output_types;
 pub use inference::function_vars::infer_function_variable_types;

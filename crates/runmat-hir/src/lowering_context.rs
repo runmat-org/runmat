@@ -1,4 +1,4 @@
-use crate::HirStmt;
+use crate::LegacyHirStmt as HirStmt;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 

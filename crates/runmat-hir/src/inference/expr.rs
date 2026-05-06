@@ -2,7 +2,7 @@ use super::shared::{
     eval_const_num, infer_dataset_type_from_literal_path, infer_slice_result_shape,
     literal_path_arg, logical_binary_result, resolve_context_from_args, shape_rank,
 };
-use crate::{HirExpr, HirExprKind, Type, VarId};
+use crate::{LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, Type, VarId};
 use runmat_parser as parser;
 use std::collections::HashMap;
 

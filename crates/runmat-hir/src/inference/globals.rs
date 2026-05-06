@@ -3,7 +3,10 @@ use super::shared::{
     refine_multi_assign_outputs_from_func, resolve_context_from_args, Analysis, FuncDef,
 };
 use crate::inference::expr::infer_expr_type_with_env;
-use crate::{HirExprKind, HirProgram, HirStmt, Type, VarId};
+use crate::{
+    LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt,
+    Type, VarId,
+};
 use std::collections::HashMap;
 
 pub fn infer_global_variable_types(

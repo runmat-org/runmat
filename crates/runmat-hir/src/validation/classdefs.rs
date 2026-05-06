@@ -1,4 +1,7 @@
-use crate::{HirClassMember, HirProgram, HirStmt, SemanticError};
+use crate::{
+    LegacyHirClassMember as HirClassMember, LegacyHirProgram as HirProgram,
+    LegacyHirStmt as HirStmt, SemanticError,
+};
 
 pub fn validate_classdefs(prog: &HirProgram) -> Result<(), SemanticError> {
     use std::collections::HashSet;
