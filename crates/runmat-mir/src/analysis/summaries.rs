@@ -148,7 +148,7 @@ fn scan_rvalue(
         }
         MirRvalue::Call(call) => {
             for arg in &call.args {
-                scan_operand(body, arg, reads_captures);
+                scan_operand(body, arg.operand(), reads_captures);
             }
         }
         MirRvalue::Aggregate { elements, .. } => {

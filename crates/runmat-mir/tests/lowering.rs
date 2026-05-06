@@ -6,8 +6,8 @@ use runmat_mir::{
         InitFact, MirLocalKey,
     },
     lowering::lower_assembly,
-    AsyncBehaviorFact, MirAggregateKind, MirBody, MirLocalKind, MirOperand, MirOutputTarget,
-    MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
+    AsyncBehaviorFact, MirAggregateKind, MirBody, MirCallArg, MirLocalKind, MirOperand,
+    MirOutputTarget, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
 };
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
@@ -484,7 +484,7 @@ fn command_call_lowers_to_zero_output_call_with_string_args() {
     assert_eq!(call.args.len(), 1);
     assert!(matches!(
         call.args[0],
-        MirOperand::Constant(runmat_mir::MirConstant::String(ref value)) if value.0 == "long"
+        MirCallArg::Single(MirOperand::Constant(runmat_mir::MirConstant::String(ref value))) if value.0 == "long"
     ));
 }
 
@@ -554,7 +554,44 @@ fn complex_call_arguments_lower_through_temporary_locals() {
     else {
         panic!("expected call assignment after temp");
     };
-    assert!(matches!(call.args[0], MirOperand::Local(_)));
+    assert!(matches!(
+        call.args[0],
+        MirCallArg::Single(MirOperand::Local(_))
+    ));
+}
+
+#[test]
+fn function_argument_expansion_lowers_to_expansion_call_arg() {
+    let mir = lower_mir("function y = f(varargin); y = g(varargin{:}); end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let stmt = body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find(|stmt| {
+            matches!(
+                stmt.kind,
+                MirStmtKind::Assign {
+                    value: MirRvalue::Call(_),
+                    ..
+                }
+            )
+        })
+        .unwrap();
+    let MirStmtKind::Assign {
+        value: MirRvalue::Call(call),
+        ..
+    } = &stmt.kind
+    else {
+        panic!("expected call assignment");
+    };
+
+    assert_eq!(call.args.len(), 1);
+    assert!(matches!(
+        call.args[0],
+        MirCallArg::Expansion(MirOperand::Local(_))
+    ));
 }
 
 #[test]

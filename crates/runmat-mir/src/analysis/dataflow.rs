@@ -271,7 +271,7 @@ fn diagnose_rvalue_reads(
         }
         MirRvalue::Call(call) => {
             for arg in &call.args {
-                diagnose_operand_read(arg, state, span, diagnostics);
+                diagnose_operand_read(arg.operand(), state, span, diagnostics);
             }
         }
         MirRvalue::Aggregate { elements, .. } => {

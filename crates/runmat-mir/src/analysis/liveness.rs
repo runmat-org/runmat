@@ -119,7 +119,7 @@ fn collect_rvalue_reads(value: &MirRvalue, live: &mut HashSet<MirLocalId>) {
         }
         MirRvalue::Call(call) => {
             for arg in &call.args {
-                collect_operand_read(arg, live);
+                collect_operand_read(arg.operand(), live);
             }
         }
         MirRvalue::Aggregate { elements, .. } => {

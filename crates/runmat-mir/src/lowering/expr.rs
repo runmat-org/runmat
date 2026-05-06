@@ -1,10 +1,10 @@
 use crate::{
-    MirAggregateKind, MirCall, MirConstant, MirIndexComponent, MirIndexing, MirOperand, MirPlace,
-    MirRvalue, MirStmt, MirStmtKind,
+    MirAggregateKind, MirCall, MirCallArg, MirConstant, MirIndexComponent, MirIndexing, MirOperand,
+    MirPlace, MirRvalue, MirStmt, MirStmtKind,
 };
 use runmat_hir::{
-    CommandArgument, HirCommandCall, HirExpr, HirExprKind, IndexComponent, IndexingSemantics,
-    RequestedOutputCount, SemanticError, StringLiteral,
+    CommandArgument, HirCommandCall, HirExpr, HirExprKind, IndexComponent, IndexResultContext,
+    IndexingSemantics, RequestedOutputCount, SemanticError, StringLiteral,
 };
 
 use super::MirLoweringContext;
@@ -56,7 +56,7 @@ pub(crate) fn lower_expr(
             args: call
                 .args
                 .iter()
-                .map(|arg| lower_operand(ctx, arg, temps))
+                .map(|arg| lower_call_arg(ctx, arg, temps))
                 .collect::<Result<_, _>>()?,
             syntax: call.syntax.clone(),
             requested_outputs: call.requested_outputs.clone(),
@@ -77,6 +77,23 @@ pub(crate) fn lower_expr(
             ))
         }
     })
+}
+
+fn lower_call_arg(
+    ctx: &MirLoweringContext,
+    arg: &HirExpr,
+    temps: &mut Vec<MirStmt>,
+) -> Result<MirCallArg, SemanticError> {
+    let operand = lower_operand(ctx, arg, temps)?;
+    if matches!(
+        &arg.kind,
+        HirExprKind::Index(_, indexing)
+            if matches!(indexing.result_context, IndexResultContext::FunctionArgumentExpansion)
+    ) {
+        Ok(MirCallArg::Expansion(operand))
+    } else {
+        Ok(MirCallArg::Single(operand))
+    }
 }
 
 fn lower_aggregate_elements(
@@ -130,7 +147,7 @@ fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
         args: call
             .args
             .iter()
-            .map(|arg| MirOperand::Constant(command_arg_constant(arg)))
+            .map(|arg| MirCallArg::Single(MirOperand::Constant(command_arg_constant(arg))))
             .collect(),
         syntax: runmat_hir::CallSyntax::Plain,
         requested_outputs: RequestedOutputCount::Zero,
