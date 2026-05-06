@@ -6,6 +6,12 @@ use runmat_parser as parser;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Canonical semantic HIR product for one compiled source set.
+///
+/// The assembly owns the tables for modules, functions, classes, bindings, and
+/// entrypoints. Table IDs are local to this assembly; stable identities for
+/// packages/modules/items are represented separately by `DefPath` and qualified
+/// name types.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
 pub struct HirAssembly {
     pub modules: Vec<HirModule>,
@@ -15,6 +21,11 @@ pub struct HirAssembly {
     pub entrypoints: Vec<HirEntrypoint>,
 }
 
+/// Source unit metadata plus references to module-owned semantic items.
+///
+/// Top-level functions, classes, and synthetic script entry functions live in
+/// assembly tables and are referenced here by local IDs rather than embedded as
+/// statement variants.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirModule {
     pub id: ModuleId,
@@ -69,6 +80,12 @@ pub enum WorkspaceExportPolicy {
     HostDefined,
 }
 
+/// Uniform executable representation for MATLAB functions and generated entrypoints.
+///
+/// Named functions, nested functions, anonymous functions, class methods, and
+/// synthetic script entrypoints all use this shape. Parameters, outputs, locals,
+/// and captures reference semantic `BindingId`s; VM slots are intentionally not
+/// represented in core HIR.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirFunction {
     pub id: FunctionId,
@@ -117,6 +134,11 @@ pub struct CapturedBinding {
     pub from_function: FunctionId,
 }
 
+/// Semantic binding identity for a name owned by a module or function.
+///
+/// Bindings model MATLAB lexical/global/persistent storage and workspace
+/// visibility. They are not VM slot numbers and should be used instead of the
+/// legacy `VarId` in semantic HIR.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirBinding {
     pub id: BindingId,
@@ -262,6 +284,10 @@ pub enum HirPlace {
     IndexCell(Box<HirExpr>, IndexingSemantics),
 }
 
+/// Call expression with a semantic callee reference and source syntax marker.
+///
+/// Unresolved or dynamic calls remain explicit, so the HIR no longer relies on a
+/// string-only `FuncCall` variant as the primary call representation.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirCall {
     pub callee: HirCallableRef,
@@ -307,6 +333,10 @@ pub struct HirImport {
     pub span: Span,
 }
 
+/// Semantic class metadata owned by the assembly.
+///
+/// Methods reference `HirFunction` entries by `FunctionId`; class definitions are
+/// not durable statement variants in the semantic model.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirClass {
     pub id: ClassId,
@@ -646,6 +676,31 @@ pub enum SpawnSafetyReason {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum AsyncValueFact {
+    Future(FutureFact),
+    TaskHandle(TaskHandleFact),
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct FutureFact {
+    pub output: Box<TypeFact>,
+    pub state: FutureStateFact,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum FutureStateFact {
+    Lazy,
+    Awaited,
+    Unknown,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct TaskHandleFact {
+    pub output: Box<TypeFact>,
+    pub spawn_safety: SpawnSafetyFact,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TypeFact {
     Never,
     Unknown,
@@ -707,6 +762,11 @@ pub enum DimFact {
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct DimSymbol(pub String);
 
+/// Stable qualified semantic identity for a package/module/item path.
+///
+/// Unlike local `ModuleId`/`FunctionId`/`ClassId`/`BindingId` values, a `DefPath`
+/// is intended to describe the same semantic item across compiler products when
+/// the source/project identity is unchanged.
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct DefPath {
     pub package: PackageName,
@@ -1111,6 +1171,47 @@ mod tests {
                 shape: ShapeFact::Shaped { .. },
                 ..
             }))
+        ));
+    }
+
+    #[test]
+    fn def_path_is_distinct_from_local_table_ids() {
+        let function_id = FunctionId(0);
+        let path = DefPath {
+            package: PackageName("pkg".into()),
+            module: QualifiedName(vec![SymbolName("pkg".into()), SymbolName("demo".into())]),
+            item: vec![DefPathSegment::Function(SymbolName("f".into()))],
+        };
+
+        assert_eq!(function_id, FunctionId(0));
+        assert_eq!(path.package.0, "pkg");
+        assert!(matches!(path.item[0], DefPathSegment::Function(_)));
+    }
+
+    #[test]
+    fn async_facts_distinguish_lazy_futures_from_spawned_tasks() {
+        let future = AsyncValueFact::Future(FutureFact {
+            output: Box::new(TypeFact::Unknown),
+            state: FutureStateFact::Lazy,
+        });
+        let task = AsyncValueFact::TaskHandle(TaskHandleFact {
+            output: Box::new(TypeFact::Unknown),
+            spawn_safety: SpawnSafetyFact::SpawnSafe,
+        });
+
+        assert!(matches!(
+            future,
+            AsyncValueFact::Future(FutureFact {
+                state: FutureStateFact::Lazy,
+                ..
+            })
+        ));
+        assert!(matches!(
+            task,
+            AsyncValueFact::TaskHandle(TaskHandleFact {
+                spawn_safety: SpawnSafetyFact::SpawnSafe,
+                ..
+            })
         ));
     }
 }
