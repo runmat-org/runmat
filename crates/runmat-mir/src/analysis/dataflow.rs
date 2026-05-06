@@ -11,8 +11,9 @@ use runmat_hir::{
 use std::collections::{HashMap, VecDeque};
 
 use super::{
-    analyze_liveness, analyze_spawn_boundaries, summarize_body, AnalysisStore, BindingFact,
-    ExprFact, InitFact, MirLocalFact, MirLocalKey, ModuleSummary,
+    analyze_liveness, analyze_spawn_boundaries_with_summaries, diagnose_spawn_safety,
+    summarize_body, AnalysisStore, BindingFact, ExprFact, InitFact, MirLocalFact, MirLocalKey,
+    ModuleSummary,
 };
 
 #[derive(Debug, Clone)]
@@ -308,10 +309,12 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             insert_module_summary(&mut store, module, &summary);
         }
         store.liveness.insert(body.function, analyze_liveness(body));
-        store
-            .spawn_boundaries
-            .insert(body.function, analyze_spawn_boundaries(body));
         store.diagnostics.extend(diagnose_uninitialized_reads(body));
+    }
+    for body in assembly.bodies.values() {
+        let boundaries = analyze_spawn_boundaries_with_summaries(body, &store.functions);
+        store.diagnostics.extend(diagnose_spawn_safety(&boundaries));
+        store.spawn_boundaries.insert(body.function, boundaries);
     }
     store
 }

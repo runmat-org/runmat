@@ -559,6 +559,29 @@ fn spawn_safety_summary_is_conservative_for_spawn_sites() {
 }
 
 #[test]
+fn analyze_assembly_rejects_spawned_future_with_mutable_lexical_capture() {
+    let mir = lower_mir(
+        "function y = outer(); acc = 0; function bump(); acc = acc + 1; end; task = spawn(@bump); y = acc; end",
+    );
+
+    let store = analyze_assembly(&mir);
+
+    assert!(store.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RM-MIR0003" && diagnostic.category.as_deref() == Some("spawn-safety")
+    }));
+    assert!(store
+        .spawn_boundaries
+        .values()
+        .flatten()
+        .any(|boundary| matches!(
+            boundary.safety,
+            runmat_hir::SpawnSafetyFact::NotSpawnSafe {
+                reason: runmat_hir::SpawnSafetyReason::MutableLexicalCapture
+            }
+        )));
+}
+
+#[test]
 fn analyze_assembly_populates_store_products_by_function() {
     let mir = lower_mir("async function y = f(g, x); t = spawn(g); await(t); y = x; end");
 

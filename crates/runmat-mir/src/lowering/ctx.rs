@@ -30,8 +30,7 @@ impl MirLoweringContext {
         &mut self,
         function: &HirFunction,
     ) -> (Vec<MirLocal>, Vec<MirLocalSource>) {
-        self.next_local = function.locals.len();
-        function
+        let mut locals: Vec<_> = function
             .locals
             .iter()
             .enumerate()
@@ -60,7 +59,32 @@ impl MirLoweringContext {
                     },
                 )
             })
-            .unzip()
+            .collect();
+
+        for capture in &function.captures {
+            if self.binding_locals.contains_key(&capture.binding) {
+                continue;
+            }
+            let local = MirLocalId(locals.len());
+            self.binding_locals.insert(capture.binding, local);
+            locals.push((
+                MirLocal {
+                    id: local,
+                    binding: Some(capture.binding),
+                    kind: MirLocalKind::Capture,
+                    span: function.span,
+                },
+                MirLocalSource {
+                    local,
+                    binding: Some(capture.binding),
+                    expr: None,
+                    span: function.span,
+                },
+            ));
+        }
+
+        self.next_local = locals.len();
+        locals.into_iter().unzip()
     }
 
     pub(crate) fn fresh_temp(&self, span: Span, expr: Option<ExprId>) -> MirLocalId {
