@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 use super::{
-    AccelEligibilityFact, AnalysisStore, EffectSummary, FusibilityFact, ParallelSafetyFact,
+    AccelEligibilityFact, AnalysisStore, EffectSummary, FusibilityFact, MirLocalKey,
+    ParallelSafetyFact,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -63,6 +64,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
     let mut calls = Vec::new();
     let mut may_call_unknown = false;
     let mut place_mutations = Vec::new();
+    let mut outputs = Vec::new();
 
     for block in &body.blocks {
         for stmt in &block.statements {
@@ -141,10 +143,11 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
                 );
                 scan_local_write(body, *binding, &mut writes_captures);
             }
-            MirTerminatorKind::Return(outputs) => {
-                output_count = output_count.max(outputs.len());
-                for output in outputs {
+            MirTerminatorKind::Return(return_outputs) => {
+                output_count = output_count.max(return_outputs.len());
+                for (idx, output) in return_outputs.iter().enumerate() {
                     scan_operand(body, output, &mut reads_captures);
+                    merge_output_fact(&mut outputs, idx, operand_type_fact(body, store, output));
                 }
             }
             MirTerminatorKind::Await { future, .. } => {
@@ -171,7 +174,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
             implicit_nargin: body.abi.implicit_nargin,
             implicit_nargout: body.abi.implicit_nargout,
         },
-        outputs: vec![TypeFact::Unknown; output_count],
+        outputs: finalize_output_facts(outputs, output_count),
         requested_output_sensitive: Vec::new(),
         effects: EffectSummary {
             workspace,
@@ -250,6 +253,58 @@ fn classify_accel_eligibility(
         return AccelEligibilityFact::Ineligible("workspace effect barrier".into());
     }
     AccelEligibilityFact::Unknown
+}
+
+fn merge_output_fact(outputs: &mut Vec<Option<TypeFact>>, idx: usize, incoming: TypeFact) {
+    if outputs.len() <= idx {
+        outputs.resize_with(idx + 1, || None);
+    }
+    match &mut outputs[idx] {
+        Some(existing) => *existing = join_output_type(existing, &incoming),
+        slot @ None => *slot = Some(incoming),
+    }
+}
+
+fn finalize_output_facts(outputs: Vec<Option<TypeFact>>, output_count: usize) -> Vec<TypeFact> {
+    (0..output_count)
+        .map(|idx| {
+            outputs
+                .get(idx)
+                .and_then(Clone::clone)
+                .unwrap_or(TypeFact::Unknown)
+        })
+        .collect()
+}
+
+fn operand_type_fact(body: &MirBody, store: &AnalysisStore, operand: &MirOperand) -> TypeFact {
+    match operand {
+        MirOperand::Local(local) => store
+            .mir_locals
+            .get(&MirLocalKey {
+                function: body.function,
+                local: *local,
+            })
+            .map(|fact| fact.ty.clone())
+            .unwrap_or(TypeFact::Unknown),
+        MirOperand::Constant(crate::MirConstant::Number(_)) => TypeFact::Numeric {
+            class: runmat_hir::NumericClass::Double,
+            domain: runmat_hir::NumericDomain::Real,
+        },
+        MirOperand::Constant(crate::MirConstant::String(_)) => TypeFact::CharArray,
+        MirOperand::FunctionHandle(runmat_hir::FunctionHandleTarget::Function(function))
+        | MirOperand::FunctionHandle(runmat_hir::FunctionHandleTarget::Anonymous(function)) => {
+            TypeFact::Function(*function)
+        }
+        _ => TypeFact::Unknown,
+    }
+}
+
+fn join_output_type(left: &TypeFact, right: &TypeFact) -> TypeFact {
+    if left == right {
+        left.clone()
+    } else {
+        TypeFact::Unknown
+    }
 }
 
 fn scan_rvalue(

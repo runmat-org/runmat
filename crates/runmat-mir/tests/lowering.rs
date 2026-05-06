@@ -432,6 +432,23 @@ fn summary_records_function_outputs_and_store_entry() {
 }
 
 #[test]
+fn analyze_assembly_projects_output_type_facts_into_summary() {
+    let mir = lower_mir("function y = f(); y = 1; end");
+
+    let store = analyze_assembly(&mir);
+    let body = mir.bodies.values().next().unwrap();
+    let summary = store.functions.get(&body.function).unwrap();
+
+    assert_eq!(
+        summary.outputs,
+        vec![runmat_hir::TypeFact::Numeric {
+            class: runmat_hir::NumericClass::Double,
+            domain: runmat_hir::NumericDomain::Real,
+        }]
+    );
+}
+
+#[test]
 fn summary_preserves_variadic_function_abi() {
     let mir = lower_mir("function varargout = f(x, varargin); varargout = varargin; end");
     let body = mir.bodies.values().next().unwrap();
