@@ -178,6 +178,56 @@ fn clearvars_except_keeps_named_bindings() {
 }
 
 #[test]
+fn clearvars_selected_names_with_except_preserves_exclusions() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    block_on(engine.execute("a = 1; b = 2; c = 3; untouched = 4;")).unwrap();
+
+    let result = block_on(engine.execute("clearvars a b c -except b;")).unwrap();
+    assert!(result.error.is_none());
+    assert!(result.workspace.full);
+
+    let names: Vec<&str> = result
+        .workspace
+        .values
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert!(!names.contains(&"a"), "a should have been cleared");
+    assert!(names.contains(&"b"), "b should have been preserved");
+    assert!(!names.contains(&"c"), "c should have been cleared");
+    assert!(
+        names.contains(&"untouched"),
+        "variables outside the selected clear set should remain"
+    );
+}
+
+#[test]
+fn clearvars_function_call_selected_names_with_except_preserves_exclusions() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    block_on(engine.execute("a = 1; b = 2; c = 3; untouched = 4;")).unwrap();
+
+    let result = block_on(engine.execute("clearvars('a', 'b', 'c', '-except', 'b');")).unwrap();
+    assert!(result.error.is_none());
+    assert!(result.workspace.full);
+
+    let names: Vec<&str> = result
+        .workspace
+        .values
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert!(!names.contains(&"a"), "a should have been cleared");
+    assert!(names.contains(&"b"), "b should have been preserved");
+    assert!(!names.contains(&"c"), "c should have been cleared");
+    assert!(
+        names.contains(&"untouched"),
+        "variables outside the selected clear set should remain"
+    );
+}
+
+#[test]
 fn clearvars_repro_with_clc_and_close_all_executes() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 

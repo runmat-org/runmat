@@ -30,12 +30,13 @@
     "unit": null,
     "integration": "command_controls::clearvars_command_clears_workspace_state"
   },
-  "description": "`clearvars` removes variables from the active RunMat workspace. RunMat supports MATLAB-style command forms such as `clearvars x y` and exclusion forms such as `clearvars -except keep`, updating the session snapshot so hosts can drop cleared bindings.",
+  "description": "`clearvars` removes variables from the active RunMat workspace. RunMat supports MATLAB-style command forms such as `clearvars x y`, whole-workspace exclusion forms such as `clearvars -except keep`, and selected-variable exclusion forms such as `clearvars a b -except b`, updating the session snapshot so hosts can drop cleared bindings.",
   "behaviors": [
     "`clearvars` with no inputs clears all workspace variables created in the current session.",
     "`clearvars x` removes the variable `x` while leaving other workspace bindings intact.",
     "Multiple names can be supplied as separate inputs or command-form tokens, for example `clearvars x y z`.",
     "`clearvars -except x y` removes all active workspace variables except `x` and `y`.",
+    "`clearvars a b c -except b` removes only selected variables `a` and `c`, preserves selected exclusion `b`, and leaves variables outside the selected clear set untouched.",
     "Function-call forms accept variable names as string scalars, row character vectors, or string arrays.",
     "Clearing a name that does not exist is a no-op.",
     "`clearvars` is a sink builtin and does not produce a meaningful output value."
@@ -55,6 +56,11 @@
       "description": "Keep selected variables while clearing the rest",
       "input": "raw = 1;\nanswer = 42;\ntmp = 3;\nclearvars -except answer",
       "output": "% answer remains defined; raw and tmp are removed"
+    },
+    {
+      "description": "Clear selected variables while preserving exclusions",
+      "input": "a = 1;\nb = 2;\nc = 3;\nuntouched = 4;\nclearvars a b c -except b",
+      "output": "% a and c are removed; b and untouched remain defined"
     }
   ],
   "faqs": [

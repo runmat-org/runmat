@@ -27,20 +27,19 @@ async fn clearvars_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         collect_clearvars_words(arg, &mut words)?;
     }
 
-    let mut except = false;
-    let mut names = Vec::new();
-    for (index, word) in words.iter().enumerate() {
+    let mut targets = Vec::new();
+    let mut exclusions = Vec::new();
+    let mut saw_except = false;
+    for word in words.iter() {
         let name = word.trim();
         if name.is_empty() {
             continue;
         }
         if name.eq_ignore_ascii_case("-except") {
-            if index != 0 {
-                return Err(clearvars_error(
-                    "clearvars: -except must appear before variable names",
-                ));
+            if saw_except {
+                return Err(clearvars_error("clearvars: duplicate -except option"));
             }
-            except = true;
+            saw_except = true;
             continue;
         }
         if name.starts_with('-') {
@@ -48,18 +47,22 @@ async fn clearvars_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 "clearvars: unsupported option '{name}'"
             )));
         }
-        names.push(name.to_string());
+        if saw_except {
+            exclusions.push(name.to_string());
+        } else {
+            targets.push(name.to_string());
+        }
     }
 
-    if except {
-        if names.is_empty() {
+    if saw_except {
+        if exclusions.is_empty() {
             return Err(clearvars_error(
                 "clearvars: -except requires at least one variable name",
             ));
         }
-        clear_except(&names)?;
+        clear_except(&targets, &exclusions)?;
     } else {
-        for name in names {
+        for name in targets {
             workspace::remove(&name).map_err(clearvars_error)?;
         }
     }
@@ -67,13 +70,21 @@ async fn clearvars_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     Ok(empty_return_value())
 }
 
-fn clear_except(names: &[String]) -> BuiltinResult<()> {
-    let keep: HashSet<&str> = names.iter().map(String::as_str).collect();
-    let snapshot = workspace::snapshot()
-        .ok_or_else(|| clearvars_error("clearvars: workspace state unavailable"))?;
-    for (name, _) in snapshot {
-        if !keep.contains(name.as_str()) {
-            workspace::remove(&name).map_err(clearvars_error)?;
+fn clear_except(targets: &[String], exclusions: &[String]) -> BuiltinResult<()> {
+    let keep: HashSet<&str> = exclusions.iter().map(String::as_str).collect();
+    if targets.is_empty() {
+        let snapshot = workspace::snapshot()
+            .ok_or_else(|| clearvars_error("clearvars: workspace state unavailable"))?;
+        for (name, _) in snapshot {
+            if !keep.contains(name.as_str()) {
+                workspace::remove(&name).map_err(clearvars_error)?;
+            }
+        }
+    } else {
+        for name in targets {
+            if !keep.contains(name.as_str()) {
+                workspace::remove(name).map_err(clearvars_error)?;
+            }
         }
     }
     Ok(())
