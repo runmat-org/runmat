@@ -20,6 +20,8 @@ pub struct MirLocal {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MirLocalKind {
+    Parameter,
+    Output,
     Binding,
     Temporary,
     Capture,

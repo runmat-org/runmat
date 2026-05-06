@@ -2,11 +2,14 @@ use crate::AsyncBehaviorFact;
 use runmat_hir::{EnvironmentEffect, ShapeFact, TypeFact, ValueFlowFact, WorkspaceEffect};
 use serde::{Deserialize, Serialize};
 
+use super::InitFact;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MirLocalFact {
     pub ty: TypeFact,
     pub shape: ShapeFact,
     pub value_flow: ValueFlowFact,
+    pub initialized: InitFact,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

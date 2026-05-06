@@ -38,11 +38,18 @@ impl MirLoweringContext {
             .map(|(idx, binding)| {
                 let local = MirLocalId(idx);
                 self.binding_locals.insert(*binding, local);
+                let kind = if function.params.contains(binding) {
+                    MirLocalKind::Parameter
+                } else if function.outputs.contains(binding) {
+                    MirLocalKind::Output
+                } else {
+                    MirLocalKind::Binding
+                };
                 (
                     MirLocal {
                         id: local,
                         binding: Some(*binding),
-                        kind: MirLocalKind::Binding,
+                        kind,
                         span: function.span,
                     },
                     MirLocalSource {

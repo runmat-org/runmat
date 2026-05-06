@@ -1,13 +1,31 @@
 use runmat_hir::{lower, HirCallableRef, LoweringContext};
 use runmat_mir::{
-    lowering::lower_assembly, MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue,
-    MirStmtKind, MirTerminatorKind,
+    analysis::{analyze_body, AnalysisStore, InitFact},
+    lowering::lower_assembly,
+    MirBody, MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmtKind,
+    MirTerminatorKind,
 };
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
     let ast = runmat_parser::parse(src).unwrap();
     let hir = lower(&ast, &LoweringContext::empty()).unwrap();
     lower_assembly(&hir.assembly).unwrap()
+}
+
+fn analyze_single_body(src: &str) -> (MirBody, AnalysisStore) {
+    let mir = lower_mir(src);
+    let body = mir.bodies.values().next().unwrap().clone();
+    let mut store = AnalysisStore::default();
+    analyze_body(&body, &mut store);
+    (body, store)
+}
+
+fn first_local_of_kind(body: &MirBody, kind: MirLocalKind) -> runmat_mir::MirLocalId {
+    body.locals
+        .iter()
+        .find(|local| local.kind == kind)
+        .unwrap()
+        .id
 }
 
 #[test]
@@ -30,6 +48,44 @@ fn simple_function_lowers_to_single_block_with_binding_locals() {
         body.blocks[0].terminator.kind,
         MirTerminatorKind::Return(ref outputs) if outputs.len() == 1
     ));
+}
+
+#[test]
+fn dataflow_marks_parameters_and_assigned_outputs_definitely_assigned() {
+    let (body, store) = analyze_single_body("function y = f(x); y = x; end");
+    let param = first_local_of_kind(&body, MirLocalKind::Parameter);
+    let output = first_local_of_kind(&body, MirLocalKind::Output);
+
+    assert_eq!(
+        store.mir_locals.get(&param).unwrap().initialized,
+        InitFact::DefinitelyAssigned
+    );
+    assert_eq!(
+        store.mir_locals.get(&output).unwrap().initialized,
+        InitFact::DefinitelyAssigned
+    );
+}
+
+#[test]
+fn dataflow_joins_branch_assignment_as_maybe_assigned() {
+    let (body, store) = analyze_single_body("function y = f(c); if c; y = 1; end; end");
+    let output = first_local_of_kind(&body, MirLocalKind::Output);
+
+    assert_eq!(
+        store.mir_locals.get(&output).unwrap().initialized,
+        InitFact::MaybeAssigned
+    );
+}
+
+#[test]
+fn dataflow_widens_loop_assignment_as_maybe_assigned() {
+    let (body, store) = analyze_single_body("function y = f(c); while c; y = 1; end; end");
+    let output = first_local_of_kind(&body, MirLocalKind::Output);
+
+    assert_eq!(
+        store.mir_locals.get(&output).unwrap().initialized,
+        InitFact::MaybeAssigned
+    );
 }
 
 #[test]

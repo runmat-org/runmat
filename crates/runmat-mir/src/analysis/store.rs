@@ -23,7 +23,7 @@ pub struct ExprFact {
     pub ty: TypeFact,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InitFact {
     Unassigned,
     MaybeAssigned,
