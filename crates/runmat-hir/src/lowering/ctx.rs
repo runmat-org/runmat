@@ -1,6 +1,3 @@
-use crate::inference::function_outputs::infer_function_output_types;
-use crate::inference::function_vars::infer_function_variable_types;
-use crate::inference::globals::infer_global_variable_types;
 use crate::validation::classdefs::validate_classdefs;
 use crate::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingId, BindingName, BindingOwner,
@@ -94,10 +91,6 @@ pub fn lower(
         }
     }
 
-    let inferred_function_returns = infer_function_output_types(&hir);
-    let inferred_function_envs = infer_function_variable_types(&hir);
-    let inferred_globals = infer_global_variable_types(&hir, &inferred_function_returns);
-
     let (assembly, semantic_index) = SemanticCtx::lower_program(prog)?;
 
     Ok(LoweringResult {
@@ -108,9 +101,9 @@ pub fn lower(
         functions: ctx.functions,
         var_types: ctx.var_types,
         var_names,
-        inferred_globals,
-        inferred_function_envs,
-        inferred_function_returns,
+        inferred_globals: HashMap::new(),
+        inferred_function_envs: HashMap::new(),
+        inferred_function_returns: HashMap::new(),
     })
 }
 

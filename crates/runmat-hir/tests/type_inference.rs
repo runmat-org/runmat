@@ -17,6 +17,11 @@ fn lower_result(code: &str) -> runmat_hir::LoweringResult {
     runmat_hir::lower(&ast, &LoweringContext::empty()).unwrap()
 }
 
+fn infer_globals(result: &runmat_hir::LoweringResult) -> std::collections::HashMap<VarId, Type> {
+    let returns = runmat_hir::infer_function_output_types(&result.hir);
+    runmat_hir::infer_global_variable_types(&result.hir, &returns)
+}
+
 #[test]
 fn infer_simple_function_return_types() {
     let prog = lower("function y = f(x); if x>0; y=1; else; y=2.0; end; end");
@@ -180,14 +185,7 @@ fn infer_range_shape_in_globals() {
     }
     let x_id = runmat_hir::VarId(*result.variables.get("x").unwrap());
     let y_id = runmat_hir::VarId(*result.variables.get("y").unwrap());
-    if !result.inferred_globals.contains_key(&x_id) {
-        panic!(
-            "missing inferred global for x: {:?}",
-            result.inferred_globals
-        );
-    }
-    let recomputed =
-        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    let recomputed = infer_globals(&result);
     if !recomputed.contains_key(&x_id) {
         panic!("missing recomputed global for x: {:?}", recomputed);
     }
@@ -224,8 +222,7 @@ fn infer_range_shape_in_globals() {
 fn infer_global_types_track_trycatch_assignments() {
     let result = lower_result("try; x = 1; catch; x = 2; end");
     let x_id = runmat_hir::VarId(*result.variables.get("x").unwrap());
-    let globals =
-        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    let globals = infer_globals(&result);
     assert_eq!(
         globals
             .get(&x_id)
@@ -239,8 +236,7 @@ fn infer_global_types_track_trycatch_assignments() {
 fn infer_global_types_track_struct_lvalue_assignments() {
     let result = lower_result("s.x = 1;");
     let s_id = runmat_hir::VarId(*result.variables.get("s").unwrap());
-    let globals =
-        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    let globals = infer_globals(&result);
     assert_eq!(
         globals
             .get(&s_id)
@@ -262,8 +258,7 @@ fn infer_range_shape_with_constants() {
     }
     let result = lower_result("a = 0:pi/100:2*pi;");
     let a_id = runmat_hir::VarId(*result.variables.get("a").unwrap());
-    let globals =
-        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    let globals = infer_globals(&result);
     let a_ty = globals
         .get(&a_id)
         .cloned()
@@ -280,8 +275,7 @@ fn infer_range_shape_with_constants() {
 fn infer_range_shape_with_negative_start() {
     let result = lower_result("x = -2:0.02:2;");
     let x_id = runmat_hir::VarId(*result.variables.get("x").unwrap());
-    let globals =
-        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    let globals = infer_globals(&result);
     let x_ty = globals
         .get(&x_id)
         .cloned()
@@ -298,8 +292,7 @@ fn infer_range_shape_with_negative_start() {
 fn infer_range_shape_two_arg_descending_is_empty() {
     let result = lower_result("r = 5:1;");
     let r_id = runmat_hir::VarId(*result.variables.get("r").unwrap());
-    let globals =
-        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    let globals = infer_globals(&result);
     let r_ty = globals
         .get(&r_id)
         .cloned()
@@ -321,8 +314,7 @@ fn infer_index_shapes_for_scalar_and_range() {
         return;
     }
     let result = lower_result("a = 0:pi/100:2*pi; b = sin(a); c = a[5]; d = a[1:10];");
-    let globals =
-        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    let globals = infer_globals(&result);
     let c_id = runmat_hir::VarId(*result.variables.get("c").unwrap());
     let d_id = runmat_hir::VarId(*result.variables.get("d").unwrap());
     let c_ty = globals
@@ -345,8 +337,7 @@ fn infer_index_shapes_for_scalar_and_range() {
 #[test]
 fn infer_matmul_shape_with_known_dims() {
     let result = lower_result("a = ones(2,3); b = ones(3,4); c = a * b;");
-    let globals =
-        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    let globals = infer_globals(&result);
     let c_id = runmat_hir::VarId(*result.variables.get("c").unwrap());
     let c_ty = globals
         .get(&c_id)
