@@ -15,6 +15,8 @@ pub enum MirRvalue {
     Call(MirCall),
     Aggregate {
         kind: MirAggregateKind,
+        rows: usize,
+        cols: usize,
         elements: Vec<MirOperand>,
     },
     Index {

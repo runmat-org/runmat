@@ -45,10 +45,14 @@ pub(crate) fn lower_expr(
         },
         HirExprKind::Tensor(rows) => MirRvalue::Aggregate {
             kind: MirAggregateKind::Tensor,
+            rows: rows.len(),
+            cols: aggregate_col_count(rows),
             elements: lower_aggregate_elements(ctx, rows, temps)?,
         },
         HirExprKind::Cell(rows) => MirRvalue::Aggregate {
             kind: MirAggregateKind::Cell,
+            rows: rows.len(),
+            cols: aggregate_col_count(rows),
             elements: lower_aggregate_elements(ctx, rows, temps)?,
         },
         HirExprKind::Call(call) => MirRvalue::Call(MirCall {
@@ -105,6 +109,10 @@ fn lower_aggregate_elements(
         .flat_map(|row| row.iter())
         .map(|element| lower_operand(ctx, element, temps))
         .collect()
+}
+
+fn aggregate_col_count(rows: &[Vec<HirExpr>]) -> usize {
+    rows.iter().map(Vec::len).max().unwrap_or(0)
 }
 
 pub(crate) fn lower_indexing(

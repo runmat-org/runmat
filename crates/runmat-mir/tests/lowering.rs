@@ -219,6 +219,47 @@ fn analyze_body_records_function_handle_value_flow_fact() {
 }
 
 #[test]
+fn analyze_body_records_tensor_and_cell_aggregate_facts() {
+    let (tensor_body, tensor_store) = analyze_single_body("function y = f(); y = [1, 2]; end");
+    let tensor_output = first_local_of_kind(&tensor_body, MirLocalKind::Output);
+    let tensor_fact = &tensor_store.mir_locals[&MirLocalKey {
+        function: tensor_body.function,
+        local: tensor_output,
+    }];
+
+    assert!(matches!(tensor_fact.ty, runmat_hir::TypeFact::Tensor(_)));
+    assert_eq!(
+        tensor_fact.shape,
+        runmat_hir::ShapeFact::Shaped {
+            dims: vec![runmat_hir::DimFact::Known(1), runmat_hir::DimFact::Known(2)]
+        }
+    );
+    assert!(matches!(
+        tensor_fact.value_flow,
+        runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::Tensor(_))
+    ));
+
+    let (cell_body, cell_store) = analyze_single_body("function y = f(); y = {1, 2}; end");
+    let cell_output = first_local_of_kind(&cell_body, MirLocalKind::Output);
+    let cell_fact = &cell_store.mir_locals[&MirLocalKey {
+        function: cell_body.function,
+        local: cell_output,
+    }];
+
+    assert_eq!(cell_fact.ty, runmat_hir::TypeFact::Cell);
+    assert_eq!(
+        cell_fact.shape,
+        runmat_hir::ShapeFact::Shaped {
+            dims: vec![runmat_hir::DimFact::Known(1), runmat_hir::DimFact::Known(2)]
+        }
+    );
+    assert_eq!(
+        cell_fact.value_flow,
+        runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::Cell)
+    );
+}
+
+#[test]
 fn analyze_body_records_future_and_task_async_value_facts() {
     let mir = lower_mir("function y = f(); fut = @(x) x; task = spawn(fut); y = 1; end");
     let store = analyze_assembly(&mir);
@@ -822,6 +863,8 @@ fn tensor_literal_lowers_to_mir_aggregate() {
         MirStmtKind::Assign {
             value: MirRvalue::Aggregate {
                 kind: MirAggregateKind::Tensor,
+                rows: 1,
+                cols: 2,
                 ref elements,
             },
             ..
@@ -839,6 +882,8 @@ fn cell_literal_lowers_to_mir_aggregate() {
         MirStmtKind::Assign {
             value: MirRvalue::Aggregate {
                 kind: MirAggregateKind::Cell,
+                rows: 1,
+                cols: 2,
                 ref elements,
             },
             ..

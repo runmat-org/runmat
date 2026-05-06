@@ -1,11 +1,12 @@
 use crate::{
-    BasicBlock, BasicBlockId, MirAssembly, MirBody, MirDiagnostic, MirDiagnosticSeverity,
-    MirIndexComponent, MirIndexing, MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue,
-    MirStmtKind, MirTerminatorKind,
+    BasicBlock, BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirDiagnostic,
+    MirDiagnosticSeverity, MirIndexComponent, MirIndexing, MirLocalId, MirLocalKind, MirOperand,
+    MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
 };
 use runmat_hir::{
-    AsyncValueFact, FunctionHandleTarget, FutureFact, FutureStateFact, NumericClass, NumericDomain,
-    ShapeFact, Span, SpawnSafetyFact, TaskHandleFact, TypeFact, ValueFlowFact,
+    AsyncValueFact, DimFact, FunctionHandleTarget, FutureFact, FutureStateFact, NumericClass,
+    NumericDomain, ShapeFact, Span, SpawnSafetyFact, TaskHandleFact, TensorElementDomainFact,
+    TensorTypeFact, TypeFact, ValueFlowFact,
 };
 use std::collections::{HashMap, VecDeque};
 
@@ -169,7 +170,27 @@ fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
             })),
             ..SimpleValueFact::default()
         },
+        MirRvalue::Aggregate {
+            kind, rows, cols, ..
+        } => aggregate_fact(kind, *rows, *cols),
         _ => SimpleValueFact::default(),
+    }
+}
+
+fn aggregate_fact(kind: &MirAggregateKind, rows: usize, cols: usize) -> SimpleValueFact {
+    let shape = ShapeFact::Shaped {
+        dims: vec![DimFact::Known(rows), DimFact::Known(cols)],
+    };
+    match kind {
+        MirAggregateKind::Tensor => single_fact(
+            TypeFact::Tensor(TensorTypeFact {
+                element: TensorElementDomainFact::Unknown,
+                shape: shape.clone(),
+            }),
+            shape,
+        ),
+        MirAggregateKind::Cell => single_fact(TypeFact::Cell, shape),
+        MirAggregateKind::Struct | MirAggregateKind::ObjectArray(_) => SimpleValueFact::default(),
     }
 }
 
@@ -194,9 +215,13 @@ fn simple_operand_fact(operand: &MirOperand) -> SimpleValueFact {
 }
 
 fn scalar_single_fact(ty: TypeFact) -> SimpleValueFact {
+    single_fact(ty, ShapeFact::Scalar)
+}
+
+fn single_fact(ty: TypeFact, shape: ShapeFact) -> SimpleValueFact {
     SimpleValueFact {
         ty: ty.clone(),
-        shape: ShapeFact::Scalar,
+        shape,
         value_flow: ValueFlowFact::Single(ty),
         async_value: None,
     }
