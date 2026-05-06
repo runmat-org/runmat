@@ -171,26 +171,49 @@ fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
             ..SimpleValueFact::default()
         },
         MirRvalue::Aggregate {
-            kind, rows, cols, ..
-        } => aggregate_fact(kind, *rows, *cols),
+            kind,
+            rows,
+            cols,
+            elements,
+        } => aggregate_fact(kind, *rows, *cols, elements),
         _ => SimpleValueFact::default(),
     }
 }
 
-fn aggregate_fact(kind: &MirAggregateKind, rows: usize, cols: usize) -> SimpleValueFact {
+fn aggregate_fact(
+    kind: &MirAggregateKind,
+    rows: usize,
+    cols: usize,
+    elements: &[MirOperand],
+) -> SimpleValueFact {
     let shape = ShapeFact::Shaped {
         dims: vec![DimFact::Known(rows), DimFact::Known(cols)],
     };
     match kind {
         MirAggregateKind::Tensor => single_fact(
             TypeFact::Tensor(TensorTypeFact {
-                element: TensorElementDomainFact::Unknown,
+                element: tensor_element_domain(elements),
                 shape: shape.clone(),
             }),
             shape,
         ),
         MirAggregateKind::Cell => single_fact(TypeFact::Cell, shape),
         MirAggregateKind::Struct | MirAggregateKind::ObjectArray(_) => SimpleValueFact::default(),
+    }
+}
+
+fn tensor_element_domain(elements: &[MirOperand]) -> TensorElementDomainFact {
+    if !elements.is_empty()
+        && elements
+            .iter()
+            .all(|element| matches!(element, MirOperand::Constant(crate::MirConstant::Number(_))))
+    {
+        TensorElementDomainFact::Numeric {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }
+    } else {
+        TensorElementDomainFact::Unknown
     }
 }
 

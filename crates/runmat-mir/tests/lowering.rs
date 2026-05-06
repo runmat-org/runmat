@@ -227,7 +227,16 @@ fn analyze_body_records_tensor_and_cell_aggregate_facts() {
         local: tensor_output,
     }];
 
-    assert!(matches!(tensor_fact.ty, runmat_hir::TypeFact::Tensor(_)));
+    assert!(matches!(
+        tensor_fact.ty,
+        runmat_hir::TypeFact::Tensor(runmat_hir::TensorTypeFact {
+            element: runmat_hir::TensorElementDomainFact::Numeric {
+                class: runmat_hir::NumericClass::Double,
+                domain: runmat_hir::NumericDomain::Real,
+            },
+            ..
+        })
+    ));
     assert_eq!(
         tensor_fact.shape,
         runmat_hir::ShapeFact::Shaped {
