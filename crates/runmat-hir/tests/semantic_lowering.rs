@@ -1,12 +1,17 @@
 use runmat_hir::{
-    lower, BindingRole, BindingStorage, CommandArgument, FunctionKind, HirCallableRef, HirExprKind,
-    HirStmtKind, LoweringContext, OutputTarget, RequestedOutputCount, SourceUnitKind,
-    WorkspaceVisibility,
+    lower, AssignmentCreationPolicy, BindingRole, BindingStorage, CallKind, CommandArgument,
+    FunctionKind, HirCallableRef, HirExprKind, HirPlace, HirStmtKind, IndexComponent,
+    IndexResultContext, LoweringContext, OutputTarget, PlaceMutationKind, RequestedOutputCount,
+    SourceUnitKind, WorkspaceVisibility,
 };
 
-fn lower_semantic(src: &str) -> runmat_hir::HirAssembly {
+fn lower_result(src: &str) -> runmat_hir::LoweringResult {
     let ast = runmat_parser::parse(src).unwrap();
-    lower(&ast, &LoweringContext::empty()).unwrap().assembly
+    lower(&ast, &LoweringContext::empty()).unwrap()
+}
+
+fn lower_semantic(src: &str) -> runmat_hir::HirAssembly {
+    lower_result(src).assembly
 }
 
 #[test]
@@ -284,4 +289,124 @@ fn await_and_spawn_lower_to_explicit_semantic_forms() {
         panic!("expected await assignment");
     };
     assert!(matches!(await_expr.kind, HirExprKind::Await(_)));
+}
+
+#[test]
+fn semantic_index_records_bindings_functions_imports_and_calls() {
+    let result = lower_result("import pkg.*; x = f(1); function y = f(a); y = a; end");
+    let function_id = result.assembly.modules[0].top_level_functions[0];
+
+    assert!(result
+        .semantic_index
+        .imports
+        .iter()
+        .any(|import| import.import.path.0[0].0 == "pkg" && import.import.wildcard));
+    assert!(result
+        .semantic_index
+        .bindings
+        .iter()
+        .any(|binding| binding.name.0 == "x"));
+    assert!(result
+        .semantic_index
+        .functions
+        .iter()
+        .any(|function| function.name.0 == "f" && function.function == function_id));
+    assert!(result.semantic_index.calls.iter().any(|call| {
+        matches!(call.kind, CallKind::DirectFunction(id) if id == function_id)
+            && matches!(call.requested_outputs, RequestedOutputCount::One)
+    }));
+}
+
+#[test]
+fn semantic_index_records_unresolved_calls_explicitly() {
+    let result = lower_result("x = definitely_missing(1);");
+
+    assert!(result.semantic_index.calls.iter().any(|call| {
+        call.name.0[0].0 == "definitely_missing"
+            && matches!(call.callee, HirCallableRef::Unresolved(_))
+            && matches!(call.kind, CallKind::Dynamic)
+    }));
+}
+
+#[test]
+fn indexed_assignment_to_undefined_root_records_creation_policy() {
+    let result = lower_result("x(3) = 10;");
+    let mutation = result
+        .semantic_index
+        .mutations
+        .iter()
+        .find(|mutation| matches!(mutation.place, HirPlace::Index(_, _)))
+        .unwrap();
+
+    assert!(matches!(mutation.kind, PlaceMutationKind::IndexedAssign));
+    assert!(matches!(
+        mutation.creation_policy,
+        AssignmentCreationPolicy::CreateArrayByIndex
+    ));
+    let HirPlace::Index(base, indexing) = &mutation.place else {
+        panic!("expected indexed place");
+    };
+    assert!(matches!(base.kind, HirExprKind::Binding(_)));
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::AssignmentTarget
+    ));
+}
+
+#[test]
+fn assignment_indexing_preserves_colon_and_end_components() {
+    let result = lower_result("A(:, end) = 0;");
+    let mutation = result
+        .semantic_index
+        .mutations
+        .iter()
+        .find(|mutation| matches!(mutation.place, HirPlace::Index(_, _)))
+        .unwrap();
+
+    let HirPlace::Index(_, indexing) = &mutation.place else {
+        panic!("expected indexed place");
+    };
+    assert!(matches!(indexing.components[0], IndexComponent::Colon));
+    assert!(matches!(indexing.components[1], IndexComponent::End { .. }));
+}
+
+#[test]
+fn empty_array_index_assignment_records_deletion_target() {
+    let result = lower_result("A(2) = [];");
+    let mutation = result
+        .semantic_index
+        .mutations
+        .iter()
+        .find(|mutation| matches!(mutation.place, HirPlace::Index(_, _)))
+        .unwrap();
+
+    assert!(matches!(mutation.kind, PlaceMutationKind::Delete));
+    assert!(matches!(
+        mutation.creation_policy,
+        AssignmentCreationPolicy::ExistingOnly
+    ));
+    let HirPlace::Index(_, indexing) = &mutation.place else {
+        panic!("expected indexed place");
+    };
+    assert!(matches!(
+        indexing.result_context,
+        IndexResultContext::DeletionTarget
+    ));
+}
+
+#[test]
+fn struct_field_path_assignment_records_member_creation_policy() {
+    let result = lower_result("s.a.b = 1;");
+    let mutation = result
+        .semantic_index
+        .mutations
+        .iter()
+        .find(|mutation| matches!(mutation.place, HirPlace::Member(_, _)))
+        .unwrap();
+
+    assert!(matches!(mutation.kind, PlaceMutationKind::MemberAssign));
+    assert!(matches!(
+        mutation.creation_policy,
+        AssignmentCreationPolicy::CreateStructFieldPath
+    ));
 }

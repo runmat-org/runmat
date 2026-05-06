@@ -3,18 +3,20 @@ use crate::inference::function_vars::infer_function_variable_types;
 use crate::inference::globals::infer_global_variable_types;
 use crate::validation::classdefs::validate_classdefs;
 use crate::{
-    BindingId, BindingName, BindingOwner, BindingRole, BindingStorage, BuiltinId, CallSyntax,
-    CapturedBinding, ClassArgumentBlock, ClassEnumeration, ClassEvent, ClassId, ClassKind,
-    ClassMethod, ClassProperty, CommandArgument, EntrypointId, EntrypointName, EntrypointOrigin,
-    EntrypointPolicy, ExprId, FunctionAbi, FunctionId, FunctionKind, FunctionModifiers,
-    FunctionName, HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass,
-    HirCommandCall, HirEntrypoint, HirExpr, HirExprKind, HirFunction, HirImport, HirModule,
-    HirPlace, HirStmt as SemanticHirStmt, HirStmtKind, IndexComponent, IndexKind,
-    IndexResultContext, IndexingSemantics, LegacyHirProgram as HirProgram,
-    LegacyHirStmt as HirStmt, LoopIterationSemantics, LoweringContext, LoweringResult, ModuleId,
-    OperatorKind, QualifiedName, RequestedOutputCount, SemanticError, SourceId, SourceUnitKind,
-    Span, StmtId, StringLiteral, SymbolName, Type, VarId, WorkspaceExportPolicy,
-    WorkspaceVisibility,
+    AssignmentCreationPolicy, AssignmentShapePolicy, BindingId, BindingName, BindingOwner,
+    BindingResolution, BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution,
+    CallSyntax, CapturedBinding, ClassArgumentBlock, ClassEnumeration, ClassEvent, ClassId,
+    ClassKind, ClassMethod, ClassProperty, ClassResolution, CommandArgument, EntrypointId,
+    EntrypointName, EntrypointOrigin, EntrypointPolicy, ExprId, FunctionAbi, FunctionId,
+    FunctionKind, FunctionModifiers, FunctionName, FunctionResolution, HirAssembly, HirBinding,
+    HirBlock, HirCall, HirCallableRef, HirClass, HirCommandCall, HirEntrypoint, HirExpr,
+    HirExprKind, HirFunction, HirImport, HirModule, HirPlace, HirStmt as SemanticHirStmt,
+    HirStmtKind, ImportResolution, IndexComponent, IndexKind, IndexResultContext,
+    IndexingSemantics, LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt,
+    LoopIterationSemantics, LoweringContext, LoweringResult, ModuleId, OperatorKind, PlaceMutation,
+    PlaceMutationKind, QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount,
+    SemanticError, SemanticIndex, SourceId, SourceUnitKind, Span, StmtId, StringLiteral,
+    SymbolName, Type, VarId, WorkspaceExportPolicy, WorkspaceVisibility,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use std::collections::HashMap;
@@ -42,6 +44,7 @@ struct SemanticScope {
 
 struct SemanticCtx {
     assembly: HirAssembly,
+    semantic_index: SemanticIndex,
     module: ModuleId,
     next_expr: usize,
     next_stmt: usize,
@@ -95,10 +98,11 @@ pub fn lower(
     let inferred_function_envs = infer_function_variable_types(&hir);
     let inferred_globals = infer_global_variable_types(&hir, &inferred_function_returns);
 
-    let assembly = SemanticCtx::lower_program(prog)?;
+    let (assembly, semantic_index) = SemanticCtx::lower_program(prog)?;
 
     Ok(LoweringResult {
         assembly,
+        semantic_index,
         hir,
         variables,
         functions: ctx.functions,
@@ -111,9 +115,10 @@ pub fn lower(
 }
 
 impl SemanticCtx {
-    fn lower_program(prog: &AstProgram) -> Result<HirAssembly, SemanticError> {
+    fn lower_program(prog: &AstProgram) -> Result<(HirAssembly, SemanticIndex), SemanticError> {
         let mut ctx = Self {
             assembly: HirAssembly::default(),
+            semantic_index: SemanticIndex::default(),
             module: ModuleId(0),
             next_expr: 0,
             next_stmt: 0,
@@ -145,11 +150,15 @@ impl SemanticCtx {
 
         for stmt in &prog.body {
             if let AstStmt::Import { path, wildcard, .. } = stmt {
-                ctx.assembly.modules[ctx.module.0].imports.push(HirImport {
+                let import = HirImport {
                     path: qualified_name(path),
                     wildcard: *wildcard,
                     span: stmt.span(),
+                };
+                ctx.semantic_index.imports.push(ImportResolution {
+                    import: import.clone(),
                 });
+                ctx.assembly.modules[ctx.module.0].imports.push(import);
             }
         }
 
@@ -233,7 +242,7 @@ impl SemanticCtx {
             }
         }
 
-        Ok(ctx.assembly)
+        Ok((ctx.assembly, ctx.semantic_index))
     }
 
     fn reserve_function_name(&mut self, name: &str) -> FunctionId {
@@ -316,12 +325,23 @@ impl SemanticCtx {
             workspace_visibility,
             declared_span: span,
         });
+        self.semantic_index.bindings.push(BindingResolution {
+            name: BindingName(name.to_string()),
+            binding: id,
+            owner: BindingOwner::Function(owner),
+            span,
+        });
         id
     }
 
-    fn binding_for_read(&mut self, name: &str) -> Option<BindingId> {
+    fn binding_for_read(&mut self, name: &str, span: Span) -> Option<BindingId> {
         let binding = self.lookup_binding(name)?;
         self.record_capture_if_outer(binding);
+        self.semantic_index.references.push(ReferenceResolution {
+            name: SymbolName(name.to_string()),
+            kind: ReferenceKind::Binding(binding),
+            span,
+        });
         Some(binding)
     }
 
@@ -451,6 +471,12 @@ impl SemanticCtx {
             }
             let locals = ctx.binding_ids_for_owner(id);
             let captures = ctx.captures.remove(&id).unwrap_or_default();
+            ctx.semantic_index.functions.push(FunctionResolution {
+                name: FunctionName(name.to_string()),
+                function: id,
+                parent,
+                span,
+            });
             Ok(HirFunction {
                 id,
                 module: ctx.module,
@@ -561,10 +587,17 @@ impl SemanticCtx {
             }
         }
 
+        let qualified = QualifiedName(vec![SymbolName(name.to_string())]);
+        self.semantic_index.classes.push(ClassResolution {
+            name: qualified.clone(),
+            class: class_id,
+            span,
+        });
+
         Ok(HirClass {
             id: class_id,
             module: self.module,
-            name: QualifiedName(vec![SymbolName(name.to_string())]),
+            name: qualified,
             super_class: None,
             kind: if super_class
                 .map(|name| name.eq_ignore_ascii_case("handle"))
@@ -610,8 +643,15 @@ impl SemanticCtx {
             ),
             AstStmt::Assign(name, expr, suppressed, _) => {
                 let binding = self.binding_for_write(name, span);
+                let place = HirPlace::Binding(binding);
+                self.record_mutation(
+                    place.clone(),
+                    PlaceMutationKind::BindOrAssign,
+                    AssignmentCreationPolicy::CreateBinding,
+                    AssignmentShapePolicy::Exact,
+                );
                 HirStmtKind::Assign(
-                    HirPlace::Binding(binding),
+                    place,
                     self.lower_expr_semantic_requested(expr, RequestedOutputCount::One)?,
                     *suppressed,
                 )
@@ -744,11 +784,19 @@ impl SemanticCtx {
                     catch_body: self.lower_stmts_semantic(catch_body)?,
                 }
             }
-            AstStmt::AssignLValue(lvalue, expr, suppressed, _) => HirStmtKind::Assign(
-                self.lower_lvalue_semantic(lvalue, span)?,
-                self.lower_expr_semantic(expr)?,
-                *suppressed,
-            ),
+            AstStmt::AssignLValue(lvalue, expr, suppressed, _) => {
+                let deletion = is_empty_array_expr(expr);
+                let place = self.lower_lvalue_semantic(lvalue, span, deletion)?;
+                let kind = mutation_kind_for_place(&place, deletion);
+                let creation_policy = creation_policy_for_place(&place, deletion);
+                self.record_mutation(
+                    place.clone(),
+                    kind,
+                    creation_policy,
+                    AssignmentShapePolicy::MatlabCompatible,
+                );
+                HirStmtKind::Assign(place, self.lower_expr_semantic(expr)?, *suppressed)
+            }
         };
         Ok(Some(SemanticHirStmt {
             id: self.alloc_stmt_id(),
@@ -761,27 +809,85 @@ impl SemanticCtx {
         &mut self,
         lvalue: &runmat_parser::LValue,
         span: Span,
+        deletion: bool,
     ) -> Result<HirPlace, SemanticError> {
         use runmat_parser::LValue;
         Ok(match lvalue {
             LValue::Var(name) => HirPlace::Binding(self.binding_for_write(name, span)),
             LValue::Member(base, name) => HirPlace::Member(
-                Box::new(self.lower_expr_semantic(base)?),
+                Box::new(self.lower_assignment_base_expr(base, span)?),
                 crate::MemberName(name.clone()),
             ),
             LValue::MemberDynamic(base, name) => HirPlace::MemberDynamic(
-                Box::new(self.lower_expr_semantic(base)?),
+                Box::new(self.lower_assignment_base_expr(base, span)?),
                 Box::new(self.lower_expr_semantic(name)?),
             ),
             LValue::Index(base, indices) => HirPlace::Index(
-                Box::new(self.lower_expr_semantic(base)?),
-                self.lower_indexing(indices, IndexKind::Paren)?,
+                Box::new(self.lower_assignment_base_expr(base, span)?),
+                self.lower_indexing_with_context(
+                    indices,
+                    IndexKind::Paren,
+                    assignment_index_context(deletion),
+                )?,
             ),
             LValue::IndexCell(base, indices) => HirPlace::IndexCell(
-                Box::new(self.lower_expr_semantic(base)?),
-                self.lower_indexing(indices, IndexKind::Brace)?,
+                Box::new(self.lower_assignment_base_expr(base, span)?),
+                self.lower_indexing_with_context(
+                    indices,
+                    IndexKind::Brace,
+                    assignment_index_context(deletion),
+                )?,
             ),
         })
+    }
+
+    fn lower_assignment_base_expr(
+        &mut self,
+        expr: &AstExpr,
+        span: Span,
+    ) -> Result<HirExpr, SemanticError> {
+        match expr {
+            AstExpr::Ident(name, _) => {
+                let binding = self.binding_for_write(name, span);
+                Ok(HirExpr {
+                    id: self.alloc_expr_id(),
+                    kind: HirExprKind::Binding(binding),
+                    span: expr.span(),
+                })
+            }
+            AstExpr::Member(base, name, _) => Ok(HirExpr {
+                id: self.alloc_expr_id(),
+                kind: HirExprKind::Member(
+                    Box::new(self.lower_assignment_base_expr(base, span)?),
+                    crate::MemberName(name.clone()),
+                ),
+                span: expr.span(),
+            }),
+            AstExpr::MemberDynamic(base, name, _) => Ok(HirExpr {
+                id: self.alloc_expr_id(),
+                kind: HirExprKind::MemberDynamic(
+                    Box::new(self.lower_assignment_base_expr(base, span)?),
+                    Box::new(self.lower_expr_semantic(name)?),
+                ),
+                span: expr.span(),
+            }),
+            _ => self.lower_expr_semantic(expr),
+        }
+    }
+
+    fn record_mutation(
+        &mut self,
+        place: HirPlace,
+        kind: PlaceMutationKind,
+        creation_policy: AssignmentCreationPolicy,
+        shape_policy: AssignmentShapePolicy,
+    ) {
+        self.semantic_index.mutations.push(PlaceMutation {
+            place,
+            kind,
+            creation_policy,
+            shape_policy,
+        });
     }
 
     fn lower_expr_semantic(&mut self, expr: &AstExpr) -> Result<HirExpr, SemanticError> {
@@ -798,7 +904,7 @@ impl SemanticCtx {
             AstExpr::Number(value, _) => HirExprKind::Number(value.clone()),
             AstExpr::String(value, _) => HirExprKind::String(StringLiteral(value.clone())),
             AstExpr::Ident(name, _) => self
-                .binding_for_read(name)
+                .binding_for_read(name, span)
                 .map(HirExprKind::Binding)
                 .unwrap_or_else(|| {
                     if runmat_builtins::constants()
@@ -812,6 +918,7 @@ impl SemanticCtx {
                             Vec::new(),
                             CallSyntax::Plain,
                             requested_outputs,
+                            span,
                         ))
                     }
                 }),
@@ -824,7 +931,7 @@ impl SemanticCtx {
                     HirExprKind::Await(Box::new(args.into_iter().next().unwrap()))
                 } else if name == "spawn" && args.len() == 1 {
                     HirExprKind::Spawn(Box::new(args.into_iter().next().unwrap()))
-                } else if let Some(binding) = self.binding_for_read(name) {
+                } else if let Some(binding) = self.binding_for_read(name, span) {
                     let base = HirExpr {
                         id: self.alloc_expr_id(),
                         kind: HirExprKind::Binding(binding),
@@ -844,6 +951,7 @@ impl SemanticCtx {
                         args,
                         CallSyntax::Plain,
                         requested_outputs,
+                        span,
                     ))
                 }
             }
@@ -854,6 +962,7 @@ impl SemanticCtx {
                         Vec::new(),
                         CallSyntax::Plain,
                         RequestedOutputCount::Zero,
+                        span,
                     )
                     .callee,
                 args: args.iter().map(command_argument).collect(),
@@ -982,6 +1091,7 @@ impl SemanticCtx {
                     call_args,
                     CallSyntax::Method,
                     RequestedOutputCount::One,
+                    span,
                 ))
             }
             AstExpr::MetaClass(name, _) => {
@@ -1000,6 +1110,15 @@ impl SemanticCtx {
         indices: &[AstExpr],
         kind: IndexKind,
     ) -> Result<IndexingSemantics, SemanticError> {
+        self.lower_indexing_with_context(indices, kind, IndexResultContext::ReadSingle)
+    }
+
+    fn lower_indexing_with_context(
+        &mut self,
+        indices: &[AstExpr],
+        kind: IndexKind,
+        result_context: IndexResultContext,
+    ) -> Result<IndexingSemantics, SemanticError> {
         Ok(IndexingSemantics {
             kind,
             components: indices
@@ -1015,24 +1134,42 @@ impl SemanticCtx {
                     })
                 })
                 .collect::<Result<_, SemanticError>>()?,
-            result_context: IndexResultContext::ReadSingle,
+            result_context,
         })
     }
 
     fn call_for_name(
-        &self,
+        &mut self,
         name: &str,
         args: Vec<HirExpr>,
         syntax: CallSyntax,
         requested_outputs: RequestedOutputCount,
+        span: Span,
     ) -> HirCall {
-        let callee = if let Some(function) = self.function_names.get(name) {
-            HirCallableRef::Function(*function)
+        let (callee, kind) = if let Some(function) = self.function_names.get(name) {
+            (
+                HirCallableRef::Function(*function),
+                CallKind::DirectFunction(*function),
+            )
         } else if is_builtin(name) {
-            HirCallableRef::Builtin(BuiltinId(name.to_string()))
+            let builtin = BuiltinId(name.to_string());
+            (
+                HirCallableRef::Builtin(builtin.clone()),
+                CallKind::Builtin(builtin),
+            )
         } else {
-            HirCallableRef::Unresolved(QualifiedName(vec![SymbolName(name.to_string())]))
+            (
+                HirCallableRef::Unresolved(QualifiedName(vec![SymbolName(name.to_string())])),
+                CallKind::Dynamic,
+            )
         };
+        self.semantic_index.calls.push(CallResolution {
+            name: QualifiedName(vec![SymbolName(name.to_string())]),
+            callee: callee.clone(),
+            kind,
+            requested_outputs: requested_outputs.clone(),
+            span,
+        });
         HirCall {
             callee,
             args,
@@ -1067,6 +1204,45 @@ fn command_argument(expr: &AstExpr) -> CommandArgument {
         AstExpr::String(value, _) => CommandArgument::StringLiteral(StringLiteral(value.clone())),
         AstExpr::EndKeyword(_) => CommandArgument::Word(SymbolName("end".to_string())),
         _ => CommandArgument::StringLiteral(StringLiteral(format!("{expr:?}"))),
+    }
+}
+
+fn is_empty_array_expr(expr: &AstExpr) -> bool {
+    matches!(expr, AstExpr::Tensor(rows, _) if rows.is_empty() || rows.iter().all(Vec::is_empty))
+}
+
+fn assignment_index_context(deletion: bool) -> IndexResultContext {
+    if deletion {
+        IndexResultContext::DeletionTarget
+    } else {
+        IndexResultContext::AssignmentTarget
+    }
+}
+
+fn mutation_kind_for_place(place: &HirPlace, deletion: bool) -> PlaceMutationKind {
+    if deletion {
+        return PlaceMutationKind::Delete;
+    }
+    match place {
+        HirPlace::Binding(_) => PlaceMutationKind::BindOrAssign,
+        HirPlace::Index(_, _) => PlaceMutationKind::IndexedAssign,
+        HirPlace::IndexCell(_, _) => PlaceMutationKind::CellAssign,
+        HirPlace::Member(_, _) | HirPlace::MemberDynamic(_, _) => PlaceMutationKind::MemberAssign,
+    }
+}
+
+fn creation_policy_for_place(place: &HirPlace, deletion: bool) -> AssignmentCreationPolicy {
+    if deletion {
+        return AssignmentCreationPolicy::ExistingOnly;
+    }
+    match place {
+        HirPlace::Binding(_) => AssignmentCreationPolicy::CreateBinding,
+        HirPlace::Index(_, _) | HirPlace::IndexCell(_, _) => {
+            AssignmentCreationPolicy::CreateArrayByIndex
+        }
+        HirPlace::Member(_, _) | HirPlace::MemberDynamic(_, _) => {
+            AssignmentCreationPolicy::CreateStructFieldPath
+        }
     }
 }
 

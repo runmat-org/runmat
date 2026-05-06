@@ -660,6 +660,61 @@ pub enum CallKind {
     OverloadedIndexing,
 }
 
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
+pub struct SemanticIndex {
+    pub bindings: Vec<BindingResolution>,
+    pub functions: Vec<FunctionResolution>,
+    pub classes: Vec<ClassResolution>,
+    pub imports: Vec<ImportResolution>,
+    pub references: Vec<ReferenceResolution>,
+    pub calls: Vec<CallResolution>,
+    pub mutations: Vec<PlaceMutation>,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct BindingResolution {
+    pub name: BindingName,
+    pub binding: BindingId,
+    pub owner: BindingOwner,
+    pub span: Span,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct FunctionResolution {
+    pub name: FunctionName,
+    pub function: FunctionId,
+    pub parent: Option<FunctionId>,
+    pub span: Span,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ClassResolution {
+    pub name: QualifiedName,
+    pub class: ClassId,
+    pub span: Span,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ImportResolution {
+    pub import: HirImport,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ReferenceResolution {
+    pub name: SymbolName,
+    pub kind: ReferenceKind,
+    pub span: Span,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct CallResolution {
+    pub name: QualifiedName,
+    pub callee: HirCallableRef,
+    pub kind: CallKind,
+    pub requested_outputs: RequestedOutputCount,
+    pub span: Span,
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum SpawnSafetyFact {
     SpawnSafe,
@@ -999,6 +1054,7 @@ pub struct LegacyHirProgram {
 #[derive(Debug, Clone)]
 pub struct LoweringResult {
     pub assembly: HirAssembly,
+    pub semantic_index: SemanticIndex,
     pub hir: LegacyHirProgram,
     pub variables: HashMap<String, usize>,
     pub functions: HashMap<String, LegacyHirStmt>,

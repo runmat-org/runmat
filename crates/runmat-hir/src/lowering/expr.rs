@@ -397,43 +397,63 @@ impl Ctx {
                 HirLValue::Var(id)
             }
             ALV::Member(base, name) => {
-                if let parser::Expr::Ident(var_name, _) = &**base {
-                    let id = match self.lookup(var_name) {
-                        Some(id) => id,
-                        None => self.define(var_name.clone()),
-                    };
-                    let ty = if id.0 < self.var_types.len() {
-                        self.var_types[id.0].clone()
-                    } else {
-                        Type::Unknown
-                    };
-                    let b = HirExpr {
-                        kind: HirExprKind::Var(id),
-                        ty,
-                        span: base.span(),
-                    };
-                    HirLValue::Member(Box::new(b), name.clone())
-                } else {
-                    let b = self.lower_expr(base)?;
-                    HirLValue::Member(Box::new(b), name.clone())
-                }
+                let b = self.lower_lvalue_base_expr(base)?;
+                HirLValue::Member(Box::new(b), name.clone())
             }
             ALV::MemberDynamic(base, name_expr) => {
-                let b = self.lower_expr(base)?;
+                let b = self.lower_lvalue_base_expr(base)?;
                 let n = self.lower_expr(name_expr)?;
                 HirLValue::MemberDynamic(Box::new(b), Box::new(n))
             }
             ALV::Index(base, idxs) => {
-                let b = self.lower_expr(base)?;
+                let b = self.lower_lvalue_base_expr(base)?;
                 let lowered: Result<Vec<_>, _> = idxs.iter().map(|e| self.lower_expr(e)).collect();
                 HirLValue::Index(Box::new(b), lowered?)
             }
             ALV::IndexCell(base, idxs) => {
-                let b = self.lower_expr(base)?;
+                let b = self.lower_lvalue_base_expr(base)?;
                 let lowered: Result<Vec<_>, _> = idxs.iter().map(|e| self.lower_expr(e)).collect();
                 HirLValue::IndexCell(Box::new(b), lowered?)
             }
         })
+    }
+
+    fn lower_lvalue_base_expr(&mut self, expr: &parser::Expr) -> Result<HirExpr, SemanticError> {
+        match expr {
+            parser::Expr::Ident(var_name, _) => {
+                let id = match self.lookup(var_name) {
+                    Some(id) => id,
+                    None => self.define(var_name.clone()),
+                };
+                let ty = if id.0 < self.var_types.len() {
+                    self.var_types[id.0].clone()
+                } else {
+                    Type::Unknown
+                };
+                Ok(HirExpr {
+                    kind: HirExprKind::Var(id),
+                    ty,
+                    span: expr.span(),
+                })
+            }
+            parser::Expr::Member(base, name, span) => Ok(HirExpr {
+                kind: HirExprKind::Member(
+                    Box::new(self.lower_lvalue_base_expr(base)?),
+                    name.clone(),
+                ),
+                ty: Type::Unknown,
+                span: *span,
+            }),
+            parser::Expr::MemberDynamic(base, name_expr, span) => Ok(HirExpr {
+                kind: HirExprKind::MemberDynamic(
+                    Box::new(self.lower_lvalue_base_expr(base)?),
+                    Box::new(self.lower_expr(name_expr)?),
+                ),
+                ty: Type::Unknown,
+                span: *span,
+            }),
+            _ => self.lower_expr(expr),
+        }
     }
 
     pub(crate) fn infer_function_return_type(&self, func_name: &str, args: &[HirExpr]) -> Type {
