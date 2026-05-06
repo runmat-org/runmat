@@ -1,6 +1,7 @@
 use runmat_hir::{
-    AsyncValueFact, BindingId, EnvironmentEffect, ExprId, FunctionId, ModuleId, ShapeFact,
-    TypeFact, ValueFlowFact, WorkspaceEffect,
+    AsyncValueFact, BindingId, CompatibilityMode, EmptyArrayRole, EnvironmentEffect,
+    ExpansionSemantics, ExprId, FunctionId, ModuleId, OperatorKind, ShapeFact, SourceUnitKind,
+    TensorElementDomainFact, TypeFact, ValueFlowFact, WorkspaceEffect,
 };
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
@@ -25,6 +26,8 @@ pub struct AnalysisStore {
 pub struct ModuleSummary {
     pub module: ModuleId,
     pub functions: Vec<FunctionId>,
+    pub source_unit: Option<SourceUnitKind>,
+    pub compatibility_mode: CompatibilityMode,
     pub workspace: Vec<WorkspaceEffect>,
     pub environment: Vec<EnvironmentEffect>,
     pub may_call_unknown: bool,
@@ -75,6 +78,10 @@ pub struct ExprFact {
     pub shape: ShapeFact,
     pub value_flow: ValueFlowFact,
     pub async_value: Option<AsyncValueFact>,
+    pub empty_array_role: Option<EmptyArrayRole>,
+    pub expansion: Option<ExpansionSemantics>,
+    pub operator: Option<OperatorKind>,
+    pub tensor_element_domain: Option<TensorElementDomainFact>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

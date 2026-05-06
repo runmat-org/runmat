@@ -157,7 +157,7 @@ fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
             .iter()
             .map(|arg| MirCallArg::Single(MirOperand::Constant(command_arg_constant(arg))))
             .collect(),
-        syntax: runmat_hir::CallSyntax::Plain,
+        syntax: runmat_hir::CallSyntax::Command,
         requested_outputs: RequestedOutputCount::Zero,
     })
 }

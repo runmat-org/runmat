@@ -1,6 +1,7 @@
 use crate::AsyncBehaviorFact;
 use runmat_hir::{
-    AsyncValueFact, EnvironmentEffect, ShapeFact, TypeFact, ValueFlowFact, WorkspaceEffect,
+    AsyncValueFact, EmptyArrayRole, EnvironmentEffect, ExpansionSemantics, OperatorKind, ShapeFact,
+    TensorElementDomainFact, TypeFact, ValueFlowFact, WorkspaceEffect,
 };
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +13,10 @@ pub struct MirLocalFact {
     pub shape: ShapeFact,
     pub value_flow: ValueFlowFact,
     pub async_value: Option<AsyncValueFact>,
+    pub empty_array_role: Option<EmptyArrayRole>,
+    pub expansion: Option<ExpansionSemantics>,
+    pub operator: Option<OperatorKind>,
+    pub tensor_element_domain: Option<TensorElementDomainFact>,
     pub initialized: InitFact,
 }
 

@@ -311,6 +311,7 @@ pub enum CallSyntax {
     Plain,
     Method,
     DottedInvoke,
+    Command,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -572,9 +573,10 @@ pub enum LoopIterationSemantics {
     WhileCondition,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
 pub enum CompatibilityMode {
     MatlabStrict,
+    #[default]
     RunMatExtended,
     Interactive,
 }

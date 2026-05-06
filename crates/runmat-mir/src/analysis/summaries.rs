@@ -63,6 +63,19 @@ pub struct CallSummary {
     pub requested_outputs: RequestedOutputCount,
     pub arg_count: usize,
     pub expansion_arg_count: usize,
+    pub async_behavior: AsyncBehaviorFact,
+    pub dispatch: NominalDispatchHook,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum NominalDispatchHook {
+    DirectFunction,
+    Builtin,
+    Constructor,
+    MethodSyntax,
+    Dynamic,
+    OverloadedIndexing,
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -220,7 +233,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
             .iter()
             .map(|fact| fact.async_value.clone())
             .collect(),
-        requested_output_sensitive: Vec::new(),
+        requested_output_sensitive: requested_output_sensitive_facts(&finalized_outputs),
         effects: EffectSummary {
             workspace,
             environment,
@@ -430,6 +443,11 @@ fn scan_rvalue(
             if is_unknown_call(&call.callee) {
                 *may_call_unknown = true;
             }
+            if matches!(async_behavior_for_call(call), AsyncBehaviorFact::MaySuspend)
+                && matches!(*async_behavior, AsyncBehaviorFact::NeverSuspends)
+            {
+                *async_behavior = AsyncBehaviorFact::MaySuspend;
+            }
             calls.push(call_summary(call));
             for arg in &call.args {
                 scan_operand(body, arg.operand(), reads_captures, function_handles);
@@ -469,7 +487,52 @@ fn call_summary(call: &MirCall) -> CallSummary {
             .iter()
             .filter(|arg| matches!(arg, MirCallArg::Expansion(_)))
             .count(),
+        async_behavior: async_behavior_for_call(call),
+        dispatch: dispatch_hook(call),
     }
+}
+
+fn async_behavior_for_call(call: &MirCall) -> AsyncBehaviorFact {
+    if matches!(
+        call.callee,
+        HirCallableRef::DynamicExpr(_) | HirCallableRef::Unresolved(_)
+    ) {
+        AsyncBehaviorFact::MaySuspend
+    } else {
+        AsyncBehaviorFact::NeverSuspends
+    }
+}
+
+fn dispatch_hook(call: &MirCall) -> NominalDispatchHook {
+    match (&call.callee, &call.syntax) {
+        (HirCallableRef::Function(_), _) => NominalDispatchHook::DirectFunction,
+        (HirCallableRef::Builtin(_), _) => NominalDispatchHook::Builtin,
+        (HirCallableRef::ClassConstructor(_), _) => NominalDispatchHook::Constructor,
+        (_, runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke) => {
+            NominalDispatchHook::MethodSyntax
+        }
+        (HirCallableRef::DynamicExpr(_) | HirCallableRef::Unresolved(_), _) => {
+            NominalDispatchHook::Dynamic
+        }
+        _ => NominalDispatchHook::None,
+    }
+}
+
+fn requested_output_sensitive_facts(
+    outputs: &[OutputFact],
+) -> Vec<(RequestedOutputCount, Vec<TypeFact>)> {
+    (0..=outputs.len())
+        .map(|count| {
+            (
+                RequestedOutputCount::Exactly(count),
+                outputs
+                    .iter()
+                    .take(count)
+                    .map(|fact| fact.ty.clone())
+                    .collect(),
+            )
+        })
+        .collect()
 }
 
 fn scan_workspace_effect(

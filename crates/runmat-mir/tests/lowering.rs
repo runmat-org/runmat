@@ -3,7 +3,8 @@ use runmat_mir::{
     analysis::{
         analyze_assembly, analyze_body, analyze_liveness, analyze_spawn_boundaries,
         diagnose_uninitialized_reads, summarize_body, summarize_spawn_safety, AccelEligibilityFact,
-        AnalysisStore, FusibilityFact, InitFact, MirLocalKey, ParallelSafetyFact,
+        AnalysisStore, FusibilityFact, InitFact, MirLocalKey, NominalDispatchHook,
+        ParallelSafetyFact,
     },
     lowering::lower_assembly,
     AsyncBehaviorFact, CacheProduct, MirAggregateKind, MirBody, MirCallArg, MirLocalKind,
@@ -42,6 +43,11 @@ fn simple_function_lowers_to_single_block_with_binding_locals() {
     assert_eq!(body.locals.len(), 4);
     assert_eq!(body.source_map.function, Some(body.function));
     assert!(body.source_map.module.is_some());
+    assert!(body.source_map.source_unit.is_some());
+    assert_eq!(
+        body.source_map.compatibility_mode,
+        runmat_hir::CompatibilityMode::RunMatExtended
+    );
     assert_eq!(body.source_map.enclosing_class, None);
     assert_eq!(body.source_map.locals.len(), body.locals.len());
     assert_eq!(body.blocks[0].statements.len(), 1);
@@ -256,6 +262,10 @@ fn analyze_body_records_tensor_and_cell_aggregate_facts() {
         tensor_fact.value_flow,
         runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::Tensor(_))
     ));
+    assert!(matches!(
+        tensor_fact.tensor_element_domain,
+        Some(runmat_hir::TensorElementDomainFact::Numeric { .. })
+    ));
 
     let (cell_body, cell_store) = analyze_single_body("function y = f(); y = {1, 2}; end");
     let cell_output = first_local_of_kind(&cell_body, MirLocalKind::Output);
@@ -274,6 +284,22 @@ fn analyze_body_records_tensor_and_cell_aggregate_facts() {
     assert_eq!(
         cell_fact.value_flow,
         runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::Cell)
+    );
+}
+
+#[test]
+fn analyze_body_records_operator_and_expansion_semantic_facts() {
+    let (body, store) = analyze_single_body("function y = f(x); y = x + 1; end");
+    let output = first_local_of_kind(&body, MirLocalKind::Output);
+    let fact = &store.mir_locals[&MirLocalKey {
+        function: body.function,
+        local: output,
+    }];
+
+    assert_eq!(fact.operator, Some(runmat_hir::OperatorKind::Add));
+    assert_eq!(
+        fact.expansion,
+        Some(runmat_hir::ExpansionSemantics::ImplicitExpansion)
     );
 }
 
@@ -497,6 +523,18 @@ fn summary_records_requested_output_sensitive_call_facts() {
     ));
     assert_eq!(summary.calls[0].arg_count, 1);
     assert_eq!(summary.calls[0].expansion_arg_count, 1);
+    assert!(matches!(
+        summary.calls[0].async_behavior,
+        AsyncBehaviorFact::MaySuspend
+    ));
+    assert_eq!(summary.calls[0].dispatch, NominalDispatchHook::Dynamic);
+    assert!(summary
+        .requested_output_sensitive
+        .iter()
+        .any(|(requested, outputs)| matches!(
+            requested,
+            runmat_hir::RequestedOutputCount::Exactly(1)
+        ) && outputs.len() == 1));
 }
 
 #[test]
@@ -508,6 +546,10 @@ fn summary_marks_unresolved_calls_as_unknown_call_barriers() {
     let summary = summarize_body(body, &mut store);
 
     assert!(summary.may_call_unknown);
+    assert_eq!(
+        summary.effects.async_behavior,
+        Some(AsyncBehaviorFact::MaySuspend)
+    );
     assert!(matches!(summary.fusibility, FusibilityFact::NonFusible(_)));
     assert!(matches!(
         summary.accel_eligibility,
@@ -592,6 +634,11 @@ fn analyze_assembly_populates_store_products_by_function() {
     let module = body.source_map.module.unwrap();
     assert!(store.modules.contains_key(&module));
     assert!(store.modules[&module].functions.contains(&body.function));
+    assert!(store.modules[&module].source_unit.is_some());
+    assert_eq!(
+        store.modules[&module].compatibility_mode,
+        runmat_hir::CompatibilityMode::RunMatExtended
+    );
     assert!(store.liveness.contains_key(&body.function));
     assert!(store.spawn_boundaries.contains_key(&body.function));
     assert_eq!(store.spawn_boundaries.get(&body.function).unwrap().len(), 1);
@@ -637,6 +684,27 @@ fn analyze_assembly_collects_structured_diagnostics() {
             && diagnostic.category.as_deref() == Some("definite-assignment")
             && diagnostic.help.as_deref()
                 == Some("assign this local on every control-flow path before reading it")));
+}
+
+#[test]
+fn analyze_assembly_collects_semantic_marker_diagnostics() {
+    let mut mir = lower_mir("function y = f(x); y = x; end");
+    let body = mir.bodies.values_mut().next().unwrap();
+    let local = first_local_of_kind(body, MirLocalKind::Parameter);
+    body.blocks[0].statements[0].kind = MirStmtKind::Expr(MirRvalue::Call(runmat_mir::MirCall {
+        callee: HirCallableRef::Unresolved(runmat_hir::QualifiedName(vec![
+            runmat_hir::SymbolName("sink".into()),
+        ])),
+        args: vec![MirCallArg::Expansion(MirOperand::Local(local))],
+        syntax: runmat_hir::CallSyntax::Plain,
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+    }));
+
+    let store = analyze_assembly(&mir);
+
+    assert!(store.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RM-MIR0004" && diagnostic.category.as_deref() == Some("comma-list")
+    }));
 }
 
 #[test]
@@ -914,6 +982,7 @@ fn command_call_lowers_to_zero_output_call_with_string_args() {
         call.requested_outputs,
         runmat_hir::RequestedOutputCount::Zero
     ));
+    assert_eq!(call.syntax, runmat_hir::CallSyntax::Command);
     assert_eq!(call.args.len(), 1);
     assert!(matches!(
         call.args[0],

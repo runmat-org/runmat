@@ -1,11 +1,16 @@
 use crate::{BasicBlockId, MirLocalId};
-use runmat_hir::{BindingId, ClassId, ExprId, FunctionId, ModuleId, Span, StmtId};
+use runmat_hir::{
+    BindingId, ClassId, CompatibilityMode, ExprId, FunctionId, ModuleId, SourceUnitKind, Span,
+    StmtId,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MirSourceMap {
     pub function: Option<FunctionId>,
     pub module: Option<ModuleId>,
+    pub source_unit: Option<SourceUnitKind>,
+    pub compatibility_mode: CompatibilityMode,
     pub enclosing_class: Option<ClassId>,
     pub statements: Vec<MirSourceRecord>,
     pub locals: Vec<MirLocalSource>,
