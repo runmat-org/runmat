@@ -8,30 +8,45 @@ pub(crate) fn lower_stmt(
     stmt: &HirStmt,
 ) -> Result<Vec<MirStmt>, SemanticError> {
     Ok(match &stmt.kind {
-        HirStmtKind::Assign(place, expr, _) => vec![MirStmt {
-            kind: MirStmtKind::Assign {
-                place: lower_place(ctx, place)?,
-                value: lower_expr(ctx, expr)?,
-            },
-            span: stmt.span,
-        }],
-        HirStmtKind::MultiAssign(targets, expr, _) => vec![MirStmt {
-            kind: MirStmtKind::MultiAssign {
-                targets: MirOutputTargetList {
-                    targets: targets
-                        .targets
-                        .iter()
-                        .map(|target| lower_output_target(ctx, target))
-                        .collect::<Result<_, _>>()?,
+        HirStmtKind::Assign(place, expr, _) => {
+            let mut stmts = Vec::new();
+            let value = lower_expr(ctx, expr, &mut stmts)?;
+            stmts.push(MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: lower_place(ctx, place)?,
+                    value,
                 },
-                value: lower_expr(ctx, expr)?,
-            },
-            span: stmt.span,
-        }],
-        HirStmtKind::ExprStmt(expr, _) => vec![MirStmt {
-            kind: MirStmtKind::Expr(lower_expr(ctx, expr)?),
-            span: stmt.span,
-        }],
+                span: stmt.span,
+            });
+            stmts
+        }
+        HirStmtKind::MultiAssign(targets, expr, _) => {
+            let mut stmts = Vec::new();
+            let value = lower_expr(ctx, expr, &mut stmts)?;
+            stmts.push(MirStmt {
+                kind: MirStmtKind::MultiAssign {
+                    targets: MirOutputTargetList {
+                        targets: targets
+                            .targets
+                            .iter()
+                            .map(|target| lower_output_target(ctx, target))
+                            .collect::<Result<_, _>>()?,
+                    },
+                    value,
+                },
+                span: stmt.span,
+            });
+            stmts
+        }
+        HirStmtKind::ExprStmt(expr, _) => {
+            let mut stmts = Vec::new();
+            let value = lower_expr(ctx, expr, &mut stmts)?;
+            stmts.push(MirStmt {
+                kind: MirStmtKind::Expr(value),
+                span: stmt.span,
+            });
+            stmts
+        }
         HirStmtKind::Return => Vec::new(),
         _ => {
             return Err(SemanticError::new(

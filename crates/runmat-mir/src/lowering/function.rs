@@ -1,7 +1,7 @@
 use crate::{MirAssembly, MirBody, MirOperand, MirSourceMap, MirTerminator, MirTerminatorKind};
 use runmat_hir::{HirAssembly, HirFunction, SemanticError};
 
-use super::{control_flow::ControlFlowBuilder, expr::lower_operand, MirLoweringContext};
+use super::{control_flow::ControlFlowBuilder, expr::lower_simple_operand, MirLoweringContext};
 
 pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, SemanticError> {
     let mut assembly = MirAssembly::default();
@@ -25,7 +25,9 @@ pub fn lower_function(function: &HirFunction) -> Result<MirBody, SemanticError> 
                 kind: runmat_hir::HirExprKind::Binding(*binding),
                 span: function.span,
             };
-            lower_operand(&ctx, &expr)
+            lower_simple_operand(&ctx, &expr)?.ok_or_else(|| {
+                SemanticError::new("function return binding did not lower to a simple MIR operand")
+            })
         })
         .collect::<Result<_, _>>()?;
     let return_terminator = MirTerminator {
@@ -34,6 +36,12 @@ pub fn lower_function(function: &HirFunction) -> Result<MirBody, SemanticError> 
     };
     let (blocks, statement_sources) =
         ControlFlowBuilder::new().lower_function_body(&ctx, &function.body, return_terminator)?;
+    let (temp_locals, temp_sources) = ctx.take_temp_locals();
+    let mut locals = locals;
+    let mut local_sources = local_sources;
+    locals.extend(temp_locals);
+    local_sources.extend(temp_sources);
+
     Ok(MirBody {
         function: function.id,
         locals,

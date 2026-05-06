@@ -1,6 +1,7 @@
 use runmat_hir::{lower, HirCallableRef, LoweringContext};
 use runmat_mir::{
-    lowering::lower_assembly, MirOutputTarget, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
+    lowering::lower_assembly, MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue,
+    MirStmtKind, MirTerminatorKind,
 };
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
@@ -60,6 +61,59 @@ fn direct_function_call_preserves_callee_and_requested_outputs() {
     assert!(matches!(
         call.requested_outputs,
         runmat_hir::RequestedOutputCount::One
+    ));
+}
+
+#[test]
+fn complex_call_arguments_lower_through_temporary_locals() {
+    let mir = lower_mir("function y = g(x); y = f(x + 1); end\nfunction z = f(a); z = a; end");
+    let body = mir
+        .bodies
+        .values()
+        .find(|body| body.blocks[0].statements.len() == 2)
+        .unwrap();
+
+    assert!(body
+        .locals
+        .iter()
+        .any(|local| matches!(local.kind, MirLocalKind::Temporary) && local.binding.is_none()));
+    assert!(matches!(
+        body.blocks[0].statements[0].kind,
+        MirStmtKind::Assign {
+            place: MirPlace::Local(_),
+            value: MirRvalue::Binary(_, _, _),
+        }
+    ));
+
+    let MirStmtKind::Assign {
+        value: MirRvalue::Call(call),
+        ..
+    } = &body.blocks[0].statements[1].kind
+    else {
+        panic!("expected call assignment after temp");
+    };
+    assert!(matches!(call.args[0], MirOperand::Local(_)));
+}
+
+#[test]
+fn nested_binary_operands_lower_through_temporary_locals() {
+    let mir = lower_mir("function y = calc(a, b, c); y = (a + b) * c; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert_eq!(body.blocks[0].statements.len(), 2);
+    assert!(matches!(
+        body.blocks[0].statements[0].kind,
+        MirStmtKind::Assign {
+            place: MirPlace::Local(_),
+            value: MirRvalue::Binary(_, _, _),
+        }
+    ));
+    assert!(matches!(
+        body.blocks[0].statements[1].kind,
+        MirStmtKind::Assign {
+            value: MirRvalue::Binary(MirOperand::Local(_), _, _),
+            ..
+        }
     ));
 }
 

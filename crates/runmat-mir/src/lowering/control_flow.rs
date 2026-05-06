@@ -111,12 +111,13 @@ impl ControlFlowBuilder {
                 )?;
                 self.blocks.push(then_block);
                 self.blocks.push(else_block);
+                let cond = lower_operand(ctx, cond, &mut statements)?;
                 return Ok(BasicBlock {
                     id,
                     statements,
                     terminator: MirTerminator {
                         kind: MirTerminatorKind::Branch {
-                            cond: lower_operand(ctx, cond)?,
+                            cond,
                             then_block: then_id,
                             else_block: else_id,
                         },
@@ -151,12 +152,13 @@ impl ControlFlowBuilder {
                     Some((id, exit_id)),
                 )?;
                 self.blocks.push(body_block);
+                let cond = lower_operand(ctx, cond, &mut statements)?;
                 return Ok(BasicBlock {
                     id,
                     statements,
                     terminator: MirTerminator {
                         kind: MirTerminatorKind::Branch {
-                            cond: lower_operand(ctx, cond)?,
+                            cond,
                             then_block: loop_body_id,
                             else_block: exit_id,
                         },
@@ -193,13 +195,14 @@ impl ControlFlowBuilder {
                     Some((id, exit_id)),
                 )?;
                 self.blocks.push(body_block);
+                let iterable = lower_expr(ctx, range, &mut statements)?;
                 return Ok(BasicBlock {
                     id,
                     statements,
                     terminator: MirTerminator {
                         kind: MirTerminatorKind::For {
                             binding: ctx.local_for_binding(*binding)?,
-                            iterable: lower_expr(ctx, range)?,
+                            iterable,
                             semantics: semantics.clone(),
                             body_block: body_id,
                             exit_block: exit_id,
