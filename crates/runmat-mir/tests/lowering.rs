@@ -1,8 +1,8 @@
 use runmat_hir::{lower, HirCallableRef, LoweringContext};
 use runmat_mir::{
     analysis::{
-        analyze_body, analyze_liveness, diagnose_uninitialized_reads, summarize_body,
-        AnalysisStore, InitFact,
+        analyze_body, analyze_liveness, analyze_spawn_boundaries, diagnose_uninitialized_reads,
+        summarize_body, summarize_spawn_safety, AnalysisStore, InitFact,
     },
     lowering::lower_assembly,
     AsyncBehaviorFact, MirAggregateKind, MirBody, MirLocalKind, MirOperand, MirOutputTarget,
@@ -146,6 +146,35 @@ fn summary_marks_spawn_as_requiring_async_runtime() {
         summary.effects.async_behavior,
         Some(AsyncBehaviorFact::RequiresAsyncRuntime)
     );
+}
+
+#[test]
+fn spawn_boundary_analysis_records_spawn_site() {
+    let mir = lower_mir("function y = f(g); y = spawn(g); end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let boundaries = analyze_spawn_boundaries(body);
+
+    assert_eq!(boundaries.len(), 1);
+    assert!(matches!(
+        boundaries[0].safety,
+        runmat_hir::SpawnSafetyFact::RequiresIsolation
+    ));
+    assert!(matches!(boundaries[0].future, MirOperand::Local(_)));
+}
+
+#[test]
+fn spawn_safety_summary_is_conservative_for_spawn_sites() {
+    let mir = lower_mir("function y = f(g); y = spawn(g); end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let summary = summarize_spawn_safety(body);
+
+    assert_eq!(summary.function, body.function);
+    assert!(matches!(
+        summary.safety,
+        runmat_hir::SpawnSafetyFact::RequiresIsolation
+    ));
 }
 
 #[test]
