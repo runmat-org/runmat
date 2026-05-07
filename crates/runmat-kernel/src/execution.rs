@@ -5,7 +5,10 @@
 
 use crate::Result;
 use runmat_builtins::Value;
-use runmat_core::{RunError, RunMatSession};
+use runmat_core::{
+    abi::{DiagnosticSeverity, ExecutionOutcome, RuntimeFlow},
+    ExecutionStreamKind, RunError, RunMatSession,
+};
 use runmat_time::Instant;
 use std::path::Path;
 use std::time::Duration;
@@ -133,24 +136,19 @@ impl ExecutionEngine {
             log::debug!("Executing code ({}): {}", self.execution_count, code);
         }
 
-        // Execute using the underlying RunMatSession
-        match self.repl_engine.execute(code).await {
-            Ok(repl_result) => {
+        // Execute through the runtime/workspace ABI boundary.
+        match self.repl_engine.execute_outcome(code).await {
+            Ok(outcome) => {
                 let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
-                if let Some(error) = repl_result.error {
-                    let identifier = error.identifier().map(ToString::to_string);
-                    let error_message = error.format_diagnostic();
-                    let traceback = if error.context.call_stack.is_empty() {
-                        vec!["Error during code execution".to_string()]
-                    } else {
-                        error.context.call_stack.clone()
-                    };
+                if let Some(diagnostic) = outcome_error_diagnostic(&outcome) {
+                    let identifier = Some(diagnostic.code.clone());
+                    let error_message = diagnostic.message.clone();
 
                     Ok(ExecutionResult {
                         status: ExecutionStatus::Error,
-                        stdout: self.capture_stdout(),
-                        stderr: self.capture_stderr(&error_message),
+                        stdout: stdout_from_outcome(&outcome),
+                        stderr: stderr_from_outcome(&outcome, &error_message),
                         result: None,
                         execution_time_ms,
                         error: Some(ExecutionError {
@@ -159,15 +157,21 @@ impl ExecutionEngine {
                                 .unwrap_or_else(|| "RuntimeError".to_string()),
                             identifier,
                             message: error_message,
-                            traceback,
+                            traceback: vec!["Error during code execution".to_string()],
                         }),
                     })
                 } else {
                     Ok(ExecutionResult {
                         status: ExecutionStatus::Success,
-                        stdout: self.capture_stdout(),
+                        stdout: stdout_from_outcome(&outcome),
                         stderr: String::new(), // No errors on success
-                        result: repl_result.value,
+                        result: match outcome.flow {
+                            RuntimeFlow::Single(value) => Some(value),
+                            RuntimeFlow::NoValue
+                            | RuntimeFlow::OutputList(_)
+                            | RuntimeFlow::CommaList(_)
+                            | RuntimeFlow::DynamicList(_) => None,
+                        },
                         execution_time_ms,
                         error: None,
                     })
@@ -270,20 +274,37 @@ impl ExecutionEngine {
     pub fn has_snapshot(&self) -> bool {
         self.repl_engine.has_snapshot()
     }
+}
 
-    /// Capture stdout output from the REPL execution
-    fn capture_stdout(&self) -> String {
-        // In a production implementation, this would capture actual stdout
-        // For now, we simulate by checking if there were any successful results
-        // The REPL itself doesn't currently emit to stdout, but this would be the place
-        // to capture print() function output or similar
-        String::new()
-    }
+fn outcome_error_diagnostic(
+    outcome: &ExecutionOutcome,
+) -> Option<&runmat_core::abi::RuntimeDiagnostic> {
+    outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+}
 
-    /// Capture stderr output, including error messages
-    fn capture_stderr(&self, error_msg: &str) -> String {
-        // Format error message for stderr
-        format!("Error: {error_msg}")
+fn stdout_from_outcome(outcome: &ExecutionOutcome) -> String {
+    outcome
+        .streams
+        .iter()
+        .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
+        .map(|entry| entry.text.as_str())
+        .collect()
+}
+
+fn stderr_from_outcome(outcome: &ExecutionOutcome, fallback_error: &str) -> String {
+    let stderr = outcome
+        .streams
+        .iter()
+        .filter(|entry| entry.stream == ExecutionStreamKind::Stderr)
+        .map(|entry| entry.text.as_str())
+        .collect::<String>();
+    if stderr.is_empty() {
+        format!("Error: {fallback_error}")
+    } else {
+        stderr
     }
 }
 
