@@ -2,6 +2,7 @@ use crate::{
     AsyncBehaviorFact, MirBody, MirCall, MirCallArg, MirIndexComponent, MirIndexing, MirLocal,
     MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
 };
+use runmat_builtins::{BuiltinEffects, BuiltinPurity, BuiltinSemanticKind};
 use runmat_hir::{
     AsyncValueFact, BindingId, FunctionHandleTarget, FunctionId, HirCallableRef,
     RequestedOutputCount, ShapeFact, SpawnSafetyFact, TypeFact, ValueFlowFact, WorkspaceEffect,
@@ -64,6 +65,9 @@ pub struct CallSummary {
     pub arg_count: usize,
     pub expansion_arg_count: usize,
     pub async_behavior: AsyncBehaviorFact,
+    pub effects: BuiltinEffects,
+    pub purity: BuiltinPurity,
+    pub semantic_kind: BuiltinSemanticKind,
     pub dispatch: NominalDispatchHook,
 }
 
@@ -201,9 +205,11 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
         }
     }
 
-    let fusibility = classify_fusibility(&workspace, &environment, may_call_unknown);
-    let parallel_safety = classify_parallel_safety(&workspace, &environment, may_call_unknown);
-    let accel_eligibility = classify_accel_eligibility(&workspace, &environment, may_call_unknown);
+    let fusibility = classify_fusibility(&workspace, &environment, &calls, may_call_unknown);
+    let parallel_safety =
+        classify_parallel_safety(&workspace, &environment, &calls, may_call_unknown);
+    let accel_eligibility =
+        classify_accel_eligibility(&workspace, &environment, &calls, may_call_unknown);
 
     let finalized_outputs = finalize_output_facts(outputs, output_count);
 
@@ -256,9 +262,104 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
     summary
 }
 
+pub fn propagate_function_summaries(store: &mut AnalysisStore) {
+    let base = store.functions.clone();
+    let mut current = base.clone();
+
+    for _ in 0..base.len().max(1) {
+        let mut changed = false;
+        let mut next = current.clone();
+        for (function, base_summary) in &base {
+            let mut summary = base_summary.clone();
+            for call in &base_summary.calls {
+                let Some(callee) = call_function_id(call) else {
+                    continue;
+                };
+                let Some(callee_summary) = current.get(&callee) else {
+                    continue;
+                };
+                merge_callee_summary(&mut summary, callee_summary);
+            }
+            if next.get(function) != Some(&summary) {
+                next.insert(*function, summary);
+                changed = true;
+            }
+        }
+        current = next;
+        if !changed {
+            break;
+        }
+    }
+
+    store.functions = current;
+}
+
+fn call_function_id(call: &CallSummary) -> Option<FunctionId> {
+    match &call.callee {
+        HirCallableRef::Function(function) => Some(*function),
+        _ => None,
+    }
+}
+
+fn merge_callee_summary(summary: &mut FunctionSummary, callee: &FunctionSummary) {
+    append_unique(&mut summary.effects.workspace, &callee.effects.workspace);
+    append_unique(
+        &mut summary.effects.environment,
+        &callee.effects.environment,
+    );
+    if let Some(incoming) = &callee.effects.async_behavior {
+        match &mut summary.effects.async_behavior {
+            Some(current) => merge_async_behavior(current, incoming),
+            slot @ None => *slot = Some(incoming.clone()),
+        }
+    }
+    summary.may_call_unknown |= callee.may_call_unknown;
+    if summary.may_call_unknown {
+        summary.fusibility = FusibilityFact::NonFusible("unknown call barrier".into());
+        summary.accel_eligibility = AccelEligibilityFact::Ineligible("unknown call barrier".into());
+    }
+    if !matches!(
+        callee.fusibility,
+        FusibilityFact::Unknown | FusibilityFact::Fusible
+    ) {
+        summary.fusibility = FusibilityFact::NonFusible("callee effect barrier".into());
+    }
+    if matches!(
+        callee.parallel_safety,
+        ParallelSafetyFact::WritesSharedState
+    ) {
+        summary.parallel_safety = ParallelSafetyFact::WritesSharedState;
+    } else if matches!(callee.parallel_safety, ParallelSafetyFact::ReadsSharedState)
+        && matches!(
+            summary.parallel_safety,
+            ParallelSafetyFact::Unknown | ParallelSafetyFact::Safe
+        )
+    {
+        summary.parallel_safety = ParallelSafetyFact::ReadsSharedState;
+    }
+    if !matches!(
+        callee.accel_eligibility,
+        AccelEligibilityFact::Unknown
+            | AccelEligibilityFact::Eligible
+            | AccelEligibilityFact::Preferred
+    ) {
+        summary.accel_eligibility =
+            AccelEligibilityFact::Ineligible("callee effect barrier".into());
+    }
+}
+
+fn append_unique<T: Clone + PartialEq>(target: &mut Vec<T>, values: &[T]) {
+    for value in values {
+        if !target.contains(value) {
+            target.push(value.clone());
+        }
+    }
+}
+
 fn classify_fusibility(
     workspace: &[WorkspaceEffect],
     environment: &[runmat_hir::EnvironmentEffect],
+    calls: &[CallSummary],
     may_call_unknown: bool,
 ) -> FusibilityFact {
     if may_call_unknown {
@@ -273,12 +374,16 @@ fn classify_fusibility(
     {
         return FusibilityFact::NonFusible("workspace effect barrier".into());
     }
+    if calls.iter().any(call_has_effect_barrier) {
+        return FusibilityFact::NonFusible("builtin effect barrier".into());
+    }
     FusibilityFact::Unknown
 }
 
 fn classify_parallel_safety(
     workspace: &[WorkspaceEffect],
     environment: &[runmat_hir::EnvironmentEffect],
+    calls: &[CallSummary],
     may_call_unknown: bool,
 ) -> ParallelSafetyFact {
     if may_call_unknown {
@@ -287,8 +392,14 @@ fn classify_parallel_safety(
         || workspace
             .iter()
             .any(|effect| !matches!(effect, WorkspaceEffect::None))
+        || calls.iter().any(call_has_effect_barrier)
     {
         ParallelSafetyFact::WritesSharedState
+    } else if calls
+        .iter()
+        .any(|call| matches!(call.purity, BuiltinPurity::DeterministicReadOnly))
+    {
+        ParallelSafetyFact::ReadsSharedState
     } else {
         ParallelSafetyFact::Unknown
     }
@@ -297,6 +408,7 @@ fn classify_parallel_safety(
 fn classify_accel_eligibility(
     workspace: &[WorkspaceEffect],
     environment: &[runmat_hir::EnvironmentEffect],
+    calls: &[CallSummary],
     may_call_unknown: bool,
 ) -> AccelEligibilityFact {
     if may_call_unknown {
@@ -311,7 +423,26 @@ fn classify_accel_eligibility(
     {
         return AccelEligibilityFact::Ineligible("workspace effect barrier".into());
     }
+    if calls.iter().any(call_has_effect_barrier) {
+        return AccelEligibilityFact::Ineligible("builtin effect barrier".into());
+    }
     AccelEligibilityFact::Unknown
+}
+
+fn call_has_effect_barrier(call: &CallSummary) -> bool {
+    !matches!(call.purity, BuiltinPurity::Pure) || has_observable_effects(call.effects)
+}
+
+fn has_observable_effects(effects: BuiltinEffects) -> bool {
+    effects.workspace
+        || effects.environment
+        || effects.filesystem
+        || effects.network
+        || effects.ui
+        || effects.random
+        || effects.time
+        || effects.host_callback
+        || effects.unknown
 }
 
 fn merge_output_fact(outputs: &mut Vec<Option<OutputFact>>, idx: usize, incoming: OutputFact) {
@@ -443,11 +574,7 @@ fn scan_rvalue(
             if is_unknown_call(&call.callee) {
                 *may_call_unknown = true;
             }
-            if matches!(call.async_behavior, AsyncBehaviorFact::MaySuspend)
-                && matches!(*async_behavior, AsyncBehaviorFact::NeverSuspends)
-            {
-                *async_behavior = AsyncBehaviorFact::MaySuspend;
-            }
+            merge_async_behavior(async_behavior, &call.async_behavior);
             calls.push(call_summary(call));
             for arg in &call.args {
                 scan_operand(body, arg.operand(), reads_captures, function_handles);
@@ -462,7 +589,17 @@ fn scan_rvalue(
             scan_operand(body, base, reads_captures, function_handles);
             scan_indexing(body, indexing, reads_captures, function_handles);
         }
-        MirRvalue::Future { args, .. } => {
+        MirRvalue::Future {
+            function,
+            args,
+            requested_outputs,
+            ..
+        } => {
+            calls.push(future_call_summary(
+                *function,
+                args,
+                requested_outputs.clone(),
+            ));
             for arg in args {
                 scan_operand(body, arg.operand(), reads_captures, function_handles);
             }
@@ -479,6 +616,19 @@ fn scan_rvalue(
             *async_behavior = AsyncBehaviorFact::RequiresAsyncRuntime;
             scan_operand(body, future, reads_captures, function_handles);
         }
+    }
+}
+
+fn merge_async_behavior(current: &mut AsyncBehaviorFact, incoming: &AsyncBehaviorFact) {
+    match (&*current, incoming) {
+        (AsyncBehaviorFact::RequiresAsyncRuntime, _) | (_, AsyncBehaviorFact::NeverSuspends) => {}
+        (_, AsyncBehaviorFact::RequiresAsyncRuntime) => {
+            *current = AsyncBehaviorFact::RequiresAsyncRuntime;
+        }
+        (AsyncBehaviorFact::NeverSuspends, AsyncBehaviorFact::MaySuspend) => {
+            *current = AsyncBehaviorFact::MaySuspend;
+        }
+        (AsyncBehaviorFact::MaySuspend, AsyncBehaviorFact::MaySuspend) => {}
     }
 }
 
@@ -500,7 +650,31 @@ fn call_summary(call: &MirCall) -> CallSummary {
             .filter(|arg| matches!(arg, MirCallArg::Expansion(_)))
             .count(),
         async_behavior: call.async_behavior.clone(),
+        effects: call.effects,
+        purity: call.purity,
+        semantic_kind: call.semantic_kind,
         dispatch: dispatch_hook(call),
+    }
+}
+
+fn future_call_summary(
+    function: FunctionId,
+    args: &[MirCallArg],
+    requested_outputs: RequestedOutputCount,
+) -> CallSummary {
+    CallSummary {
+        callee: HirCallableRef::Function(function),
+        requested_outputs,
+        arg_count: args.len(),
+        expansion_arg_count: args
+            .iter()
+            .filter(|arg| matches!(arg, MirCallArg::Expansion(_)))
+            .count(),
+        async_behavior: AsyncBehaviorFact::NeverSuspends,
+        effects: BuiltinEffects::none(),
+        purity: BuiltinPurity::Impure,
+        semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+        dispatch: NominalDispatchHook::DirectFunction,
     }
 }
 

@@ -2,6 +2,7 @@ use crate::{
     MirAggregateKind, MirCall, MirCallArg, MirConstant, MirIndexComponent, MirIndexing, MirOperand,
     MirPlace, MirRvalue, MirStmt, MirStmtKind,
 };
+use runmat_builtins::{BuiltinAsyncBehavior, BuiltinSemantics};
 use runmat_hir::{
     CommandArgument, ExprId, HirCallableRef, HirCommandCall, HirExpr, HirExprKind, IndexComponent,
     IndexResultContext, IndexingSemantics, RequestedOutputCount, SemanticError, StringLiteral,
@@ -77,22 +78,10 @@ pub(crate) fn lower_expr_with_replacements(
                         requested_outputs: call.requested_outputs.clone(),
                     }
                 } else {
-                    MirRvalue::Call(MirCall {
-                        callee: call.callee.clone(),
-                        args,
-                        syntax: call.syntax.clone(),
-                        requested_outputs: call.requested_outputs.clone(),
-                        async_behavior: call_async_behavior(&call.callee),
-                    })
+                    call_rvalue(call, args)
                 }
             } else {
-                MirRvalue::Call(MirCall {
-                    callee: call.callee.clone(),
-                    args,
-                    syntax: call.syntax.clone(),
-                    requested_outputs: call.requested_outputs.clone(),
-                    async_behavior: call_async_behavior(&call.callee),
-                })
+                call_rvalue(call, args)
             }
         }
         HirExprKind::CommandCall(call) => lower_command_call(call),
@@ -215,6 +204,7 @@ fn lower_index_component(
 }
 
 fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
+    let semantics = call_semantics(&call.command);
     MirRvalue::Call(MirCall {
         callee: call.command.clone(),
         args: call
@@ -224,18 +214,59 @@ fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
             .collect(),
         syntax: runmat_hir::CallSyntax::Command,
         requested_outputs: RequestedOutputCount::Zero,
-        async_behavior: crate::AsyncBehaviorFact::NeverSuspends,
+        async_behavior: map_async_behavior(semantics.async_behavior),
+        effects: semantics.effects,
+        purity: semantics.purity,
+        semantic_kind: semantics.semantic_kind,
     })
 }
 
-fn call_async_behavior(callee: &HirCallableRef) -> crate::AsyncBehaviorFact {
+fn call_rvalue(call: &runmat_hir::HirCall, args: Vec<MirCallArg>) -> MirRvalue {
+    let semantics = call_semantics(&call.callee);
+    MirRvalue::Call(MirCall {
+        callee: call.callee.clone(),
+        args,
+        syntax: call.syntax.clone(),
+        requested_outputs: call.requested_outputs.clone(),
+        async_behavior: map_async_behavior(semantics.async_behavior),
+        effects: semantics.effects,
+        purity: semantics.purity,
+        semantic_kind: semantics.semantic_kind,
+    })
+}
+
+fn call_semantics(callee: &HirCallableRef) -> BuiltinSemantics {
     match callee {
-        HirCallableRef::DynamicExpr(_)
-        | HirCallableRef::Unresolved(_)
-        | HirCallableRef::Builtin(_)
-        | HirCallableRef::Imported(_) => crate::AsyncBehaviorFact::MaySuspend,
-        HirCallableRef::Function(_) | HirCallableRef::ClassConstructor(_) => {
-            crate::AsyncBehaviorFact::NeverSuspends
+        HirCallableRef::Builtin(id) => runmat_builtins::builtin_function_by_name(&id.0)
+            .map(|builtin| builtin.semantics())
+            .or_else(|| runmat_builtins::builtin_semantics_for_name(&id.0))
+            .unwrap_or_else(BuiltinSemantics::unknown),
+        HirCallableRef::Unresolved(name) => runmat_builtins::builtin_semantics_for_name(
+            &name
+                .0
+                .iter()
+                .map(|part| part.0.as_str())
+                .collect::<Vec<_>>()
+                .join("."),
+        )
+        .unwrap_or_else(BuiltinSemantics::unknown),
+        HirCallableRef::DynamicExpr(_) | HirCallableRef::Imported(_) => BuiltinSemantics::unknown(),
+        HirCallableRef::Function(_) | HirCallableRef::ClassConstructor(_) => BuiltinSemantics {
+            compatibility: runmat_builtins::BuiltinCompatibility::Matlab,
+            async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+            effects: runmat_builtins::BuiltinEffects::none(),
+            purity: runmat_builtins::BuiltinPurity::Impure,
+            semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+        },
+    }
+}
+
+fn map_async_behavior(behavior: BuiltinAsyncBehavior) -> crate::AsyncBehaviorFact {
+    match behavior {
+        BuiltinAsyncBehavior::NeverSuspends => crate::AsyncBehaviorFact::NeverSuspends,
+        BuiltinAsyncBehavior::MaySuspend => crate::AsyncBehaviorFact::MaySuspend,
+        BuiltinAsyncBehavior::RequiresAsyncRuntime => {
+            crate::AsyncBehaviorFact::RequiresAsyncRuntime
         }
     }
 }

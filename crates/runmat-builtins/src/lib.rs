@@ -1535,6 +1535,10 @@ impl BuiltinFunction {
         }
         self.return_type.clone()
     }
+
+    pub fn semantics(&self) -> BuiltinSemantics {
+        semantics::builtin_semantics_for(self)
+    }
 }
 
 /// A constant value that can be accessed as a variable
@@ -1544,7 +1548,15 @@ pub struct Constant {
     pub value: Value,
 }
 
+pub mod semantics;
 pub mod shape_rules;
+
+pub use semantics::{
+    builtin_semantics_for, builtin_semantics_for_name, data_api_method_op_for_name,
+    is_data_namespace_symbol, is_data_open_name, BuiltinAsyncBehavior, BuiltinCompatibility,
+    BuiltinEffects, BuiltinPurity, BuiltinSemanticKind, BuiltinSemantics, DataApiOp,
+    ShapeTransformKind,
+};
 
 impl std::fmt::Debug for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

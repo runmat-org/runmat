@@ -1,6 +1,6 @@
 use super::shared::{
-    eval_const_num, infer_dataset_type_from_literal_path, infer_slice_result_shape,
-    literal_path_arg, logical_binary_result, resolve_context_from_args, shape_rank,
+    eval_const_num, infer_slice_result_shape, literal_path_arg, logical_binary_result,
+    resolve_context_from_args, shape_rank,
 };
 use crate::{LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, Type, VarId};
 use runmat_parser as parser;
@@ -174,13 +174,6 @@ pub fn infer_expr_type_with_env(
         .unwrap_or_else(Type::tensor),
         K::FuncCall(name, args) => {
             if name == "data.open" {
-                if let Some(path_expr) = args.first() {
-                    if let Some(path) = literal_path_arg(path_expr) {
-                        if let Some(dataset_ty) = infer_dataset_type_from_literal_path(&path) {
-                            return dataset_ty;
-                        }
-                    }
-                }
                 return Type::DataDataset { arrays: None };
             }
             if name == "data.create" || name == "data.import" {

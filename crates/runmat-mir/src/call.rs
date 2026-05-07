@@ -1,4 +1,5 @@
 use crate::{AsyncBehaviorFact, MirOperand};
+use runmat_builtins::{BuiltinEffects, BuiltinPurity, BuiltinSemanticKind};
 use runmat_hir::{CallSyntax, HirCallableRef, RequestedOutputCount};
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +10,9 @@ pub struct MirCall {
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
     pub async_behavior: AsyncBehaviorFact,
+    pub effects: BuiltinEffects,
+    pub purity: BuiltinPurity,
+    pub semantic_kind: BuiltinSemanticKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

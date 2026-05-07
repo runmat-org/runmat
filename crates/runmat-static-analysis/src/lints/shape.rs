@@ -1,7 +1,5 @@
-use runmat_hir::{
-    BindingId, HirCallableRef, HirDiagnostic, HirDiagnosticSeverity, OperatorKind, QualifiedName,
-    Span,
-};
+use runmat_builtins::{BuiltinSemanticKind, ShapeTransformKind};
+use runmat_hir::{BindingId, HirDiagnostic, HirDiagnosticSeverity, OperatorKind, Span};
 use runmat_mir::analysis::{AnalysisStore, MirLocalKey};
 use std::collections::HashMap;
 
@@ -366,22 +364,20 @@ impl ShapeLintContext {
         span: Span,
         call: &runmat_mir::MirCall,
     ) -> MirShapeValue {
-        let name = call_name(&call.callee);
-        let name = name.as_deref();
         let arg_values: Vec<_> = call
             .args
             .iter()
             .map(|arg| self.infer_mir_operand(body, arg.operand()))
             .collect();
-        let shape = match name {
-            Some("ones") | Some("zeros") | Some("rand") => Some(Shape(
+        let shape = match call.semantic_kind {
+            BuiltinSemanticKind::ArrayConstructor => Some(Shape(
                 arg_values
                     .iter()
                     .filter_map(|value| value.number.and_then(number_to_int))
                     .map(Some)
                     .collect(),
             )),
-            Some("dot") => {
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Dot) => {
                 let lhs = arg_values.first().and_then(|value| value.shape.as_ref());
                 let rhs = arg_values.get(1).and_then(|value| value.shape.as_ref());
                 if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
@@ -398,7 +394,7 @@ impl ShapeLintContext {
                 }
                 Some(Shape(vec![Some(1), Some(1)]))
             }
-            Some("reshape") => {
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Reshape) => {
                 let input = arg_values.first().and_then(|value| value.shape.as_ref());
                 let dims = mir_parse_dims(&arg_values[1..]);
                 if dims.iter().filter(|dim| matches!(dim, Dim::Infer)).count() > 1
@@ -412,7 +408,7 @@ impl ShapeLintContext {
                 }
                 Some(Shape(dims.iter().map(|dim| dim.as_shape_dim()).collect()))
             }
-            Some("repmat") => {
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Repmat) => {
                 for arg in &arg_values[1..] {
                     if !matches!(mir_parse_dim(arg), Dim::Known(_)) {
                         self.warn(
@@ -424,7 +420,7 @@ impl ShapeLintContext {
                 }
                 arg_values.first().and_then(|value| value.shape.clone())
             }
-            Some("permute") => {
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Permute) => {
                 let base = arg_values.first().and_then(|value| value.shape.clone());
                 let order = arg_values.get(1).and_then(|value| value.int_vector.clone());
                 if let Some(order) = &order {
@@ -444,7 +440,7 @@ impl ShapeLintContext {
                 }
                 base
             }
-            Some("sum") | Some("mean") | Some("max") | Some("min") => {
+            BuiltinSemanticKind::Reduction => {
                 let base = arg_values.first().and_then(|value| value.shape.clone());
                 if let (Some(base_shape), Some(dim)) = (
                     base.as_ref(),
@@ -533,22 +529,6 @@ fn mir_parse_dims(args: &[MirShapeValue]) -> Vec<Dim> {
         }
     }
     args.iter().map(mir_parse_dim).collect()
-}
-
-fn call_name(callee: &HirCallableRef) -> Option<String> {
-    match callee {
-        HirCallableRef::Builtin(id) => Some(id.0.clone()),
-        HirCallableRef::Unresolved(name) => Some(qualified_name(name)),
-        _ => None,
-    }
-}
-
-fn qualified_name(name: &QualifiedName) -> String {
-    name.0
-        .iter()
-        .map(|part| part.0.as_str())
-        .collect::<Vec<_>>()
-        .join(".")
 }
 
 fn shape_from_fact(shape: &runmat_hir::ShapeFact) -> Option<Shape> {

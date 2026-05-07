@@ -878,6 +878,9 @@ fn analyze_assembly_collects_semantic_marker_diagnostics() {
         syntax: runmat_hir::CallSyntax::Plain,
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         async_behavior: runmat_mir::AsyncBehaviorFact::MaySuspend,
+        effects: runmat_builtins::BuiltinEffects::unknown(),
+        purity: runmat_builtins::BuiltinPurity::Impure,
+        semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
     }));
 
     let store = analyze_assembly(&mir);
@@ -1231,6 +1234,56 @@ fn direct_function_call_preserves_callee_and_requested_outputs() {
     assert!(matches!(
         call.requested_outputs,
         runmat_hir::RequestedOutputCount::One
+    ));
+}
+
+#[test]
+fn function_summary_propagates_user_callee_effects() {
+    let mir =
+        lower_mir("function y = g(); y = f(); end\nfunction z = f(); eval('x = 1'); z = 1; end");
+    let store = analyze_assembly(&mir);
+    let caller = store
+        .functions
+        .values()
+        .find(|summary| {
+            summary
+                .calls
+                .iter()
+                .any(|call| matches!(call.callee, HirCallableRef::Function(_)))
+        })
+        .unwrap();
+
+    assert!(caller
+        .effects
+        .workspace
+        .contains(&runmat_hir::WorkspaceEffect::DynamicEval));
+    assert!(matches!(caller.fusibility, FusibilityFact::NonFusible(_)));
+    assert!(matches!(
+        caller.accel_eligibility,
+        AccelEligibilityFact::Ineligible(_)
+    ));
+}
+
+#[test]
+fn function_summary_records_async_future_dependency_edges() {
+    let mir = lower_mir(
+        "function y = g(t); fut = f(t); y = 1; end\nasync function z = f(t); z = await(t); end",
+    );
+    let store = analyze_assembly(&mir);
+    let caller = store
+        .functions
+        .values()
+        .find(|summary| {
+            summary
+                .calls
+                .iter()
+                .any(|call| matches!(call.callee, HirCallableRef::Function(_)))
+        })
+        .unwrap();
+
+    assert!(matches!(
+        caller.effects.async_behavior,
+        Some(runmat_mir::AsyncBehaviorFact::RequiresAsyncRuntime)
     ));
 }
 

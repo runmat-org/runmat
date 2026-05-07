@@ -1,9 +1,8 @@
 use crate::schema::{
     normalize_literal_string, DatasetSchema, DatasetSchemaProvider, FsDatasetSchemaProvider,
 };
-use runmat_hir::{
-    CallSyntax, HirCallableRef, HirDiagnostic, HirDiagnosticSeverity, LoweringResult, QualifiedName,
-};
+use runmat_builtins::{BuiltinSemanticKind, DataApiOp};
+use runmat_hir::{CallSyntax, HirDiagnostic, HirDiagnosticSeverity, LoweringResult};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
@@ -75,26 +74,19 @@ fn lint_data_api_from_mir(
                         let runmat_mir::MirRvalue::Call(call) = value else {
                             continue;
                         };
-                        let name = mir_call_name(&call.callee);
+                        let op = data_api_op(call);
+                        let method_op = data_api_method_op(call);
                         if call.syntax == runmat_hir::CallSyntax::Plain
-                            && name.as_deref() == Some("data")
+                            && op == Some(DataApiOp::Namespace)
                             && call.args.is_empty()
                         {
                             data_namespaces.insert(local_key);
                         }
-                        if is_mir_data_open(
-                            body,
-                            call.syntax.clone(),
-                            name.as_deref(),
-                            &call.args,
-                            &data_namespaces,
-                        ) {
-                            if let Some(path) = mir_data_open_path(name.as_deref(), &call.args)
-                                .and_then(mir_literal_string)
+                        if is_mir_data_open(body, call, &call.args, &data_namespaces) {
+                            if let Some(path) =
+                                mir_data_open_path(call, &call.args).and_then(mir_literal_string)
                             {
-                                if let Some(dataset) = infer_dataset_binding(provider, &path) {
-                                    datasets.insert(local_key, dataset);
-                                }
+                                datasets.insert(local_key, infer_dataset_binding(provider, &path));
                             } else {
                                 diagnostics.push(diagnostic(
                                     "lint.data.no_untyped_open",
@@ -103,7 +95,7 @@ fn lint_data_api_from_mir(
                                 ));
                             }
                         } else if call.syntax == runmat_hir::CallSyntax::Method
-                            && name.as_deref() == Some("array")
+                            && method_op == Some(DataApiOp::Array)
                         {
                             if let (Some(dataset_local), Some(array_name)) = (
                                 call.args.first().and_then(mir_arg_local),
@@ -126,12 +118,19 @@ fn lint_data_api_from_mir(
                                 }
                             }
                         } else if call.syntax == runmat_hir::CallSyntax::Method
-                            && name.as_deref() == Some("begin")
+                            && method_op == Some(DataApiOp::BeginTransaction)
+                            && call
+                                .args
+                                .first()
+                                .and_then(mir_arg_local)
+                                .is_some_and(|local| {
+                                    datasets.contains_key(&mir_local_key(body, local))
+                                })
                         {
                             tx_locals.insert(local_key);
                         }
                         if call.syntax == runmat_hir::CallSyntax::Method
-                            && name.as_deref() == Some("read")
+                            && method_op == Some(DataApiOp::Read)
                         {
                             check_mir_array_read(
                                 body,
@@ -144,9 +143,9 @@ fn lint_data_api_from_mir(
                         }
                     }
                     runmat_mir::MirStmtKind::Expr(runmat_mir::MirRvalue::Call(call)) => {
-                        let name = mir_call_name(&call.callee);
+                        let method_op = data_api_method_op(call);
                         if call.syntax == runmat_hir::CallSyntax::Method
-                            && name.as_deref() == Some("read")
+                            && method_op == Some(DataApiOp::Read)
                         {
                             check_mir_array_read(
                                 body,
@@ -157,15 +156,21 @@ fn lint_data_api_from_mir(
                                 &mut diagnostics,
                             );
                         } else if call.syntax == runmat_hir::CallSyntax::Method
-                            && name.as_deref() == Some("write")
+                            && method_op == Some(DataApiOp::Write)
                         {
-                            let in_tx =
-                                call.args
-                                    .first()
-                                    .and_then(mir_arg_local)
-                                    .is_some_and(|local| {
-                                        tx_locals.contains(&mir_local_key(body, local))
-                                    });
+                            let receiver = call.args.first().and_then(mir_arg_local);
+                            let in_tx = receiver.is_some_and(|local| {
+                                tx_locals.contains(&mir_local_key(body, local))
+                            });
+                            let is_data_write = receiver.is_some_and(|local| {
+                                let key = mir_local_key(body, local);
+                                datasets.contains_key(&key)
+                                    || arrays.contains_key(&key)
+                                    || tx_locals.contains(&key)
+                            });
+                            if !is_data_write {
+                                continue;
+                            }
                             if !in_tx {
                                 non_tx_write_count += 1;
                                 if non_tx_write_count > 1 {
@@ -177,7 +182,15 @@ fn lint_data_api_from_mir(
                                 }
                             }
                         } else if call.syntax == runmat_hir::CallSyntax::Method
-                            && name.as_deref() == Some("commit")
+                            && method_op == Some(DataApiOp::Commit)
+                            && call
+                                .args
+                                .first()
+                                .and_then(mir_arg_local)
+                                .is_some_and(|local| {
+                                    let key = mir_local_key(body, local);
+                                    tx_locals.contains(&key) || datasets.contains_key(&key)
+                                })
                         {
                             diagnostics.push(diagnostic(
                                 "lint.data.ignore_commit_result",
@@ -232,14 +245,12 @@ fn check_mir_array_read(
     }
 }
 
-fn infer_dataset_binding(
-    provider: &dyn DatasetSchemaProvider,
-    path: &str,
-) -> Option<DatasetBinding> {
-    let schema: DatasetSchema = provider.load_schema(path)?;
-    Some(DatasetBinding {
-        arrays: schema.arrays,
-    })
+fn infer_dataset_binding(provider: &dyn DatasetSchemaProvider, path: &str) -> DatasetBinding {
+    let arrays = provider
+        .load_schema(path)
+        .map(|schema: DatasetSchema| schema.arrays)
+        .unwrap_or_default();
+    DatasetBinding { arrays }
 }
 
 fn assigned_local(place: &runmat_mir::MirPlace) -> Option<runmat_mir::MirLocalId> {
@@ -249,10 +260,30 @@ fn assigned_local(place: &runmat_mir::MirPlace) -> Option<runmat_mir::MirLocalId
     }
 }
 
-fn mir_call_name(callee: &HirCallableRef) -> Option<String> {
-    match callee {
-        HirCallableRef::Builtin(id) => Some(id.0.clone()),
-        HirCallableRef::Unresolved(name) => Some(qualified_name(name)),
+fn data_api_op(call: &runmat_mir::MirCall) -> Option<DataApiOp> {
+    match call.semantic_kind {
+        BuiltinSemanticKind::DataApi(op) => Some(op),
+        _ => None,
+    }
+}
+
+fn data_api_method_op(call: &runmat_mir::MirCall) -> Option<DataApiOp> {
+    if call.syntax != CallSyntax::Method {
+        return None;
+    }
+    call_callee_name(call).and_then(|name| runmat_builtins::data_api_method_op_for_name(&name))
+}
+
+fn call_callee_name(call: &runmat_mir::MirCall) -> Option<String> {
+    match &call.callee {
+        runmat_hir::HirCallableRef::Builtin(id) => Some(id.0.clone()),
+        runmat_hir::HirCallableRef::Unresolved(name) => Some(
+            name.0
+                .iter()
+                .map(|part| part.0.as_str())
+                .collect::<Vec<_>>()
+                .join("."),
+        ),
         _ => None,
     }
 }
@@ -289,45 +320,50 @@ fn mir_slice_rank(
 
 fn is_mir_data_open(
     body: &runmat_mir::MirBody,
-    syntax: CallSyntax,
-    name: Option<&str>,
+    call: &runmat_mir::MirCall,
     args: &[runmat_mir::MirCallArg],
     data_namespaces: &HashSet<runmat_mir::analysis::MirLocalKey>,
 ) -> bool {
-    name == Some("data.open")
-        || (syntax == CallSyntax::Method
-            && name == Some("open")
-            && args.first().is_some_and(|arg| {
-                matches!(
-                    arg.operand(),
-                    runmat_mir::MirOperand::Constant(runmat_mir::MirConstant::Symbol(symbol))
-                        if symbol.0 == "data"
-                ) || match arg.operand() {
-                    runmat_mir::MirOperand::Local(local) => {
-                        data_namespaces.contains(&mir_local_key(body, *local))
-                    }
-                    _ => false,
-                }
-            }))
+    (call.syntax == CallSyntax::Plain
+        && data_api_op(call) == Some(DataApiOp::Open)
+        && is_data_open_callee(call))
+        || (call.syntax == CallSyntax::Method
+            && data_api_method_op(call) == Some(DataApiOp::Open)
+            && args
+                .first()
+                .is_some_and(|arg| is_data_namespace(body, arg, data_namespaces)))
 }
 
 fn mir_data_open_path<'a>(
-    name: Option<&str>,
+    call: &runmat_mir::MirCall,
     args: &'a [runmat_mir::MirCallArg],
 ) -> Option<&'a runmat_mir::MirCallArg> {
-    if name == Some("data.open") {
+    if call.syntax == CallSyntax::Plain {
         args.first()
     } else {
         args.get(1)
     }
 }
 
-fn qualified_name(name: &QualifiedName) -> String {
-    name.0
-        .iter()
-        .map(|part| part.0.as_str())
-        .collect::<Vec<_>>()
-        .join(".")
+fn is_data_namespace(
+    body: &runmat_mir::MirBody,
+    arg: &runmat_mir::MirCallArg,
+    data_namespaces: &HashSet<runmat_mir::analysis::MirLocalKey>,
+) -> bool {
+    matches!(
+        arg.operand(),
+        runmat_mir::MirOperand::Constant(runmat_mir::MirConstant::Symbol(symbol))
+            if runmat_builtins::is_data_namespace_symbol(&symbol.0)
+    ) || match arg.operand() {
+        runmat_mir::MirOperand::Local(local) => {
+            data_namespaces.contains(&mir_local_key(body, *local))
+        }
+        _ => false,
+    }
+}
+
+fn is_data_open_callee(call: &runmat_mir::MirCall) -> bool {
+    call_callee_name(call).is_some_and(|name| runmat_builtins::is_data_open_name(&name))
 }
 
 fn diagnostic(

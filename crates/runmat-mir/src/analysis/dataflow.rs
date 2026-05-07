@@ -12,8 +12,8 @@ use std::collections::{HashMap, VecDeque};
 
 use super::{
     analyze_liveness, analyze_spawn_boundaries_with_summaries, diagnose_spawn_safety,
-    summarize_body, AnalysisStore, BindingFact, ExprFact, InitFact, MirLocalFact, MirLocalKey,
-    ModuleSummary,
+    propagate_function_summaries, summarize_body, AnalysisStore, BindingFact, ExprFact, InitFact,
+    MirLocalFact, MirLocalKey, ModuleSummary,
 };
 
 #[derive(Debug, Clone)]
@@ -461,13 +461,19 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     let mut store = AnalysisStore::default();
     for body in assembly.bodies.values() {
         analyze_body(body, &mut store);
-        let summary = summarize_body(body, &mut store);
-        if let Some(module) = body.source_map.module {
-            insert_module_summary(&mut store, module, body, &summary);
-        }
+        summarize_body(body, &mut store);
         store.liveness.insert(body.function, analyze_liveness(body));
         store.diagnostics.extend(diagnose_uninitialized_reads(body));
         store.diagnostics.extend(diagnose_semantic_misuse(body));
+    }
+    propagate_function_summaries(&mut store);
+    for body in assembly.bodies.values() {
+        if let (Some(module), Some(summary)) = (
+            body.source_map.module,
+            store.functions.get(&body.function).cloned(),
+        ) {
+            insert_module_summary(&mut store, module, body, &summary);
+        }
     }
     for body in assembly.bodies.values() {
         let boundaries = analyze_spawn_boundaries_with_summaries(body, &store.functions);

@@ -419,52 +419,6 @@ pub(crate) fn literal_path_arg(expr: &HirExpr) -> Option<String> {
     None
 }
 
-pub(crate) fn infer_dataset_type_from_literal_path(path: &str) -> Option<Type> {
-    let manifest_path = if path.ends_with(".json") {
-        std::path::PathBuf::from(path)
-    } else {
-        std::path::PathBuf::from(path).join("manifest.json")
-    };
-    let bytes = std::fs::read(&manifest_path).ok()?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    let arrays = value.get("arrays")?.as_object()?;
-    let mut out = std::collections::BTreeMap::new();
-    for (name, meta) in arrays {
-        let shape = meta.get("shape").and_then(|v| v.as_array()).map(|dims| {
-            dims.iter()
-                .map(|d| d.as_u64().map(|n| n as usize))
-                .collect::<Vec<_>>()
-        });
-        let chunk_shape = meta
-            .get("chunk_shape")
-            .or_else(|| meta.get("chunkShape"))
-            .and_then(|v| v.as_array())
-            .map(|dims| {
-                dims.iter()
-                    .map(|d| d.as_u64().map(|n| n as usize))
-                    .collect::<Vec<_>>()
-            });
-        let dtype = meta
-            .get("dtype")
-            .and_then(|v| v.as_str())
-            .map(ToString::to_string);
-        let codec = meta
-            .get("codec")
-            .and_then(|v| v.as_str())
-            .map(ToString::to_string);
-        out.insert(
-            name.clone(),
-            runmat_builtins::DataArrayTypeInfo {
-                dtype,
-                shape,
-                chunk_shape,
-                codec,
-            },
-        );
-    }
-    Some(Type::DataDataset { arrays: Some(out) })
-}
-
 pub(crate) fn shape_rank(shape: &Option<Vec<Option<usize>>>) -> Option<usize> {
     shape.as_ref().map(Vec::len)
 }

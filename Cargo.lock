@@ -5658,7 +5658,6 @@ dependencies = [
  "runmat-parser",
  "runmat-runtime",
  "serde",
- "serde_json",
  "tempfile",
 ]
 
@@ -5761,6 +5760,7 @@ dependencies = [
 name = "runmat-mir"
 version = "0.4.1"
 dependencies = [
+ "runmat-builtins",
  "runmat-hir",
  "runmat-parser",
  "serde",
