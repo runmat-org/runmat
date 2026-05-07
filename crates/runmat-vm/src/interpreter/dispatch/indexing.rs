@@ -395,6 +395,22 @@ where
                     ];
                     stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
                 }
+                Value::FunctionHandle(_) | Value::Closure(_) => {
+                    let args = numeric.into_iter().map(Value::Num).collect::<Vec<_>>();
+                    match crate::call::feval::execute_feval(base, args, functions, functions)
+                        .await?
+                    {
+                        crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),
+                        crate::call::feval::FevalDispatch::InvokeUser {
+                            name,
+                            args,
+                            functions,
+                        } => {
+                            let value = call_user(&name, args, &functions, vars).await?;
+                            stack.push(value);
+                        }
+                    }
+                }
                 _ => {
                     stack.push(idx_read_linear::generic_index(&base, &numeric).await?);
                 }

@@ -5,8 +5,8 @@ use crate::{
 use runmat_builtins::{BuiltinAsyncBehavior, BuiltinSemantics};
 use runmat_hir::{
     CommandArgument, ExprId, HirCallableRef, HirCommandCall, HirExpr, HirExprKind, IndexComponent,
-    IndexKind, IndexResultContext, IndexingSemantics, RequestedOutputCount, SemanticError,
-    StringLiteral,
+    IndexKind, IndexResultContext, IndexingSemantics, QualifiedName, RequestedOutputCount,
+    SemanticError, StringLiteral, SymbolName,
 };
 use std::collections::HashMap;
 
@@ -65,12 +65,28 @@ pub(crate) fn lower_expr_with_replacements(
             elements: lower_aggregate_elements(ctx, rows, temps, await_replacements)?,
         },
         HirExprKind::Call(call) => {
-            let args = call
+            let mut args: Vec<MirCallArg> = call
                 .args
                 .iter()
                 .map(|arg| lower_call_arg(ctx, arg, temps, await_replacements))
                 .collect::<Result<_, _>>()?;
-            if let HirCallableRef::Function(function) = call.callee {
+            if let HirCallableRef::DynamicExpr(callee) = &call.callee {
+                args.insert(
+                    0,
+                    MirCallArg::Single(lower_operand_with_replacements(
+                        ctx,
+                        callee,
+                        temps,
+                        await_replacements,
+                    )?),
+                );
+                let mut call = call.clone();
+                call.callee = HirCallableRef::Unresolved(QualifiedName(vec![SymbolName(
+                    "feval".to_string(),
+                )]));
+                call.requested_outputs = RequestedOutputCount::One;
+                call_rvalue(&call, args)
+            } else if let HirCallableRef::Function(function) = call.callee {
                 if ctx.is_async_function(function) {
                     MirRvalue::Future {
                         function,
