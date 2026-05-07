@@ -228,6 +228,24 @@ fn clearvars_function_call_selected_names_with_except_preserves_exclusions() {
 }
 
 #[test]
+fn clearvars_named_variable_is_undefined_later_in_same_execution() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = block_on(engine.execute("x = 7; clearvars x; disp(x);")).unwrap();
+    let err = result.error.expect("expected cleared x to be undefined");
+    assert!(err.to_string().contains("Undefined variable: x"));
+}
+
+#[test]
+fn clear_named_variable_is_undefined_later_in_same_execution() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let result = block_on(engine.execute("x = 7; clear x; disp(x);")).unwrap();
+    let err = result.error.expect("expected cleared x to be undefined");
+    assert!(err.to_string().contains("Undefined variable: x"));
+}
+
+#[test]
 fn clearvars_repro_with_clc_and_close_all_executes() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 

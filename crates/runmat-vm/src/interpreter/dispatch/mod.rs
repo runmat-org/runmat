@@ -250,7 +250,7 @@ pub async fn dispatch_instruction(
         Instr::LoadVar(index) => {
             if call_counts.is_empty() {
                 if let Some(name) = var_names.get(index) {
-                    if matches!(workspace_slot_assigned(*index), Some(false)) {
+                    if !matches!(workspace_slot_assigned(*index), Some(true)) {
                         return Err(crate::interpreter::errors::mex(
                             "UndefinedVariable",
                             &format!("Undefined variable: {name}"),
