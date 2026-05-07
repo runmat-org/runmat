@@ -9,8 +9,9 @@ use runmat_hir::{
     LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt, OperatorKind, RequestedOutputCount,
 };
 use runmat_mir::{
-    MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirConstant, MirIndexComponent,
-    MirIndexing, MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
+    BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirConstant,
+    MirIndexComponent, MirIndexing, MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind,
+    MirTerminatorKind,
 };
 use std::collections::HashMap;
 
@@ -344,15 +345,58 @@ impl Compiler {
             .clone()
             .ok_or_else(|| CompileError::new("compiler missing MIR body"))?;
 
-        if body.blocks.len() != 1 || body.blocks[0].id.0 != 0 {
-            return Err(CompileError::new(
-                "MIR bytecode lowering only supports single-block bodies in this migration slice",
-            ));
+        self.compile_mir_body(&body)?;
+        Ok(())
+    }
+
+    fn compile_mir_body(&mut self, body: &MirBody) -> Result<(), CompileError> {
+        let mut blocks = body.blocks.clone();
+        blocks.sort_by_key(|block| block.id.0);
+
+        let mut block_starts = HashMap::new();
+        let mut pending_jumps: Vec<(usize, BasicBlockId, bool)> = Vec::new();
+
+        for block in &blocks {
+            block_starts.insert(block.id, self.instructions.len());
+            for stmt in &block.statements {
+                self.compile_mir_stmt(stmt)?;
+            }
+            match &block.terminator.kind {
+                MirTerminatorKind::Goto(target) => {
+                    let pc = self.emit(Instr::Jump(usize::MAX));
+                    pending_jumps.push((pc, *target, false));
+                }
+                MirTerminatorKind::Branch {
+                    cond,
+                    then_block,
+                    else_block,
+                } => {
+                    self.compile_mir_operand(cond)?;
+                    let false_pc = self.emit(Instr::JumpIfFalse(usize::MAX));
+                    pending_jumps.push((false_pc, *else_block, true));
+                    let true_pc = self.emit(Instr::Jump(usize::MAX));
+                    pending_jumps.push((true_pc, *then_block, false));
+                }
+                MirTerminatorKind::Return(_) => {
+                    self.compile_mir_return(&block.terminator.kind)?;
+                }
+                _ => return Err(CompileError::new(
+                    "MIR bytecode lowering for this control-flow terminator is not implemented yet",
+                )),
+            }
         }
-        for stmt in &body.blocks[0].statements {
-            self.compile_mir_stmt(stmt)?;
+
+        for (pc, target, is_conditional) in pending_jumps {
+            let target_pc = *block_starts
+                .get(&target)
+                .ok_or_else(|| CompileError::new(format!("missing MIR target block {target:?}")))?;
+            if is_conditional {
+                self.patch(pc, Instr::JumpIfFalse(target_pc));
+            } else {
+                self.patch(pc, Instr::Jump(target_pc));
+            }
         }
-        self.compile_mir_return(&body.blocks[0].terminator.kind)?;
+
         Ok(())
     }
 
