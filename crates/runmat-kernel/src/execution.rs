@@ -25,9 +25,9 @@ pub struct ExecutionEngine {
     repl_engine: RunMatSession,
 }
 
-/// Result of code execution
+/// Kernel-specific result of code execution.
 #[derive(Debug, Clone)]
-pub struct ExecutionResult {
+pub struct KernelExecutionResult {
     /// Execution status
     pub status: ExecutionStatus,
     /// Standard output captured during execution
@@ -128,7 +128,7 @@ impl ExecutionEngine {
     }
 
     /// Execute code
-    pub async fn execute(&mut self, code: &str) -> Result<ExecutionResult> {
+    pub async fn execute_code(&mut self, code: &str) -> Result<KernelExecutionResult> {
         let start_time = Instant::now();
         self.execution_count += 1;
 
@@ -145,7 +145,7 @@ impl ExecutionEngine {
                     let identifier = Some(diagnostic.code.clone());
                     let error_message = diagnostic.message.clone();
 
-                    Ok(ExecutionResult {
+                    Ok(KernelExecutionResult {
                         status: ExecutionStatus::Error,
                         stdout: stdout_from_outcome(&outcome),
                         stderr: stderr_from_outcome(&outcome, &error_message),
@@ -161,7 +161,7 @@ impl ExecutionEngine {
                         }),
                     })
                 } else {
-                    Ok(ExecutionResult {
+                    Ok(KernelExecutionResult {
                         status: ExecutionStatus::Success,
                         stdout: stdout_from_outcome(&outcome),
                         stderr: String::new(), // No errors on success
@@ -213,7 +213,7 @@ impl ExecutionEngine {
                     }
                 };
 
-                Ok(ExecutionResult {
+                Ok(KernelExecutionResult {
                     status: ExecutionStatus::Error,
                     stdout: String::new(),
                     stderr: String::new(),
@@ -231,14 +231,14 @@ impl ExecutionEngine {
     }
 
     /// Execute code with a specific timeout
-    pub async fn execute_with_timeout(
+    pub async fn execute_code_with_timeout(
         &mut self,
         code: &str,
         timeout: Duration,
-    ) -> Result<ExecutionResult> {
+    ) -> Result<KernelExecutionResult> {
         let original_timeout = self.timeout;
         self.timeout = Some(timeout);
-        let result = self.execute(code).await;
+        let result = self.execute_code(code).await;
         self.timeout = original_timeout;
         result
     }
@@ -355,7 +355,7 @@ mod tests {
     #[test]
     fn test_simple_execution() {
         let mut engine = ExecutionEngine::new();
-        let result = block_on(engine.execute("x = 1 + 2")).unwrap();
+        let result = block_on(engine.execute_code("x = 1 + 2")).unwrap();
 
         assert_eq!(result.status, ExecutionStatus::Success);
         assert_eq!(engine.execution_count(), 1);
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn test_parse_error_handling() {
         let mut engine = ExecutionEngine::new();
-        let result = block_on(engine.execute("x = 1 +")).unwrap();
+        let result = block_on(engine.execute_code("x = 1 +")).unwrap();
 
         assert_eq!(result.status, ExecutionStatus::Error);
         assert!(result.error.is_some());
@@ -380,7 +380,7 @@ mod tests {
     #[test]
     fn test_runtime_error_handling() {
         let mut engine = ExecutionEngine::new();
-        let result = block_on(engine.execute("x = undefined_var")).unwrap();
+        let result = block_on(engine.execute_code("x = undefined_var")).unwrap();
 
         assert_eq!(result.status, ExecutionStatus::Error);
         assert!(result.error.is_some());
@@ -399,21 +399,21 @@ mod tests {
     fn test_execution_count_increment() {
         let mut engine = ExecutionEngine::new();
 
-        block_on(engine.execute("x = 1")).unwrap();
+        block_on(engine.execute_code("x = 1")).unwrap();
         assert_eq!(engine.execution_count(), 1);
 
-        block_on(engine.execute("y = 2")).unwrap();
+        block_on(engine.execute_code("y = 2")).unwrap();
         assert_eq!(engine.execution_count(), 2);
 
         // Even failed executions increment the counter
-        block_on(engine.execute("invalid syntax")).unwrap();
+        block_on(engine.execute_code("invalid syntax")).unwrap();
         assert_eq!(engine.execution_count(), 3);
     }
 
     #[test]
     fn test_engine_reset() {
         let mut engine = ExecutionEngine::new();
-        block_on(engine.execute("x = 1")).unwrap();
+        block_on(engine.execute_code("x = 1")).unwrap();
         assert_eq!(engine.execution_count(), 1);
 
         engine.reset();
@@ -436,7 +436,7 @@ mod tests {
     fn test_stats() {
         let mut engine = ExecutionEngine::new();
         engine.set_debug(true);
-        block_on(engine.execute("x = 1")).unwrap();
+        block_on(engine.execute_code("x = 1")).unwrap();
 
         let stats = engine.stats();
         assert_eq!(stats.execution_count, 1);
