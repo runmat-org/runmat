@@ -23,6 +23,7 @@ fn execute_outcome_exposes_runtime_flow() {
         matches!(outcome.flow, abi::RuntimeFlow::Single(_)),
         "unsuppressed expression should adapt to a single-value ABI flow"
     );
+    assert_eq!(outcome.display_events.len(), 1);
     assert!(outcome.diagnostics.is_empty());
 }
 

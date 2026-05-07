@@ -109,6 +109,17 @@ impl From<ExecutionResult> for ExecutionOutcome {
                 }),
         );
 
+        let display_events = result
+            .value
+            .as_ref()
+            .map(|value| DisplayEvent {
+                label: DisplayLabel::Anonymous,
+                value: value.clone(),
+                span: Span::default(),
+            })
+            .into_iter()
+            .collect();
+
         Self {
             flow: result
                 .value
@@ -118,7 +129,7 @@ impl From<ExecutionResult> for ExecutionOutcome {
                 full_snapshot_required: result.workspace.full,
                 ..WorkspaceDelta::default()
             },
-            display_events: Vec::new(),
+            display_events,
             diagnostics,
             effects: Vec::new(),
             suspension: None,
