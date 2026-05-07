@@ -1,6 +1,6 @@
 use crate::compiler::CompileError;
 use crate::functions::UserFunction;
-use crate::instr::{ArgSpec, EmitLabel, Instr};
+use crate::instr::{ArgSpec, EmitLabel, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
@@ -39,6 +39,15 @@ pub struct Compiler {
 struct SpanGuard {
     compiler: *mut Compiler,
     prev: Option<runmat_hir::Span>,
+}
+
+fn end_expr_with_offset(offset: isize) -> EndExpr {
+    let magnitude = EndExpr::Const(offset.unsigned_abs() as f64);
+    if offset.is_negative() {
+        EndExpr::Sub(Box::new(EndExpr::End), Box::new(magnitude))
+    } else {
+        EndExpr::Add(Box::new(EndExpr::End), Box::new(magnitude))
+    }
 }
 
 impl SpanGuard {
@@ -919,7 +928,8 @@ impl Compiler {
                     .iter()
                     .all(|component| matches!(component, MirIndexComponent::Expr(_)))
                     && !indexing.components.iter().any(|component| {
-                        matches!(component, MirIndexComponent::Expr(MirOperand::Local(local)) if self.mir_local_is_colon(*local) || self.mir_local_is_end(*local))
+                        matches!(component, MirIndexComponent::Expr(MirOperand::Local(local)) if self.mir_local_is_colon(*local))
+                            || matches!(component, MirIndexComponent::Expr(operand) if self.mir_operand_end_expr(operand).is_some())
                     })
                 {
                     self.compile_mir_index_components(indexing, IndexResultContext::ReadSingle)?;
@@ -963,6 +973,28 @@ impl Compiler {
     }
 
     fn compile_mir_slice_index(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
+        if indexing.components.iter().any(|component| match component {
+            MirIndexComponent::End { offset, .. } => *offset != 0,
+            MirIndexComponent::Expr(operand) => self.mir_operand_end_expr(operand).is_some(),
+            _ => false,
+        }) {
+            let (numeric_count, colon_mask, end_mask, end_numeric_exprs) =
+                self.compile_mir_slice_expr_components(indexing)?;
+            self.emit(Instr::IndexSliceExpr {
+                dims: indexing.components.len(),
+                numeric_count,
+                colon_mask,
+                end_mask,
+                range_dims: Vec::new(),
+                range_has_step: Vec::new(),
+                range_start_exprs: Vec::new(),
+                range_step_exprs: Vec::new(),
+                range_end_exprs: Vec::new(),
+                end_numeric_exprs,
+            });
+            return Ok(());
+        }
+
         let (numeric_count, colon_mask, end_mask) = self.compile_mir_slice_components(indexing)?;
         self.emit(Instr::IndexSlice(
             indexing.components.len(),
@@ -1010,12 +1042,130 @@ impl Compiler {
         Ok((numeric_count, colon_mask, end_mask))
     }
 
+    fn compile_mir_slice_expr_components(
+        &mut self,
+        indexing: &MirIndexing,
+    ) -> Result<(usize, u32, u32, Vec<(usize, EndExpr)>), CompileError> {
+        let mut colon_mask = 0u32;
+        let end_mask = 0u32;
+        let mut numeric_count = 0usize;
+        let mut end_numeric_exprs = Vec::new();
+
+        for (dim, component) in indexing.components.iter().enumerate() {
+            match component {
+                MirIndexComponent::Colon => colon_mask |= 1u32 << dim,
+                MirIndexComponent::End { offset, .. } => {
+                    if *offset == 0 {
+                        self.emit(Instr::LoadConst(0.0));
+                        end_numeric_exprs.push((numeric_count, EndExpr::End));
+                    } else {
+                        self.emit(Instr::LoadConst(0.0));
+                        end_numeric_exprs.push((numeric_count, end_expr_with_offset(*offset)));
+                    }
+                    numeric_count += 1;
+                }
+                MirIndexComponent::Expr(MirOperand::Local(local))
+                    if self.mir_local_is_colon(*local) =>
+                {
+                    colon_mask |= 1u32 << dim;
+                }
+                MirIndexComponent::Expr(operand)
+                    if self.mir_operand_end_expr(operand).is_some() =>
+                {
+                    self.emit(Instr::LoadConst(0.0));
+                    end_numeric_exprs.push((
+                        numeric_count,
+                        self.mir_operand_end_expr(operand).ok_or_else(|| {
+                            self.compile_error("MIR end expression disappeared during lowering")
+                        })?,
+                    ));
+                    numeric_count += 1;
+                }
+                MirIndexComponent::Expr(operand) => {
+                    self.compile_mir_operand(operand)?;
+                    numeric_count += 1;
+                }
+                MirIndexComponent::Logical(_) => {
+                    return Err(self.compile_error(
+                        "MIR bytecode lowering for this slice index is not implemented yet",
+                    ))
+                }
+            }
+        }
+
+        Ok((numeric_count, colon_mask, end_mask, end_numeric_exprs))
+    }
+
     fn mir_local_is_colon(&self, local: runmat_mir::MirLocalId) -> bool {
         self.mir_local_matches_rvalue(local, |value| matches!(value, MirRvalue::Colon))
     }
 
     fn mir_local_is_end(&self, local: runmat_mir::MirLocalId) -> bool {
         self.mir_local_matches_rvalue(local, |value| matches!(value, MirRvalue::End))
+    }
+
+    fn mir_operand_end_expr(&self, operand: &MirOperand) -> Option<EndExpr> {
+        self.mir_operand_end_expr_internal(operand)
+            .and_then(|(expr, has_end)| has_end.then_some(expr))
+    }
+
+    fn mir_operand_end_expr_internal(&self, operand: &MirOperand) -> Option<(EndExpr, bool)> {
+        match operand {
+            MirOperand::Local(local) => self.mir_local_end_expr_internal(*local),
+            MirOperand::Constant(MirConstant::Number(value)) => value
+                .parse::<f64>()
+                .ok()
+                .map(|value| (EndExpr::Const(value), false)),
+            _ => None,
+        }
+    }
+
+    fn mir_local_end_expr_internal(
+        &self,
+        local: runmat_mir::MirLocalId,
+    ) -> Option<(EndExpr, bool)> {
+        let body = self.body.as_ref()?;
+        body.blocks
+            .iter()
+            .flat_map(|block| block.statements.iter())
+            .find_map(|stmt| match &stmt.kind {
+                MirStmtKind::Assign {
+                    place: MirPlace::Local(candidate),
+                    value,
+                } if *candidate == local => self.mir_rvalue_end_expr_internal(value),
+                _ => None,
+            })
+    }
+
+    fn mir_rvalue_end_expr_internal(&self, value: &MirRvalue) -> Option<(EndExpr, bool)> {
+        match value {
+            MirRvalue::End => Some((EndExpr::End, true)),
+            MirRvalue::Use(operand) => self.mir_operand_end_expr_internal(operand),
+            MirRvalue::Unary(op, operand) => {
+                let (expr, has_end) = self.mir_operand_end_expr_internal(operand)?;
+                match op {
+                    OperatorKind::UnaryPlus => Some((EndExpr::Pos(Box::new(expr)), has_end)),
+                    OperatorKind::UnaryMinus => Some((EndExpr::Neg(Box::new(expr)), has_end)),
+                    _ => None,
+                }
+            }
+            MirRvalue::Binary(left, op, right) => {
+                let (left, left_has_end) = self.mir_operand_end_expr_internal(left)?;
+                let (right, right_has_end) = self.mir_operand_end_expr_internal(right)?;
+                let has_end = left_has_end || right_has_end;
+                let expr = match op {
+                    OperatorKind::Add => EndExpr::Add(Box::new(left), Box::new(right)),
+                    OperatorKind::Subtract => EndExpr::Sub(Box::new(left), Box::new(right)),
+                    OperatorKind::MatrixMultiply => EndExpr::Mul(Box::new(left), Box::new(right)),
+                    OperatorKind::Mrdivide => EndExpr::Div(Box::new(left), Box::new(right)),
+                    OperatorKind::Mldivide => EndExpr::LeftDiv(Box::new(left), Box::new(right)),
+                    OperatorKind::MatrixPower => EndExpr::Pow(Box::new(left), Box::new(right)),
+                    _ => return None,
+                };
+                Some((expr, has_end))
+            }
+            _ => None,
+        }
     }
 
     fn mir_local_matches_rvalue(
