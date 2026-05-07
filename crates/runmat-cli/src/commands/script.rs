@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use log::{info, warn};
 use runmat_config::RunMatConfig;
 use runmat_core::{
-    runtime_error_telemetry_failure_info, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
+    abi::{DiagnosticSeverity, ExecutionOutcome, RuntimeFlow},
+    TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
 };
 use runmat_time::Instant;
 use std::fs;
@@ -73,8 +74,8 @@ pub(crate) async fn execute_script_contents(
         accelerate_enabled: config.accelerate.enabled,
     });
     let start_time = Instant::now();
-    let result = match engine.execute(&content).await {
-        Ok(result) => result,
+    let outcome = match engine.execute_outcome(&content).await {
+        Ok(outcome) => outcome,
         Err(err) => {
             let failure = err.telemetry_failure_info();
             if let Some(run) = script_run.take() {
@@ -101,26 +102,17 @@ pub(crate) async fn execute_script_contents(
     };
 
     let execution_time = start_time.elapsed();
-    emit_execution_streams(&result.streams);
+    emit_execution_streams(&outcome.streams);
 
     let provider_snapshot = capture_provider_snapshot();
-    let failure = result
-        .error
-        .as_ref()
-        .map(runtime_error_telemetry_failure_info);
-    let error_payload = result
-        .error
-        .as_ref()
-        .and_then(|err| err.identifier().map(|value| value.to_string()))
-        .or_else(|| failure.as_ref().map(|info| info.code.clone()))
-        .or_else(|| result.error.as_ref().map(|_| "runtime_error".to_string()));
+    let error_payload = outcome_error_code(&outcome);
     let success = error_payload.is_none();
 
     if let Some(artifacts_plan) = ScriptArtifactsPlan::from_cli(cli)? {
         if let Err(err) = write_script_artifacts(
             &artifacts_plan,
             &script,
-            &result,
+            &outcome,
             execution_time,
             success,
             error_payload.as_deref(),
@@ -136,34 +128,25 @@ pub(crate) async fn execute_script_contents(
         run.finish(TelemetryRunFinish {
             duration: Some(execution_time),
             success,
-            jit_used: result.used_jit,
+            jit_used: outcome.used_jit,
             error: error_payload.clone(),
-            failure,
+            failure: None,
             host: Some(TelemetryHost::Cli),
             counters: None,
             provider: provider_snapshot,
         });
     }
 
-    if let Some(error) = result.error.as_ref() {
-        eprintln!(
-            "{}",
-            error.format_diagnostic_with_source(
-                Some(script.to_string_lossy().as_ref()),
-                Some(&content),
-            )
-        );
-        return Err(AlreadyReportedCliError.into());
-    } else if let Some(error) = error_payload {
+    if let Some(error) = error_payload {
         eprintln!("{error}");
         return Err(AlreadyReportedCliError.into());
     } else {
-        if result.used_jit {
+        if outcome.used_jit {
             info!("Script executed successfully in {:?} (JIT)", execution_time);
         } else {
             info!("Script executed successfully in {:?}", execution_time);
         }
-        if let Some(value) = result.value {
+        if let RuntimeFlow::Single(value) = outcome.flow {
             if config.runtime.verbose {
                 println!("{value:?}");
             }
@@ -223,7 +206,7 @@ fn normalize_manifest_parent(parent: &Path) -> PathBuf {
 async fn write_script_artifacts(
     plan: &ScriptArtifactsPlan,
     script: &Path,
-    result: &runmat_core::ExecutionResult,
+    outcome: &ExecutionOutcome,
     execution_time: Duration,
     success: bool,
     error_identifier: Option<&str>,
@@ -235,11 +218,11 @@ async fn write_script_artifacts(
         )
     })?;
 
-    let figure_exports = export_touched_figures(plan, &result.figures_touched).await;
+    let figure_exports = export_touched_figures(plan, &outcome.figures_touched).await;
 
     let mut stdout_bytes: usize = 0;
     let mut stderr_bytes: usize = 0;
-    for stream in &result.streams {
+    for stream in &outcome.streams {
         match stream.stream {
             runmat_core::ExecutionStreamKind::Stdout => stdout_bytes += stream.text.len(),
             runmat_core::ExecutionStreamKind::Stderr => stderr_bytes += stream.text.len(),
@@ -252,12 +235,12 @@ async fn write_script_artifacts(
         "script": script.to_string_lossy(),
         "success": success,
         "execution_time_ms": execution_time.as_millis() as u64,
-        "used_jit": result.used_jit,
+        "used_jit": outcome.used_jit,
         "error_identifier": error_identifier,
-        "figures_touched": result.figures_touched,
+        "figures_touched": outcome.figures_touched,
         "figure_exports": figure_exports,
         "stream_summary": {
-            "entry_count": result.streams.len(),
+            "entry_count": outcome.streams.len(),
             "stdout_bytes": stdout_bytes,
             "stderr_bytes": stderr_bytes,
         },
@@ -364,4 +347,12 @@ async fn export_touched_figures(
     }
 
     exports
+}
+
+fn outcome_error_code(outcome: &ExecutionOutcome) -> Option<String> {
+    outcome
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        .map(|diagnostic| diagnostic.code.clone())
 }
