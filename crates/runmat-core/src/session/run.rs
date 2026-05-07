@@ -32,7 +32,7 @@ impl RunMatSession {
             .map(|entry| entry.name.clone())
             .collect::<Vec<_>>();
         let workspace_full = result.workspace.full;
-        let mut outcome = crate::abi::ExecutionOutcome::from(result);
+        let mut outcome = crate::abi::ExecutionOutcome::from_legacy_result(result);
         outcome.workspace_delta.upserts = self.abi_workspace_upserts(workspace_names);
         if workspace_full {
             outcome.workspace_delta.removals =

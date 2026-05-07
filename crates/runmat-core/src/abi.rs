@@ -98,8 +98,8 @@ impl Default for ExecutionOutcome {
     }
 }
 
-impl From<ExecutionResult> for ExecutionOutcome {
-    fn from(result: ExecutionResult) -> Self {
+impl ExecutionOutcome {
+    pub(crate) fn from_legacy_result(result: ExecutionResult) -> Self {
         let mut diagnostics = Vec::new();
         if let Some(error) = result.error {
             diagnostics.push(RuntimeDiagnostic {
