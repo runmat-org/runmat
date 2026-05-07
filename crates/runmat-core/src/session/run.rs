@@ -3,7 +3,7 @@ use super::*;
 impl RunMatSession {
     /// Execute MATLAB/Octave code
     pub async fn execute(&mut self, input: &str) -> std::result::Result<ExecutionResult, RunError> {
-        self.run_legacy_result(input).await
+        self.run_legacy_result(input, false).await
     }
 
     /// Execute MATLAB/Octave code and return the runtime/workspace ABI outcome.
@@ -24,7 +24,7 @@ impl RunMatSession {
             .keys()
             .cloned()
             .collect::<HashSet<_>>();
-        let result = self.run_legacy_result(input).await?;
+        let result = self.run_legacy_result(input, true).await?;
         let workspace_names = result
             .workspace
             .values
@@ -79,6 +79,7 @@ impl RunMatSession {
     async fn run_legacy_result(
         &mut self,
         input: &str,
+        preserve_layout_var_names: bool,
     ) -> std::result::Result<ExecutionResult, RunError> {
         let _active = ActiveExecutionGuard::new(self).map_err(|err| {
             RunError::Runtime(
@@ -330,16 +331,16 @@ impl RunMatSession {
             debug!("HIR generated successfully");
         }
 
-        let (single_assign_var, single_stmt_non_assign) = if hir.body.len() == 1 {
-            match &hir.body[0] {
-                runmat_hir::LegacyHirStmt::Assign(var_id, _, _, _) => (Some(var_id.0), false),
-                _ => (None, true),
+        let legacy_display = legacy_display_context(&hir.body);
+
+        if preserve_layout_var_names && bytecode.layout.is_some() {
+            for (slot, name) in &id_to_name {
+                bytecode
+                    .var_names
+                    .entry(*slot)
+                    .or_insert_with(|| name.clone());
             }
         } else {
-            (None, false)
-        };
-
-        if bytecode.layout.is_none() {
             bytecode.var_names = id_to_name.clone();
         }
         if self.verbose {
@@ -410,7 +411,7 @@ impl RunMatSession {
                 .map(|t| matches!(t, LexToken::Semicolon))
                 .unwrap_or(false)
         };
-        let final_stmt_emit = last_displayable_statement_emit_disposition(&hir.body);
+        let final_stmt_emit = legacy_display.final_stmt_emit;
 
         if self.verbose {
             debug!("HIR body len: {}", hir.body.len());
@@ -449,14 +450,12 @@ impl RunMatSession {
                             } else {
                                 self.stats.interpreter_fallback += 1;
                             }
-                            if let Some(runmat_hir::LegacyHirStmt::Assign(var_id, _, _, _)) =
-                                hir.body.first()
-                            {
-                                if let Some(name) = id_to_name.get(&var_id.0) {
+                            if let Some(var_id) = legacy_first_assign_var(&hir.body) {
+                                if let Some(name) = id_to_name.get(&var_id) {
                                     assigned_this_execution.insert(name.clone());
                                 }
-                                if var_id.0 < self.variable_array.len() {
-                                    let assignment_value = self.variable_array[var_id.0].clone();
+                                if var_id < self.variable_array.len() {
+                                    let assignment_value = self.variable_array[var_id].clone();
                                     if !is_semicolon_suppressed {
                                         result_value = Some(assignment_value);
                                         if self.verbose {
@@ -544,13 +543,13 @@ impl RunMatSession {
 
                     // Handle assignment statements (x = 42 should show the assigned value unless suppressed)
                     if hir.body.len() == 1 {
-                        if let runmat_hir::LegacyHirStmt::Assign(var_id, _, _, _) = &hir.body[0] {
-                            if let Some(name) = id_to_name.get(&var_id.0) {
+                        if let Some(var_id) = legacy_first_assign_var(&hir.body) {
+                            if let Some(name) = id_to_name.get(&var_id) {
                                 assigned_this_execution.insert(name.clone());
                             }
                             // For assignments, capture the assigned value for both display and type info
-                            if var_id.0 < self.variable_array.len() {
-                                let assignment_value = self.variable_array[var_id.0].clone();
+                            if var_id < self.variable_array.len() {
+                                let assignment_value = self.variable_array[var_id].clone();
                                 if !is_semicolon_suppressed {
                                     result_value = Some(assignment_value);
                                     if self.verbose {
@@ -619,8 +618,8 @@ impl RunMatSession {
             }
         }
 
-        let last_assign_var = last_unsuppressed_assign_var(&hir.body);
-        let last_expr_emits = last_expr_emits_value(&hir.body);
+        let last_assign_var = legacy_display.last_assign_var;
+        let last_expr_emits = legacy_display.last_expr_emits;
         if !is_semicolon_suppressed && result_value.is_none() {
             if last_assign_var.is_some() || last_expr_emits {
                 if let Some(value) = runmat_runtime::console::take_last_value_output() {
@@ -774,16 +773,39 @@ impl RunMatSession {
         }
 
         if !is_semicolon_suppressed
-            && matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
+            && (matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
+                || legacy_display.single_assign_var.is_some()
+                || (is_expression_stmt
+                    && matches!(final_stmt_emit, FinalStmtEmitDisposition::Inline)))
         {
             if let Some(value) = result_value.as_ref() {
-                let label = determine_display_label_from_context(
-                    single_assign_var,
-                    &id_to_name,
-                    is_expression_stmt,
-                    single_stmt_non_assign,
-                );
-                runmat_runtime::console::record_value_output(label.as_deref(), value);
+                if runmat_runtime::console::take_last_value_output().is_none() {
+                    let display_var_ids = legacy_display_var_ids(&hir.body);
+                    if display_var_ids.is_empty() {
+                        let label = last_emit_var_index(&bytecode)
+                            .and_then(|var_id| id_to_name.get(&var_id).cloned())
+                            .or_else(|| {
+                                determine_display_label_from_context(
+                                    legacy_display.single_assign_var,
+                                    &id_to_name,
+                                    is_expression_stmt,
+                                    legacy_display.single_stmt_non_assign,
+                                )
+                            });
+                        runmat_runtime::console::record_value_output(label.as_deref(), value);
+                    } else {
+                        for var_id in display_var_ids {
+                            if let (Some(label), Some(display_value)) =
+                                (id_to_name.get(&var_id), self.variable_array.get(var_id))
+                            {
+                                runmat_runtime::console::record_value_output(
+                                    Some(label.as_str()),
+                                    display_value,
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
 

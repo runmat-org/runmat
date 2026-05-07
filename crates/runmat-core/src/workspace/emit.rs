@@ -19,6 +19,15 @@ pub(crate) enum FinalStmtEmitDisposition {
     Suppressed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LegacyDisplayContext {
+    pub single_assign_var: Option<usize>,
+    pub single_stmt_non_assign: bool,
+    pub final_stmt_emit: FinalStmtEmitDisposition,
+    pub last_assign_var: Option<usize>,
+    pub last_expr_emits: bool,
+}
+
 pub(crate) fn determine_display_label_from_context(
     single_assign_var: Option<usize>,
     id_to_name: &HashMap<usize, String>,
@@ -94,7 +103,48 @@ pub(crate) fn format_type_info(value: &Value) -> String {
     }
 }
 
-pub(crate) fn last_displayable_statement_emit_disposition(
+pub(crate) fn legacy_display_context(body: &[runmat_hir::LegacyHirStmt]) -> LegacyDisplayContext {
+    let (single_assign_var, single_stmt_non_assign) = if body.len() == 1 {
+        match &body[0] {
+            runmat_hir::LegacyHirStmt::Assign(var_id, _, _, _) => (Some(var_id.0), false),
+            _ => (None, true),
+        }
+    } else {
+        (None, false)
+    };
+
+    LegacyDisplayContext {
+        single_assign_var,
+        single_stmt_non_assign,
+        final_stmt_emit: legacy_last_displayable_statement_emit_disposition(body),
+        last_assign_var: legacy_last_unsuppressed_assign_var(body),
+        last_expr_emits: legacy_last_expr_emits_value(body),
+    }
+}
+
+pub(crate) fn legacy_first_assign_var(body: &[runmat_hir::LegacyHirStmt]) -> Option<usize> {
+    match body.first() {
+        Some(runmat_hir::LegacyHirStmt::Assign(var_id, _, _, _)) => Some(var_id.0),
+        _ => None,
+    }
+}
+
+pub(crate) fn legacy_display_var_ids(body: &[runmat_hir::LegacyHirStmt]) -> Vec<usize> {
+    use runmat_hir::{LegacyHirExprKind as HirExprKind, LegacyHirStmt as HirStmt};
+
+    body.iter()
+        .filter_map(|stmt| match stmt {
+            HirStmt::Assign(var_id, _, suppressed, _) if !*suppressed => Some(var_id.0),
+            HirStmt::ExprStmt(expr, suppressed, _) if !*suppressed => match &expr.kind {
+                HirExprKind::Var(var_id) => Some(var_id.0),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+fn legacy_last_displayable_statement_emit_disposition(
     body: &[runmat_hir::LegacyHirStmt],
 ) -> FinalStmtEmitDisposition {
     use runmat_hir::LegacyHirStmt as HirStmt;
@@ -113,7 +163,7 @@ pub(crate) fn last_displayable_statement_emit_disposition(
     FinalStmtEmitDisposition::Suppressed
 }
 
-pub(crate) fn last_unsuppressed_assign_var(body: &[runmat_hir::LegacyHirStmt]) -> Option<usize> {
+fn legacy_last_unsuppressed_assign_var(body: &[runmat_hir::LegacyHirStmt]) -> Option<usize> {
     use runmat_hir::LegacyHirStmt as HirStmt;
 
     for stmt in body.iter().rev() {
@@ -130,7 +180,7 @@ pub(crate) fn last_unsuppressed_assign_var(body: &[runmat_hir::LegacyHirStmt]) -
     None
 }
 
-pub(crate) fn last_expr_emits_value(body: &[runmat_hir::LegacyHirStmt]) -> bool {
+fn legacy_last_expr_emits_value(body: &[runmat_hir::LegacyHirStmt]) -> bool {
     use runmat_hir::LegacyHirStmt as HirStmt;
 
     for stmt in body.iter().rev() {
