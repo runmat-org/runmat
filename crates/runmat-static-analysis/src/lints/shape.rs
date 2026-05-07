@@ -15,6 +15,22 @@ pub fn lint_shapes(result: &runmat_hir::LoweringResult) -> Vec<HirDiagnostic> {
     ctx.diagnostics
 }
 
+pub fn infer_binding_shapes(
+    result: &runmat_hir::LoweringResult,
+) -> HashMap<BindingId, Vec<Option<usize>>> {
+    let Ok(mir) = runmat_mir::lowering::lower_assembly(&result.assembly) else {
+        return HashMap::new();
+    };
+    let store = runmat_mir::analysis::analyze_assembly(&mir);
+    let mut ctx = ShapeLintContext::default();
+    ctx.seed_from_analysis(&mir, &store);
+    ctx.walk_mir_assembly(&mir);
+    ctx.env
+        .into_iter()
+        .map(|(binding, shape)| (binding, shape.0))
+        .collect()
+}
+
 fn mir_lowering_diagnostic(err: runmat_hir::SemanticError) -> HirDiagnostic {
     HirDiagnostic::new(
         "lint.mir.lowering_failed",
@@ -99,6 +115,9 @@ impl ShapeLintContext {
             local,
         };
         if let Some(shape) = value.shape {
+            if let Some(binding) = body.locals.get(local.0).and_then(|local| local.binding) {
+                self.env.insert(binding, shape.clone());
+            }
             self.local_env.insert(key, shape);
         }
         if let Some(number) = value.number {
@@ -139,13 +158,17 @@ impl ShapeLintContext {
                 }
             }
             runmat_mir::MirRvalue::Range { start, step, end } => {
-                self.infer_mir_operand(body, start);
-                if let Some(step) = step {
-                    self.infer_mir_operand(body, step);
-                }
-                self.infer_mir_operand(body, end);
+                let start = self.infer_mir_operand(body, start).number;
+                let step = step
+                    .as_ref()
+                    .and_then(|step| self.infer_mir_operand(body, step).number)
+                    .unwrap_or(1.0);
+                let end = self.infer_mir_operand(body, end).number;
+                let width = start
+                    .zip(end)
+                    .and_then(|(start, end)| range_width(start, step, end));
                 MirShapeValue {
-                    shape: Some(Shape(vec![Some(1), None])),
+                    shape: Some(Shape(vec![Some(1), width])),
                     number: None,
                     int_vector: None,
                 }
@@ -242,7 +265,7 @@ impl ShapeLintContext {
                     {
                         self.warn(
                             "lint.shape.matmul",
-                            "matrix multiply dimensions do not agree",
+                            "matrix multiply inner dimensions must match",
                             span,
                         );
                     }
@@ -370,6 +393,9 @@ impl ShapeLintContext {
             .map(|arg| self.infer_mir_operand(body, arg.operand()))
             .collect();
         let shape = match call.semantic_kind {
+            BuiltinSemanticKind::Elementwise => {
+                arg_values.first().and_then(|value| value.shape.clone())
+            }
             BuiltinSemanticKind::ArrayConstructor => sized_constructor_shape(&arg_values),
             BuiltinSemanticKind::ParameterizedArrayConstructor => {
                 sized_constructor_shape(arg_values.get(1..).unwrap_or(&[]))
@@ -640,6 +666,17 @@ fn shape_from_fact(shape: &runmat_hir::ShapeFact) -> Option<Shape> {
         | runmat_hir::ShapeFact::Unknown
         | runmat_hir::ShapeFact::Unreachable => None,
     }
+}
+
+fn range_width(start: f64, step: f64, end: f64) -> Option<usize> {
+    if step == 0.0 || !start.is_finite() || !step.is_finite() || !end.is_finite() {
+        return None;
+    }
+    let span = end - start;
+    if (span > 0.0 && step < 0.0) || (span < 0.0 && step > 0.0) {
+        return Some(0);
+    }
+    Some((span / step).floor().abs() as usize + 1)
 }
 
 fn matrix_dims(shape: &Shape) -> Option<(Option<usize>, Option<usize>)> {
