@@ -18,6 +18,18 @@ pub fn compile(
         .map_err(|err| CompileError::new(format!("failed to derive VM layout: {err:?}")))?;
     let mut c = Compiler::new(hir, mir, layout, entrypoint)?;
     c.compile()?;
+    let var_names = c
+        .layout
+        .as_ref()
+        .and_then(|layout| layout.entrypoints.get(&entrypoint))
+        .map(|entrypoint_layout| {
+            entrypoint_layout
+                .exports
+                .iter()
+                .map(|export| (export.slot.0, export.name.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     Ok(Bytecode {
         instructions: c.instructions,
@@ -27,7 +39,7 @@ pub fn compile(
         var_count: c.var_count,
         functions: HashMap::new(),
         var_types: c.var_types,
-        var_names: HashMap::new(),
+        var_names,
         layout: c.layout,
         #[cfg(feature = "native-accel")]
         accel_graph: None,
@@ -70,6 +82,8 @@ pub fn compile_legacy(
 mod tests {
     use super::compile;
     use crate::Instr;
+    use futures::executor::block_on;
+    use runmat_builtins::Value;
     use runmat_hir::{lower, LoweringContext};
     use runmat_mir::lowering::lower_assembly;
 
@@ -103,5 +117,22 @@ mod tests {
         assert!(matches!(bytecode.instructions[1], Instr::LoadConst(2.0)));
         assert!(matches!(bytecode.instructions[2], Instr::Add));
         assert!(matches!(bytecode.instructions[3], Instr::StoreVar(_)));
+    }
+
+    #[test]
+    fn primary_compile_interprets_visible_assignment() {
+        let ast = runmat_parser::parse("x = 1 + 2;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let export = &layout.entrypoints[&entrypoint].exports[0];
+
+        assert_eq!(bytecode.var_names[&export.slot.0], "x");
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[export.slot.0], Value::Num(3.0));
     }
 }
