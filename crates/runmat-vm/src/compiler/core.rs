@@ -356,7 +356,7 @@ impl Compiler {
         let mut block_starts = HashMap::new();
         let mut pending_jumps: Vec<(usize, BasicBlockId, bool)> = Vec::new();
 
-        for block in &blocks {
+        for (block_index, block) in blocks.iter().enumerate() {
             block_starts.insert(block.id, self.instructions.len());
             for stmt in &block.statements {
                 self.compile_mir_stmt(stmt)?;
@@ -377,8 +377,32 @@ impl Compiler {
                     let true_pc = self.emit(Instr::Jump(usize::MAX));
                     pending_jumps.push((true_pc, *then_block, false));
                 }
-                MirTerminatorKind::Return(_) => {
-                    self.compile_mir_return(&block.terminator.kind)?;
+                MirTerminatorKind::Switch {
+                    discr,
+                    cases,
+                    otherwise,
+                } => {
+                    let discr_temp = self.alloc_temp();
+                    self.compile_mir_operand(discr)?;
+                    self.emit(Instr::StoreVar(discr_temp));
+                    for (case, target) in cases {
+                        self.emit(Instr::LoadVar(discr_temp));
+                        self.compile_mir_operand(case)?;
+                        self.emit(Instr::Equal);
+                        let next_case_pc = self.emit(Instr::JumpIfFalse(usize::MAX));
+                        let target_pc = self.emit(Instr::Jump(usize::MAX));
+                        pending_jumps.push((target_pc, *target, false));
+                        self.patch(next_case_pc, Instr::JumpIfFalse(self.instructions.len()));
+                    }
+                    let otherwise_pc = self.emit(Instr::Jump(usize::MAX));
+                    pending_jumps.push((otherwise_pc, *otherwise, false));
+                }
+                MirTerminatorKind::Return(values) => {
+                    if values.is_empty() && block_index + 1 < blocks.len() {
+                        self.emit(Instr::Return);
+                    } else {
+                        self.compile_mir_return(&block.terminator.kind)?;
+                    }
                 }
                 _ => return Err(CompileError::new(
                     "MIR bytecode lowering for this control-flow terminator is not implemented yet",
