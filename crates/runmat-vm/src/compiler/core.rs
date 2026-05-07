@@ -457,7 +457,15 @@ impl Compiler {
                 self.emit(Instr::LoadVar(base_slot));
                 self.compile_mir_index_components(indexing, IndexResultContext::AssignmentTarget)?;
                 self.compile_mir_rvalue(value)?;
-                self.emit(Instr::StoreIndex(indexing.components.len()));
+                match indexing.kind {
+                    IndexKind::Paren => self.emit(Instr::StoreIndex(indexing.components.len())),
+                    IndexKind::Brace => self.emit(Instr::StoreIndexCell(indexing.components.len())),
+                    IndexKind::Dot => {
+                        return Err(self.compile_error(
+                            "MIR bytecode lowering for dot assignment is not implemented yet",
+                        ))
+                    }
+                };
                 self.emit(Instr::StoreVar(base_slot));
                 Ok(())
             }

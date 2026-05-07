@@ -264,6 +264,30 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_interprets_simple_cell_indexed_assignment() {
+        let ast = runmat_parser::parse("c = {1, 2}; c{2} = 9; x = c{2};").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let x_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "x")
+            .expect("x export");
+
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::StoreIndexCell(1))));
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[x_export.slot.0], Value::Num(9.0));
+    }
+
+    #[test]
     fn primary_compile_interprets_basic_if_statement() {
         let ast = runmat_parser::parse("if 1; x = 2; else; x = 3; end").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
