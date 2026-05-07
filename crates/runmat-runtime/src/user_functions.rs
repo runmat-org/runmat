@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 pub type UserFunctionFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeError>>>>;
 pub type UserFunctionInvoker = dyn Fn(&str, &[Value]) -> UserFunctionFuture + Send + Sync;
-pub type SemanticFunctionInvoker = dyn Fn(usize, &[Value]) -> UserFunctionFuture + Send + Sync;
+pub type SemanticFunctionInvoker =
+    dyn Fn(usize, &[Value], usize) -> UserFunctionFuture + Send + Sync;
 
 runmat_thread_local! {
     static USER_FUNCTION_INVOKER: RefCell<Option<Arc<UserFunctionInvoker>>> =
@@ -85,8 +86,9 @@ pub async fn try_call_user_function(
 pub async fn try_call_semantic_function(
     function: usize,
     args: &[Value],
+    requested_outputs: usize,
 ) -> Option<Result<Value, RuntimeError>> {
     let invoker = SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone());
     let invoker = invoker?;
-    Some(invoker(function, args).await)
+    Some(invoker(function, args, requested_outputs).await)
 }

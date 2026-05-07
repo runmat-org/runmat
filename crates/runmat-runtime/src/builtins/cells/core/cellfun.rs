@@ -515,7 +515,7 @@ impl Callable {
                 captures.extend_from_slice(args);
                 if let Some(function) = c.semantic_function {
                     if let Some(result) =
-                        user_functions::try_call_semantic_function(function, &captures).await
+                        user_functions::try_call_semantic_function(function, &captures, 1).await
                     {
                         return result;
                     }

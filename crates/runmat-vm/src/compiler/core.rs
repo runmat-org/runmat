@@ -520,7 +520,6 @@ impl Compiler {
         call: &MirCall,
         output_count: usize,
     ) -> Result<(), CompileError> {
-        let name = self.mir_builtin_call_name(call)?;
         match call.requested_outputs {
             RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count)
                 if count == output_count => {}
@@ -539,7 +538,19 @@ impl Compiler {
             };
             self.compile_mir_operand(operand)?;
         }
-        self.emit(Instr::CallBuiltin(name, call.args.len()));
+        match &call.callee {
+            HirCallableRef::Function(function) => {
+                self.emit(Instr::CallSemanticFunctionMulti(
+                    *function,
+                    call.args.len(),
+                    output_count,
+                ));
+            }
+            _ => {
+                let name = self.mir_builtin_call_name(call)?;
+                self.emit(Instr::CallBuiltin(name, call.args.len()));
+            }
+        }
         Ok(())
     }
 
@@ -614,9 +625,10 @@ impl Compiler {
                     self.emit(Instr::ReturnValue);
                     Ok(())
                 }
-                _ => Err(CompileError::new(
-                    "MIR bytecode lowering for multi-value returns is not implemented yet",
-                )),
+                _ => {
+                    self.emit(Instr::Return);
+                    Ok(())
+                }
             },
             _ => Err(CompileError::new(
                 "MIR bytecode lowering for control-flow terminators is not implemented yet",

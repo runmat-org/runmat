@@ -204,6 +204,7 @@ async fn invoke_user_function_value(
 async fn invoke_semantic_function_value(
     function: usize,
     args: &[Value],
+    requested_outputs: usize,
     semantic_functions: &HashMap<runmat_hir::FunctionId, SemanticFunctionBytecode>,
 ) -> Result<Value, RuntimeError> {
     let function_id = runmat_hir::FunctionId(function);
@@ -257,6 +258,15 @@ async fn invoke_semantic_function_value(
         runtime_arg_count,
     )
     .await?;
+    if requested_outputs > 1 {
+        let values = func
+            .output_slots
+            .iter()
+            .take(requested_outputs)
+            .map(|slot| result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
+            .collect();
+        return Ok(Value::OutputList(values));
+    }
     let Some(slot) = func.output_slots.first() else {
         return Ok(Value::Num(0.0));
     };
@@ -349,15 +359,22 @@ async fn run_interpreter_inner(
             })
         },
     )));
-    let _semantic_function_guard = user_functions::install_semantic_function_invoker(Some(
-        Arc::new(move |function: usize, args: &[Value]| {
-            let args = args.to_vec();
-            let semantic_functions = Arc::clone(&semantic_functions);
-            Box::pin(async move {
-                invoke_semantic_function_value(function, &args, &semantic_functions).await
-            })
-        }),
-    ));
+    let _semantic_function_guard =
+        user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |function: usize, args: &[Value], requested_outputs: usize| {
+                let args = args.to_vec();
+                let semantic_functions = Arc::clone(&semantic_functions);
+                Box::pin(async move {
+                    invoke_semantic_function_value(
+                        function,
+                        &args,
+                        requested_outputs,
+                        &semantic_functions,
+                    )
+                    .await
+                })
+            },
+        )));
     CALL_COUNTS.with(|cc| {
         *cc.borrow_mut() = call_counts.clone();
     });
@@ -611,6 +628,7 @@ async fn run_interpreter_inner(
             | Instr::CallBuiltin(_, _)
             | Instr::CallFunction(_, _)
             | Instr::CallSemanticFunction(_, _)
+            | Instr::CallSemanticFunctionMulti(_, _, _)
             | Instr::CallFunctionMulti(_, _, _)
             | Instr::CallFunctionExpandMulti(_, _)
             | Instr::CallBuiltinExpandLast(_, _, _)

@@ -179,6 +179,7 @@ pub enum Instr {
 
     // Calls a user function and shapes the result list to `out_count`.
     CallFunctionMulti(String, usize, usize),
+    CallSemanticFunctionMulti(FunctionId, usize, usize),
 
     // Expands one argument position from cell indexing at runtime.
     CallFunctionExpandAt(String, usize, usize, usize),
@@ -273,7 +274,8 @@ impl Instr {
             Instr::CallBuiltin(_, argc)
             | Instr::CallFunction(_, argc)
             | Instr::CallSemanticFunction(_, argc) => effect(*argc, 1),
-            Instr::CallFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
+            Instr::CallFunctionMulti(_, argc, out_count)
+            | Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
             Instr::CallMethod(_, argc) | Instr::CallMethodOrMemberIndex(_, argc) => {
                 effect(argc + 1, 1)
             }

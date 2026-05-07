@@ -637,7 +637,7 @@ impl Callable {
                 merged.extend_from_slice(args);
                 if let Some(function) = c.semantic_function {
                     if let Some(result) =
-                        user_functions::try_call_semantic_function(function, &merged).await
+                        user_functions::try_call_semantic_function(function, &merged, 1).await
                     {
                         return result;
                     }

@@ -585,7 +585,25 @@ pub async fn dispatch_instruction(
         Instr::CallSemanticFunction(function, arg_count) => {
             let args = crate::interpreter::stack::pop_args(stack, *arg_count)?;
             let Some(result) =
-                runmat_runtime::user_functions::try_call_semantic_function(function.0, &args).await
+                runmat_runtime::user_functions::try_call_semantic_function(function.0, &args, 1)
+                    .await
+            else {
+                return Err(RuntimeError::from(format!(
+                    "semantic function invoker unavailable for {:?}",
+                    function
+                )));
+            };
+            stack.push(result?);
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => {
+            let args = crate::interpreter::stack::pop_args(stack, *arg_count)?;
+            let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
+                function.0, &args, *out_count,
+            )
+            .await
             else {
                 return Err(RuntimeError::from(format!(
                     "semantic function invoker unavailable for {:?}",

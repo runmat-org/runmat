@@ -581,6 +581,12 @@ impl BytecodeCompiler {
                                 .to_string(),
                         ));
                     }
+                    Instr::CallSemanticFunctionMulti(_, _, _) => {
+                        return Err(execution_error(
+                            "Semantic multi-output function calls are not supported in JIT; use interpreter"
+                                .to_string(),
+                        ));
+                    }
                     Instr::LoadLocal(offset) => {
                         // Load from local variable slot
                         let offset_val = builder.ins().iconst(types::I64, *offset as i64);
