@@ -764,11 +764,10 @@ impl Compiler {
         match &call.callee {
             HirCallableRef::Function(function) => {
                 if has_expansion {
-                    return Err(self.compile_error(
-                        "MIR bytecode lowering for expanded semantic function arguments is not implemented yet",
-                    ));
+                    self.emit(Instr::CallSemanticFunctionExpandMulti(*function, specs));
+                } else {
+                    self.emit(Instr::CallSemanticFunction(*function, call.args.len()));
                 }
-                self.emit(Instr::CallSemanticFunction(*function, call.args.len()));
             }
             _ => {
                 let name = self.mir_builtin_call_name(call)?;
