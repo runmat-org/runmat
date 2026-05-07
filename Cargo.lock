@@ -5583,6 +5583,7 @@ dependencies = [
  "runmat-gc",
  "runmat-hir",
  "runmat-lexer",
+ "runmat-mir",
  "runmat-parser",
  "runmat-runtime",
  "runmat-snapshot",

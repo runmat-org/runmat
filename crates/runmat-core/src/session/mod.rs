@@ -108,7 +108,7 @@ pub struct RunMatSession {
 pub(crate) struct PreparedExecution {
     ast: runmat_parser::Program,
     lowering: LoweringResult,
-    bytecode: runmat_vm::Bytecode,
+    pub(crate) bytecode: runmat_vm::Bytecode,
 }
 
 #[derive(Debug, Clone)]

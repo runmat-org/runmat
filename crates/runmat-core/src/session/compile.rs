@@ -21,7 +21,7 @@ impl RunMatSession {
         let existing_functions = self.convert_hir_functions_to_user_functions();
         let mut bytecode = {
             let _span = info_span!("runtime.compile.bytecode").entered();
-            runmat_vm::compile_legacy(&lowering.hir, &existing_functions)?
+            self.compile_semantic_or_legacy(&lowering, &existing_functions)?
         };
         bytecode.source_id = Some(source_id);
         let new_function_names: HashSet<String> = lowering.functions.keys().cloned().collect();
@@ -59,6 +59,28 @@ impl RunMatSession {
             rendered.push(line);
         }
         error.context.call_stack = rendered;
+    }
+
+    fn compile_semantic_or_legacy(
+        &self,
+        lowering: &LoweringResult,
+        existing_functions: &HashMap<String, runmat_vm::UserFunction>,
+    ) -> std::result::Result<runmat_vm::Bytecode, RunError> {
+        if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
+            if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
+                if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
+                    if semantic_workspace_slots_match_legacy(&bytecode, lowering)
+                        && bytecode_has_no_runtime_calls(&bytecode)
+                    {
+                        return Ok(bytecode);
+                    }
+                }
+            }
+        }
+        Ok(runmat_vm::compile_legacy(
+            &lowering.hir,
+            existing_functions,
+        )?)
     }
 
     pub(crate) fn normalize_error_namespace(&self, error: &mut RuntimeError) {
@@ -172,4 +194,45 @@ impl RunMatSession {
 
         user_functions
     }
+}
+
+fn bytecode_has_no_runtime_calls(bytecode: &runmat_vm::Bytecode) -> bool {
+    bytecode.instructions.iter().all(|instr| {
+        !matches!(
+            instr,
+            runmat_vm::Instr::CallBuiltin(_, _)
+                | runmat_vm::Instr::CallBuiltinExpandLast(_, _, _)
+                | runmat_vm::Instr::CallBuiltinExpandAt(_, _, _, _)
+                | runmat_vm::Instr::CallBuiltinExpandMulti(..)
+                | runmat_vm::Instr::CallFunction(_, _)
+                | runmat_vm::Instr::CallFunctionMulti(_, _, _)
+                | runmat_vm::Instr::CallFunctionExpandAt(_, _, _, _)
+                | runmat_vm::Instr::CallFunctionExpandMulti(_, _)
+                | runmat_vm::Instr::CallFeval(_)
+                | runmat_vm::Instr::CallFevalExpandMulti(_)
+        )
+    })
+}
+
+fn semantic_workspace_slots_match_legacy(
+    bytecode: &runmat_vm::Bytecode,
+    lowering: &LoweringResult,
+) -> bool {
+    let Some(layout) = &bytecode.layout else {
+        return false;
+    };
+    lowering.assembly.entrypoints.iter().all(|entrypoint| {
+        layout
+            .entrypoints
+            .get(&entrypoint.id)
+            .map(|entrypoint_layout| {
+                entrypoint_layout.exports.iter().all(|export| {
+                    lowering
+                        .variables
+                        .get(&export.name)
+                        .is_some_and(|legacy_slot| *legacy_slot == export.slot.0)
+                })
+            })
+            .unwrap_or(false)
+    })
 }

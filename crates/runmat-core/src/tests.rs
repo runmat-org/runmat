@@ -16,6 +16,18 @@ fn captures_basic_workspace_assignments() {
 }
 
 #[test]
+fn compile_input_uses_semantic_vm_when_supported() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("x = [1 2; 3 4]; y = x(:, 2);")
+        .expect("compile");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "supported straight-line scripts should compile through semantic HIR/MIR/VM"
+    );
+}
+
+#[test]
 fn workspace_reports_datetime_array_shape() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let result =
