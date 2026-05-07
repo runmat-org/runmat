@@ -595,6 +595,43 @@ impl TurbineEngine {
 
         // Hash the instructions and variable count
         bytecode.var_count.hash(&mut hasher);
+        if let Some(layout) = &bytecode.layout {
+            let mut functions: Vec<_> = layout.functions.iter().collect();
+            functions.sort_by_key(|(id, _)| id.0);
+            for (id, function) in functions {
+                "layout_function".hash(&mut hasher);
+                id.0.hash(&mut hasher);
+                function.local_count.hash(&mut hasher);
+                function.display_name.hash(&mut hasher);
+
+                let mut binding_slots: Vec<_> = function.binding_slots.iter().collect();
+                binding_slots.sort_by_key(|(binding, _)| binding.0);
+                for (binding, slot) in binding_slots {
+                    binding.0.hash(&mut hasher);
+                    slot.0.hash(&mut hasher);
+                }
+
+                let mut mir_local_slots: Vec<_> = function.mir_local_slots.iter().collect();
+                mir_local_slots.sort_by_key(|(local, _)| local.0);
+                for (local, slot) in mir_local_slots {
+                    local.0.hash(&mut hasher);
+                    slot.0.hash(&mut hasher);
+                }
+            }
+
+            let mut entrypoints: Vec<_> = layout.entrypoints.iter().collect();
+            entrypoints.sort_by_key(|(id, _)| id.0);
+            for (id, entrypoint) in entrypoints {
+                "layout_entrypoint".hash(&mut hasher);
+                id.0.hash(&mut hasher);
+                entrypoint.target.0.hash(&mut hasher);
+                for export in &entrypoint.exports {
+                    export.binding.0.hash(&mut hasher);
+                    export.name.hash(&mut hasher);
+                    export.slot.0.hash(&mut hasher);
+                }
+            }
+        }
         for instr in &bytecode.instructions {
             // Create a simplified hash of the instruction
             match instr {
