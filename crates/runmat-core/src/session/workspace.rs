@@ -2,9 +2,9 @@ use super::*;
 
 impl RunMatSession {
     pub fn clear_variables(&mut self) {
-        self.variables.clear();
+        self.legacy_variables.clear();
         self.variable_array.clear();
-        self.variable_names.clear();
+        self.legacy_variable_names.clear();
         self.workspace_values.clear();
         self.workspace_preview_tokens.clear();
     }
@@ -18,7 +18,7 @@ impl RunMatSession {
         }
 
         let source_map = if self.workspace_values.is_empty() {
-            &self.variables
+            &self.legacy_variables
         } else {
             &self.workspace_values
         };
@@ -49,9 +49,9 @@ impl RunMatSession {
         self.clear_variables();
 
         for (index, (name, value)) in entries.into_iter().enumerate() {
-            self.variable_names.insert(name.clone(), index);
+            self.legacy_variable_names.insert(name.clone(), index);
             self.variable_array.push(value.clone());
-            self.variables.insert(name.clone(), value.clone());
+            self.legacy_variables.insert(name.clone(), value.clone());
             self.workspace_values.insert(name, value);
         }
 
@@ -62,7 +62,7 @@ impl RunMatSession {
 
     pub fn workspace_snapshot(&mut self) -> WorkspaceSnapshot {
         let source_map = if self.workspace_values.is_empty() {
-            &self.variables
+            &self.legacy_variables
         } else {
             &self.workspace_values
         };
@@ -97,7 +97,7 @@ impl RunMatSession {
         let value = self
             .workspace_values
             .get(&name)
-            .or_else(|| self.variables.get(&name))
+            .or_else(|| self.legacy_variables.get(&name))
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Variable '{name}' not found in workspace"))?;
 
@@ -160,9 +160,9 @@ impl RunMatSession {
         })
     }
 
-    /// Get a copy of current variables
+    /// Get a copy of current legacy variables.
     pub fn get_variables(&self) -> &HashMap<String, Value> {
-        &self.variables
+        &self.legacy_variables
     }
 
     pub(crate) fn build_workspace_snapshot(

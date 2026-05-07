@@ -15,7 +15,10 @@ impl RunMatSession {
             let _span = info_span!("runtime.lower").entered();
             runmat_hir::lower(
                 &ast,
-                &LoweringContext::new(&self.variable_names, &self.function_definitions),
+                &LoweringContext::new(
+                    &self.legacy_variable_names,
+                    &self.legacy_function_definitions,
+                ),
             )?
         };
         let existing_functions = self.convert_hir_functions_to_user_functions();
@@ -155,7 +158,7 @@ impl RunMatSession {
     fn convert_hir_functions_to_user_functions(&self) -> HashMap<String, runmat_vm::UserFunction> {
         let mut user_functions = HashMap::new();
 
-        for (name, hir_stmt) in &self.function_definitions {
+        for (name, hir_stmt) in &self.legacy_function_definitions {
             if let runmat_hir::LegacyHirStmt::Function {
                 name: func_name,
                 params,
@@ -171,7 +174,7 @@ impl RunMatSession {
                     runmat_hir::remapping::create_complete_function_var_map(params, outputs, body);
                 let max_local_var = var_map.len();
 
-                let source_id = self.function_source_ids.get(name).copied();
+                let source_id = self.legacy_function_source_ids.get(name).copied();
                 if let Some(id) = source_id {
                     if let Some(source) = self.source_pool.get(id) {
                         let _ = (&source.name, &source.text);

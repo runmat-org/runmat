@@ -649,7 +649,7 @@ impl RunMatSession {
                         "[repl] mutated names and assigned return values"
                     );
                 }
-                self.variable_names = mutated_names.clone();
+                self.legacy_variable_names = mutated_names.clone();
                 let previous_workspace = self.workspace_values.clone();
                 let current_names: HashSet<String> = assigned
                     .iter()
@@ -725,13 +725,14 @@ impl RunMatSession {
                 if matches!(stmt, runmat_hir::LegacyHirStmt::Function { .. }) {
                     let source_id = *repl_source_id
                         .get_or_insert_with(|| self.source_pool.intern("<repl>", input));
-                    self.function_source_ids.insert(name.clone(), source_id);
+                    self.legacy_function_source_ids
+                        .insert(name.clone(), source_id);
                 }
             }
-            self.function_definitions = updated_functions;
+            self.legacy_function_definitions = updated_functions;
             // Apply 'ans' update if applicable (persisting expression result)
             if let Some((var_id, value)) = ans_update {
-                self.variable_names.insert("ans".to_string(), var_id);
+                self.legacy_variable_names.insert("ans".to_string(), var_id);
                 self.workspace_values.insert("ans".to_string(), value);
                 if debug_trace {
                     println!("Updated 'ans' to var_id {}", var_id);
@@ -800,7 +801,7 @@ impl RunMatSession {
             (entries, true)
         } else if workspace_updates.is_empty() {
             let source_map = if self.workspace_values.is_empty() {
-                &self.variables
+                &self.legacy_variables
             } else {
                 &self.workspace_values
             };

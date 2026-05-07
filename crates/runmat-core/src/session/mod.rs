@@ -62,22 +62,22 @@ pub struct RunMatSession {
     verbose: bool,
     /// Execution statistics
     stats: ExecutionStats,
-    /// Persistent variable context for session state
-    variables: HashMap<String, Value>,
+    /// Legacy persistent variable context keyed by source name.
+    legacy_variables: HashMap<String, Value>,
     /// Current variable array for bytecode execution
     variable_array: Vec<Value>,
-    /// Mapping from variable names to VarId indices
-    variable_names: HashMap<String, usize>,
+    /// Legacy mapping from variable names to VarId indices.
+    legacy_variable_names: HashMap<String, usize>,
     /// Persistent workspace values keyed by variable name
     workspace_values: HashMap<String, Value>,
     /// Stable ABI identity for this interactive workspace.
     abi_workspace_handle: crate::abi::WorkspaceHandle,
-    /// User-defined functions context for session state
-    function_definitions: HashMap<String, runmat_hir::LegacyHirStmt>,
+    /// Legacy user-defined functions context for session state.
+    legacy_function_definitions: HashMap<String, runmat_hir::LegacyHirStmt>,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
-    /// Source IDs for user-defined functions keyed by name
-    function_source_ids: HashMap<String, SourceId>,
+    /// Legacy source IDs for user-defined functions keyed by name.
+    legacy_function_source_ids: HashMap<String, SourceId>,
     /// Loaded snapshot for standard library preloading
     snapshot: Option<Arc<Snapshot>>,
     /// Cooperative cancellation flag shared with the runtime.
