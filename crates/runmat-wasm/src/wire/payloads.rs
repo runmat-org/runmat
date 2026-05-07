@@ -3,15 +3,21 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 use wasm_bindgen::prelude::JsValue;
 
+use runmat_builtins::Value;
 use runmat_core::{
-    ExecutionProfiling, ExecutionResult, ExecutionStreamEntry, ExecutionStreamKind,
+    abi::{DiagnosticSeverity, ExecutionOutcome, RuntimeDiagnostic, WorkspaceBindingKey},
+    approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
+    value_shape, ExecutionProfiling, ExecutionResult, ExecutionStreamEntry, ExecutionStreamKind,
     FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader, FusionPlanSnapshot,
     MaterializedVariable, StdinEvent, StdinEventKind, WorkspaceEntry, WorkspaceMaterializeOptions,
-    WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceSliceOptions, WorkspaceSnapshot,
+    WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceResidency, WorkspaceSliceOptions,
+    WorkspaceSnapshot,
 };
 use runmat_runtime::warning_store::RuntimeWarning;
 
-use crate::wire::errors::{js_error, runtime_error_payload, RunMatErrorPayload};
+use crate::wire::errors::{
+    js_error, runtime_error_payload, RunMatErrorKind, RunMatErrorPayload, RunMatErrorSpanPayload,
+};
 use crate::wire::value::{value_to_json, MAX_DATA_PREVIEW};
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +103,43 @@ impl ExecutionPayload {
             fusion_plan: result.fusion_plan.map(FusionPlanPayload::from),
         }
     }
+
+    pub(crate) fn from_outcome(outcome: ExecutionOutcome, source: &str) -> Self {
+        let value = outcome.flow.durable_workspace_value().cloned();
+        let error = outcome
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+            .map(|diagnostic| error_payload_from_diagnostic(diagnostic, source));
+        Self {
+            value_text: value.as_ref().map(|value| value.to_string()),
+            value_json: value.as_ref().map(|value| value_to_json(value, 0)),
+            type_info: outcome.type_info,
+            execution_time_ms: outcome.execution_time_ms,
+            used_jit: outcome.used_jit,
+            error,
+            stdout: outcome
+                .streams
+                .into_iter()
+                .map(ConsoleStreamPayload::from)
+                .collect(),
+            workspace: WorkspacePayload::from_outcome(&outcome),
+            figures_touched: outcome.figures_touched,
+            warnings: outcome
+                .diagnostics
+                .into_iter()
+                .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Warning)
+                .map(WarningPayload::from_diagnostic)
+                .collect(),
+            stdin_events: outcome
+                .stdin_events
+                .into_iter()
+                .map(StdinEventPayload::from)
+                .collect(),
+            profiling: outcome.profiling.map(ProfilingPayload::from),
+            fusion_plan: outcome.fusion_plan.map(FusionPlanPayload::from),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -153,6 +196,15 @@ impl From<RuntimeWarning> for WarningPayload {
     }
 }
 
+impl WarningPayload {
+    fn from_diagnostic(diagnostic: RuntimeDiagnostic) -> Self {
+        Self {
+            identifier: diagnostic.code,
+            message: diagnostic.message,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StdinEventPayload {
@@ -201,6 +253,24 @@ impl From<WorkspaceSnapshot> for WorkspacePayload {
     }
 }
 
+impl WorkspacePayload {
+    fn from_outcome(outcome: &ExecutionOutcome) -> Self {
+        Self {
+            full: outcome.workspace_delta.full_snapshot_required,
+            version: 0,
+            values: outcome
+                .workspace_delta
+                .upserts
+                .iter()
+                .filter_map(|binding| {
+                    let name = workspace_binding_name(&binding.key)?.to_string();
+                    Some(workspace_entry_from_value(name, &binding.value))
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WorkspaceEntryPayload {
@@ -229,6 +299,81 @@ impl From<WorkspaceEntry> for WorkspaceEntryPayload {
             preview_token: entry.preview_token.map(|id| id.to_string()),
         }
     }
+}
+
+fn workspace_binding_name(key: &WorkspaceBindingKey) -> Option<&str> {
+    match key {
+        WorkspaceBindingKey::Interactive { name, .. }
+        | WorkspaceBindingKey::SourceBinding { binding: name, .. }
+        | WorkspaceBindingKey::Global { name, .. }
+        | WorkspaceBindingKey::Persistent { name, .. } => Some(name.0.as_str()),
+    }
+}
+
+fn workspace_entry_from_value(name: String, value: &Value) -> WorkspaceEntryPayload {
+    let shape = value_shape(value).unwrap_or_default();
+    let is_gpu = matches!(value, Value::GpuTensor(_));
+    let preview = if is_gpu {
+        None
+    } else {
+        preview_numeric_values(value, MAX_DATA_PREVIEW).map(|(values, truncated)| {
+            WorkspacePreviewPayload::from(WorkspacePreview { values, truncated })
+        })
+    };
+    WorkspaceEntryPayload {
+        name,
+        class_name: matlab_class_name(value),
+        dtype: numeric_dtype_label(value).map(|label| label.to_string()),
+        shape,
+        is_gpu,
+        size_bytes: approximate_size_bytes(value),
+        preview,
+        residency: if is_gpu {
+            WorkspaceResidency::Gpu.as_str()
+        } else {
+            WorkspaceResidency::Cpu.as_str()
+        },
+        preview_token: None,
+    }
+}
+
+fn error_payload_from_diagnostic(
+    diagnostic: &RuntimeDiagnostic,
+    source: &str,
+) -> RunMatErrorPayload {
+    let span = diagnostic.span.map(|span| {
+        let (line, column) = line_col_from_source(source, span.start);
+        RunMatErrorSpanPayload {
+            start: span.start,
+            end: span.end,
+            line,
+            column,
+        }
+    });
+    RunMatErrorPayload {
+        kind: RunMatErrorKind::Runtime,
+        message: diagnostic.message.clone(),
+        identifier: Some(diagnostic.code.clone()),
+        diagnostic: diagnostic.message.clone(),
+        span,
+        callstack: Vec::new(),
+        callstack_elided: 0,
+    }
+}
+
+fn line_col_from_source(source: &str, offset: usize) -> (usize, usize) {
+    let mut line = 1;
+    let mut line_start = 0;
+    for (idx, ch) in source.char_indices() {
+        if idx >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            line_start = idx + 1;
+        }
+    }
+    (line, offset.saturating_sub(line_start) + 1)
 }
 
 #[derive(Serialize)]

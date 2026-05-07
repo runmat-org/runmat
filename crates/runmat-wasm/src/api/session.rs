@@ -145,20 +145,22 @@ impl RunMatWasm {
             std::mem::take(&mut *slot)
         };
 
-        let exec_result = session.execute(&source).await;
+        let exec_result = session.execute_outcome(&source).await;
         *self.session.borrow_mut() = session;
         let payload = match exec_result {
-            Ok(result) => {
-                if result.error.is_none() {
+            Ok(outcome) => {
+                if !outcome.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.severity == runmat_core::abi::DiagnosticSeverity::Error
+                }) {
                     let touched: std::collections::HashSet<u32> =
-                        result.figures_touched.iter().copied().collect();
+                        outcome.figures_touched.iter().copied().collect();
                     for handle in figures_before {
                         if !touched.contains(&handle) {
                             let _ = runtime_close_figure(Some(FigureHandle::from(handle)));
                         }
                     }
                 }
-                ExecutionPayload::from_result(result, &source)
+                ExecutionPayload::from_outcome(outcome, &source)
             }
             Err(err) => ExecutionPayload {
                 value_text: None,
