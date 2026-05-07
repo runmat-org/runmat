@@ -45,6 +45,34 @@ fn execute_outcome_exposes_workspace_upserts() {
 }
 
 #[test]
+fn execute_request_uses_request_workspace_handle() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let workspace = abi::WorkspaceHandle(uuid::Uuid::from_u128(7));
+    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "request-test.m".to_string(),
+            text: "requested = 7;".to_string(),
+        },
+        entrypoint: abi::EntrypointSelector::SourcePath("request-test.m".to_string()),
+        compatibility: runmat_hir::CompatibilityMode::Interactive,
+        host_policy: abi::HostExecutionPolicy::default(),
+        inputs: abi::RuntimeFlow::NoValue,
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace,
+        resolver: abi::ResolverHandle(uuid::Uuid::from_u128(8)),
+    }))
+    .expect("exec succeeds");
+
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(
+            &upsert.key,
+            abi::WorkspaceBindingKey::Interactive { session, name }
+                if *session == workspace.0 && name.0 == "requested"
+        )
+    }));
+}
+
+#[test]
 fn compile_input_uses_semantic_vm_when_supported() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let prepared = session

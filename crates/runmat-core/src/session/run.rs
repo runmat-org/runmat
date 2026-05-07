@@ -23,6 +23,29 @@ impl RunMatSession {
         Ok(outcome)
     }
 
+    /// Execute a structured runtime/workspace ABI request.
+    pub async fn execute_request(
+        &mut self,
+        request: crate::abi::ExecutionRequest,
+    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        let (source_name, source_text) = source_input_text(request.source)?;
+        let previous_compat = self.compat_mode;
+        let previous_source_override = self.source_name_override.clone();
+        let previous_workspace_handle = self.abi_workspace_handle;
+
+        self.compat_mode = parser_compat_from_abi(&request.compatibility);
+        self.source_name_override = Some(source_name);
+        self.abi_workspace_handle = request.workspace;
+
+        let result = self.execute_outcome(&source_text).await;
+
+        self.compat_mode = previous_compat;
+        self.source_name_override = previous_source_override;
+        self.abi_workspace_handle = previous_workspace_handle;
+
+        result
+    }
+
     /// Parse, lower, compile, and execute input.
     pub async fn run(&mut self, input: &str) -> std::result::Result<ExecutionResult, RunError> {
         let _active = ActiveExecutionGuard::new(self).map_err(|err| {
@@ -865,4 +888,42 @@ fn compile_eval_hook_bytecode(
         }
     }
     runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
+}
+
+fn source_input_text(
+    source: crate::abi::SourceInput,
+) -> std::result::Result<(String, String), RunError> {
+    match source {
+        crate::abi::SourceInput::Text { name, text } => Ok((name, text)),
+        crate::abi::SourceInput::Path(path) => {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let text = std::fs::read_to_string(&path).map_err(|err| {
+                    RunError::Runtime(
+                        build_runtime_error(format!("failed to read source path '{path}': {err}"))
+                            .with_identifier("RunMat:SourceReadFailed")
+                            .build(),
+                    )
+                })?;
+                Ok((path, text))
+            }
+
+            #[cfg(target_arch = "wasm32")]
+            {
+                Err(RunError::Runtime(
+                    build_runtime_error("path source execution is unavailable on wasm")
+                        .with_identifier("RunMat:PathSourceUnavailable")
+                        .build(),
+                ))
+            }
+        }
+    }
+}
+
+fn parser_compat_from_abi(mode: &runmat_hir::CompatibilityMode) -> CompatMode {
+    match mode {
+        runmat_hir::CompatibilityMode::MatlabStrict => CompatMode::Strict,
+        runmat_hir::CompatibilityMode::RunMatExtended
+        | runmat_hir::CompatibilityMode::Interactive => CompatMode::Matlab,
+    }
 }
