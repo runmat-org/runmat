@@ -1,9 +1,7 @@
 use anyhow::{Context, Result};
 use log::{error, info};
 use runmat_config::RunMatConfig;
-use runmat_core::{
-    runtime_error_telemetry_failure_info, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
-};
+use runmat_core::{abi::DiagnosticSeverity, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -46,39 +44,64 @@ pub async fn execute_benchmark(
 
     println!("Warming up...");
     for _ in 0..3 {
-        if let Err(err) = engine.execute(&content).await {
-            let failure = err.telemetry_failure_info();
-            if let Some(run) = bench_run.take() {
-                run.finish(TelemetryRunFinish {
-                    duration: Some(total_time),
-                    success: false,
-                    jit_used: false,
-                    error: Some(failure.code.clone()),
-                    failure: Some(failure),
-                    host: Some(TelemetryHost::Cli),
-                    counters: Some(RuntimeExecutionCounters {
-                        total_executions: 0,
-                        jit_compiled: 0,
-                        interpreter_fallback: 0,
-                    }),
-                    provider: capture_provider_snapshot(),
-                });
+        match engine.execute_outcome(&content).await {
+            Ok(outcome) if outcome_error_code(&outcome).is_none() => {}
+            Ok(outcome) => {
+                let error =
+                    outcome_error_code(&outcome).unwrap_or_else(|| "runtime_error".to_string());
+                if let Some(run) = bench_run.take() {
+                    run.finish(TelemetryRunFinish {
+                        duration: Some(total_time),
+                        success: false,
+                        jit_used: outcome.used_jit,
+                        error: Some(error.clone()),
+                        failure: None,
+                        host: Some(TelemetryHost::Cli),
+                        counters: Some(RuntimeExecutionCounters {
+                            total_executions: 0,
+                            jit_compiled: 0,
+                            interpreter_fallback: 0,
+                        }),
+                        provider: capture_provider_snapshot(),
+                    });
+                }
+                eprintln!("Benchmark error: {error}");
+                return Err(AlreadyReportedCliError.into());
             }
-            if let Some(diag) =
-                format_frontend_error(&err, file.to_string_lossy().as_ref(), &content)
-            {
-                eprintln!("{diag}");
-            } else {
-                eprintln!("Benchmark error: {err}");
+            Err(err) => {
+                let failure = err.telemetry_failure_info();
+                if let Some(run) = bench_run.take() {
+                    run.finish(TelemetryRunFinish {
+                        duration: Some(total_time),
+                        success: false,
+                        jit_used: false,
+                        error: Some(failure.code.clone()),
+                        failure: Some(failure),
+                        host: Some(TelemetryHost::Cli),
+                        counters: Some(RuntimeExecutionCounters {
+                            total_executions: 0,
+                            jit_compiled: 0,
+                            interpreter_fallback: 0,
+                        }),
+                        provider: capture_provider_snapshot(),
+                    });
+                }
+                if let Some(diag) =
+                    format_frontend_error(&err, file.to_string_lossy().as_ref(), &content)
+                {
+                    eprintln!("{diag}");
+                } else {
+                    eprintln!("Benchmark error: {err}");
+                }
+                return Err(AlreadyReportedCliError.into());
             }
-            return Err(AlreadyReportedCliError.into());
         }
     }
 
     println!("Running benchmark...");
     for i in 1..=iterations {
-        let result = match engine.execute(&content).await {
-            Ok(result) => result,
+        let outcome = match engine.execute_outcome(&content).await {
+            Ok(outcome) => outcome,
             Err(err) => {
                 let failure = err.telemetry_failure_info();
                 let counters = RuntimeExecutionCounters {
@@ -109,50 +132,32 @@ pub async fn execute_benchmark(
             }
         };
 
-        let iter_duration = Duration::from_millis(result.execution_time_ms);
-        if let Some(error) = result
-            .error
-            .as_ref()
-            .and_then(|err| err.identifier().map(|value| value.to_string()))
-            .or_else(|| result.error.as_ref().map(|_| "runtime_error".to_string()))
-        {
+        let iter_duration = Duration::from_millis(outcome.execution_time_ms);
+        if let Some(error) = outcome_error_code(&outcome) {
             total_time += iter_duration;
             let counters = RuntimeExecutionCounters {
                 total_executions: i as u64,
-                jit_compiled: jit_executions + if result.used_jit { 1 } else { 0 },
-                interpreter_fallback: interpreter_executions + if result.used_jit { 0 } else { 1 },
+                jit_compiled: jit_executions + if outcome.used_jit { 1 } else { 0 },
+                interpreter_fallback: interpreter_executions + if outcome.used_jit { 0 } else { 1 },
             };
             if let Some(run) = bench_run.take() {
                 run.finish(TelemetryRunFinish {
                     duration: Some(total_time),
                     success: false,
-                    jit_used: result.used_jit,
+                    jit_used: outcome.used_jit,
                     error: Some(error.clone()),
-                    failure: result
-                        .error
-                        .as_ref()
-                        .map(runtime_error_telemetry_failure_info),
+                    failure: None,
                     host: Some(TelemetryHost::Cli),
                     counters: Some(counters),
                     provider: capture_provider_snapshot(),
                 });
             }
-            if let Some(runtime_error) = result.error.as_ref() {
-                eprintln!(
-                    "{}",
-                    runtime_error.format_diagnostic_with_source(
-                        Some(file.to_string_lossy().as_ref()),
-                        Some(&content),
-                    )
-                );
-            } else {
-                error!("Benchmark iteration {i} failed: {error}");
-            }
+            error!("Benchmark iteration {i} failed: {error}");
             return Err(AlreadyReportedCliError.into());
         }
 
         total_time += iter_duration;
-        if result.used_jit {
+        if outcome.used_jit {
             jit_executions += 1;
         } else {
             interpreter_executions += 1;
@@ -161,6 +166,14 @@ pub async fn execute_benchmark(
         if i % 10 == 0 {
             println!("  Completed {i} iterations");
         }
+    }
+
+    fn outcome_error_code(outcome: &runmat_core::abi::ExecutionOutcome) -> Option<String> {
+        outcome
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+            .map(|diagnostic| diagnostic.code.clone())
     }
 
     let avg_time = total_time / iterations;

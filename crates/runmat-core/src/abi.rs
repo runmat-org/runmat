@@ -2,7 +2,8 @@ use runmat_builtins::Value;
 use runmat_hir::{BindingName, DefPath, EntrypointId, Span};
 use uuid::Uuid;
 
-use crate::execution::{ExecutionProfiling, ExecutionResult, ExecutionStreamEntry};
+use crate::execution::{ExecutionProfiling, ExecutionResult, ExecutionStreamEntry, StdinEvent};
+use crate::fusion::FusionPlanSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SourceInput {
@@ -68,6 +69,12 @@ pub struct ExecutionOutcome {
     pub effects: Vec<ObservedEffect>,
     pub suspension: Option<Suspension>,
     pub profiling: Option<ExecutionProfiling>,
+    pub execution_time_ms: u64,
+    pub used_jit: bool,
+    pub type_info: Option<String>,
+    pub figures_touched: Vec<u32>,
+    pub stdin_events: Vec<StdinEvent>,
+    pub fusion_plan: Option<FusionPlanSnapshot>,
 }
 
 impl Default for ExecutionOutcome {
@@ -81,6 +88,12 @@ impl Default for ExecutionOutcome {
             effects: Vec::new(),
             suspension: None,
             profiling: None,
+            execution_time_ms: 0,
+            used_jit: false,
+            type_info: None,
+            figures_touched: Vec::new(),
+            stdin_events: Vec::new(),
+            fusion_plan: None,
         }
     }
 }
@@ -136,6 +149,12 @@ impl From<ExecutionResult> for ExecutionOutcome {
             diagnostics,
             effects: Vec::new(),
             suspension: None,
+            execution_time_ms: result.execution_time_ms,
+            used_jit: result.used_jit,
+            type_info: result.type_info,
+            figures_touched: result.figures_touched,
+            stdin_events: result.stdin_events,
+            fusion_plan: result.fusion_plan,
             profiling: result.profiling,
         }
     }
@@ -327,6 +346,12 @@ mod tests {
         assert!(outcome.diagnostics.is_empty());
         assert!(outcome.effects.is_empty());
         assert!(outcome.suspension.is_none());
+        assert_eq!(outcome.execution_time_ms, 0);
+        assert!(!outcome.used_jit);
+        assert!(outcome.type_info.is_none());
+        assert!(outcome.figures_touched.is_empty());
+        assert!(outcome.stdin_events.is_empty());
+        assert!(outcome.fusion_plan.is_none());
     }
 
     #[test]
