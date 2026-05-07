@@ -157,36 +157,117 @@ fn insert_binding_fact(
 }
 
 fn compute_simple_local_facts(body: &MirBody) -> Vec<Option<SimpleValueFact>> {
-    let mut facts = vec![None; body.locals.len()];
-    for block in &body.blocks {
-        for stmt in &block.statements {
-            match &stmt.kind {
-                MirStmtKind::Assign { place, value } => {
-                    if let MirPlace::Local(local) = place {
-                        merge_simple_fact(&mut facts[local.0], simple_rvalue_fact(value));
-                    }
+    let local_count = body.locals.len();
+    if body.blocks.is_empty() {
+        return Vec::new();
+    }
+
+    let block_index: HashMap<BasicBlockId, usize> = body
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(idx, block)| (block.id, idx))
+        .collect();
+    let mut in_states: Vec<Option<Vec<Option<SimpleValueFact>>>> = vec![None; body.blocks.len()];
+    let mut out_states = vec![vec![None; local_count]; body.blocks.len()];
+    in_states[0] = Some(vec![None; local_count]);
+
+    let mut worklist = VecDeque::from([0usize]);
+    while let Some(block_idx) = worklist.pop_front() {
+        let Some(input) = in_states[block_idx].clone() else {
+            continue;
+        };
+        let block = &body.blocks[block_idx];
+        let output = transfer_fact_block(block, input);
+        out_states[block_idx] = output.clone();
+
+        for successor in successors(&block.terminator.kind) {
+            let Some(&successor_idx) = block_index.get(&successor) else {
+                continue;
+            };
+            let changed = match &mut in_states[successor_idx] {
+                Some(existing) => join_fact_state(existing, &output),
+                slot @ None => {
+                    *slot = Some(output.clone());
+                    true
                 }
-                MirStmtKind::MultiAssign { targets, .. } => {
-                    for target in &targets.targets {
-                        if let crate::MirOutputTarget::Place(MirPlace::Local(local)) = target {
-                            merge_simple_fact(&mut facts[local.0], SimpleValueFact::default());
-                        }
-                    }
-                }
-                MirStmtKind::Expr(_)
-                | MirStmtKind::PlaceMutation(_)
-                | MirStmtKind::WorkspaceEffect { .. }
-                | MirStmtKind::EnvironmentEffect(_) => {}
+            };
+            if changed {
+                worklist.push_back(successor_idx);
             }
         }
     }
+
+    let mut final_facts = vec![None; local_count];
+    for facts in out_states {
+        join_fact_state(&mut final_facts, &facts);
+    }
+    final_facts
+}
+
+fn transfer_fact_block(
+    block: &BasicBlock,
+    mut facts: Vec<Option<SimpleValueFact>>,
+) -> Vec<Option<SimpleValueFact>> {
+    for stmt in &block.statements {
+        match &stmt.kind {
+            MirStmtKind::Assign { place, value } => {
+                if let MirPlace::Local(local) = place {
+                    facts[local.0] = Some(simple_rvalue_fact(value));
+                }
+            }
+            MirStmtKind::MultiAssign { targets, .. } => {
+                for target in &targets.targets {
+                    if let crate::MirOutputTarget::Place(MirPlace::Local(local)) = target {
+                        facts[local.0] = Some(SimpleValueFact::default());
+                    }
+                }
+            }
+            MirStmtKind::Expr(_)
+            | MirStmtKind::PlaceMutation(_)
+            | MirStmtKind::WorkspaceEffect { .. }
+            | MirStmtKind::EnvironmentEffect(_) => {}
+        }
+    }
+    match &block.terminator.kind {
+        MirTerminatorKind::Await {
+            result: Some(place),
+            ..
+        } => {
+            if let Some(local) = place_root(place) {
+                facts[local.0] = Some(SimpleValueFact::default());
+            }
+        }
+        MirTerminatorKind::For { binding, .. } => {
+            facts[binding.0] = Some(SimpleValueFact::default());
+        }
+        _ => {}
+    }
     facts
+}
+
+fn join_fact_state(
+    existing: &mut [Option<SimpleValueFact>],
+    incoming: &[Option<SimpleValueFact>],
+) -> bool {
+    let mut changed = false;
+    for (slot, incoming) in existing.iter_mut().zip(incoming) {
+        let mut joined = slot.clone();
+        if let Some(incoming) = incoming.clone() {
+            merge_simple_fact(&mut joined, incoming);
+        }
+        if *slot != joined {
+            *slot = joined;
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
     match value {
         MirRvalue::Use(operand) => simple_operand_fact(operand),
-        MirRvalue::Future(_) => SimpleValueFact {
+        MirRvalue::Future { .. } => SimpleValueFact {
             async_value: Some(AsyncValueFact::Future(FutureFact {
                 output: Box::new(TypeFact::Unknown),
                 state: FutureStateFact::Lazy,
@@ -219,7 +300,12 @@ fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
             value_flow: ValueFlowFact::UnknownList,
             ..SimpleValueFact::default()
         },
-        MirRvalue::Call(_) => SimpleValueFact::default(),
+        MirRvalue::Member { .. }
+        | MirRvalue::DynamicMember { .. }
+        | MirRvalue::MetaClass(_)
+        | MirRvalue::Colon
+        | MirRvalue::End
+        | MirRvalue::Call(_) => SimpleValueFact::default(),
     }
 }
 
@@ -754,7 +840,17 @@ fn diagnose_rvalue_reads(
             diagnose_operand_read(base, state, span, diagnostics);
             diagnose_indexing_reads(indexing, state, span, diagnostics);
         }
-        MirRvalue::Future(_) => {}
+        MirRvalue::Member { base, .. } => diagnose_operand_read(base, state, span, diagnostics),
+        MirRvalue::DynamicMember { base, member } => {
+            diagnose_operand_read(base, state, span, diagnostics);
+            diagnose_operand_read(member, state, span, diagnostics);
+        }
+        MirRvalue::Future { args, .. } => {
+            for arg in args {
+                diagnose_operand_read(arg.operand(), state, span, diagnostics);
+            }
+        }
+        MirRvalue::MetaClass(_) | MirRvalue::Colon | MirRvalue::End => {}
     }
 }
 

@@ -304,6 +304,19 @@ fn analyze_body_records_operator_and_expansion_semantic_facts() {
 }
 
 #[test]
+fn analyze_body_joins_simple_facts_across_cfg_paths() {
+    let (body, store) = analyze_single_body("function y = f(c); y = 1; if c; y = 's'; end; end");
+    let output = first_local_of_kind(&body, MirLocalKind::Output);
+    let fact = &store.mir_locals[&MirLocalKey {
+        function: body.function,
+        local: output,
+    }];
+
+    assert_eq!(fact.ty, runmat_hir::TypeFact::Unknown);
+    assert_eq!(fact.shape, runmat_hir::ShapeFact::Scalar);
+}
+
+#[test]
 fn analyze_body_records_future_and_task_async_value_facts() {
     let mir = lower_mir("function y = f(); fut = @(x) x; task = spawn(fut); y = 1; end");
     let store = analyze_assembly(&mir);
@@ -351,7 +364,7 @@ fn direct_spawn_of_anonymous_function_uses_future_temp_operand() {
         match &stmt.kind {
             MirStmtKind::Assign {
                 place: MirPlace::Local(local),
-                value: MirRvalue::Future(_),
+                value: MirRvalue::Future { .. },
             } => saw_future_temp = body.locals[local.0].kind == MirLocalKind::Temporary,
             MirStmtKind::Assign {
                 value: MirRvalue::Spawn(operand),
@@ -385,6 +398,66 @@ fn direct_spawn_of_anonymous_function_uses_future_temp_operand() {
         store.expressions[&future_expr].async_value,
         Some(runmat_hir::AsyncValueFact::Future(_))
     ));
+}
+
+#[test]
+fn async_function_call_lowers_to_lazy_future_value() {
+    let mir = lower_mir(
+        "function t = caller(x); t = callee(x); end
+async function y = callee(x); y = x; end",
+    );
+    let caller = mir
+        .bodies
+        .values()
+        .find(|body| {
+            body.blocks
+                .iter()
+                .flat_map(|block| &block.statements)
+                .any(|stmt| {
+                    matches!(
+                        stmt.kind,
+                        MirStmtKind::Assign {
+                            value: MirRvalue::Future { .. },
+                            ..
+                        }
+                    )
+                })
+        })
+        .unwrap();
+
+    assert!(caller
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .any(|stmt| {
+            matches!(
+                &stmt.kind,
+                MirStmtKind::Assign {
+                    value: MirRvalue::Future { args, .. },
+                    ..
+                } if args.len() == 1
+            )
+        }));
+}
+
+#[test]
+fn remaining_semantic_expr_and_import_forms_lower_to_mir() {
+    let mir = lower_mir("function y = f(x); y = x.field; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .any(|stmt| {
+            matches!(
+                stmt.kind,
+                MirStmtKind::Assign {
+                    value: MirRvalue::Member { .. },
+                    ..
+                }
+            )
+        }));
 }
 
 #[test]
@@ -621,6 +694,27 @@ fn analyze_assembly_rejects_spawned_future_with_mutable_lexical_capture() {
                 reason: runmat_hir::SpawnSafetyReason::MutableLexicalCapture
             }
         )));
+}
+
+#[test]
+fn analyze_assembly_rejects_spawned_future_with_unknown_target() {
+    let mir = lower_mir("function y = f(g); y = spawn(g); end");
+
+    let store = analyze_assembly(&mir);
+
+    assert!(store
+        .spawn_boundaries
+        .values()
+        .flatten()
+        .any(|boundary| matches!(
+            boundary.safety,
+            runmat_hir::SpawnSafetyFact::NotSpawnSafe {
+                reason: runmat_hir::SpawnSafetyReason::UnknownDynamicCapture
+            }
+        )));
+    assert!(store.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RM-MIR0003" && diagnostic.category.as_deref() == Some("spawn-safety")
+    }));
 }
 
 #[test]
@@ -904,6 +998,36 @@ fn persistent_statement_lowers_to_summary_workspace_effect() {
     };
     let persistent_binding = body.locals[persistent_local.0].binding.unwrap();
     assert!(summary.writes_persistents.contains(&persistent_binding));
+}
+
+#[test]
+fn source_workspace_and_environment_calls_lower_to_effect_markers() {
+    let mir = lower_mir("function y = f(); eval('x = 1'); addpath('/tmp'); y = 1; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .any(|stmt| {
+            matches!(
+                stmt.kind,
+                MirStmtKind::WorkspaceEffect {
+                    effect: runmat_hir::WorkspaceEffect::DynamicEval,
+                    ..
+                }
+            )
+        }));
+    assert!(body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .any(|stmt| {
+            matches!(
+                stmt.kind,
+                MirStmtKind::EnvironmentEffect(runmat_hir::EnvironmentEffect::PathMutation)
+            )
+        }));
 }
 
 #[test]

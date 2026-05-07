@@ -1,6 +1,6 @@
 use crate::{MirAssembly, MirBody, MirOperand, MirSourceMap, MirTerminator, MirTerminatorKind};
 use runmat_hir::{CompatibilityMode, HirAssembly, HirFunction, SemanticError, SourceUnitKind};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::{control_flow::ControlFlowBuilder, expr::lower_simple_operand, MirLoweringContext};
 
@@ -11,10 +11,20 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, SemanticError> {
         .iter()
         .map(|module| (module.id, module.source_unit.clone()))
         .collect();
+    let async_functions: HashSet<_> = hir
+        .functions
+        .iter()
+        .filter(|function| function.modifiers.is_async)
+        .map(|function| function.id)
+        .collect();
     for function in &hir.functions {
         assembly.bodies.insert(
             function.id,
-            lower_function_with_source_units(function, &source_units)?,
+            lower_function_with_context(
+                function,
+                &source_units,
+                MirLoweringContext::with_async_functions(async_functions.clone()),
+            )?,
         );
     }
     Ok(assembly)
@@ -28,7 +38,14 @@ fn lower_function_with_source_units(
     function: &HirFunction,
     source_units: &HashMap<runmat_hir::ModuleId, SourceUnitKind>,
 ) -> Result<MirBody, SemanticError> {
-    let mut ctx = MirLoweringContext::new();
+    lower_function_with_context(function, source_units, MirLoweringContext::new())
+}
+
+fn lower_function_with_context(
+    function: &HirFunction,
+    source_units: &HashMap<runmat_hir::ModuleId, SourceUnitKind>,
+    mut ctx: MirLoweringContext,
+) -> Result<MirBody, SemanticError> {
     let (locals, local_sources) = ctx.locals_for_function(function);
     let returns: Vec<MirOperand> = function
         .outputs

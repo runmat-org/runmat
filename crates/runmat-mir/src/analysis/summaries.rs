@@ -462,7 +462,19 @@ fn scan_rvalue(
             scan_operand(body, base, reads_captures, function_handles);
             scan_indexing(body, indexing, reads_captures, function_handles);
         }
-        MirRvalue::Future(_) => {}
+        MirRvalue::Future { args, .. } => {
+            for arg in args {
+                scan_operand(body, arg.operand(), reads_captures, function_handles);
+            }
+        }
+        MirRvalue::Member { base, .. } => {
+            scan_operand(body, base, reads_captures, function_handles);
+        }
+        MirRvalue::DynamicMember { base, member } => {
+            scan_operand(body, base, reads_captures, function_handles);
+            scan_operand(body, member, reads_captures, function_handles);
+        }
+        MirRvalue::MetaClass(_) | MirRvalue::Colon | MirRvalue::End => {}
         MirRvalue::Spawn(future) => {
             *async_behavior = AsyncBehaviorFact::RequiresAsyncRuntime;
             scan_operand(body, future, reads_captures, function_handles);

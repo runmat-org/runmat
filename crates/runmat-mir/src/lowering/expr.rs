@@ -3,8 +3,8 @@ use crate::{
     MirPlace, MirRvalue, MirStmt, MirStmtKind,
 };
 use runmat_hir::{
-    CommandArgument, HirCommandCall, HirExpr, HirExprKind, IndexComponent, IndexResultContext,
-    IndexingSemantics, RequestedOutputCount, SemanticError, StringLiteral,
+    CommandArgument, HirCallableRef, HirCommandCall, HirExpr, HirExprKind, IndexComponent,
+    IndexResultContext, IndexingSemantics, RequestedOutputCount, SemanticError, StringLiteral,
 };
 
 use super::MirLoweringContext;
@@ -55,31 +55,57 @@ pub(crate) fn lower_expr(
             cols: aggregate_col_count(rows),
             elements: lower_aggregate_elements(ctx, rows, temps)?,
         },
-        HirExprKind::Call(call) => MirRvalue::Call(MirCall {
-            callee: call.callee.clone(),
-            args: call
+        HirExprKind::Call(call) => {
+            let args = call
                 .args
                 .iter()
                 .map(|arg| lower_call_arg(ctx, arg, temps))
-                .collect::<Result<_, _>>()?,
-            syntax: call.syntax.clone(),
-            requested_outputs: call.requested_outputs.clone(),
-        }),
+                .collect::<Result<_, _>>()?;
+            if let HirCallableRef::Function(function) = call.callee {
+                if ctx.is_async_function(function) {
+                    MirRvalue::Future { function, args }
+                } else {
+                    MirRvalue::Call(MirCall {
+                        callee: call.callee.clone(),
+                        args,
+                        syntax: call.syntax.clone(),
+                        requested_outputs: call.requested_outputs.clone(),
+                    })
+                }
+            } else {
+                MirRvalue::Call(MirCall {
+                    callee: call.callee.clone(),
+                    args,
+                    syntax: call.syntax.clone(),
+                    requested_outputs: call.requested_outputs.clone(),
+                })
+            }
+        }
         HirExprKind::CommandCall(call) => lower_command_call(call),
         HirExprKind::Index(base, indexing) => MirRvalue::Index {
             base: lower_operand(ctx, base, temps)?,
             indexing: lower_indexing(ctx, indexing, temps)?,
         },
+        HirExprKind::Member(base, member) => MirRvalue::Member {
+            base: lower_operand(ctx, base, temps)?,
+            member: member.clone(),
+        },
+        HirExprKind::MemberDynamic(base, member) => MirRvalue::DynamicMember {
+            base: lower_operand(ctx, base, temps)?,
+            member: lower_operand(ctx, member, temps)?,
+        },
+        HirExprKind::MetaClass(name) => MirRvalue::MetaClass(name.clone()),
+        HirExprKind::Colon => MirRvalue::Colon,
+        HirExprKind::End => MirRvalue::End,
         HirExprKind::Spawn(inner) => MirRvalue::Spawn(lower_operand(ctx, inner, temps)?),
         HirExprKind::FunctionHandle(target) => {
             MirRvalue::Use(MirOperand::FunctionHandle(target.clone()))
         }
-        HirExprKind::AnonymousFunction(function) => MirRvalue::Future(*function),
-        _ => {
-            return Err(SemanticError::new(
-                "MIR lowering for expression is not implemented yet",
-            ))
-        }
+        HirExprKind::AnonymousFunction(function) => MirRvalue::Future {
+            function: *function,
+            args: Vec::new(),
+        },
+        HirExprKind::Await(future) => MirRvalue::Use(lower_operand(ctx, future, temps)?),
     })
 }
 

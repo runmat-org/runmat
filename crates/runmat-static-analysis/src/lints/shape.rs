@@ -5,6 +5,9 @@ use runmat_hir::{
 use std::collections::HashMap;
 
 pub fn lint_shapes(result: &runmat_hir::LoweringResult) -> Vec<HirDiagnostic> {
+    let _analysis_store = runmat_mir::lowering::lower_assembly(&result.assembly)
+        .ok()
+        .map(|mir| runmat_mir::analysis::analyze_assembly(&mir));
     let mut ctx = ShapeLintContext::default();
     for function in &result.assembly.functions {
         ctx.walk_block(&function.body);

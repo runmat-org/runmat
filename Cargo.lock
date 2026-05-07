@@ -5964,6 +5964,7 @@ version = "0.4.1"
 dependencies = [
  "runmat-builtins",
  "runmat-hir",
+ "runmat-mir",
  "runmat-parser",
  "runmat-runtime",
  "serde_json",

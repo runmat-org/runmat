@@ -133,7 +133,17 @@ fn collect_rvalue_reads(value: &MirRvalue, live: &mut HashSet<MirLocalId>) {
             collect_operand_read(base, live);
             collect_indexing_reads(indexing, live);
         }
-        MirRvalue::Future(_) => {}
+        MirRvalue::Member { base, .. } => collect_operand_read(base, live),
+        MirRvalue::DynamicMember { base, member } => {
+            collect_operand_read(base, live);
+            collect_operand_read(member, live);
+        }
+        MirRvalue::Future { args, .. } => {
+            for arg in args {
+                collect_operand_read(arg.operand(), live);
+            }
+        }
+        MirRvalue::MetaClass(_) | MirRvalue::Colon | MirRvalue::End => {}
     }
 }
 

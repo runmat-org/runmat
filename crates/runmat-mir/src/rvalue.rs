@@ -1,5 +1,5 @@
-use crate::{MirCall, MirIndexing, MirOperand};
-use runmat_hir::{ClassId, FunctionId, OperatorKind};
+use crate::{MirCallArg, MirIndexing, MirOperand};
+use runmat_hir::{ClassId, FunctionId, MemberName, OperatorKind, QualifiedName};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -12,7 +12,7 @@ pub enum MirRvalue {
         step: Option<MirOperand>,
         end: MirOperand,
     },
-    Call(MirCall),
+    Call(crate::MirCall),
     Aggregate {
         kind: MirAggregateKind,
         rows: usize,
@@ -23,7 +23,21 @@ pub enum MirRvalue {
         base: MirOperand,
         indexing: MirIndexing,
     },
-    Future(FunctionId),
+    Member {
+        base: MirOperand,
+        member: MemberName,
+    },
+    DynamicMember {
+        base: MirOperand,
+        member: MirOperand,
+    },
+    MetaClass(QualifiedName),
+    Colon,
+    End,
+    Future {
+        function: FunctionId,
+        args: Vec<MirCallArg>,
+    },
     Spawn(MirOperand),
 }
 

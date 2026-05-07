@@ -25,6 +25,9 @@ pub fn lint_data_api_with_provider(
     result: &LoweringResult,
     provider: &dyn DatasetSchemaProvider,
 ) -> Vec<HirDiagnostic> {
+    let _analysis_store = runmat_mir::lowering::lower_assembly(&result.assembly)
+        .ok()
+        .map(|mir| runmat_mir::analysis::analyze_assembly(&mir));
     let mut ctx = DataLintContext {
         provider,
         datasets: HashMap::new(),

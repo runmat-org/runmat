@@ -85,7 +85,12 @@ fn collect_spawn_rvalue(value: &MirRvalue, span: Span, boundaries: &mut Vec<Spaw
         | MirRvalue::Call(_)
         | MirRvalue::Aggregate { .. }
         | MirRvalue::Index { .. }
-        | MirRvalue::Future(_) => {}
+        | MirRvalue::Member { .. }
+        | MirRvalue::DynamicMember { .. }
+        | MirRvalue::MetaClass(_)
+        | MirRvalue::Colon
+        | MirRvalue::End
+        | MirRvalue::Future { .. } => {}
     }
 }
 
@@ -109,7 +114,7 @@ fn collect_future_targets(body: &MirBody) -> HashMap<crate::MirLocalId, Function
 
 fn future_target(value: &MirRvalue) -> Option<FunctionId> {
     match value {
-        MirRvalue::Future(function) => Some(*function),
+        MirRvalue::Future { function, .. } => Some(*function),
         MirRvalue::Use(MirOperand::FunctionHandle(FunctionHandleTarget::Function(function)))
         | MirRvalue::Use(MirOperand::FunctionHandle(FunctionHandleTarget::Anonymous(function))) => {
             Some(*function)
@@ -124,7 +129,9 @@ fn classify_spawn_boundary(
     future_targets: &HashMap<crate::MirLocalId, FunctionId>,
 ) -> SpawnSafetyFact {
     let Some(target) = spawn_target(&boundary.future, future_targets) else {
-        return SpawnSafetyFact::RequiresIsolation;
+        return SpawnSafetyFact::NotSpawnSafe {
+            reason: SpawnSafetyReason::UnknownDynamicCapture,
+        };
     };
     let Some(summary) = summaries.get(&target) else {
         return SpawnSafetyFact::RequiresIsolation;

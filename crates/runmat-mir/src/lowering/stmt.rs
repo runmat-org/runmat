@@ -1,7 +1,8 @@
-use crate::{MirOutputTarget, MirOutputTargetList, MirStmt, MirStmtKind};
+use crate::{MirOutputTarget, MirOutputTargetList, MirRvalue, MirStmt, MirStmtKind};
 use runmat_hir::{
-    AssignmentCreationPolicy, AssignmentShapePolicy, HirExpr, HirExprKind, HirPlace, HirStmt,
-    HirStmtKind, OutputTarget, PlaceMutation, PlaceMutationKind, SemanticError, WorkspaceEffect,
+    AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, HirCallableRef, HirExpr,
+    HirExprKind, HirPlace, HirStmt, HirStmtKind, OutputTarget, PlaceMutation, PlaceMutationKind,
+    QualifiedName, SemanticError, Span, WorkspaceEffect,
 };
 
 use super::{expr::lower_expr, place::lower_place, MirLoweringContext};
@@ -14,6 +15,7 @@ pub(crate) fn lower_stmt(
         HirStmtKind::Assign(place, expr, _) => {
             let mut stmts = Vec::new();
             let value = lower_expr(ctx, expr, &mut stmts)?;
+            stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
             if !matches!(place, HirPlace::Binding(_)) || is_empty_array_expr(expr) {
                 stmts.push(MirStmt {
                     kind: MirStmtKind::PlaceMutation(place_mutation(
@@ -33,6 +35,7 @@ pub(crate) fn lower_stmt(
         HirStmtKind::MultiAssign(targets, expr, _) => {
             let mut stmts = Vec::new();
             let value = lower_expr(ctx, expr, &mut stmts)?;
+            stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
             stmts.push(MirStmt {
                 kind: MirStmtKind::MultiAssign {
                     targets: MirOutputTargetList {
@@ -51,6 +54,7 @@ pub(crate) fn lower_stmt(
         HirStmtKind::ExprStmt(expr, _) => {
             let mut stmts = Vec::new();
             let value = lower_expr(ctx, expr, &mut stmts)?;
+            stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
             stmts.push(MirStmt {
                 kind: MirStmtKind::Expr(value),
                 span: stmt.span,
@@ -77,13 +81,74 @@ pub(crate) fn lower_stmt(
             },
             span: stmt.span,
         }],
-        HirStmtKind::Return => Vec::new(),
+        HirStmtKind::Return | HirStmtKind::Import(_) => Vec::new(),
         _ => {
             return Err(SemanticError::new(
                 "MIR lowering for statement is not implemented yet",
             ))
         }
     })
+}
+
+fn effect_stmts_for_rvalue(value: &MirRvalue, span: Span) -> Vec<MirStmt> {
+    let MirRvalue::Call(call) = value else {
+        return Vec::new();
+    };
+    let Some(name) = callable_name(&call.callee) else {
+        return Vec::new();
+    };
+    let mut stmts = Vec::new();
+    if let Some(effect) = workspace_effect_for_name(&name) {
+        stmts.push(MirStmt {
+            kind: MirStmtKind::WorkspaceEffect {
+                effect,
+                bindings: Vec::new(),
+            },
+            span,
+        });
+    }
+    if let Some(effect) = environment_effect_for_name(&name) {
+        stmts.push(MirStmt {
+            kind: MirStmtKind::EnvironmentEffect(effect),
+            span,
+        });
+    }
+    stmts
+}
+
+fn callable_name(callee: &HirCallableRef) -> Option<String> {
+    match callee {
+        HirCallableRef::Builtin(id) => Some(id.0.clone()),
+        HirCallableRef::Unresolved(name) => Some(qualified_name(name)),
+        _ => None,
+    }
+}
+
+fn qualified_name(name: &QualifiedName) -> String {
+    name.0
+        .iter()
+        .map(|part| part.0.as_str())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn workspace_effect_for_name(name: &str) -> Option<WorkspaceEffect> {
+    match name {
+        "load" => Some(WorkspaceEffect::LoadsExternalBindings),
+        "clear" => Some(WorkspaceEffect::ClearsBinding),
+        "eval" | "evalin" => Some(WorkspaceEffect::DynamicEval),
+        "assignin" => Some(WorkspaceEffect::CreatesBinding),
+        _ => None,
+    }
+}
+
+fn environment_effect_for_name(name: &str) -> Option<EnvironmentEffect> {
+    match name {
+        "path" | "addpath" | "rmpath" => Some(EnvironmentEffect::PathMutation),
+        "cd" | "chdir" => Some(EnvironmentEffect::WorkingDirectoryMutation),
+        "rehash" | "clear functions" => Some(EnvironmentEffect::FunctionCacheInvalidation),
+        _ => None,
+    }
 }
 
 fn place_mutation(place: &HirPlace, deletion: bool) -> PlaceMutation {

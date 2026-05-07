@@ -1,11 +1,12 @@
 use crate::{MirLocal, MirLocalId, MirLocalKind, MirLocalSource};
-use runmat_hir::{BindingId, ExprId, HirFunction, SemanticError, Span};
+use runmat_hir::{BindingId, ExprId, FunctionId, HirFunction, SemanticError, Span};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Default)]
 pub struct MirLoweringContext {
     pub(crate) binding_locals: HashMap<BindingId, MirLocalId>,
+    async_functions: HashSet<FunctionId>,
     next_local: usize,
     temp_locals: RefCell<Vec<MirLocal>>,
     temp_sources: RefCell<Vec<MirLocalSource>>,
@@ -14,6 +15,17 @@ pub struct MirLoweringContext {
 impl MirLoweringContext {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn with_async_functions(async_functions: HashSet<FunctionId>) -> Self {
+        Self {
+            async_functions,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn is_async_function(&self, function: FunctionId) -> bool {
+        self.async_functions.contains(&function)
     }
 
     pub(crate) fn local_for_binding(
