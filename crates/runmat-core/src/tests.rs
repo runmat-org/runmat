@@ -46,6 +46,26 @@ fn execute_outcome_exposes_workspace_upserts() {
 }
 
 #[test]
+fn execute_outcome_exposes_workspace_removals_and_effects() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(session.execute_outcome("x = 1; y = 2;")).expect("seed workspace");
+    let outcome = block_on(session.execute_outcome("clear x;")).expect("clear succeeds");
+
+    assert!(outcome.workspace_delta.removals.iter().any(|key| {
+        matches!(key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "x")
+    }));
+    assert!(!outcome.workspace_delta.removals.iter().any(|key| {
+        matches!(key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+    }));
+    assert!(outcome.effects.iter().any(|effect| {
+        matches!(
+            effect,
+            abi::ObservedEffect::Workspace(abi::WorkspaceEffectKind::Clear)
+        )
+    }));
+}
+
+#[test]
 fn execute_request_uses_request_workspace_handle() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let workspace = abi::WorkspaceHandle(uuid::Uuid::from_u128(7));

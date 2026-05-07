@@ -11,6 +11,11 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        let previous_workspace_names = self
+            .workspace_values
+            .keys()
+            .cloned()
+            .collect::<HashSet<_>>();
         let result = self.run(input).await?;
         let workspace_names = result
             .workspace
@@ -18,8 +23,18 @@ impl RunMatSession {
             .iter()
             .map(|entry| entry.name.clone())
             .collect::<Vec<_>>();
+        let workspace_full = result.workspace.full;
         let mut outcome = crate::abi::ExecutionOutcome::from(result);
         outcome.workspace_delta.upserts = self.abi_workspace_upserts(workspace_names);
+        if workspace_full {
+            outcome.workspace_delta.removals =
+                self.abi_workspace_removals(previous_workspace_names);
+            if !outcome.workspace_delta.removals.is_empty() {
+                outcome.effects.push(crate::abi::ObservedEffect::Workspace(
+                    crate::abi::WorkspaceEffectKind::Clear,
+                ));
+            }
+        }
         Ok(outcome)
     }
 
@@ -868,6 +883,24 @@ impl RunMatSession {
                     },
                     value,
                 })
+            })
+            .collect()
+    }
+
+    fn abi_workspace_removals(
+        &self,
+        previous_workspace_names: HashSet<String>,
+    ) -> Vec<crate::abi::WorkspaceBindingKey> {
+        let mut removed_names = previous_workspace_names
+            .into_iter()
+            .filter(|name| !self.workspace_values.contains_key(name))
+            .collect::<Vec<_>>();
+        removed_names.sort();
+        removed_names
+            .into_iter()
+            .map(|name| crate::abi::WorkspaceBindingKey::Interactive {
+                session: self.abi_workspace_handle.0,
+                name: runmat_hir::BindingName(name),
             })
             .collect()
     }
