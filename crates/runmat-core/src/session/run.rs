@@ -2,7 +2,10 @@ use super::*;
 
 impl RunMatSession {
     /// Execute MATLAB/Octave code
-    pub async fn execute(&mut self, input: &str) -> std::result::Result<ExecutionResult, RunError> {
+    pub async fn execute(
+        &mut self,
+        input: &str,
+    ) -> std::result::Result<LegacyExecutionResult, RunError> {
         self.run_legacy_result(input, false).await
     }
 
@@ -80,7 +83,7 @@ impl RunMatSession {
         &mut self,
         input: &str,
         preserve_layout_var_names: bool,
-    ) -> std::result::Result<ExecutionResult, RunError> {
+    ) -> std::result::Result<LegacyExecutionResult, RunError> {
         let _active = ActiveExecutionGuard::new(self).map_err(|err| {
             RunError::Runtime(
                 build_runtime_error(err.to_string())
@@ -876,7 +879,7 @@ impl RunMatSession {
         };
 
         self.format_mode = runmat_builtins::get_display_format();
-        Ok(ExecutionResult {
+        Ok(LegacyExecutionResult {
             value: public_value,
             execution_time_ms,
             used_jit,
@@ -971,7 +974,7 @@ fn compile_eval_hook_with_legacy_hir_fallback(
     runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
 }
 
-fn outcome_from_legacy_result(result: ExecutionResult) -> crate::abi::ExecutionOutcome {
+fn outcome_from_legacy_result(result: LegacyExecutionResult) -> crate::abi::ExecutionOutcome {
     let mut diagnostics = Vec::new();
     if let Some(error) = result.error {
         diagnostics.push(crate::abi::RuntimeDiagnostic {

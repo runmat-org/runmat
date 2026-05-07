@@ -27,8 +27,8 @@ use std::sync::{
 use uuid::Uuid;
 
 use crate::execution::{
-    ExecutionResult, ExecutionStats, ExecutionStreamEntry, ExecutionStreamKind, InputRequest,
-    InputRequestKind, InputResponse, SharedAsyncInputHandler, StdinEvent, StdinEventKind,
+    ExecutionStats, ExecutionStreamEntry, ExecutionStreamKind, InputRequest, InputRequestKind,
+    InputResponse, LegacyExecutionResult, SharedAsyncInputHandler, StdinEvent, StdinEventKind,
 };
 use crate::fusion::{build_fusion_snapshot, FusionPlanSnapshot};
 use crate::profiling::{gather_profiling, reset_provider_telemetry};

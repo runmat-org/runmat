@@ -57,7 +57,7 @@ impl RunMatSession {
         self.stats = ExecutionStats::default();
     }
 
-    /// Control whether fusion plan snapshots are emitted in [`ExecutionResult`].
+    /// Control whether fusion plan snapshots are emitted in [`crate::abi::ExecutionOutcome`].
     pub fn set_emit_fusion_plan(&mut self, enabled: bool) {
         self.emit_fusion_plan = enabled;
     }

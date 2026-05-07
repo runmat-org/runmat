@@ -70,7 +70,7 @@ pub struct ExecutionProfiling {
 }
 
 #[derive(Debug)]
-pub struct ExecutionResult {
+pub struct LegacyExecutionResult {
     pub value: Option<Value>,
     pub execution_time_ms: u64,
     pub used_jit: bool,
