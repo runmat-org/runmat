@@ -5948,6 +5948,7 @@ dependencies = [
  "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",
+ "runmat-mir",
  "runmat-parser",
  "runmat-runtime",
  "runmat-time",

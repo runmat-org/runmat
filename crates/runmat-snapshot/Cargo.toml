@@ -22,6 +22,7 @@ blas-lapack = ["runmat-runtime/blas-lapack"]
 runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true }
 runmat-hir = { workspace = true }
+runmat-mir = { workspace = true }
 runmat-vm = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-gc = { workspace = true }

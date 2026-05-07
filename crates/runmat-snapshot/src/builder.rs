@@ -665,10 +665,18 @@ impl SnapshotBuilder {
         let mut stdlib_bytecode = HashMap::new();
         let mut operation_sequences = Vec::new();
         let mut hotspots = Vec::new();
+        let stdlib_sources: HashMap<_, _> =
+            self.get_stdlib_function_sources().into_iter().collect();
 
         // Compile HIR functions to bytecode
         for (name, hir) in &hir_cache.functions {
-            match runmat_vm::compile_legacy(hir, &HashMap::new()) {
+            let compiled = stdlib_sources
+                .get(name)
+                .map(|source| self.compile_source_to_bytecode(source))
+                .unwrap_or_else(|| {
+                    runmat_vm::compile_legacy(hir, &HashMap::new()).map_err(Into::into)
+                });
+            match compiled {
                 Ok(bytecode) => {
                     stdlib_bytecode.insert(name.clone(), bytecode);
 
@@ -730,11 +738,22 @@ impl SnapshotBuilder {
 
     /// Create bytecode for sequence
     fn create_sequence_bytecode(&self, source: &str) -> runmat_vm::Bytecode {
-        match self.compile_to_hir(source) {
-            Ok(hir) => runmat_vm::compile_legacy(&hir, &HashMap::new())
-                .unwrap_or_else(|_| runmat_vm::Bytecode::empty()),
-            Err(_) => runmat_vm::Bytecode::empty(),
+        self.compile_source_to_bytecode(source)
+            .unwrap_or_else(|_| runmat_vm::Bytecode::empty())
+    }
+
+    fn compile_source_to_bytecode(&self, source: &str) -> Result<runmat_vm::Bytecode> {
+        let ast = runmat_parser::parse(source).map_err(|e| anyhow::anyhow!(e))?;
+        let lowering =
+            runmat_hir::lower(&ast, &LoweringContext::empty()).map_err(|e| anyhow::anyhow!(e))?;
+        if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
+            if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
+                if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
+                    return Ok(bytecode);
+                }
+            }
         }
+        Ok(runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())?)
     }
 
     /// Identify hotspot bytecode for JIT optimization
