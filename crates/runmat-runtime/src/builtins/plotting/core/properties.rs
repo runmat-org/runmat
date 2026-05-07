@@ -696,7 +696,11 @@ fn canonical_property_name(name: &str) -> &str {
         "grid" => "grid",
         "axisequal" => "axisequal",
         "colorbar" => "colorbar",
+        "colorbarvisible" => "colorbarvisible",
         "colormap" => "colormap",
+        "xdisplaylabels" => "xdisplaylabels",
+        "ydisplaylabels" => "ydisplaylabels",
+        "colordata" | "cdata" => "colordata",
         "xlim" => "xlim",
         "ylim" => "ylim",
         "zlim" => "zlim",
@@ -1111,6 +1115,9 @@ fn get_plot_child_property(
         super::state::PlotChildHandleState::Image(image) => {
             get_image_property(image, property, builtin)
         }
+        super::state::PlotChildHandleState::Heatmap(heatmap) => {
+            get_heatmap_property(heatmap, property, builtin)
+        }
         super::state::PlotChildHandleState::Area(area) => {
             get_area_property(area, property, builtin)
         }
@@ -1169,6 +1176,9 @@ fn apply_plot_child_property(
         }
         super::state::PlotChildHandleState::Image(image) => {
             apply_image_property(image, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Heatmap(heatmap) => {
+            apply_heatmap_property(heatmap, key, value, builtin)
         }
         super::state::PlotChildHandleState::Area(area) => {
             apply_area_property(area, key, value, builtin)
@@ -2079,6 +2089,98 @@ fn get_image_property(
     }
 }
 
+fn get_heatmap_property(
+    heatmap_handle: &super::state::HeatmapHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let figure = super::state::clone_figure(heatmap_handle.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid heatmap figure")))?;
+    let plot = figure
+        .plots()
+        .nth(heatmap_handle.plot_index)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid heatmap handle")))?;
+    let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid heatmap handle"),
+        ));
+    };
+    if !surface.image_mode {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: handle does not reference a heatmap plot"),
+        ));
+    }
+    let meta = figure
+        .axes_metadata(heatmap_handle.axes_index)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid heatmap axes")))?;
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = StructValue::new();
+            st.insert("Type", Value::String("heatmap".into()));
+            st.insert(
+                "Parent",
+                Value::Num(super::state::encode_axes_handle(
+                    heatmap_handle.figure,
+                    heatmap_handle.axes_index,
+                )),
+            );
+            st.insert("Children", handles_value(Vec::new()));
+            st.insert(
+                "Title",
+                Value::String(meta.title.clone().unwrap_or_default()),
+            );
+            st.insert(
+                "XLabel",
+                Value::String(meta.x_label.clone().unwrap_or_default()),
+            );
+            st.insert(
+                "YLabel",
+                Value::String(meta.y_label.clone().unwrap_or_default()),
+            );
+            st.insert(
+                "XDisplayLabels",
+                string_array_from_vec(heatmap_handle.x_labels.clone())?,
+            );
+            st.insert(
+                "YDisplayLabels",
+                string_array_from_vec(heatmap_handle.y_labels.clone())?,
+            );
+            st.insert(
+                "ColorData",
+                Value::Tensor(heatmap_handle.color_data.clone()),
+            );
+            st.insert("ColorbarVisible", Value::Bool(meta.colorbar_enabled));
+            st.insert(
+                "Colormap",
+                Value::String(format!("{:?}", meta.colormap).to_ascii_lowercase()),
+            );
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("heatmap".into())),
+        Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
+            heatmap_handle.figure,
+            heatmap_handle.axes_index,
+        ))),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("title") => Ok(Value::String(meta.title.clone().unwrap_or_default())),
+        Some("xlabel") => Ok(Value::String(meta.x_label.clone().unwrap_or_default())),
+        Some("ylabel") => Ok(Value::String(meta.y_label.clone().unwrap_or_default())),
+        Some("xdisplaylabels") => string_array_from_vec(heatmap_handle.x_labels.clone()),
+        Some("ydisplaylabels") => string_array_from_vec(heatmap_handle.y_labels.clone()),
+        Some("colordata") => Ok(Value::Tensor(heatmap_handle.color_data.clone())),
+        Some("colorbarvisible") | Some("colorbar") => Ok(Value::Bool(meta.colorbar_enabled)),
+        Some("colormap") => Ok(Value::String(
+            format!("{:?}", meta.colormap).to_ascii_lowercase(),
+        )),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported heatmap property `{other}`"),
+        )),
+    }
+}
+
 fn get_area_property(
     area_handle: &super::state::AreaHandleState,
     property: Option<&str>,
@@ -2363,6 +2465,87 @@ fn apply_image_property(
     })
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
+}
+
+fn apply_heatmap_property(
+    heatmap_handle: &super::state::HeatmapHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    match key {
+        "title" => apply_axes_property(
+            heatmap_handle.figure,
+            heatmap_handle.axes_index,
+            "title",
+            value,
+            builtin,
+        ),
+        "xlabel" => apply_axes_property(
+            heatmap_handle.figure,
+            heatmap_handle.axes_index,
+            "xlabel",
+            value,
+            builtin,
+        ),
+        "ylabel" => apply_axes_property(
+            heatmap_handle.figure,
+            heatmap_handle.axes_index,
+            "ylabel",
+            value,
+            builtin,
+        ),
+        "colorbar" | "colorbarvisible" => apply_axes_property(
+            heatmap_handle.figure,
+            heatmap_handle.axes_index,
+            "colorbar",
+            value,
+            builtin,
+        ),
+        "colormap" => apply_axes_property(
+            heatmap_handle.figure,
+            heatmap_handle.axes_index,
+            "colormap",
+            value,
+            builtin,
+        ),
+        "xdisplaylabels" => {
+            let labels = string_labels_from_value(value, builtin)?;
+            if labels.len() != heatmap_handle.x_labels.len() {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: XDisplayLabels length must match heatmap columns"),
+                ));
+            }
+            super::state::update_heatmap_handle(
+                heatmap_handle.figure,
+                heatmap_handle.axes_index,
+                heatmap_handle.plot_index,
+                |state| state.x_labels = labels,
+            )
+            .map_err(|err| map_figure_error(builtin, err))
+        }
+        "ydisplaylabels" => {
+            let labels = string_labels_from_value(value, builtin)?;
+            if labels.len() != heatmap_handle.y_labels.len() {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: YDisplayLabels length must match heatmap rows"),
+                ));
+            }
+            super::state::update_heatmap_handle(
+                heatmap_handle.figure,
+                heatmap_handle.axes_index,
+                heatmap_handle.plot_index,
+                |state| state.y_labels = labels,
+            )
+            .map_err(|err| map_figure_error(builtin, err))
+        }
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported heatmap property `{other}`"),
+        )),
+    }
 }
 
 fn apply_area_property(
@@ -2927,6 +3110,38 @@ fn tensor_from_vec(data: Vec<f64>) -> Value {
         data,
         dtype: runmat_builtins::NumericDType::F64,
     })
+}
+
+fn string_array_from_vec(data: Vec<String>) -> BuiltinResult<Value> {
+    let cols = data.len();
+    let array = StringArray::new(data, vec![1, cols])
+        .map_err(|e| plotting_error("get", format!("get: {e}")))?;
+    Ok(Value::StringArray(array))
+}
+
+fn string_labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<String>> {
+    match value {
+        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .map(|item| {
+                value_as_text_string(item).ok_or_else(|| {
+                    plotting_error(
+                        builtin,
+                        format!("{builtin}: labels must contain text values"),
+                    )
+                })
+            })
+            .collect(),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
+        Value::String(text) => Ok(vec![text.clone()]),
+        Value::Tensor(tensor) => Ok(tensor.data.iter().map(|v| v.to_string()).collect()),
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported label value {other:?}"),
+        )),
+    }
 }
 
 fn tensor_from_matrix(data: Vec<Vec<f64>>) -> Value {
