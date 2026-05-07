@@ -17,7 +17,7 @@ pub fn emit_bytecode(source: &str, config: &RunMatConfig) -> Result<String> {
         .map_err(|err| anyhow::anyhow!(format!("Parse error: {err:?}")))?;
     let lowering = runmat_hir::lower(&ast, &LoweringContext::empty())
         .map_err(|err| anyhow::anyhow!(format!("Lowering error: {err:?}")))?;
-    let mut bytecode = runmat_vm::compile(&lowering.hir, &HashMap::new())
+    let mut bytecode = runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
         .map_err(|err| anyhow::anyhow!(format!("Compile error: {err:?}")))?;
     bytecode.var_names = lowering
         .var_names

@@ -149,11 +149,11 @@ fn execute_user_function_isolated(
     if func_var_types.len() < local_var_count {
         func_var_types.resize(local_var_count, Type::Unknown);
     }
-    let func_program = runmat_hir::HirProgram {
+    let func_program = runmat_hir::LegacyHirProgram {
         body: remapped_body,
         var_types: func_var_types,
     };
-    let func_bytecode = runmat_vm::compile(&func_program, all_functions)
+    let func_bytecode = runmat_vm::compile_legacy(&func_program, all_functions)
         .map_err(|e| execution_error(format!("Failed to compile function: {e}")))?;
 
     let func_result_vars = match run_immediate(Box::pin(runmat_vm::interpret_with_vars(

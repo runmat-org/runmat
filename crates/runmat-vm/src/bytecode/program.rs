@@ -1,10 +1,11 @@
 use crate::bytecode::instr::Instr;
+use crate::layout::VmAssemblyLayout;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::FusionGroup;
 use runmat_builtins::{Type, Value};
-use runmat_hir::{HirStmt, VarId};
+use runmat_hir::{LegacyHirStmt as HirStmt, VarId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -55,6 +56,8 @@ pub struct Bytecode {
     pub var_types: Vec<Type>,
     #[serde(default)]
     pub var_names: HashMap<usize, String>,
+    #[serde(default)]
+    pub layout: Option<VmAssemblyLayout>,
     #[cfg(feature = "native-accel")]
     #[serde(default)]
     pub accel_graph: Option<AccelGraph>,
@@ -74,6 +77,7 @@ impl Bytecode {
             functions: HashMap::new(),
             var_types: Vec::new(),
             var_names: HashMap::new(),
+            layout: None,
             #[cfg(feature = "native-accel")]
             accel_graph: None,
             #[cfg(feature = "native-accel")]

@@ -6,13 +6,13 @@ use lsp_types::{
 };
 use runmat_builtins::{self, BuiltinFunction, Constant, Type};
 use runmat_hir::{
-    CompatibilityMode, HirDiagnostic, HirDiagnosticSeverity, HirStmt, LoweringContext,
-    LoweringResult, SemanticError,
+    CompatibilityMode, HirDiagnostic, HirDiagnosticSeverity, LegacyHirStmt as HirStmt,
+    LoweringContext, LoweringResult, SemanticError,
 };
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
-use runmat_vm::{compile, CompileError};
+use runmat_vm::{compile_legacy, CompileError};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -86,7 +86,7 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
                     };
                 }
             };
-            let compile_error = compile(&lowering.hir, &HashMap::new()).err();
+            let compile_error = compile_legacy(&lowering.hir, &HashMap::new()).err();
 
             let semantic = build_semantic_model(lowering, &tokens, text);
 
@@ -499,15 +499,18 @@ fn diagnostic_for_compile_error(error: &CompileError, text: &str) -> Diagnostic 
 }
 
 fn diagnostic_for_hir_lint(diag: &HirDiagnostic, text: &str) -> Diagnostic {
-    let end = diag.span.end.max(diag.span.start + 1);
+    let span = diag.primary.span;
+    let end = span.end.max(span.start + 1);
     let range = TextRange {
-        start: diag.span.start,
+        start: span.start,
         end,
     }
     .to_lsp_range(text);
     let severity = match diag.severity {
+        HirDiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
         HirDiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
         HirDiagnosticSeverity::Information => DiagnosticSeverity::INFORMATION,
+        HirDiagnosticSeverity::Help => DiagnosticSeverity::HINT,
     };
     Diagnostic {
         range,

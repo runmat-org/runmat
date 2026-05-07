@@ -1,7 +1,7 @@
 //! Lowering support for `end` expressions used in indexing.
 
 use crate::instr::EndExpr;
-use runmat_hir::{HirExpr, HirExprKind};
+use runmat_hir::{LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind};
 
 pub(crate) fn expr_is_one(expr: &HirExpr) -> bool {
     parse_number(expr)

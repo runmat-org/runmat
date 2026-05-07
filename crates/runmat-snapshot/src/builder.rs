@@ -610,7 +610,7 @@ impl SnapshotBuilder {
     }
 
     /// Compile source to HIR
-    fn compile_to_hir(&self, source: &str) -> Result<runmat_hir::HirProgram> {
+    fn compile_to_hir(&self, source: &str) -> Result<runmat_hir::LegacyHirProgram> {
         let ast = runmat_parser::parse(source).map_err(|e| anyhow::anyhow!(e))?;
         let hir =
             runmat_hir::lower(&ast, &LoweringContext::empty()).map_err(|e| anyhow::anyhow!(e))?;
@@ -620,7 +620,7 @@ impl SnapshotBuilder {
     /// Extract type information from HIR
     fn extract_type_info(
         &self,
-        _hir: &runmat_hir::HirProgram,
+        _hir: &runmat_hir::LegacyHirProgram,
         _type_cache: &mut HashMap<String, runmat_hir::Type>,
     ) {
         // Type extraction would analyze HIR and populate type cache
@@ -648,10 +648,10 @@ impl SnapshotBuilder {
     }
 
     /// Create HIR pattern (simplified)
-    fn create_pattern_hir(&self, source: &str) -> runmat_hir::HirProgram {
+    fn create_pattern_hir(&self, source: &str) -> runmat_hir::LegacyHirProgram {
         self.compile_to_hir(source).unwrap_or_else(|_| {
             // Fallback to empty program
-            runmat_hir::HirProgram {
+            runmat_hir::LegacyHirProgram {
                 body: Vec::new(),
                 var_types: Vec::new(),
             }
@@ -668,7 +668,7 @@ impl SnapshotBuilder {
 
         // Compile HIR functions to bytecode
         for (name, hir) in &hir_cache.functions {
-            match runmat_vm::compile(hir, &HashMap::new()) {
+            match runmat_vm::compile_legacy(hir, &HashMap::new()) {
                 Ok(bytecode) => {
                     stdlib_bytecode.insert(name.clone(), bytecode);
 
@@ -731,7 +731,7 @@ impl SnapshotBuilder {
     /// Create bytecode for sequence
     fn create_sequence_bytecode(&self, source: &str) -> runmat_vm::Bytecode {
         match self.compile_to_hir(source) {
-            Ok(hir) => runmat_vm::compile(&hir, &HashMap::new())
+            Ok(hir) => runmat_vm::compile_legacy(&hir, &HashMap::new())
                 .unwrap_or_else(|_| runmat_vm::Bytecode::empty()),
             Err(_) => runmat_vm::Bytecode::empty(),
         }

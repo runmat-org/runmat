@@ -21,7 +21,7 @@ impl RunMatSession {
         let existing_functions = self.convert_hir_functions_to_user_functions();
         let mut bytecode = {
             let _span = info_span!("runtime.compile.bytecode").entered();
-            runmat_vm::compile(&lowering.hir, &existing_functions)?
+            runmat_vm::compile_legacy(&lowering.hir, &existing_functions)?
         };
         bytecode.source_id = Some(source_id);
         let new_function_names: HashSet<String> = lowering.functions.keys().cloned().collect();
@@ -134,7 +134,7 @@ impl RunMatSession {
         let mut user_functions = HashMap::new();
 
         for (name, hir_stmt) in &self.function_definitions {
-            if let runmat_hir::HirStmt::Function {
+            if let runmat_hir::LegacyHirStmt::Function {
                 name: func_name,
                 params,
                 outputs,

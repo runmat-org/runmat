@@ -5,7 +5,9 @@ use crate::compiler::CompileError;
 use crate::functions::UserFunction;
 use crate::instr::Instr;
 use runmat_builtins::Type;
-use runmat_hir::{HirExpr, HirExprKind, HirStmt, VarId};
+use runmat_hir::{
+    LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, LegacyHirStmt as HirStmt, VarId,
+};
 use std::collections::{HashMap, HashSet};
 
 impl Compiler {
@@ -17,7 +19,7 @@ impl Compiler {
         seen: &mut HashSet<VarId>,
         out: &mut Vec<VarId>,
     ) {
-        use runmat_hir::HirExprKind as K;
+        use runmat_hir::LegacyHirExprKind as K;
 
         match &expr.kind {
             K::Var(id) => {

@@ -79,13 +79,13 @@ impl Compiler {
         &mut self,
         name: &str,
         super_class: &Option<String>,
-        members: &[runmat_hir::HirClassMember],
+        members: &[runmat_hir::LegacyHirClassMember],
     ) -> Result<(), CompileError> {
         let mut props: Vec<(String, bool, String, String)> = Vec::new();
         let mut methods: Vec<(String, String, bool, String)> = Vec::new();
         for m in members {
             match m {
-                runmat_hir::HirClassMember::Properties { names, attributes } => {
+                runmat_hir::LegacyHirClassMember::Properties { names, attributes } => {
                     let (is_static, is_dependent, get_access, set_access) =
                         Self::parse_prop_attrs(attributes);
                     for n in names {
@@ -97,10 +97,10 @@ impl Compiler {
                         props.push((enc, is_static, get_access.clone(), set_access.clone()));
                     }
                 }
-                runmat_hir::HirClassMember::Methods { body, attributes } => {
+                runmat_hir::LegacyHirClassMember::Methods { body, attributes } => {
                     let (is_static, access) = Self::parse_method_attrs(attributes);
                     for s in body {
-                        if let runmat_hir::HirStmt::Function { name: mname, .. } = s {
+                        if let runmat_hir::LegacyHirStmt::Function { name: mname, .. } = s {
                             methods.push((mname.clone(), mname.clone(), is_static, access.clone()));
                         }
                     }

@@ -95,9 +95,9 @@ pub(crate) fn format_type_info(value: &Value) -> String {
 }
 
 pub(crate) fn last_displayable_statement_emit_disposition(
-    body: &[runmat_hir::HirStmt],
+    body: &[runmat_hir::LegacyHirStmt],
 ) -> FinalStmtEmitDisposition {
-    use runmat_hir::HirStmt;
+    use runmat_hir::LegacyHirStmt as HirStmt;
 
     for stmt in body.iter().rev() {
         match stmt {
@@ -113,8 +113,8 @@ pub(crate) fn last_displayable_statement_emit_disposition(
     FinalStmtEmitDisposition::Suppressed
 }
 
-pub(crate) fn last_unsuppressed_assign_var(body: &[runmat_hir::HirStmt]) -> Option<usize> {
-    use runmat_hir::HirStmt;
+pub(crate) fn last_unsuppressed_assign_var(body: &[runmat_hir::LegacyHirStmt]) -> Option<usize> {
+    use runmat_hir::LegacyHirStmt as HirStmt;
 
     for stmt in body.iter().rev() {
         match stmt {
@@ -130,8 +130,8 @@ pub(crate) fn last_unsuppressed_assign_var(body: &[runmat_hir::HirStmt]) -> Opti
     None
 }
 
-pub(crate) fn last_expr_emits_value(body: &[runmat_hir::HirStmt]) -> bool {
-    use runmat_hir::HirStmt;
+pub(crate) fn last_expr_emits_value(body: &[runmat_hir::LegacyHirStmt]) -> bool {
+    use runmat_hir::LegacyHirStmt as HirStmt;
 
     for stmt in body.iter().rev() {
         match stmt {
@@ -162,8 +162,8 @@ pub(crate) fn last_emit_var_index(bytecode: &runmat_vm::Bytecode) -> Option<usiz
     None
 }
 
-pub(crate) fn expr_emit_disposition(expr: &runmat_hir::HirExpr) -> FinalStmtEmitDisposition {
-    use runmat_hir::HirExprKind;
+pub(crate) fn expr_emit_disposition(expr: &runmat_hir::LegacyHirExpr) -> FinalStmtEmitDisposition {
+    use runmat_hir::LegacyHirExprKind as HirExprKind;
     if let HirExprKind::FuncCall(name, _) = &expr.kind {
         if runmat_builtins::suppresses_auto_output(name) {
             return FinalStmtEmitDisposition::Suppressed;

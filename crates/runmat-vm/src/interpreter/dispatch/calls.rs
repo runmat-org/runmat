@@ -30,7 +30,7 @@ pub enum FevalHandling {
 pub struct PreparedUserDispatch {
     pub func: UserFunction,
     pub var_map: std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
-    pub func_program: runmat_hir::HirProgram,
+    pub func_program: runmat_hir::LegacyHirProgram,
     pub func_vars: Vec<Value>,
 }
 
@@ -615,7 +615,7 @@ where
         func_program,
         func_vars,
     } = prepared;
-    let mut func_bytecode = crate::compile(&func_program, bytecode_functions)?;
+    let mut func_bytecode = crate::compile_legacy(&func_program, bytecode_functions)?;
     func_bytecode.source_id = func.source_id;
     for (k, v) in func_bytecode.functions.iter() {
         caller_functions.insert(k.clone(), v.clone());

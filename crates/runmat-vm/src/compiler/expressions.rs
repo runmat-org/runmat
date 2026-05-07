@@ -5,7 +5,7 @@ use crate::compiler::end_expr::{end_numeric_expr, range_dynamic_end_spec};
 use crate::compiler::imports::CallImportResolution;
 use crate::compiler::CompileError;
 use crate::instr::{EndExpr, Instr};
-use runmat_hir::{HirExpr, HirExprKind};
+use runmat_hir::{LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind};
 
 impl Compiler {
     pub(crate) fn compile_expr_impl(&mut self, expr: &HirExpr) -> Result<(), CompileError> {
@@ -391,7 +391,7 @@ impl Compiler {
                     if !has_any_expand {
                         let mut total_argc = 0usize;
                         let mut did_expand_inner = false;
-                        let mut pending_simple: Vec<&runmat_hir::HirExpr> = Vec::new();
+                        let mut pending_simple: Vec<&HirExpr> = Vec::new();
                         for arg in args {
                             if let HirExprKind::FuncCall(inner, inner_args) = &arg.kind {
                                 if self.functions.contains_key(inner) {

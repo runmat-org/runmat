@@ -1,6 +1,6 @@
 use crate::compiler::core::Compiler;
 use crate::compiler::CompileError;
-use runmat_hir::HirStmt;
+use runmat_hir::LegacyHirStmt as HirStmt;
 
 mod stochastic_evolution;
 

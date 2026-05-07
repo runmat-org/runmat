@@ -3,7 +3,9 @@ use crate::compiler::end_expr::expr_is_one;
 use crate::compiler::CompileError;
 use crate::instr::Instr;
 use once_cell::sync::OnceCell;
-use runmat_hir::{HirExpr, HirExprKind, HirStmt, VarId};
+use runmat_hir::{
+    LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, LegacyHirStmt as HirStmt, VarId,
+};
 
 pub(crate) struct Plan<'a> {
     pub state: VarId,

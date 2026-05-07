@@ -4,7 +4,9 @@ use crate::compiler::core::{Compiler, LoopLabels};
 use crate::compiler::idioms;
 use crate::compiler::CompileError;
 use crate::instr::{EmitLabel, Instr};
-use runmat_hir::{HirExpr, HirExprKind, HirStmt};
+use runmat_hir::{
+    LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, LegacyHirStmt as HirStmt,
+};
 
 fn expr_supports_inline_emit(expr: &HirExpr) -> bool {
     match &expr.kind {

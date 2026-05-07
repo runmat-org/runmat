@@ -159,7 +159,7 @@ impl RunMatSession {
                                 .build()
                         })?;
                         let result_idx = lowering.variables.get("__runmat_input_result__").copied();
-                        let bc = runmat_vm::compile(&lowering.hir, &HashMap::new())
+                        let bc = runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
                             .map_err(RuntimeError::from)?;
                         let vars = runmat_vm::interpret(&bc).await?;
                         result_idx
@@ -260,7 +260,7 @@ impl RunMatSession {
 
         let (single_assign_var, single_stmt_non_assign) = if hir.body.len() == 1 {
             match &hir.body[0] {
-                runmat_hir::HirStmt::Assign(var_id, _, _, _) => (Some(var_id.0), false),
+                runmat_hir::LegacyHirStmt::Assign(var_id, _, _, _) => (Some(var_id.0), false),
                 _ => (None, true),
             }
         } else {
@@ -375,7 +375,7 @@ impl RunMatSession {
                             } else {
                                 self.stats.interpreter_fallback += 1;
                             }
-                            if let Some(runmat_hir::HirStmt::Assign(var_id, _, _, _)) =
+                            if let Some(runmat_hir::LegacyHirStmt::Assign(var_id, _, _, _)) =
                                 hir.body.first()
                             {
                                 if let Some(name) = id_to_name.get(&var_id.0) {
@@ -470,7 +470,7 @@ impl RunMatSession {
 
                     // Handle assignment statements (x = 42 should show the assigned value unless suppressed)
                     if hir.body.len() == 1 {
-                        if let runmat_hir::HirStmt::Assign(var_id, _, _, _) = &hir.body[0] {
+                        if let runmat_hir::LegacyHirStmt::Assign(var_id, _, _, _) = &hir.body[0] {
                             if let Some(name) = id_to_name.get(&var_id.0) {
                                 assigned_this_execution.insert(name.clone());
                             }
@@ -661,7 +661,7 @@ impl RunMatSession {
             }
             let mut repl_source_id: Option<SourceId> = None;
             for (name, stmt) in &updated_functions {
-                if matches!(stmt, runmat_hir::HirStmt::Function { .. }) {
+                if matches!(stmt, runmat_hir::LegacyHirStmt::Function { .. }) {
                     let source_id = *repl_source_id
                         .get_or_insert_with(|| self.source_pool.intern("<repl>", input));
                     self.function_source_ids.insert(name.clone(), source_id);

@@ -1,7 +1,7 @@
 use crate::bytecode::{ArgSpec, UserFunction};
 use crate::compiler::CompileError;
 use runmat_builtins::{Type, Value};
-use runmat_hir::{remapping, HirProgram, VarId};
+use runmat_hir::{remapping, LegacyHirProgram as HirProgram, VarId};
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
 use std::future::Future;

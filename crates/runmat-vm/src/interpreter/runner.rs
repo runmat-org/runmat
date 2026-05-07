@@ -190,7 +190,7 @@ async fn invoke_user_function_value(
         func_program,
         func_vars,
     } = prepared;
-    let func_bytecode = crate::compile(&func_program, functions)?;
+    let func_bytecode = crate::compile_legacy(&func_program, functions)?;
     register_dynamic_user_functions(&func_bytecode.functions);
     let func_result_vars =
         interpret_function_with_counts(&func_bytecode, func_vars, name, 1, arg_count).await?;

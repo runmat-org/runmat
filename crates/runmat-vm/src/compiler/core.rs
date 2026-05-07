@@ -2,7 +2,10 @@ use crate::compiler::CompileError;
 use crate::functions::UserFunction;
 use crate::instr::{EmitLabel, Instr};
 use runmat_builtins::{self, Type};
-use runmat_hir::{HirExpr, HirExprKind, HirProgram, HirStmt};
+use runmat_hir::{
+    LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram,
+    LegacyHirStmt as HirStmt,
+};
 use std::collections::HashMap;
 
 pub struct LoopLabels {

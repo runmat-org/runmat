@@ -5,11 +5,13 @@ use crate::compiler::end_expr::{end_numeric_expr, range_dynamic_end_spec};
 use crate::compiler::CompileError;
 use crate::instr::{EndExpr, Instr};
 use runmat_builtins::Type;
-use runmat_hir::{HirExpr, HirExprKind, HirLValue};
+use runmat_hir::{
+    LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, LegacyHirLValue as HirLValue,
+};
 
 impl Compiler {
     pub(crate) fn expr_contains_end(expr: &HirExpr) -> bool {
-        use runmat_hir::HirExprKind as K;
+        use runmat_hir::LegacyHirExprKind as K;
 
         match &expr.kind {
             K::End => true,

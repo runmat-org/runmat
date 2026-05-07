@@ -12,11 +12,12 @@ pub mod instr {
     pub use crate::bytecode::instr::{ArgSpec, EmitLabel, EndExpr, Instr, StackEffect};
 }
 pub mod interpreter;
+pub mod layout;
 pub mod object;
 pub mod ops;
 pub mod runtime;
 
-pub use bytecode::compile;
+pub use bytecode::{compile, compile_legacy};
 pub use bytecode::{
     ArgSpec, Bytecode, CallFrame, EmitLabel, EndExpr, ExecutionContext, Instr, StackEffect,
     UserFunction,
@@ -29,16 +30,19 @@ pub use interpreter::runner::{
     interpret, interpret_function, interpret_function_with_counts, interpret_with_vars,
 };
 pub use interpreter::state::{InterpreterOutcome, InterpreterState};
+pub use layout::{
+    derive_layout, LayoutError, VmAssemblyLayout, VmEntrypointLayout, VmFunctionLayout, VmSlotId,
+};
 pub use runtime::workspace::{
     push_pending_workspace, take_updated_workspace_state, PendingWorkspaceGuard,
 };
 
 use runmat_builtins::Value;
-use runmat_hir::HirProgram;
+use runmat_hir::LegacyHirProgram;
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
 
-pub async fn execute(program: &HirProgram) -> Result<Vec<Value>, RuntimeError> {
-    let bc = compile(program, &HashMap::new()).map_err(RuntimeError::from)?;
+pub async fn execute_legacy(program: &LegacyHirProgram) -> Result<Vec<Value>, RuntimeError> {
+    let bc = compile_legacy(program, &HashMap::new()).map_err(RuntimeError::from)?;
     interpret(&bc).await
 }

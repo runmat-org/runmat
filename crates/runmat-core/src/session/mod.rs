@@ -71,7 +71,7 @@ pub struct RunMatSession {
     /// Persistent workspace values keyed by variable name
     workspace_values: HashMap<String, Value>,
     /// User-defined functions context for session state
-    function_definitions: HashMap<String, runmat_hir::HirStmt>,
+    function_definitions: HashMap<String, runmat_hir::LegacyHirStmt>,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
     /// Source IDs for user-defined functions keyed by name
