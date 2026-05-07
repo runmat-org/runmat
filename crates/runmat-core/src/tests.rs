@@ -94,6 +94,28 @@ fn execute_request_uses_request_workspace_handle() {
 }
 
 #[test]
+fn execute_request_honors_zero_requested_outputs() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "request-zero-output.m".to_string(),
+            text: "1 + 1".to_string(),
+        },
+        entrypoint: abi::EntrypointSelector::SourcePath("request-zero-output.m".to_string()),
+        compatibility: runmat_hir::CompatibilityMode::Interactive,
+        host_policy: abi::HostExecutionPolicy::default(),
+        inputs: abi::RuntimeFlow::NoValue,
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(9)),
+        resolver: abi::ResolverHandle(uuid::Uuid::from_u128(10)),
+    }))
+    .expect("exec succeeds");
+
+    assert!(outcome.flow.is_no_value());
+    assert_eq!(outcome.display_events.len(), 1);
+}
+
+#[test]
 fn compile_input_uses_semantic_vm_when_supported() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let prepared = session

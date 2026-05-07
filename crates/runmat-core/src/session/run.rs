@@ -43,6 +43,7 @@ impl RunMatSession {
         &mut self,
         request: crate::abi::ExecutionRequest,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        let requested_outputs = request.requested_outputs.clone();
         let (source_name, source_text) = source_input_text(request.source)?;
         let previous_compat = self.compat_mode;
         let previous_source_override = self.source_name_override.clone();
@@ -58,7 +59,12 @@ impl RunMatSession {
         self.source_name_override = previous_source_override;
         self.abi_workspace_handle = previous_workspace_handle;
 
-        result
+        result.map(|mut outcome| {
+            if matches!(requested_outputs, runmat_hir::RequestedOutputCount::Zero) {
+                outcome.flow = crate::abi::RuntimeFlow::NoValue;
+            }
+            outcome
+        })
     }
 
     /// Parse, lower, compile, and execute input.
