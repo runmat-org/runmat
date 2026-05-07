@@ -204,20 +204,24 @@ fn semantic_display_context(
         }
     }
 
-    let display_var_ids = statements
-        .iter()
-        .filter_map(|stmt| match &stmt.kind {
-            HirStmtKind::Assign(place, _, suppressed) if !*suppressed => slot_for_place(place),
-            HirStmtKind::ExprStmt(expr, suppressed) if !*suppressed => slot_for_binding_expr(expr),
+    let mut display_var_ids = Vec::new();
+    for stmt in statements {
+        match &stmt.kind {
+            HirStmtKind::Assign(place, _, suppressed) if !*suppressed => {
+                display_var_ids.extend(slot_for_place(place));
+            }
+            HirStmtKind::ExprStmt(expr, suppressed) if !*suppressed => {
+                display_var_ids.extend(slot_for_binding_expr(expr));
+            }
             HirStmtKind::MultiAssign(targets, _, suppressed) if !*suppressed => {
-                targets.targets.iter().find_map(|target| match target {
+                display_var_ids.extend(targets.targets.iter().filter_map(|target| match target {
                     runmat_hir::OutputTarget::Place(place) => slot_for_place(place),
                     _ => None,
-                })
+                }));
             }
-            _ => None,
-        })
-        .collect();
+            _ => {}
+        }
+    }
 
     Some(ExecutionDisplayContext {
         context: DisplayContext {

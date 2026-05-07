@@ -782,14 +782,15 @@ impl RunMatSession {
         }
 
         if !is_semicolon_suppressed
-            && (matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
+            && (!display_var_ids.is_empty()
+                || matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
                 || display_context.single_assign_var.is_some()
                 || (is_expression_stmt
                     && matches!(final_stmt_emit, FinalStmtEmitDisposition::Inline)))
         {
-            if let Some(value) = result_value.as_ref() {
-                if runmat_runtime::console::take_last_value_output().is_none() {
-                    if display_var_ids.is_empty() {
+            if runmat_runtime::console::take_last_value_output().is_none() {
+                if display_var_ids.is_empty() {
+                    if let Some(value) = result_value.as_ref() {
                         let label = last_emit_var_index(&bytecode)
                             .and_then(|var_id| id_to_name.get(&var_id).cloned())
                             .or_else(|| {
@@ -801,16 +802,16 @@ impl RunMatSession {
                                 )
                             });
                         runmat_runtime::console::record_value_output(label.as_deref(), value);
-                    } else {
-                        for var_id in display_var_ids {
-                            if let (Some(label), Some(display_value)) =
-                                (id_to_name.get(&var_id), self.variable_array.get(var_id))
-                            {
-                                runmat_runtime::console::record_value_output(
-                                    Some(label.as_str()),
-                                    display_value,
-                                );
-                            }
+                    }
+                } else {
+                    for var_id in display_var_ids {
+                        if let (Some(label), Some(display_value)) =
+                            (id_to_name.get(&var_id), self.variable_array.get(var_id))
+                        {
+                            runmat_runtime::console::record_value_output(
+                                Some(label.as_str()),
+                                display_value,
+                            );
                         }
                     }
                 }

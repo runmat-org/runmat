@@ -10,8 +10,8 @@ use runmat_hir::{
 };
 use runmat_mir::{
     BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirConstant,
-    MirIndexComponent, MirIndexing, MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind,
-    MirTerminatorKind,
+    MirIndexComponent, MirIndexing, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt,
+    MirStmtKind, MirTerminatorKind,
 };
 use std::collections::HashMap;
 
@@ -435,9 +435,69 @@ impl Compiler {
             }
             MirStmtKind::WorkspaceEffect { .. } | MirStmtKind::EnvironmentEffect(_) => Ok(()),
             MirStmtKind::PlaceMutation(_) => Ok(()),
-            MirStmtKind::MultiAssign { .. } => Err(self
-                .compile_error("MIR bytecode lowering for this statement is not implemented yet")),
+            MirStmtKind::MultiAssign { targets, value } => {
+                self.compile_mir_multi_assign(targets, value)
+            }
         }
+    }
+
+    fn compile_mir_multi_assign(
+        &mut self,
+        targets: &runmat_mir::MirOutputTargetList,
+        value: &MirRvalue,
+    ) -> Result<(), CompileError> {
+        match value {
+            MirRvalue::Call(call) => {
+                self.compile_mir_call_for_multi_assign(call, targets.targets.len())?
+            }
+            _ => self.compile_mir_rvalue(value)?,
+        }
+        self.emit(Instr::Unpack(targets.targets.len()));
+        for target in targets.targets.iter().rev() {
+            match target {
+                MirOutputTarget::Place(place) => {
+                    let slot = self.mir_place_slot(place)?;
+                    self.emit(Instr::StoreVar(slot));
+                }
+                MirOutputTarget::Discard => {
+                    self.emit(Instr::Pop);
+                }
+                MirOutputTarget::VarargoutExpansion => {
+                    return Err(self.compile_error(
+                        "MIR bytecode lowering for varargout expansion is not implemented yet",
+                    ))
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn compile_mir_call_for_multi_assign(
+        &mut self,
+        call: &MirCall,
+        output_count: usize,
+    ) -> Result<(), CompileError> {
+        let name = self.mir_builtin_call_name(call)?;
+        match call.requested_outputs {
+            RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count)
+                if count == output_count => {}
+            RequestedOutputCount::UnknownDynamic => {}
+            _ => {
+                return Err(
+                    self.compile_error("MIR multi-assign call output count does not match targets")
+                )
+            }
+        }
+        for arg in &call.args {
+            let MirCallArg::Single(operand) = arg else {
+                return Err(self.compile_error(
+                    "MIR bytecode lowering for expanded call arguments is not implemented yet",
+                ));
+            };
+            self.compile_mir_operand(operand)?;
+        }
+        self.emit(Instr::CallBuiltin(name, call.args.len()));
+        Ok(())
     }
 
     fn compile_mir_assign(

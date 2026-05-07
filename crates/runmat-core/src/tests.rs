@@ -216,6 +216,35 @@ fn simple_builtin_call_uses_semantic_vm() {
 }
 
 #[test]
+fn multi_assign_deal_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("[a, b] = deal(1, 2)")
+        .expect("compile multi-assign");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "multi-assign should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = block_on(session.execute_outcome("[a, b] = deal(1, 2)")).expect("exec succeeds");
+    let stdout = outcome
+        .streams
+        .iter()
+        .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
+        .map(|entry| entry.text.trim().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(stdout, vec!["a = 1", "b = 2"]);
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
+            && upsert.value.to_string() == "1"
+    }));
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
+            && upsert.value.to_string() == "2"
+    }));
+}
+
+#[test]
 fn workspace_reports_datetime_array_shape() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let result =
