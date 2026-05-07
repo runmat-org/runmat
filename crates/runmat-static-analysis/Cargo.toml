@@ -13,8 +13,6 @@ runmat-hir = { workspace = true }
 runmat-mir = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-parser = { workspace = true }
-serde_json = { workspace = true }
 
 [dev-dependencies]
 runmat-runtime = { workspace = true }
-tempfile = "3"

@@ -1312,7 +1312,14 @@ fn command_call_lowers_to_zero_output_call_with_string_args() {
     let mir = lower_mir("function y = f()\nformat long\ny = 1\nend");
     let body = mir.bodies.values().next().unwrap();
 
-    let MirStmtKind::Expr(MirRvalue::Call(call)) = &body.blocks[0].statements[0].kind else {
+    let Some(call) = body.blocks[0]
+        .statements
+        .iter()
+        .find_map(|stmt| match &stmt.kind {
+            MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call),
+            _ => None,
+        })
+    else {
         panic!("expected command call expression");
     };
 

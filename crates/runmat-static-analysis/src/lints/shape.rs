@@ -1,4 +1,4 @@
-use runmat_builtins::{BuiltinSemanticKind, ShapeTransformKind};
+use runmat_builtins::{BuiltinSemanticKind, ConcatKind, ShapeTransformKind};
 use runmat_hir::{BindingId, HirDiagnostic, HirDiagnosticSeverity, OperatorKind, Span};
 use runmat_mir::analysis::{AnalysisStore, MirLocalKey};
 use std::collections::HashMap;
@@ -370,13 +370,18 @@ impl ShapeLintContext {
             .map(|arg| self.infer_mir_operand(body, arg.operand()))
             .collect();
         let shape = match call.semantic_kind {
-            BuiltinSemanticKind::ArrayConstructor => Some(Shape(
+            BuiltinSemanticKind::ArrayConstructor => sized_constructor_shape(&arg_values),
+            BuiltinSemanticKind::ParameterizedArrayConstructor => {
+                sized_constructor_shape(arg_values.get(1..).unwrap_or(&[]))
+            }
+            BuiltinSemanticKind::PermutationConstructor => Some(Shape(vec![
+                Some(1),
                 arg_values
-                    .iter()
-                    .filter_map(|value| value.number.and_then(number_to_int))
-                    .map(Some)
-                    .collect(),
-            )),
+                    .first()
+                    .and_then(|value| value.number.and_then(number_to_int)),
+            ])),
+            BuiltinSemanticKind::RangeConstructor => Some(Shape(vec![Some(1), None])),
+            BuiltinSemanticKind::EmptyConstructor => Some(Shape(vec![Some(0), Some(0)])),
             BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Dot) => {
                 let lhs = arg_values.first().and_then(|value| value.shape.as_ref());
                 let rhs = arg_values.get(1).and_then(|value| value.shape.as_ref());
@@ -440,6 +445,22 @@ impl ShapeLintContext {
                 }
                 base
             }
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Transpose) => {
+                let base = arg_values.first().and_then(|value| value.shape.clone());
+                base.map(|shape| {
+                    if shape.0.len() >= 2 {
+                        Shape(vec![shape.0[1], shape.0[0]])
+                    } else {
+                        shape
+                    }
+                })
+            }
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Concatenate(kind)) => {
+                self.infer_mir_concat(span, kind, &arg_values)
+            }
+            BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::General) => {
+                arg_values.first().and_then(|value| value.shape.clone())
+            }
             BuiltinSemanticKind::Reduction => {
                 let base = arg_values.first().and_then(|value| value.shape.clone());
                 if let (Some(base_shape), Some(dim)) = (
@@ -465,6 +486,66 @@ impl ShapeLintContext {
             number: None,
             int_vector: None,
         }
+    }
+
+    fn infer_mir_concat(
+        &mut self,
+        span: Span,
+        kind: ConcatKind,
+        arg_values: &[MirShapeValue],
+    ) -> Option<Shape> {
+        let (dim, values) = match kind {
+            ConcatKind::Dimension => {
+                let dim = arg_values
+                    .first()
+                    .and_then(|value| value.number.and_then(number_to_int))?;
+                (dim, &arg_values[1..])
+            }
+            ConcatKind::Horizontal => (2, arg_values),
+            ConcatKind::Vertical => (1, arg_values),
+        };
+        let shapes: Vec<_> = values
+            .iter()
+            .filter_map(|value| value.shape.as_ref())
+            .collect();
+        if shapes.is_empty() || dim == 0 {
+            return None;
+        }
+        let rank = shapes
+            .iter()
+            .map(|shape| shape.0.len())
+            .max()
+            .unwrap_or(dim);
+        let axis = dim - 1;
+        if axis >= rank {
+            return None;
+        }
+        let mut out = vec![Some(1); rank];
+        for idx in 0..rank {
+            if idx == axis {
+                out[idx] = shapes
+                    .iter()
+                    .map(|shape| shape.0.get(idx).copied().flatten())
+                    .try_fold(0usize, |sum, dim| dim.map(|dim| sum + dim));
+                continue;
+            }
+            let mut expected = None;
+            for shape in &shapes {
+                let dim = shape.0.get(idx).copied().flatten().or(Some(1));
+                if let (Some(expected), Some(dim)) = (expected, dim) {
+                    if expected != dim {
+                        self.warn(
+                            "lint.shape.concat",
+                            "concatenation dimensions do not agree",
+                            span,
+                        );
+                    }
+                }
+                expected = expected.or(dim);
+            }
+            out[idx] = expected;
+        }
+        Some(Shape(out))
     }
 
     fn check_logical_index(&mut self, span: Span, base: Option<&Shape>, idx: Option<&Shape>) {
@@ -529,6 +610,19 @@ fn mir_parse_dims(args: &[MirShapeValue]) -> Vec<Dim> {
         }
     }
     args.iter().map(mir_parse_dim).collect()
+}
+
+fn sized_constructor_shape(args: &[MirShapeValue]) -> Option<Shape> {
+    let dims: Vec<_> = args
+        .iter()
+        .filter_map(|value| value.number.and_then(number_to_int))
+        .map(Some)
+        .collect();
+    match dims.as_slice() {
+        [] => None,
+        [dim] => Some(Shape(vec![*dim, *dim])),
+        _ => Some(Shape(dims)),
+    }
 }
 
 fn shape_from_fact(shape: &runmat_hir::ShapeFact) -> Option<Shape> {
