@@ -2,7 +2,7 @@ use runmat_builtins::Value;
 use runmat_hir::{BindingName, DefPath, EntrypointId, Span};
 use uuid::Uuid;
 
-use crate::execution::{ExecutionProfiling, ExecutionResult, ExecutionStreamEntry, StdinEvent};
+use crate::execution::{ExecutionProfiling, ExecutionStreamEntry, StdinEvent};
 use crate::fusion::FusionPlanSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -94,68 +94,6 @@ impl Default for ExecutionOutcome {
             figures_touched: Vec::new(),
             stdin_events: Vec::new(),
             fusion_plan: None,
-        }
-    }
-}
-
-impl ExecutionOutcome {
-    pub(crate) fn from_legacy_result(result: ExecutionResult) -> Self {
-        let mut diagnostics = Vec::new();
-        if let Some(error) = result.error {
-            diagnostics.push(RuntimeDiagnostic {
-                code: error
-                    .identifier()
-                    .unwrap_or("RunMat:RuntimeError")
-                    .to_string(),
-                severity: DiagnosticSeverity::Error,
-                message: error.message().to_string(),
-                span: None,
-            });
-        }
-        diagnostics.extend(
-            result
-                .warnings
-                .into_iter()
-                .map(|warning| RuntimeDiagnostic {
-                    code: warning.identifier,
-                    severity: DiagnosticSeverity::Warning,
-                    message: warning.message,
-                    span: None,
-                }),
-        );
-
-        let display_events = result
-            .value
-            .as_ref()
-            .map(|value| DisplayEvent {
-                label: DisplayLabel::Anonymous,
-                value: value.clone(),
-                span: Span::default(),
-            })
-            .into_iter()
-            .collect();
-
-        Self {
-            flow: result
-                .value
-                .map(RuntimeFlow::Single)
-                .unwrap_or(RuntimeFlow::NoValue),
-            workspace_delta: WorkspaceDelta {
-                full_snapshot_required: result.workspace.full,
-                ..WorkspaceDelta::default()
-            },
-            display_events,
-            streams: result.streams,
-            diagnostics,
-            effects: Vec::new(),
-            suspension: None,
-            execution_time_ms: result.execution_time_ms,
-            used_jit: result.used_jit,
-            type_info: result.type_info,
-            figures_touched: result.figures_touched,
-            stdin_events: result.stdin_events,
-            fusion_plan: result.fusion_plan,
-            profiling: result.profiling,
         }
     }
 }

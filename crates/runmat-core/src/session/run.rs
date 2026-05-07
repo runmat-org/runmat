@@ -32,7 +32,7 @@ impl RunMatSession {
             .map(|entry| entry.name.clone())
             .collect::<Vec<_>>();
         let workspace_full = result.workspace.full;
-        let mut outcome = crate::abi::ExecutionOutcome::from_legacy_result(result);
+        let mut outcome = outcome_from_legacy_result(result);
         outcome.workspace_delta.upserts = self.abi_workspace_upserts(workspace_names);
         if workspace_full {
             outcome.workspace_delta.removals =
@@ -969,6 +969,66 @@ fn compile_eval_hook_with_legacy_hir_fallback(
     lowering: &runmat_hir::LoweringResult,
 ) -> Result<runmat_vm::Bytecode, runmat_vm::CompileError> {
     runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
+}
+
+fn outcome_from_legacy_result(result: ExecutionResult) -> crate::abi::ExecutionOutcome {
+    let mut diagnostics = Vec::new();
+    if let Some(error) = result.error {
+        diagnostics.push(crate::abi::RuntimeDiagnostic {
+            code: error
+                .identifier()
+                .unwrap_or("RunMat:RuntimeError")
+                .to_string(),
+            severity: crate::abi::DiagnosticSeverity::Error,
+            message: error.message().to_string(),
+            span: None,
+        });
+    }
+    diagnostics.extend(
+        result
+            .warnings
+            .into_iter()
+            .map(|warning| crate::abi::RuntimeDiagnostic {
+                code: warning.identifier,
+                severity: crate::abi::DiagnosticSeverity::Warning,
+                message: warning.message,
+                span: None,
+            }),
+    );
+
+    let display_events = result
+        .value
+        .as_ref()
+        .map(|value| crate::abi::DisplayEvent {
+            label: crate::abi::DisplayLabel::Anonymous,
+            value: value.clone(),
+            span: runmat_hir::Span::default(),
+        })
+        .into_iter()
+        .collect();
+
+    crate::abi::ExecutionOutcome {
+        flow: result
+            .value
+            .map(crate::abi::RuntimeFlow::Single)
+            .unwrap_or(crate::abi::RuntimeFlow::NoValue),
+        workspace_delta: crate::abi::WorkspaceDelta {
+            full_snapshot_required: result.workspace.full,
+            ..crate::abi::WorkspaceDelta::default()
+        },
+        display_events,
+        streams: result.streams,
+        diagnostics,
+        effects: Vec::new(),
+        suspension: None,
+        execution_time_ms: result.execution_time_ms,
+        used_jit: result.used_jit,
+        type_info: result.type_info,
+        figures_touched: result.figures_touched,
+        stdin_events: result.stdin_events,
+        fusion_plan: result.fusion_plan,
+        profiling: result.profiling,
+    }
 }
 
 fn source_input_text(
