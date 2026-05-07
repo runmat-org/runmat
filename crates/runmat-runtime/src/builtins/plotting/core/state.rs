@@ -896,21 +896,6 @@ pub fn set_colorbar_enabled_for_axes(
     Ok(())
 }
 
-pub fn set_tick_labels_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    x_labels: Option<Vec<String>>,
-    y_labels: Option<Vec<String>>,
-) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state
-            .figure
-            .set_axes_tick_labels(axes_index, x_labels, y_labels);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
-}
-
 pub fn set_legend_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -1359,28 +1344,59 @@ pub fn plot_child_handle_snapshot(handle: f64) -> Result<PlotChildHandleState, F
         .ok_or(FigureError::InvalidPlotObjectHandle)
 }
 
-pub fn update_heatmap_handle(
+pub fn set_heatmap_display_labels(
     figure: FigureHandle,
     axes_index: usize,
     plot_index: usize,
-    updater: impl FnOnce(&mut HeatmapHandleState),
+    x_labels: Option<Vec<String>>,
+    y_labels: Option<Vec<String>>,
 ) -> Result<(), FigureError> {
-    let mut reg = registry();
-    let state = reg.plot_children.values_mut().find(|state| match state {
-        PlotChildHandleState::Heatmap(heatmap) => {
-            heatmap.figure == figure
-                && heatmap.axes_index == axes_index
-                && heatmap.plot_index == plot_index
+    let figure_clone = {
+        let mut reg = registry();
+        let (current_x_labels, current_y_labels) = {
+            let state = reg.plot_children.values_mut().find(|state| match state {
+                PlotChildHandleState::Heatmap(heatmap) => {
+                    heatmap.figure == figure
+                        && heatmap.axes_index == axes_index
+                        && heatmap.plot_index == plot_index
+                }
+                _ => false,
+            });
+            let PlotChildHandleState::Heatmap(heatmap) =
+                state.ok_or(FigureError::InvalidPlotObjectHandle)?
+            else {
+                return Err(FigureError::InvalidPlotObjectHandle);
+            };
+            if let Some(labels) = x_labels {
+                heatmap.x_labels = labels;
+            }
+            if let Some(labels) = y_labels {
+                heatmap.y_labels = labels;
+            }
+            (heatmap.x_labels.clone(), heatmap.y_labels.clone())
+        };
+
+        let state = get_state_mut(&mut reg, figure);
+        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        if axes_index >= total_axes {
+            return Err(FigureError::InvalidSubplotIndex {
+                rows: state.figure.axes_rows.max(1),
+                cols: state.figure.axes_cols.max(1),
+                index: axes_index,
+            });
         }
-        _ => false,
-    });
-    match state.ok_or(FigureError::InvalidPlotObjectHandle)? {
-        PlotChildHandleState::Heatmap(heatmap) => {
-            updater(heatmap);
-            Ok(())
-        }
-        _ => Err(FigureError::InvalidPlotObjectHandle),
-    }
+        state.active_axes = axes_index;
+        state.figure.set_active_axes_index(axes_index);
+        state.figure.set_axes_tick_labels(
+            axes_index,
+            Some(current_x_labels),
+            Some(current_y_labels),
+        );
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(figure, &figure_clone, FigureEventKind::Updated);
+    Ok(())
 }
 
 pub fn update_histogram_handle_for_plot(

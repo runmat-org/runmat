@@ -416,6 +416,53 @@ mod tests {
             panic!("expected string array");
         };
         assert_eq!(labels.data, vec!["Small", "Medium", "Large"]);
+
+        set_builtin(vec![
+            Value::Num(handle),
+            Value::String("XDisplayLabels".into()),
+            Value::Cell(
+                CellArray::new(
+                    vec![
+                        Value::String("S".into()),
+                        Value::String("M".into()),
+                        Value::String("L".into()),
+                    ],
+                    1,
+                    3,
+                )
+                .unwrap(),
+            ),
+            Value::String("YDisplayLabels".into()),
+            Value::Cell(
+                CellArray::new(
+                    vec![
+                        Value::String("G".into()),
+                        Value::String("R".into()),
+                        Value::String("B".into()),
+                        Value::String("Y".into()),
+                    ],
+                    1,
+                    4,
+                )
+                .unwrap(),
+            ),
+        ])
+        .unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let meta = fig.axes_metadata(0).unwrap();
+        assert_eq!(
+            meta.x_tick_labels.as_ref().unwrap(),
+            &vec!["S".to_string(), "M".to_string(), "L".to_string()]
+        );
+        assert_eq!(
+            meta.y_tick_labels.as_ref().unwrap(),
+            &vec![
+                "G".to_string(),
+                "R".to_string(),
+                "B".to_string(),
+                "Y".to_string()
+            ]
+        );
     }
 
     #[test]

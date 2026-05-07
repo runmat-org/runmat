@@ -2578,18 +2578,12 @@ fn apply_heatmap_property(
                     format!("{builtin}: XDisplayLabels length must match heatmap columns"),
                 ));
             }
-            super::state::set_tick_labels_for_axes(
-                heatmap_handle.figure,
-                heatmap_handle.axes_index,
-                Some(labels.clone()),
-                Some(heatmap_handle.y_labels.clone()),
-            )
-            .map_err(|err| map_figure_error(builtin, err))?;
-            super::state::update_heatmap_handle(
+            super::state::set_heatmap_display_labels(
                 heatmap_handle.figure,
                 heatmap_handle.axes_index,
                 heatmap_handle.plot_index,
-                |state| state.x_labels = labels,
+                Some(labels),
+                None,
             )
             .map_err(|err| map_figure_error(builtin, err))
         }
@@ -2601,18 +2595,12 @@ fn apply_heatmap_property(
                     format!("{builtin}: YDisplayLabels length must match heatmap rows"),
                 ));
             }
-            super::state::set_tick_labels_for_axes(
-                heatmap_handle.figure,
-                heatmap_handle.axes_index,
-                Some(heatmap_handle.x_labels.clone()),
-                Some(labels.clone()),
-            )
-            .map_err(|err| map_figure_error(builtin, err))?;
-            super::state::update_heatmap_handle(
+            super::state::set_heatmap_display_labels(
                 heatmap_handle.figure,
                 heatmap_handle.axes_index,
                 heatmap_handle.plot_index,
-                |state| state.y_labels = labels,
+                None,
+                Some(labels),
             )
             .map_err(|err| map_figure_error(builtin, err))
         }
