@@ -609,18 +609,18 @@ impl SnapshotBuilder {
         ]
     }
 
-    /// Compile source to HIR
-    fn compile_to_hir(&self, source: &str) -> Result<runmat_hir::LegacyHirProgram> {
+    /// Compile source to semantic HIR
+    fn compile_to_hir(&self, source: &str) -> Result<runmat_hir::HirAssembly> {
         let ast = runmat_parser::parse(source).map_err(|e| anyhow::anyhow!(e))?;
         let hir =
             runmat_hir::lower(&ast, &LoweringContext::empty()).map_err(|e| anyhow::anyhow!(e))?;
-        Ok(hir.hir)
+        Ok(hir.assembly)
     }
 
     /// Extract type information from HIR
     fn extract_type_info(
         &self,
-        _hir: &runmat_hir::LegacyHirProgram,
+        _hir: &runmat_hir::HirAssembly,
         _type_cache: &mut HashMap<String, runmat_hir::Type>,
     ) {
         // Type extraction would analyze HIR and populate type cache
@@ -648,13 +648,10 @@ impl SnapshotBuilder {
     }
 
     /// Create HIR pattern (simplified)
-    fn create_pattern_hir(&self, source: &str) -> runmat_hir::LegacyHirProgram {
+    fn create_pattern_hir(&self, source: &str) -> runmat_hir::HirAssembly {
         self.compile_to_hir(source).unwrap_or_else(|_| {
             // Fallback to empty program
-            runmat_hir::LegacyHirProgram {
-                body: Vec::new(),
-                var_types: Vec::new(),
-            }
+            runmat_hir::HirAssembly::default()
         })
     }
 
@@ -673,9 +670,7 @@ impl SnapshotBuilder {
             let compiled = stdlib_sources
                 .get(name)
                 .map(|source| self.compile_source_to_bytecode(source))
-                .unwrap_or_else(|| {
-                    runmat_vm::compile_legacy(hir, &HashMap::new()).map_err(Into::into)
-                });
+                .unwrap_or_else(|| self.compile_assembly_to_bytecode(hir));
             match compiled {
                 Ok(bytecode) => {
                     stdlib_bytecode.insert(name.clone(), bytecode);
@@ -754,6 +749,22 @@ impl SnapshotBuilder {
             }
         }
         Ok(runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())?)
+    }
+
+    fn compile_assembly_to_bytecode(
+        &self,
+        assembly: &runmat_hir::HirAssembly,
+    ) -> Result<runmat_vm::Bytecode> {
+        let entrypoint = assembly
+            .entrypoints
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("semantic HIR assembly has no entrypoint"))?;
+        let mir = runmat_mir::lowering::lower_assembly(assembly).map_err(|err| {
+            anyhow::anyhow!(format!(
+                "failed to lower semantic HIR assembly to MIR: {err:?}"
+            ))
+        })?;
+        runmat_vm::compile(assembly, &mir, entrypoint.id).map_err(Into::into)
     }
 
     /// Identify hotspot bytecode for JIT optimization
