@@ -455,11 +455,38 @@ impl Compiler {
             MirPlace::Index(base, indexing) => {
                 let base_slot = self.mir_place_slot(base)?;
                 self.emit(Instr::LoadVar(base_slot));
-                self.compile_mir_index_components(indexing, IndexResultContext::AssignmentTarget)?;
-                self.compile_mir_rvalue(value)?;
                 match indexing.kind {
-                    IndexKind::Paren => self.emit(Instr::StoreIndex(indexing.components.len())),
-                    IndexKind::Brace => self.emit(Instr::StoreIndexCell(indexing.components.len())),
+                    IndexKind::Paren => {
+                        if indexing.components.iter().all(|component| {
+                            matches!(component, MirIndexComponent::Expr(_))
+                                && !matches!(component, MirIndexComponent::Expr(MirOperand::Local(local)) if self.mir_local_is_colon(*local) || self.mir_local_is_end(*local))
+                        }) {
+                            self.compile_mir_index_components(
+                                indexing,
+                                IndexResultContext::AssignmentTarget,
+                            )?;
+                            self.compile_mir_rvalue(value)?;
+                            self.emit(Instr::StoreIndex(indexing.components.len()));
+                        } else {
+                            let (numeric_count, colon_mask, end_mask) =
+                                self.compile_mir_slice_components(indexing)?;
+                            self.compile_mir_rvalue(value)?;
+                            self.emit(Instr::StoreSlice(
+                                indexing.components.len(),
+                                numeric_count,
+                                colon_mask,
+                                end_mask,
+                            ));
+                        }
+                    }
+                    IndexKind::Brace => {
+                        self.compile_mir_index_components(
+                            indexing,
+                            IndexResultContext::AssignmentTarget,
+                        )?;
+                        self.compile_mir_rvalue(value)?;
+                        self.emit(Instr::StoreIndexCell(indexing.components.len()));
+                    }
                     IndexKind::Dot => {
                         return Err(self.compile_error(
                             "MIR bytecode lowering for dot assignment is not implemented yet",
@@ -711,6 +738,20 @@ impl Compiler {
     }
 
     fn compile_mir_slice_index(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
+        let (numeric_count, colon_mask, end_mask) = self.compile_mir_slice_components(indexing)?;
+        self.emit(Instr::IndexSlice(
+            indexing.components.len(),
+            numeric_count,
+            colon_mask,
+            end_mask,
+        ));
+        Ok(())
+    }
+
+    fn compile_mir_slice_components(
+        &mut self,
+        indexing: &MirIndexing,
+    ) -> Result<(usize, u32, u32), CompileError> {
         let mut colon_mask = 0u32;
         let mut end_mask = 0u32;
         let mut numeric_count = 0usize;
@@ -741,13 +782,7 @@ impl Compiler {
             }
         }
 
-        self.emit(Instr::IndexSlice(
-            indexing.components.len(),
-            numeric_count,
-            colon_mask,
-            end_mask,
-        ));
-        Ok(())
+        Ok((numeric_count, colon_mask, end_mask))
     }
 
     fn mir_local_is_colon(&self, local: runmat_mir::MirLocalId) -> bool {
