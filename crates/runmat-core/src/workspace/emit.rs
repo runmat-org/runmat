@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use runmat_builtins::Value;
+use runmat_hir::{HirAssembly, HirExprKind, HirPlace, HirStmtKind};
 
 use crate::{
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
@@ -20,12 +21,18 @@ pub(crate) enum FinalStmtEmitDisposition {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct LegacyDisplayContext {
+pub(crate) struct DisplayContext {
+    pub first_assign_var: Option<usize>,
     pub single_assign_var: Option<usize>,
     pub single_stmt_non_assign: bool,
     pub final_stmt_emit: FinalStmtEmitDisposition,
     pub last_assign_var: Option<usize>,
     pub last_expr_emits: bool,
+}
+
+pub(crate) struct ExecutionDisplayContext {
+    pub context: DisplayContext,
+    pub display_var_ids: Vec<usize>,
 }
 
 pub(crate) fn determine_display_label_from_context(
@@ -103,7 +110,146 @@ pub(crate) fn format_type_info(value: &Value) -> String {
     }
 }
 
-pub(crate) fn legacy_display_context(body: &[runmat_hir::LegacyHirStmt]) -> LegacyDisplayContext {
+pub(crate) fn execution_display_context(
+    assembly: &HirAssembly,
+    layout: Option<&runmat_vm::layout::VmAssemblyLayout>,
+    legacy_body: &[runmat_hir::LegacyHirStmt],
+) -> ExecutionDisplayContext {
+    semantic_display_context(assembly, layout).unwrap_or_else(|| ExecutionDisplayContext {
+        display_var_ids: legacy_display_var_ids(legacy_body),
+        context: legacy_display_context(legacy_body),
+    })
+}
+
+fn semantic_display_context(
+    assembly: &HirAssembly,
+    layout: Option<&runmat_vm::layout::VmAssemblyLayout>,
+) -> Option<ExecutionDisplayContext> {
+    let entrypoint = assembly.entrypoints.first()?;
+    let function = assembly
+        .functions
+        .iter()
+        .find(|f| f.id == entrypoint.target)?;
+    let function_layout = layout?.functions.get(&function.id)?;
+    let slot_for_place = |place: &HirPlace| match place {
+        HirPlace::Binding(binding) => function_layout
+            .binding_slots
+            .get(binding)
+            .map(|slot| slot.0),
+        _ => None,
+    };
+    let slot_for_binding_expr = |expr: &runmat_hir::HirExpr| match &expr.kind {
+        HirExprKind::Binding(binding) => function_layout
+            .binding_slots
+            .get(binding)
+            .map(|slot| slot.0),
+        _ => None,
+    };
+
+    let statements = &function.body.statements;
+    let (single_assign_var, single_stmt_non_assign) = if statements.len() == 1 {
+        match &statements[0].kind {
+            HirStmtKind::Assign(place, _, _) => (slot_for_place(place), false),
+            _ => (None, true),
+        }
+    } else {
+        (None, false)
+    };
+
+    let first_assign_var = statements.first().and_then(|stmt| match &stmt.kind {
+        HirStmtKind::Assign(place, _, _) => slot_for_place(place),
+        _ => None,
+    });
+
+    let mut final_stmt_emit = FinalStmtEmitDisposition::Suppressed;
+    for stmt in statements.iter().rev() {
+        match &stmt.kind {
+            HirStmtKind::ExprStmt(expr, suppressed) => {
+                final_stmt_emit = semantic_expr_emit_disposition(expr, *suppressed);
+                break;
+            }
+            HirStmtKind::Assign(_, _, _) | HirStmtKind::MultiAssign(_, _, _) => break,
+            _ => continue,
+        }
+    }
+
+    let mut last_assign_var = None;
+    for stmt in statements.iter().rev() {
+        match &stmt.kind {
+            HirStmtKind::Assign(place, _, suppressed) => {
+                last_assign_var = if *suppressed {
+                    None
+                } else {
+                    slot_for_place(place)
+                };
+                break;
+            }
+            HirStmtKind::ExprStmt(_, _) | HirStmtKind::MultiAssign(_, _, _) => break,
+            _ => continue,
+        }
+    }
+
+    let mut last_expr_emits = false;
+    for stmt in statements.iter().rev() {
+        match &stmt.kind {
+            HirStmtKind::ExprStmt(expr, suppressed) => {
+                last_expr_emits = matches!(
+                    semantic_expr_emit_disposition(expr, *suppressed),
+                    FinalStmtEmitDisposition::Inline
+                );
+                break;
+            }
+            HirStmtKind::Assign(_, _, _) | HirStmtKind::MultiAssign(_, _, _) => break,
+            _ => continue,
+        }
+    }
+
+    let display_var_ids = statements
+        .iter()
+        .filter_map(|stmt| match &stmt.kind {
+            HirStmtKind::Assign(place, _, suppressed) if !*suppressed => slot_for_place(place),
+            HirStmtKind::ExprStmt(expr, suppressed) if !*suppressed => slot_for_binding_expr(expr),
+            HirStmtKind::MultiAssign(targets, _, suppressed) if !*suppressed => {
+                targets.targets.iter().find_map(|target| match target {
+                    runmat_hir::OutputTarget::Place(place) => slot_for_place(place),
+                    _ => None,
+                })
+            }
+            _ => None,
+        })
+        .collect();
+
+    Some(ExecutionDisplayContext {
+        context: DisplayContext {
+            first_assign_var,
+            single_assign_var,
+            single_stmt_non_assign,
+            final_stmt_emit,
+            last_assign_var,
+            last_expr_emits,
+        },
+        display_var_ids,
+    })
+}
+
+fn semantic_expr_emit_disposition(
+    expr: &runmat_hir::HirExpr,
+    suppressed: bool,
+) -> FinalStmtEmitDisposition {
+    if suppressed {
+        return FinalStmtEmitDisposition::Suppressed;
+    }
+    if let HirExprKind::Call(call) = &expr.kind {
+        if let runmat_hir::HirCallableRef::Builtin(builtin) = &call.callee {
+            if runmat_builtins::suppresses_auto_output(builtin.0.as_str()) {
+                return FinalStmtEmitDisposition::Suppressed;
+            }
+        }
+    }
+    FinalStmtEmitDisposition::Inline
+}
+
+fn legacy_display_context(body: &[runmat_hir::LegacyHirStmt]) -> DisplayContext {
     let (single_assign_var, single_stmt_non_assign) = if body.len() == 1 {
         match &body[0] {
             runmat_hir::LegacyHirStmt::Assign(var_id, _, _, _) => (Some(var_id.0), false),
@@ -113,7 +259,8 @@ pub(crate) fn legacy_display_context(body: &[runmat_hir::LegacyHirStmt]) -> Lega
         (None, false)
     };
 
-    LegacyDisplayContext {
+    DisplayContext {
+        first_assign_var: legacy_first_assign_var(body),
         single_assign_var,
         single_stmt_non_assign,
         final_stmt_emit: legacy_last_displayable_statement_emit_disposition(body),

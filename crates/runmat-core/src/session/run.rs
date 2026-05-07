@@ -302,6 +302,13 @@ impl RunMatSession {
         if self.verbose {
             debug!("AST: {ast:?}");
         }
+        let display = execution_display_context(
+            &lowering.assembly,
+            bytecode.layout.as_ref(),
+            &lowering.hir.body,
+        );
+        let display_context = display.context;
+        let display_var_ids = display.display_var_ids;
         let (hir, updated_vars, updated_functions, var_names_map) = (
             lowering.hir,
             lowering.variables,
@@ -334,8 +341,6 @@ impl RunMatSession {
         if self.verbose {
             debug!("HIR generated successfully");
         }
-
-        let legacy_display = legacy_display_context(&hir.body);
 
         if preserve_layout_var_names && bytecode.layout.is_some() {
             for (slot, name) in &id_to_name {
@@ -415,7 +420,7 @@ impl RunMatSession {
                 .map(|t| matches!(t, LexToken::Semicolon))
                 .unwrap_or(false)
         };
-        let final_stmt_emit = legacy_display.final_stmt_emit;
+        let final_stmt_emit = display_context.final_stmt_emit;
 
         if self.verbose {
             debug!("HIR body len: {}", hir.body.len());
@@ -454,7 +459,7 @@ impl RunMatSession {
                             } else {
                                 self.stats.interpreter_fallback += 1;
                             }
-                            if let Some(var_id) = legacy_first_assign_var(&hir.body) {
+                            if let Some(var_id) = display_context.first_assign_var {
                                 if let Some(name) = id_to_name.get(&var_id) {
                                     assigned_this_execution.insert(name.clone());
                                 }
@@ -547,7 +552,7 @@ impl RunMatSession {
 
                     // Handle assignment statements (x = 42 should show the assigned value unless suppressed)
                     if hir.body.len() == 1 {
-                        if let Some(var_id) = legacy_first_assign_var(&hir.body) {
+                        if let Some(var_id) = display_context.first_assign_var {
                             if let Some(name) = id_to_name.get(&var_id) {
                                 assigned_this_execution.insert(name.clone());
                             }
@@ -622,8 +627,8 @@ impl RunMatSession {
             }
         }
 
-        let last_assign_var = legacy_display.last_assign_var;
-        let last_expr_emits = legacy_display.last_expr_emits;
+        let last_assign_var = display_context.last_assign_var;
+        let last_expr_emits = display_context.last_expr_emits;
         if !is_semicolon_suppressed && result_value.is_none() {
             if last_assign_var.is_some() || last_expr_emits {
                 if let Some(value) = runmat_runtime::console::take_last_value_output() {
@@ -778,22 +783,21 @@ impl RunMatSession {
 
         if !is_semicolon_suppressed
             && (matches!(final_stmt_emit, FinalStmtEmitDisposition::NeedsFallback)
-                || legacy_display.single_assign_var.is_some()
+                || display_context.single_assign_var.is_some()
                 || (is_expression_stmt
                     && matches!(final_stmt_emit, FinalStmtEmitDisposition::Inline)))
         {
             if let Some(value) = result_value.as_ref() {
                 if runmat_runtime::console::take_last_value_output().is_none() {
-                    let display_var_ids = legacy_display_var_ids(&hir.body);
                     if display_var_ids.is_empty() {
                         let label = last_emit_var_index(&bytecode)
                             .and_then(|var_id| id_to_name.get(&var_id).cloned())
                             .or_else(|| {
                                 determine_display_label_from_context(
-                                    legacy_display.single_assign_var,
+                                    display_context.single_assign_var,
                                     &id_to_name,
                                     is_expression_stmt,
-                                    legacy_display.single_stmt_non_assign,
+                                    display_context.single_stmt_non_assign,
                                 )
                             });
                         runmat_runtime::console::record_value_output(label.as_deref(), value);
