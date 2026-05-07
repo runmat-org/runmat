@@ -9,8 +9,8 @@ use runmat_hir::{
     OperatorKind, RequestedOutputCount,
 };
 use runmat_mir::{
-    MirAssembly, MirBody, MirCall, MirCallArg, MirConstant, MirOperand, MirPlace, MirRvalue,
-    MirStmt, MirStmtKind, MirTerminatorKind,
+    MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirConstant, MirOperand, MirPlace,
+    MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
 };
 use std::collections::HashMap;
 
@@ -454,6 +454,12 @@ impl Compiler {
                 Ok(())
             }
             MirRvalue::Call(call) => self.compile_mir_call(call),
+            MirRvalue::Aggregate {
+                kind,
+                rows,
+                cols,
+                elements,
+            } => self.compile_mir_aggregate(kind, *rows, *cols, elements),
             _ => {
                 Err(self
                     .compile_error("MIR bytecode lowering for this rvalue is not implemented yet"))
@@ -501,6 +507,34 @@ impl Compiler {
         runmat_builtins::builtin_function_by_name(&candidate)
             .map(|builtin| builtin.name.to_string())
             .ok_or_else(|| CompileError::new(format!("unknown builtin function {candidate}")))
+    }
+
+    fn compile_mir_aggregate(
+        &mut self,
+        kind: &MirAggregateKind,
+        rows: usize,
+        cols: usize,
+        elements: &[MirOperand],
+    ) -> Result<(), CompileError> {
+        if rows.checked_mul(cols) != Some(elements.len()) {
+            return Err(
+                self.compile_error("MIR aggregate shape does not match aggregate element count")
+            );
+        }
+
+        for element in elements {
+            self.compile_mir_operand(element)?;
+        }
+        match kind {
+            MirAggregateKind::Tensor => self.emit(Instr::CreateMatrix(rows, cols)),
+            MirAggregateKind::Cell => self.emit(Instr::CreateCell2D(rows, cols)),
+            MirAggregateKind::Struct | MirAggregateKind::ObjectArray(_) => {
+                return Err(self.compile_error(
+                    "MIR bytecode lowering for this aggregate kind is not implemented yet",
+                ))
+            }
+        };
+        Ok(())
     }
 
     fn compile_mir_operand(&mut self, operand: &MirOperand) -> Result<(), CompileError> {

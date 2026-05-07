@@ -155,4 +155,35 @@ mod tests {
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert_eq!(vars[export.slot.0], Value::Num(3.0));
     }
+
+    #[test]
+    fn primary_compile_interprets_matrix_literal_assignment() {
+        let ast = runmat_parser::parse("x = [1 2; 3 4];").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let export = &layout.entrypoints[&entrypoint].exports[0];
+
+        assert!(matches!(
+            bytecode.instructions.as_slice(),
+            [
+                Instr::LoadConst(1.0),
+                Instr::LoadConst(2.0),
+                Instr::LoadConst(3.0),
+                Instr::LoadConst(4.0),
+                Instr::CreateMatrix(2, 2),
+                Instr::StoreVar(_),
+            ]
+        ));
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[export.slot.0] else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.shape, vec![2, 2]);
+        assert_eq!(tensor.data, vec![1.0, 3.0, 2.0, 4.0]);
+    }
 }
