@@ -351,7 +351,6 @@ async fn store_graphics_member(
     field: &str,
     rhs: Value,
 ) -> Result<Value, RuntimeError> {
-    runmat_runtime::call_builtin_async("get", std::slice::from_ref(&base)).await?;
     runmat_runtime::call_builtin_async(
         "set",
         &[base.clone(), Value::String(field.to_string()), rhs],
