@@ -917,12 +917,32 @@ impl Compiler {
                 };
                 Ok(())
             }
-            MirOperand::Constant(MirConstant::EmptyArray)
-            | MirOperand::FunctionHandle(_)
-            | MirOperand::Temp(_) => {
+            MirOperand::FunctionHandle(target) => self.compile_mir_function_handle(target),
+            MirOperand::Constant(MirConstant::EmptyArray) | MirOperand::Temp(_) => {
                 Err(self
                     .compile_error("MIR bytecode lowering for this operand is not implemented yet"))
             }
+        }
+    }
+
+    fn compile_mir_function_handle(
+        &mut self,
+        target: &runmat_hir::FunctionHandleTarget,
+    ) -> Result<(), CompileError> {
+        match target {
+            runmat_hir::FunctionHandleTarget::Builtin(builtin) => {
+                self.emit(Instr::LoadString(builtin.0.clone()));
+                self.emit(Instr::CallBuiltin("make_handle".to_string(), 1));
+                Ok(())
+            }
+            runmat_hir::FunctionHandleTarget::DynamicName(name) => {
+                self.emit(Instr::LoadString(name.0.clone()));
+                self.emit(Instr::CallBuiltin("make_handle".to_string(), 1));
+                Ok(())
+            }
+            _ => Err(self.compile_error(
+                "MIR bytecode lowering for this function handle target is not implemented yet",
+            )),
         }
     }
 
