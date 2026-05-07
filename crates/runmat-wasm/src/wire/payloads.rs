@@ -3,22 +3,18 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 use wasm_bindgen::prelude::JsValue;
 
+use crate::wire::errors::{js_error, RunMatErrorKind, RunMatErrorPayload, RunMatErrorSpanPayload};
+use crate::wire::value::{value_to_json, MAX_DATA_PREVIEW};
 use runmat_builtins::Value;
 use runmat_core::{
     abi::{DiagnosticSeverity, ExecutionOutcome, RuntimeDiagnostic, WorkspaceBindingKey},
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
-    value_shape, ExecutionProfiling, ExecutionResult, ExecutionStreamEntry, ExecutionStreamKind,
-    FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader, FusionPlanSnapshot,
-    MaterializedVariable, StdinEvent, StdinEventKind, WorkspaceEntry, WorkspaceMaterializeOptions,
+    value_shape, ExecutionProfiling, ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision,
+    FusionPlanEdge, FusionPlanNode, FusionPlanShader, FusionPlanSnapshot, MaterializedVariable,
+    StdinEvent, StdinEventKind, WorkspaceEntry, WorkspaceMaterializeOptions,
     WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceResidency, WorkspaceSliceOptions,
     WorkspaceSnapshot,
 };
-use runmat_runtime::warning_store::RuntimeWarning;
-
-use crate::wire::errors::{
-    js_error, runtime_error_payload, RunMatErrorKind, RunMatErrorPayload, RunMatErrorSpanPayload,
-};
-use crate::wire::value::{value_to_json, MAX_DATA_PREVIEW};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,42 +64,6 @@ pub(crate) struct MemoryUsagePayload {
 }
 
 impl ExecutionPayload {
-    pub(crate) fn from_result(result: ExecutionResult, source: &str) -> Self {
-        let value_text = result.value.as_ref().map(|v| v.to_string());
-        let value_json = result.value.as_ref().map(|v| value_to_json(v, 0));
-        let error = result
-            .error
-            .as_ref()
-            .map(|err| runtime_error_payload(err, Some(source)));
-        Self {
-            value_text,
-            value_json,
-            type_info: result.type_info,
-            execution_time_ms: result.execution_time_ms,
-            used_jit: result.used_jit,
-            error,
-            stdout: result
-                .streams
-                .into_iter()
-                .map(ConsoleStreamPayload::from)
-                .collect(),
-            workspace: WorkspacePayload::from(result.workspace),
-            figures_touched: result.figures_touched,
-            warnings: result
-                .warnings
-                .into_iter()
-                .map(WarningPayload::from)
-                .collect(),
-            stdin_events: result
-                .stdin_events
-                .into_iter()
-                .map(StdinEventPayload::from)
-                .collect(),
-            profiling: result.profiling.map(ProfilingPayload::from),
-            fusion_plan: result.fusion_plan.map(FusionPlanPayload::from),
-        }
-    }
-
     pub(crate) fn from_outcome(outcome: ExecutionOutcome, source: &str) -> Self {
         let value = outcome.flow.durable_workspace_value().cloned();
         let error = outcome
@@ -185,15 +145,6 @@ impl ConsoleStreamPayload {
 pub(crate) struct WarningPayload {
     pub(crate) identifier: String,
     pub(crate) message: String,
-}
-
-impl From<RuntimeWarning> for WarningPayload {
-    fn from(warning: RuntimeWarning) -> Self {
-        Self {
-            identifier: warning.identifier,
-            message: warning.message,
-        }
-    }
 }
 
 impl WarningPayload {
