@@ -368,6 +368,33 @@ fn local_function_multi_output_uses_semantic_vm() {
 }
 
 #[test]
+fn feval_with_cell_expansion_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "f = @(x) x + 1; C = {2}; y = feval(f, C{:});";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile feval expansion call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "feval with cell expansion should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMulti(_))),
+        "expanded feval should use the VM feval ABI instruction"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "3"
+    }));
+}
+
+#[test]
 fn workspace_reports_datetime_array_shape() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let result =

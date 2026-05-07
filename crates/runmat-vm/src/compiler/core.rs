@@ -772,7 +772,16 @@ impl Compiler {
             }
             _ => {
                 let name = self.mir_builtin_call_name(call)?;
-                if has_expansion {
+                if has_expansion && name == "feval" {
+                    if call.args.is_empty() {
+                        return Err(self.compile_error("feval: missing function argument"));
+                    }
+                    let rest_specs = specs
+                        .get(1..)
+                        .ok_or_else(|| self.compile_error("feval: missing function argument"))?
+                        .to_vec();
+                    self.emit(Instr::CallFevalExpandMulti(rest_specs));
+                } else if has_expansion {
                     self.emit(Instr::CallBuiltinExpandMulti(name, specs));
                 } else if name == "feval" {
                     if call.args.is_empty() {
