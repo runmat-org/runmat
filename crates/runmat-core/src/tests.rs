@@ -414,6 +414,25 @@ fn multi_assign_cell_expansion_rhs_uses_semantic_vm() {
 }
 
 #[test]
+fn cell_end_indexing_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "C = {1, 2}; y = C{end};";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile cell end indexing");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "cell end indexing should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "2"
+    }));
+}
+
+#[test]
 fn feval_anonymous_handle_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "f = @(x) x + 1; y = feval(f, 2);";

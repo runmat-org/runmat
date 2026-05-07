@@ -26,6 +26,42 @@ fn total_len_from_shape(shape: &[usize]) -> usize {
     }
 }
 
+fn numeric_indices_from_values(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
+    values
+        .iter()
+        .map(|value| {
+            let index: f64 = value.try_into()?;
+            Ok(index as usize)
+        })
+        .collect()
+}
+
+fn resolve_cell_indices(
+    values: &[Value],
+    rows: usize,
+    cols: usize,
+) -> Result<Vec<usize>, RuntimeError> {
+    values
+        .iter()
+        .enumerate()
+        .map(|(dim, value)| match value {
+            Value::Num(index) if *index == 0.0 && index.is_sign_negative() => {
+                Ok(if values.len() == 1 {
+                    rows * cols
+                } else if dim == 0 {
+                    rows
+                } else {
+                    cols
+                })
+            }
+            _ => {
+                let index: f64 = value.try_into()?;
+                Ok(index as usize)
+            }
+        })
+        .collect()
+}
+
 #[derive(Clone, Copy)]
 struct IndexContext<'a> {
     dims: usize,
@@ -418,22 +454,22 @@ where
             Ok(true)
         }
         crate::bytecode::Instr::IndexCell(num_indices) => {
-            let mut indices = Vec::with_capacity(*num_indices);
+            let mut raw_indices = Vec::with_capacity(*num_indices);
             for _ in 0..*num_indices {
-                let v: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
+                let v = stack.pop().ok_or(crate::interpreter::errors::mex(
                     "StackUnderflow",
                     "stack underflow",
-                ))?)
-                    .try_into()?;
-                indices.push(v as usize);
+                ))?;
+                raw_indices.push(v);
             }
-            indices.reverse();
+            raw_indices.reverse();
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
             match base {
                 Value::Object(obj) => {
+                    let indices = numeric_indices_from_values(&raw_indices)?;
                     let cell = runmat_runtime::call_builtin_async(
                         "__make_cell",
                         &indices
@@ -451,6 +487,7 @@ where
                     stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
                 }
                 Value::HandleObject(handle) => {
+                    let indices = numeric_indices_from_values(&raw_indices)?;
                     let cell = runmat_runtime::call_builtin_async(
                         "__make_cell",
                         &indices
@@ -467,7 +504,10 @@ where
                     ];
                     stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
                 }
-                Value::Cell(ca) => stack.push(crate::ops::cells::index_cell_value(&ca, &indices)?),
+                Value::Cell(ca) => {
+                    let indices = resolve_cell_indices(&raw_indices, ca.rows, ca.cols)?;
+                    stack.push(crate::ops::cells::index_cell_value(&ca, &indices)?);
+                }
                 _ => {
                     return Err(crate::interpreter::errors::mex(
                         "CellIndexingOnNonCell",

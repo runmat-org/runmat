@@ -1006,7 +1006,7 @@ impl Compiler {
                 }
             }
             IndexKind::Brace => {
-                self.compile_mir_index_components(indexing, indexing.result_context.clone())?;
+                self.compile_mir_cell_index_components(indexing, indexing.result_context.clone())?;
                 self.emit(Instr::IndexCell(indexing.components.len()));
             }
             IndexKind::Dot => {
@@ -1035,6 +1035,32 @@ impl Compiler {
                 ));
             };
             self.compile_mir_operand(operand)?;
+        }
+        Ok(())
+    }
+
+    fn compile_mir_cell_index_components(
+        &mut self,
+        indexing: &MirIndexing,
+        expected_context: IndexResultContext,
+    ) -> Result<(), CompileError> {
+        if indexing.result_context != expected_context {
+            return Err(self.compile_error(
+                "MIR bytecode lowering for this indexing form is not implemented yet",
+            ));
+        }
+        for component in &indexing.components {
+            match component {
+                MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
+                MirIndexComponent::End { offset, .. } if *offset == 0 => {
+                    self.emit(Instr::LoadConst(-0.0));
+                }
+                _ => {
+                    return Err(self.compile_error(
+                        "MIR bytecode lowering for non-expression indices is not implemented yet",
+                    ))
+                }
+            }
         }
         Ok(())
     }
