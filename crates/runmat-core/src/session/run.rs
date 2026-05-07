@@ -6,7 +6,9 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<LegacyExecutionResult, RunError> {
-        self.run_legacy_result(input, false).await
+        self.execute_internal(input, false)
+            .await
+            .map(legacy_result_from_execution)
     }
 
     /// Execute MATLAB/Octave code and return the runtime/workspace ABI outcome.
@@ -27,15 +29,15 @@ impl RunMatSession {
             .keys()
             .cloned()
             .collect::<HashSet<_>>();
-        let result = self.run_legacy_result(input, true).await?;
-        let workspace_names = result
-            .workspace
+        let mut execution = self.execute_internal(input, true).await?;
+        let workspace_names = execution
+            .workspace_snapshot
             .values
             .iter()
             .map(|entry| entry.name.clone())
             .collect::<Vec<_>>();
-        let workspace_full = result.workspace.full;
-        let mut outcome = outcome_from_legacy_result(result);
+        let workspace_full = execution.workspace_snapshot.full;
+        let outcome = &mut execution.outcome;
         outcome.workspace_delta.upserts = self.abi_workspace_upserts(workspace_names);
         if workspace_full {
             outcome.workspace_delta.removals =
@@ -46,7 +48,7 @@ impl RunMatSession {
                 ));
             }
         }
-        Ok(outcome)
+        Ok(execution.outcome)
     }
 
     /// Execute a structured runtime/workspace ABI request.
@@ -78,12 +80,11 @@ impl RunMatSession {
         })
     }
 
-    /// Legacy execution result path retained for compatibility callers.
-    async fn run_legacy_result(
+    async fn execute_internal(
         &mut self,
         input: &str,
         preserve_layout_var_names: bool,
-    ) -> std::result::Result<LegacyExecutionResult, RunError> {
+    ) -> std::result::Result<SessionExecution, RunError> {
         let _active = ActiveExecutionGuard::new(self).map_err(|err| {
             RunError::Runtime(
                 build_runtime_error(err.to_string())
@@ -878,20 +879,70 @@ impl RunMatSession {
             result_value
         };
 
-        self.format_mode = runmat_builtins::get_display_format();
-        Ok(LegacyExecutionResult {
-            value: public_value,
+        let mut diagnostics = Vec::new();
+        if let Some(error) = &error {
+            diagnostics.push(crate::abi::RuntimeDiagnostic {
+                code: error
+                    .identifier()
+                    .unwrap_or("RunMat:RuntimeError")
+                    .to_string(),
+                severity: crate::abi::DiagnosticSeverity::Error,
+                message: error.message().to_string(),
+                span: None,
+            });
+        }
+        diagnostics.extend(
+            warnings
+                .iter()
+                .map(|warning| crate::abi::RuntimeDiagnostic {
+                    code: warning.identifier.clone(),
+                    severity: crate::abi::DiagnosticSeverity::Warning,
+                    message: warning.message.clone(),
+                    span: None,
+                }),
+        );
+
+        let display_events = public_value
+            .as_ref()
+            .map(|value| crate::abi::DisplayEvent {
+                label: crate::abi::DisplayLabel::Anonymous,
+                value: value.clone(),
+                span: runmat_hir::Span::default(),
+            })
+            .into_iter()
+            .collect();
+
+        let profiling = gather_profiling(execution_time_ms);
+        let outcome = crate::abi::ExecutionOutcome {
+            flow: public_value
+                .clone()
+                .map(crate::abi::RuntimeFlow::Single)
+                .unwrap_or(crate::abi::RuntimeFlow::NoValue),
+            workspace_delta: crate::abi::WorkspaceDelta {
+                full_snapshot_required: workspace_snapshot.full,
+                ..crate::abi::WorkspaceDelta::default()
+            },
+            display_events,
+            streams,
+            diagnostics,
+            effects: Vec::new(),
+            suspension: None,
             execution_time_ms,
             used_jit,
-            error,
             type_info,
-            streams,
-            workspace: workspace_snapshot,
             figures_touched,
-            warnings,
-            profiling: gather_profiling(execution_time_ms),
-            fusion_plan: fusion_snapshot,
             stdin_events,
+            fusion_plan: fusion_snapshot,
+            profiling,
+        };
+
+        self.format_mode = runmat_builtins::get_display_format();
+        Ok(SessionExecution {
+            outcome,
+            workspace_snapshot,
+            public_value,
+            error,
+            warnings,
         })
     }
 
@@ -974,63 +1025,28 @@ fn compile_eval_hook_with_legacy_hir_fallback(
     runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
 }
 
-fn outcome_from_legacy_result(result: LegacyExecutionResult) -> crate::abi::ExecutionOutcome {
-    let mut diagnostics = Vec::new();
-    if let Some(error) = result.error {
-        diagnostics.push(crate::abi::RuntimeDiagnostic {
-            code: error
-                .identifier()
-                .unwrap_or("RunMat:RuntimeError")
-                .to_string(),
-            severity: crate::abi::DiagnosticSeverity::Error,
-            message: error.message().to_string(),
-            span: None,
-        });
-    }
-    diagnostics.extend(
-        result
-            .warnings
-            .into_iter()
-            .map(|warning| crate::abi::RuntimeDiagnostic {
-                code: warning.identifier,
-                severity: crate::abi::DiagnosticSeverity::Warning,
-                message: warning.message,
-                span: None,
-            }),
-    );
+struct SessionExecution {
+    outcome: crate::abi::ExecutionOutcome,
+    workspace_snapshot: WorkspaceSnapshot,
+    public_value: Option<Value>,
+    error: Option<RuntimeError>,
+    warnings: Vec<runmat_runtime::warning_store::RuntimeWarning>,
+}
 
-    let display_events = result
-        .value
-        .as_ref()
-        .map(|value| crate::abi::DisplayEvent {
-            label: crate::abi::DisplayLabel::Anonymous,
-            value: value.clone(),
-            span: runmat_hir::Span::default(),
-        })
-        .into_iter()
-        .collect();
-
-    crate::abi::ExecutionOutcome {
-        flow: result
-            .value
-            .map(crate::abi::RuntimeFlow::Single)
-            .unwrap_or(crate::abi::RuntimeFlow::NoValue),
-        workspace_delta: crate::abi::WorkspaceDelta {
-            full_snapshot_required: result.workspace.full,
-            ..crate::abi::WorkspaceDelta::default()
-        },
-        display_events,
-        streams: result.streams,
-        diagnostics,
-        effects: Vec::new(),
-        suspension: None,
-        execution_time_ms: result.execution_time_ms,
-        used_jit: result.used_jit,
-        type_info: result.type_info,
-        figures_touched: result.figures_touched,
-        stdin_events: result.stdin_events,
-        fusion_plan: result.fusion_plan,
-        profiling: result.profiling,
+fn legacy_result_from_execution(execution: SessionExecution) -> LegacyExecutionResult {
+    LegacyExecutionResult {
+        value: execution.public_value,
+        execution_time_ms: execution.outcome.execution_time_ms,
+        used_jit: execution.outcome.used_jit,
+        error: execution.error,
+        type_info: execution.outcome.type_info,
+        streams: execution.outcome.streams,
+        workspace: execution.workspace_snapshot,
+        figures_touched: execution.outcome.figures_touched,
+        warnings: execution.warnings,
+        profiling: execution.outcome.profiling,
+        fusion_plan: execution.outcome.fusion_plan,
+        stdin_events: execution.outcome.stdin_events,
     }
 }
 
