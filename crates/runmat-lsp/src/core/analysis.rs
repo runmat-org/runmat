@@ -86,7 +86,7 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
                     };
                 }
             };
-            let compile_error = compile_legacy(&lowering.hir, &HashMap::new()).err();
+            let compile_error = compile_error_for_lowering(&lowering);
 
             let semantic = build_semantic_model(lowering, &tokens, text);
 
@@ -119,6 +119,18 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
             }
         }
     }
+}
+
+fn compile_error_for_lowering(lowering: &LoweringResult) -> Option<CompileError> {
+    if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
+        if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
+            if runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id).is_ok() {
+                return None;
+            }
+        }
+    }
+
+    compile_legacy(&lowering.hir, &HashMap::new()).err()
 }
 
 fn hir_compatibility_mode(compat: CompatMode) -> CompatibilityMode {

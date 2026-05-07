@@ -5732,6 +5732,7 @@ dependencies = [
  "runmat-core",
  "runmat-hir",
  "runmat-lexer",
+ "runmat-mir",
  "runmat-parser",
  "runmat-runtime",
  "runmat-static-analysis",
