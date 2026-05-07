@@ -6,6 +6,8 @@ pub struct BuiltinSemantics {
     pub compatibility: BuiltinCompatibility,
     pub async_behavior: BuiltinAsyncBehavior,
     pub effects: BuiltinEffects,
+    pub workspace_effect: Option<BuiltinWorkspaceEffect>,
+    pub environment_effect: Option<BuiltinEnvironmentEffect>,
     pub purity: BuiltinPurity,
     pub semantic_kind: BuiltinSemanticKind,
 }
@@ -16,6 +18,8 @@ impl BuiltinSemantics {
             compatibility: BuiltinCompatibility::Matlab,
             async_behavior: BuiltinAsyncBehavior::MaySuspend,
             effects: BuiltinEffects::unknown(),
+            workspace_effect: None,
+            environment_effect: None,
             purity: BuiltinPurity::Impure,
             semantic_kind: BuiltinSemanticKind::General,
         }
@@ -41,6 +45,24 @@ pub enum BuiltinPurity {
     Pure,
     DeterministicReadOnly,
     Impure,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BuiltinWorkspaceEffect {
+    ReadsWorkspace,
+    CreatesBinding,
+    ClearsBinding,
+    ClearsFunctionCache,
+    LoadsExternalBindings,
+    DynamicEval,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BuiltinEnvironmentEffect {
+    PathMutation,
+    WorkingDirectoryMutation,
+    FunctionCacheInvalidation,
+    DynamicLookupInvalidation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -171,29 +193,64 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
         "dot" => pure(BuiltinSemanticKind::ShapeTransform(ShapeTransformKind::Dot)),
         "sum" | "mean" | "max" | "min" => pure(BuiltinSemanticKind::Reduction),
 
-        "load" | "save" | "fopen" | "fclose" | "fread" | "fwrite" | "fprintf" | "fileread"
-        | "filewrite" | "copyfile" | "movefile" | "delete" | "mkdir" | "rmdir" | "dir" => {
-            BuiltinSemantics {
-                effects: BuiltinEffects::none().with_filesystem(),
-                purity: BuiltinPurity::Impure,
-                semantic_kind: BuiltinSemanticKind::Filesystem,
-                ..BuiltinSemantics::unknown()
-            }
-        }
+        "load" => BuiltinSemantics {
+            effects: BuiltinEffects::none().with_filesystem().with_workspace(),
+            workspace_effect: Some(BuiltinWorkspaceEffect::LoadsExternalBindings),
+            purity: BuiltinPurity::Impure,
+            semantic_kind: BuiltinSemanticKind::Filesystem,
+            ..BuiltinSemantics::unknown()
+        },
+        "save" | "fopen" | "fclose" | "fread" | "fwrite" | "fprintf" | "fileread" | "filewrite"
+        | "copyfile" | "movefile" | "delete" | "mkdir" | "rmdir" | "dir" => BuiltinSemantics {
+            effects: BuiltinEffects::none().with_filesystem(),
+            purity: BuiltinPurity::Impure,
+            semantic_kind: BuiltinSemanticKind::Filesystem,
+            ..BuiltinSemantics::unknown()
+        },
         "webread" | "webwrite" | "tcpclient" | "tcpserver" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_network(),
             purity: BuiltinPurity::Impure,
             semantic_kind: BuiltinSemanticKind::Network,
             ..BuiltinSemantics::unknown()
         },
-        "path" | "addpath" | "rmpath" | "cd" | "chdir" | "rehash" => BuiltinSemantics {
+        "path" | "addpath" | "rmpath" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_environment(),
+            environment_effect: Some(BuiltinEnvironmentEffect::PathMutation),
             purity: BuiltinPurity::Impure,
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..BuiltinSemantics::unknown()
         },
-        "eval" | "evalin" | "assignin" | "clear" => BuiltinSemantics {
+        "cd" | "chdir" => BuiltinSemantics {
+            effects: BuiltinEffects::none().with_environment(),
+            environment_effect: Some(BuiltinEnvironmentEffect::WorkingDirectoryMutation),
+            purity: BuiltinPurity::Impure,
+            semantic_kind: BuiltinSemanticKind::Workspace,
+            ..BuiltinSemantics::unknown()
+        },
+        "rehash" => BuiltinSemantics {
+            effects: BuiltinEffects::none().with_environment(),
+            environment_effect: Some(BuiltinEnvironmentEffect::FunctionCacheInvalidation),
+            purity: BuiltinPurity::Impure,
+            semantic_kind: BuiltinSemanticKind::Workspace,
+            ..BuiltinSemantics::unknown()
+        },
+        "eval" | "evalin" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_workspace(),
+            workspace_effect: Some(BuiltinWorkspaceEffect::DynamicEval),
+            purity: BuiltinPurity::Impure,
+            semantic_kind: BuiltinSemanticKind::Workspace,
+            ..BuiltinSemantics::unknown()
+        },
+        "assignin" => BuiltinSemantics {
+            effects: BuiltinEffects::none().with_workspace(),
+            workspace_effect: Some(BuiltinWorkspaceEffect::CreatesBinding),
+            purity: BuiltinPurity::Impure,
+            semantic_kind: BuiltinSemanticKind::Workspace,
+            ..BuiltinSemantics::unknown()
+        },
+        "clear" => BuiltinSemantics {
+            effects: BuiltinEffects::none().with_workspace(),
+            workspace_effect: Some(BuiltinWorkspaceEffect::ClearsBinding),
             purity: BuiltinPurity::Impure,
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..BuiltinSemantics::unknown()
@@ -227,6 +284,8 @@ fn derive_semantics(function: &BuiltinFunction) -> BuiltinSemantics {
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         effects: BuiltinEffects::none(),
+        workspace_effect: None,
+        environment_effect: None,
         purity: BuiltinPurity::Pure,
         semantic_kind: BuiltinSemanticKind::General,
     };
@@ -272,6 +331,8 @@ fn pure(semantic_kind: BuiltinSemanticKind) -> BuiltinSemantics {
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::NeverSuspends,
         effects: BuiltinEffects::none(),
+        workspace_effect: None,
+        environment_effect: None,
         purity: BuiltinPurity::Pure,
         semantic_kind,
     }
@@ -282,6 +343,8 @@ fn data_api(op: DataApiOp) -> BuiltinSemantics {
         compatibility: BuiltinCompatibility::RunMatExtended,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
         effects: BuiltinEffects::none().with_filesystem(),
+        workspace_effect: None,
+        environment_effect: None,
         purity: BuiltinPurity::Impure,
         semantic_kind: BuiltinSemanticKind::DataApi(op),
     }

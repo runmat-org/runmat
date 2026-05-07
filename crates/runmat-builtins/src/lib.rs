@@ -1554,8 +1554,8 @@ pub mod shape_rules;
 pub use semantics::{
     builtin_semantics_for, builtin_semantics_for_name, data_api_method_op_for_name,
     is_data_namespace_symbol, is_data_open_name, BuiltinAsyncBehavior, BuiltinCompatibility,
-    BuiltinEffects, BuiltinPurity, BuiltinSemanticKind, BuiltinSemantics, DataApiOp,
-    ShapeTransformKind,
+    BuiltinEffects, BuiltinEnvironmentEffect, BuiltinPurity, BuiltinSemanticKind, BuiltinSemantics,
+    BuiltinWorkspaceEffect, DataApiOp, ShapeTransformKind,
 };
 
 impl std::fmt::Debug for Constant {

@@ -2,9 +2,9 @@ use crate::{
     MirOutputTarget, MirOutputTargetList, MirPlaceMutation, MirRvalue, MirStmt, MirStmtKind,
 };
 use runmat_hir::{
-    AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, ExprId, HirCallableRef,
-    HirExpr, HirExprKind, HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind, QualifiedName,
-    SemanticError, Span, WorkspaceEffect,
+    AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, ExprId, HirExpr,
+    HirExprKind, HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind, SemanticError, Span,
+    WorkspaceEffect,
 };
 use std::collections::HashMap;
 
@@ -95,11 +95,8 @@ fn effect_stmts_for_rvalue(value: &MirRvalue, span: Span) -> Vec<MirStmt> {
     let MirRvalue::Call(call) = value else {
         return Vec::new();
     };
-    let Some(name) = callable_name(&call.callee) else {
-        return Vec::new();
-    };
     let mut stmts = Vec::new();
-    if let Some(effect) = workspace_effect_for_name(&name) {
+    if let Some(effect) = call.workspace_effect.map(workspace_effect_from_builtin) {
         stmts.push(MirStmt {
             kind: MirStmtKind::WorkspaceEffect {
                 effect,
@@ -108,7 +105,7 @@ fn effect_stmts_for_rvalue(value: &MirRvalue, span: Span) -> Vec<MirStmt> {
             span,
         });
     }
-    if let Some(effect) = environment_effect_for_name(&name) {
+    if let Some(effect) = call.environment_effect.map(environment_effect_from_builtin) {
         stmts.push(MirStmt {
             kind: MirStmtKind::EnvironmentEffect(effect),
             span,
@@ -117,38 +114,37 @@ fn effect_stmts_for_rvalue(value: &MirRvalue, span: Span) -> Vec<MirStmt> {
     stmts
 }
 
-fn callable_name(callee: &HirCallableRef) -> Option<String> {
-    match callee {
-        HirCallableRef::Builtin(id) => Some(id.0.clone()),
-        HirCallableRef::Unresolved(name) => Some(qualified_name(name)),
-        _ => None,
+fn workspace_effect_from_builtin(
+    effect: runmat_builtins::BuiltinWorkspaceEffect,
+) -> WorkspaceEffect {
+    match effect {
+        runmat_builtins::BuiltinWorkspaceEffect::ReadsWorkspace => WorkspaceEffect::ReadsWorkspace,
+        runmat_builtins::BuiltinWorkspaceEffect::CreatesBinding => WorkspaceEffect::CreatesBinding,
+        runmat_builtins::BuiltinWorkspaceEffect::ClearsBinding => WorkspaceEffect::ClearsBinding,
+        runmat_builtins::BuiltinWorkspaceEffect::ClearsFunctionCache => {
+            WorkspaceEffect::ClearsFunctionCache
+        }
+        runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings => {
+            WorkspaceEffect::LoadsExternalBindings
+        }
+        runmat_builtins::BuiltinWorkspaceEffect::DynamicEval => WorkspaceEffect::DynamicEval,
     }
 }
 
-fn qualified_name(name: &QualifiedName) -> String {
-    name.0
-        .iter()
-        .map(|part| part.0.as_str())
-        .collect::<Vec<_>>()
-        .join(".")
-}
-
-fn workspace_effect_for_name(name: &str) -> Option<WorkspaceEffect> {
-    match name {
-        "load" => Some(WorkspaceEffect::LoadsExternalBindings),
-        "clear" => Some(WorkspaceEffect::ClearsBinding),
-        "eval" | "evalin" => Some(WorkspaceEffect::DynamicEval),
-        "assignin" => Some(WorkspaceEffect::CreatesBinding),
-        _ => None,
-    }
-}
-
-fn environment_effect_for_name(name: &str) -> Option<EnvironmentEffect> {
-    match name {
-        "path" | "addpath" | "rmpath" => Some(EnvironmentEffect::PathMutation),
-        "cd" | "chdir" => Some(EnvironmentEffect::WorkingDirectoryMutation),
-        "rehash" | "clear functions" => Some(EnvironmentEffect::FunctionCacheInvalidation),
-        _ => None,
+fn environment_effect_from_builtin(
+    effect: runmat_builtins::BuiltinEnvironmentEffect,
+) -> EnvironmentEffect {
+    match effect {
+        runmat_builtins::BuiltinEnvironmentEffect::PathMutation => EnvironmentEffect::PathMutation,
+        runmat_builtins::BuiltinEnvironmentEffect::WorkingDirectoryMutation => {
+            EnvironmentEffect::WorkingDirectoryMutation
+        }
+        runmat_builtins::BuiltinEnvironmentEffect::FunctionCacheInvalidation => {
+            EnvironmentEffect::FunctionCacheInvalidation
+        }
+        runmat_builtins::BuiltinEnvironmentEffect::DynamicLookupInvalidation => {
+            EnvironmentEffect::DynamicLookupInvalidation
+        }
     }
 }
 

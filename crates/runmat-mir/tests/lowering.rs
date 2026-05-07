@@ -879,6 +879,8 @@ fn analyze_assembly_collects_semantic_marker_diagnostics() {
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         async_behavior: runmat_mir::AsyncBehaviorFact::MaySuspend,
         effects: runmat_builtins::BuiltinEffects::unknown(),
+        workspace_effect: None,
+        environment_effect: None,
         purity: runmat_builtins::BuiltinPurity::Impure,
         semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
     }));

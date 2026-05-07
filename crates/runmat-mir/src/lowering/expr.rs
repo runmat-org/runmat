@@ -216,6 +216,8 @@ fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
         requested_outputs: RequestedOutputCount::Zero,
         async_behavior: map_async_behavior(semantics.async_behavior),
         effects: semantics.effects,
+        workspace_effect: semantics.workspace_effect,
+        environment_effect: semantics.environment_effect,
         purity: semantics.purity,
         semantic_kind: semantics.semantic_kind,
     })
@@ -230,6 +232,8 @@ fn call_rvalue(call: &runmat_hir::HirCall, args: Vec<MirCallArg>) -> MirRvalue {
         requested_outputs: call.requested_outputs.clone(),
         async_behavior: map_async_behavior(semantics.async_behavior),
         effects: semantics.effects,
+        workspace_effect: semantics.workspace_effect,
+        environment_effect: semantics.environment_effect,
         purity: semantics.purity,
         semantic_kind: semantics.semantic_kind,
     })
@@ -255,6 +259,8 @@ fn call_semantics(callee: &HirCallableRef) -> BuiltinSemantics {
             compatibility: runmat_builtins::BuiltinCompatibility::Matlab,
             async_behavior: BuiltinAsyncBehavior::NeverSuspends,
             effects: runmat_builtins::BuiltinEffects::none(),
+            workspace_effect: None,
+            environment_effect: None,
             purity: runmat_builtins::BuiltinPurity::Impure,
             semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
         },
