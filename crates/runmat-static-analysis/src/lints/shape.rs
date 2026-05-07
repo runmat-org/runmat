@@ -2,13 +2,20 @@ use runmat_hir::{
     BindingId, HirBlock, HirCallableRef, HirDiagnostic, HirDiagnosticSeverity, HirExpr,
     HirExprKind, HirPlace, HirStmt, HirStmtKind, IndexComponent, OperatorKind, QualifiedName, Span,
 };
+use runmat_mir::analysis::{AnalysisStore, MirLocalKey};
 use std::collections::HashMap;
 
 pub fn lint_shapes(result: &runmat_hir::LoweringResult) -> Vec<HirDiagnostic> {
-    let _analysis_store = runmat_mir::lowering::lower_assembly(&result.assembly)
+    let analysis = runmat_mir::lowering::lower_assembly(&result.assembly)
         .ok()
-        .map(|mir| runmat_mir::analysis::analyze_assembly(&mir));
+        .map(|mir| {
+            let store = runmat_mir::analysis::analyze_assembly(&mir);
+            (mir, store)
+        });
     let mut ctx = ShapeLintContext::default();
+    if let Some((mir, store)) = &analysis {
+        ctx.seed_from_analysis(mir, store);
+    }
     for function in &result.assembly.functions {
         ctx.walk_block(&function.body);
     }
@@ -25,6 +32,25 @@ struct ShapeLintContext {
 }
 
 impl ShapeLintContext {
+    fn seed_from_analysis(&mut self, mir: &runmat_mir::MirAssembly, store: &AnalysisStore) {
+        for body in mir.bodies.values() {
+            for local in &body.locals {
+                let Some(binding) = local.binding else {
+                    continue;
+                };
+                let Some(fact) = store.mir_locals.get(&MirLocalKey {
+                    function: body.function,
+                    local: local.id,
+                }) else {
+                    continue;
+                };
+                if let Some(shape) = shape_from_fact(&fact.shape) {
+                    self.env.insert(binding, shape);
+                }
+            }
+        }
+    }
+
     fn walk_block(&mut self, block: &HirBlock) {
         for stmt in &block.statements {
             self.walk_stmt(stmt);
@@ -409,6 +435,23 @@ fn qualified_name(name: &QualifiedName) -> String {
         .map(|part| part.0.as_str())
         .collect::<Vec<_>>()
         .join(".")
+}
+
+fn shape_from_fact(shape: &runmat_hir::ShapeFact) -> Option<Shape> {
+    match shape {
+        runmat_hir::ShapeFact::Scalar => Some(Shape(vec![Some(1), Some(1)])),
+        runmat_hir::ShapeFact::Shaped { dims } => Some(Shape(
+            dims.iter()
+                .map(|dim| match dim {
+                    runmat_hir::DimFact::Known(value) => Some(*value),
+                    runmat_hir::DimFact::Symbolic(_) | runmat_hir::DimFact::Unknown => None,
+                })
+                .collect(),
+        )),
+        runmat_hir::ShapeFact::Ranked { .. }
+        | runmat_hir::ShapeFact::Unknown
+        | runmat_hir::ShapeFact::Unreachable => None,
+    }
 }
 
 fn const_num(expr: &HirExpr) -> Option<f64> {

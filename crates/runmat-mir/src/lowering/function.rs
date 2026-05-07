@@ -1,5 +1,5 @@
 use crate::{MirAssembly, MirBody, MirOperand, MirSourceMap, MirTerminator, MirTerminatorKind};
-use runmat_hir::{CompatibilityMode, HirAssembly, HirFunction, SemanticError, SourceUnitKind};
+use runmat_hir::{HirAssembly, HirFunction, SemanticError, SourceUnitKind};
 use std::collections::{HashMap, HashSet};
 
 use super::{control_flow::ControlFlowBuilder, expr::lower_simple_operand, MirLoweringContext};
@@ -82,7 +82,7 @@ fn lower_function_with_context(
             function: Some(function.id),
             module: Some(function.module),
             source_unit: source_units.get(&function.module).cloned(),
-            compatibility_mode: CompatibilityMode::RunMatExtended,
+            compatibility_mode: None,
             enclosing_class: function.enclosing_class,
             statements: statement_sources,
             locals: local_sources,

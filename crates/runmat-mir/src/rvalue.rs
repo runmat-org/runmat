@@ -1,5 +1,7 @@
 use crate::{MirCallArg, MirIndexing, MirOperand};
-use runmat_hir::{ClassId, FunctionId, MemberName, OperatorKind, QualifiedName};
+use runmat_hir::{
+    CallSyntax, ClassId, FunctionId, MemberName, OperatorKind, QualifiedName, RequestedOutputCount,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -37,6 +39,8 @@ pub enum MirRvalue {
     Future {
         function: FunctionId,
         args: Vec<MirCallArg>,
+        syntax: CallSyntax,
+        requested_outputs: RequestedOutputCount,
     },
     Spawn(MirOperand),
 }

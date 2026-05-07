@@ -10,7 +10,7 @@ pub struct MirSourceMap {
     pub function: Option<FunctionId>,
     pub module: Option<ModuleId>,
     pub source_unit: Option<SourceUnitKind>,
-    pub compatibility_mode: CompatibilityMode,
+    pub compatibility_mode: Option<CompatibilityMode>,
     pub enclosing_class: Option<ClassId>,
     pub statements: Vec<MirSourceRecord>,
     pub locals: Vec<MirLocalSource>,

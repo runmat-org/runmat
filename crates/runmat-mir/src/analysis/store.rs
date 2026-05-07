@@ -27,7 +27,7 @@ pub struct ModuleSummary {
     pub module: ModuleId,
     pub functions: Vec<FunctionId>,
     pub source_unit: Option<SourceUnitKind>,
-    pub compatibility_mode: CompatibilityMode,
+    pub compatibility_mode: Option<CompatibilityMode>,
     pub workspace: Vec<WorkspaceEffect>,
     pub environment: Vec<EnvironmentEffect>,
     pub may_call_unknown: bool,

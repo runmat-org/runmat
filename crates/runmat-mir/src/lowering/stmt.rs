@@ -36,14 +36,11 @@ pub(crate) fn lower_stmt(
             let mut stmts = Vec::new();
             let value = lower_expr(ctx, expr, &mut stmts)?;
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
+            let lowered_targets = lower_output_targets(ctx, &targets.targets, &mut stmts)?;
             stmts.push(MirStmt {
                 kind: MirStmtKind::MultiAssign {
                     targets: MirOutputTargetList {
-                        targets: targets
-                            .targets
-                            .iter()
-                            .map(|target| lower_output_target(ctx, target))
-                            .collect::<Result<_, _>>()?,
+                        targets: lowered_targets,
                     },
                     value,
                 },
@@ -191,19 +188,27 @@ fn is_empty_array_expr(expr: &HirExpr) -> bool {
     matches!(&expr.kind, HirExprKind::Tensor(rows) if rows.is_empty() || rows.iter().all(Vec::is_empty))
 }
 
+fn lower_output_targets(
+    ctx: &MirLoweringContext,
+    targets: &[OutputTarget],
+    stmts: &mut Vec<MirStmt>,
+) -> Result<Vec<MirOutputTarget>, SemanticError> {
+    targets
+        .iter()
+        .map(|target| lower_output_target(ctx, target, stmts))
+        .collect()
+}
+
 fn lower_output_target(
     ctx: &MirLoweringContext,
     target: &OutputTarget,
+    stmts: &mut Vec<MirStmt>,
 ) -> Result<MirOutputTarget, SemanticError> {
     Ok(match target {
         OutputTarget::Place(place) => {
             let mut temps = Vec::new();
             let place = lower_place(ctx, place, &mut temps)?;
-            if !temps.is_empty() {
-                return Err(SemanticError::new(
-                    "MIR temporaries in output targets are not supported yet",
-                ));
-            }
+            stmts.extend(temps);
             MirOutputTarget::Place(place)
         }
         OutputTarget::Discard => MirOutputTarget::Discard,

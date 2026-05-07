@@ -25,9 +25,13 @@ pub fn lint_data_api_with_provider(
     result: &LoweringResult,
     provider: &dyn DatasetSchemaProvider,
 ) -> Vec<HirDiagnostic> {
-    let _analysis_store = runmat_mir::lowering::lower_assembly(&result.assembly)
-        .ok()
-        .map(|mir| runmat_mir::analysis::analyze_assembly(&mir));
+    if let Ok(mir) = runmat_mir::lowering::lower_assembly(&result.assembly) {
+        let store = runmat_mir::analysis::analyze_assembly(&mir);
+        let diagnostics = lint_data_api_from_mir(&mir, &store, provider);
+        if !diagnostics.is_empty() {
+            return diagnostics;
+        }
+    }
     let mut ctx = DataLintContext {
         provider,
         datasets: HashMap::new(),
@@ -45,6 +49,131 @@ pub fn lint_data_api_with_provider(
     }
 
     ctx.diagnostics
+}
+
+fn lint_data_api_from_mir(
+    mir: &runmat_mir::MirAssembly,
+    _store: &runmat_mir::analysis::AnalysisStore,
+    provider: &dyn DatasetSchemaProvider,
+) -> Vec<HirDiagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut datasets = HashMap::<runmat_mir::MirLocalId, DatasetBinding>::new();
+    let mut arrays = HashMap::<runmat_mir::MirLocalId, ArrayBinding>::new();
+    let mut tx_locals = HashSet::<runmat_mir::MirLocalId>::new();
+    let mut non_tx_write_count = 0usize;
+
+    for body in mir.bodies.values() {
+        for block in &body.blocks {
+            for stmt in &block.statements {
+                match &stmt.kind {
+                    runmat_mir::MirStmtKind::Assign { place, value } => {
+                        let Some(local) = assigned_local(place) else {
+                            continue;
+                        };
+                        let runmat_mir::MirRvalue::Call(call) = value else {
+                            continue;
+                        };
+                        let name = mir_call_name(&call.callee);
+                        if is_mir_data_open(call.syntax.clone(), name.as_deref(), &call.args) {
+                            if let Some(path) = mir_data_open_path(name.as_deref(), &call.args)
+                                .and_then(mir_literal_string)
+                            {
+                                if let Some(dataset) = infer_dataset_binding(provider, &path) {
+                                    datasets.insert(local, dataset);
+                                }
+                            } else {
+                                diagnostics.push(diagnostic(
+                                    "lint.data.no_untyped_open",
+                                    "data.open should use a literal dataset path for static checking",
+                                    stmt.span,
+                                ));
+                            }
+                        } else if call.syntax == runmat_hir::CallSyntax::Method
+                            && name.as_deref() == Some("array")
+                        {
+                            if let (Some(dataset_local), Some(array_name)) = (
+                                call.args.first().and_then(mir_arg_local),
+                                call.args.get(1).and_then(mir_literal_string),
+                            ) {
+                                if let Some(dataset) = datasets.get(&dataset_local) {
+                                    let rank = dataset.arrays.get(&array_name).copied();
+                                    if rank.is_none() {
+                                        diagnostics.push(diagnostic(
+                                            "lint.data.unknown_array_name",
+                                            format!(
+                                                "dataset schema does not contain array '{array_name}'"
+                                            ),
+                                            stmt.span,
+                                        ));
+                                    }
+                                    arrays.insert(local, ArrayBinding { rank });
+                                }
+                            }
+                        } else if call.syntax == runmat_hir::CallSyntax::Method
+                            && name.as_deref() == Some("begin")
+                        {
+                            tx_locals.insert(local);
+                        }
+                    }
+                    runmat_mir::MirStmtKind::Expr(runmat_mir::MirRvalue::Call(call)) => {
+                        let name = mir_call_name(&call.callee);
+                        if call.syntax == runmat_hir::CallSyntax::Method
+                            && name.as_deref() == Some("read")
+                        {
+                            if let (Some(array_local), Some(slice)) = (
+                                call.args.first().and_then(mir_arg_local),
+                                call.args.get(1).map(|arg| arg.operand()),
+                            ) {
+                                if let Some(array) = arrays.get(&array_local) {
+                                    if let (Some(expected), Some(actual)) =
+                                        (array.rank, mir_slice_rank(slice))
+                                    {
+                                        if expected != actual {
+                                            diagnostics.push(diagnostic(
+                                                "lint.data.invalid_slice_rank",
+                                                format!(
+                                                    "slice rank {actual} does not match array rank {expected}"
+                                                ),
+                                                stmt.span,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        } else if call.syntax == runmat_hir::CallSyntax::Method
+                            && name.as_deref() == Some("write")
+                        {
+                            let in_tx = call
+                                .args
+                                .first()
+                                .and_then(mir_arg_local)
+                                .is_some_and(|local| tx_locals.contains(&local));
+                            if !in_tx {
+                                non_tx_write_count += 1;
+                                if non_tx_write_count > 1 {
+                                    diagnostics.push(diagnostic(
+                                        "lint.data.no_multiwrite_outside_tx",
+                                        "multiple dataset writes should be grouped in a transaction",
+                                        stmt.span,
+                                    ));
+                                }
+                            }
+                        } else if call.syntax == runmat_hir::CallSyntax::Method
+                            && name.as_deref() == Some("commit")
+                        {
+                            diagnostics.push(diagnostic(
+                                "lint.data.ignore_commit_result",
+                                "transaction commit result should be checked",
+                                stmt.span,
+                            ));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    diagnostics
 }
 
 struct DataLintContext<'a> {
@@ -260,6 +389,73 @@ fn infer_dataset_binding(
     Some(DatasetBinding {
         arrays: schema.arrays,
     })
+}
+
+fn assigned_local(place: &runmat_mir::MirPlace) -> Option<runmat_mir::MirLocalId> {
+    match place {
+        runmat_mir::MirPlace::Local(local) => Some(*local),
+        _ => None,
+    }
+}
+
+fn mir_call_name(callee: &HirCallableRef) -> Option<String> {
+    match callee {
+        HirCallableRef::Builtin(id) => Some(id.0.clone()),
+        HirCallableRef::Unresolved(name) => Some(qualified_name(name)),
+        _ => None,
+    }
+}
+
+fn mir_arg_local(arg: &runmat_mir::MirCallArg) -> Option<runmat_mir::MirLocalId> {
+    match arg.operand() {
+        runmat_mir::MirOperand::Local(local) => Some(*local),
+        _ => None,
+    }
+}
+
+fn mir_literal_string(arg: &runmat_mir::MirCallArg) -> Option<String> {
+    match arg.operand() {
+        runmat_mir::MirOperand::Constant(runmat_mir::MirConstant::String(value)) => {
+            Some(normalize_literal_string(&value.0))
+        }
+        _ => None,
+    }
+}
+
+fn mir_slice_rank(operand: &runmat_mir::MirOperand) -> Option<usize> {
+    match operand {
+        runmat_mir::MirOperand::Constant(runmat_mir::MirConstant::EmptyArray) => Some(0),
+        runmat_mir::MirOperand::Local(_) => None,
+        _ => None,
+    }
+}
+
+fn is_mir_data_open(
+    syntax: CallSyntax,
+    name: Option<&str>,
+    args: &[runmat_mir::MirCallArg],
+) -> bool {
+    name == Some("data.open")
+        || (syntax == CallSyntax::Method
+            && name == Some("open")
+            && args.first().is_some_and(|arg| {
+                matches!(
+                    arg.operand(),
+                    runmat_mir::MirOperand::Constant(runmat_mir::MirConstant::Symbol(symbol))
+                        if symbol.0 == "data"
+                )
+            }))
+}
+
+fn mir_data_open_path<'a>(
+    name: Option<&str>,
+    args: &'a [runmat_mir::MirCallArg],
+) -> Option<&'a runmat_mir::MirCallArg> {
+    if name == Some("data.open") {
+        args.first()
+    } else {
+        args.get(1)
+    }
 }
 
 fn is_begin_call(expr: &HirExpr) -> bool {

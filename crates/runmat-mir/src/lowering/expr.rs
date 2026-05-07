@@ -63,7 +63,12 @@ pub(crate) fn lower_expr(
                 .collect::<Result<_, _>>()?;
             if let HirCallableRef::Function(function) = call.callee {
                 if ctx.is_async_function(function) {
-                    MirRvalue::Future { function, args }
+                    MirRvalue::Future {
+                        function,
+                        args,
+                        syntax: call.syntax.clone(),
+                        requested_outputs: call.requested_outputs.clone(),
+                    }
                 } else {
                     MirRvalue::Call(MirCall {
                         callee: call.callee.clone(),
@@ -101,10 +106,9 @@ pub(crate) fn lower_expr(
         HirExprKind::FunctionHandle(target) => {
             MirRvalue::Use(MirOperand::FunctionHandle(target.clone()))
         }
-        HirExprKind::AnonymousFunction(function) => MirRvalue::Future {
-            function: *function,
-            args: Vec::new(),
-        },
+        HirExprKind::AnonymousFunction(function) => MirRvalue::Use(MirOperand::FunctionHandle(
+            runmat_hir::FunctionHandleTarget::Anonymous(*function),
+        )),
         HirExprKind::Await(future) => MirRvalue::Use(lower_operand(ctx, future, temps)?),
     })
 }

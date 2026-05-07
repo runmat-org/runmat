@@ -44,10 +44,7 @@ fn simple_function_lowers_to_single_block_with_binding_locals() {
     assert_eq!(body.source_map.function, Some(body.function));
     assert!(body.source_map.module.is_some());
     assert!(body.source_map.source_unit.is_some());
-    assert_eq!(
-        body.source_map.compatibility_mode,
-        runmat_hir::CompatibilityMode::RunMatExtended
-    );
+    assert_eq!(body.source_map.compatibility_mode, None);
     assert_eq!(body.source_map.enclosing_class, None);
     assert_eq!(body.source_map.locals.len(), body.locals.len());
     assert_eq!(body.blocks[0].statements.len(), 1);
@@ -318,7 +315,10 @@ fn analyze_body_joins_simple_facts_across_cfg_paths() {
 
 #[test]
 fn analyze_body_records_future_and_task_async_value_facts() {
-    let mir = lower_mir("function y = f(); fut = @(x) x; task = spawn(fut); y = 1; end");
+    let mir = lower_mir(
+        "function y = f(); fut = make(); task = spawn(fut); y = 1; end
+async function y = make(); y = 1; end",
+    );
     let store = analyze_assembly(&mir);
 
     let async_values: Vec<_> = store
@@ -336,7 +336,7 @@ fn analyze_body_records_future_and_task_async_value_facts() {
 }
 
 #[test]
-fn direct_spawn_of_anonymous_function_uses_future_temp_operand() {
+fn direct_spawn_of_anonymous_function_uses_function_handle_temp_operand() {
     let mir = lower_mir("function y = f(); task = spawn(@(x) x); y = 1; end");
     let store = analyze_assembly(&mir);
     let body = mir
@@ -358,14 +358,17 @@ fn direct_spawn_of_anonymous_function_uses_future_temp_operand() {
         })
         .unwrap();
 
-    let mut saw_future_temp = false;
+    let mut saw_handle_temp = false;
     let mut spawn_operand = None;
     for stmt in &body.blocks[0].statements {
         match &stmt.kind {
             MirStmtKind::Assign {
                 place: MirPlace::Local(local),
-                value: MirRvalue::Future { .. },
-            } => saw_future_temp = body.locals[local.0].kind == MirLocalKind::Temporary,
+                value:
+                    MirRvalue::Use(MirOperand::FunctionHandle(
+                        runmat_hir::FunctionHandleTarget::Anonymous(_),
+                    )),
+            } => saw_handle_temp = body.locals[local.0].kind == MirLocalKind::Temporary,
             MirStmtKind::Assign {
                 value: MirRvalue::Spawn(operand),
                 ..
@@ -374,29 +377,30 @@ fn direct_spawn_of_anonymous_function_uses_future_temp_operand() {
         }
     }
 
-    assert!(saw_future_temp);
+    assert!(saw_handle_temp);
     assert!(matches!(spawn_operand, Some(MirOperand::Local(_))));
 
-    let future_expr = body
+    let handle_expr = body
         .source_map
         .locals
         .iter()
         .find_map(|source| {
             source.expr.filter(|_| {
                 body.locals[source.local.0].kind == MirLocalKind::Temporary
-                    && store.mir_locals[&MirLocalKey {
-                        function: body.function,
-                        local: source.local,
-                    }]
-                        .async_value
-                        .as_ref()
-                        .is_some_and(|fact| matches!(fact, runmat_hir::AsyncValueFact::Future(_)))
+                    && matches!(
+                        store.mir_locals[&MirLocalKey {
+                            function: body.function,
+                            local: source.local,
+                        }]
+                            .ty,
+                        runmat_hir::TypeFact::Function(_)
+                    )
             })
         })
         .unwrap();
     assert!(matches!(
-        store.expressions[&future_expr].async_value,
-        Some(runmat_hir::AsyncValueFact::Future(_))
+        store.expressions[&handle_expr].ty,
+        runmat_hir::TypeFact::Function(_)
     ));
 }
 
@@ -433,9 +437,11 @@ async function y = callee(x); y = x; end",
             matches!(
                 &stmt.kind,
                 MirStmtKind::Assign {
-                    value: MirRvalue::Future { args, .. },
+                    value: MirRvalue::Future { args, requested_outputs, syntax, .. },
                     ..
                 } if args.len() == 1
+                    && matches!(requested_outputs, runmat_hir::RequestedOutputCount::One)
+                    && matches!(syntax, runmat_hir::CallSyntax::Plain)
             )
         }));
 }
@@ -729,10 +735,7 @@ fn analyze_assembly_populates_store_products_by_function() {
     assert!(store.modules.contains_key(&module));
     assert!(store.modules[&module].functions.contains(&body.function));
     assert!(store.modules[&module].source_unit.is_some());
-    assert_eq!(
-        store.modules[&module].compatibility_mode,
-        runmat_hir::CompatibilityMode::RunMatExtended
-    );
+    assert_eq!(store.modules[&module].compatibility_mode, None);
     assert!(store.liveness.contains_key(&body.function));
     assert!(store.spawn_boundaries.contains_key(&body.function));
     assert_eq!(store.spawn_boundaries.get(&body.function).unwrap().len(), 1);
