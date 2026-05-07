@@ -262,20 +262,15 @@ pub fn readmatrix_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 }
 
 pub fn data_dataset_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::DataDataset { arrays: None }
+    Type::Struct { known_fields: None }
 }
 
 pub fn data_array_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::DataArray {
-        dtype: None,
-        shape: None,
-        chunk_shape: None,
-        codec: None,
-    }
+    Type::Struct { known_fields: None }
 }
 
 pub fn data_tx_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::DataTransaction
+    Type::Struct { known_fields: None }
 }
 
 pub fn data_cell_string_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
@@ -494,24 +489,19 @@ mod tests {
         data_dataset_type_resolver,
         data_dataset_type,
         &[],
-        Type::DataDataset { arrays: None }
+        Type::Struct { known_fields: None }
     );
     assert_resolver!(
         data_array_type_resolver,
         data_array_type,
         &[],
-        Type::DataArray {
-            dtype: None,
-            shape: None,
-            chunk_shape: None,
-            codec: None,
-        }
+        Type::Struct { known_fields: None }
     );
     assert_resolver!(
         data_tx_type_resolver,
         data_tx_type,
         &[],
-        Type::DataTransaction
+        Type::Struct { known_fields: None }
     );
     assert_resolver!(data_int_type_resolver, data_int_type, &[], Type::Int);
     assert_resolver!(

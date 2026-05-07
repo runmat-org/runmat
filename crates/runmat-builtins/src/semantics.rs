@@ -183,52 +183,6 @@ pub fn builtin_semantics_for(function: &BuiltinFunction) -> BuiltinSemantics {
 
 pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
     Some(match name {
-        "data" => runmat_extension(BuiltinSemanticKind::General),
-        "data.create"
-        | "data.open"
-        | "data.exists"
-        | "data.delete"
-        | "data.copy"
-        | "data.move"
-        | "data.import"
-        | "data.export"
-        | "data.list"
-        | "data.inspect"
-        | "Dataset.array"
-        | "Dataset.begin"
-        | "DataArray.read"
-        | "DataArray.write"
-        | "DataTransaction.write"
-        | "DataTransaction.commit"
-        | "DataTransaction.abort" => data_runtime_builtin(),
-        "Dataset.set_attr"
-        | "Dataset.set_attrs"
-        | "DataTransaction.set_attr"
-        | "DataTransaction.set_attrs"
-        | "DataArray.resize"
-        | "DataTransaction.resize"
-        | "DataArray.fill"
-        | "DataTransaction.fill"
-        | "DataTransaction.delete_array"
-        | "DataTransaction.create_array" => data_runtime_builtin(),
-        "Dataset.path"
-        | "Dataset.id"
-        | "Dataset.version"
-        | "Dataset.arrays"
-        | "Dataset.has_array"
-        | "Dataset.attrs"
-        | "Dataset.get_attr"
-        | "Dataset.snapshot"
-        | "Dataset.refresh"
-        | "DataArray.name"
-        | "DataArray.dtype"
-        | "DataArray.shape"
-        | "DataArray.rank"
-        | "DataArray.chunk_shape"
-        | "DataArray.codec"
-        | "DataTransaction.id"
-        | "DataTransaction.status" => data_runtime_builtin(),
-
         "ones" | "zeros" => pure(BuiltinSemanticKind::ArrayConstructor),
         "empty" => pure(BuiltinSemanticKind::EmptyConstructor),
         "range" | "colon" | "linspace" => pure(BuiltinSemanticKind::RangeConstructor),
@@ -519,30 +473,6 @@ fn pure(semantic_kind: BuiltinSemanticKind) -> BuiltinSemantics {
         environment_effect: None,
         purity: BuiltinPurity::Pure,
         semantic_kind,
-    }
-}
-
-fn runmat_extension(semantic_kind: BuiltinSemanticKind) -> BuiltinSemantics {
-    BuiltinSemantics {
-        compatibility: BuiltinCompatibility::RunMatExtended,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
-        effects: BuiltinEffects::none(),
-        workspace_effect: None,
-        environment_effect: None,
-        purity: BuiltinPurity::Pure,
-        semantic_kind,
-    }
-}
-
-fn data_runtime_builtin() -> BuiltinSemantics {
-    BuiltinSemantics {
-        compatibility: BuiltinCompatibility::RunMatExtended,
-        async_behavior: BuiltinAsyncBehavior::RequiresAsyncRuntime,
-        effects: BuiltinEffects::none().with_filesystem(),
-        workspace_effect: None,
-        environment_effect: None,
-        purity: BuiltinPurity::Impure,
-        semantic_kind: BuiltinSemanticKind::Filesystem,
     }
 }
 
