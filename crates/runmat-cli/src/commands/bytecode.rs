@@ -17,6 +17,19 @@ pub fn emit_bytecode(source: &str, config: &RunMatConfig) -> Result<String> {
         .map_err(|err| anyhow::anyhow!(format!("Parse error: {err:?}")))?;
     let lowering = runmat_hir::lower(&ast, &LoweringContext::empty())
         .map_err(|err| anyhow::anyhow!(format!("Lowering error: {err:?}")))?;
+    let bytecode = compile_bytecode(&lowering)?;
+    Ok(disassemble_bytecode(&bytecode))
+}
+
+fn compile_bytecode(lowering: &runmat_hir::LoweringResult) -> Result<runmat_vm::Bytecode> {
+    if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
+        if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
+            if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
+                return Ok(bytecode);
+            }
+        }
+    }
+
     let mut bytecode = runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
         .map_err(|err| anyhow::anyhow!(format!("Compile error: {err:?}")))?;
     bytecode.var_names = lowering
@@ -24,7 +37,7 @@ pub fn emit_bytecode(source: &str, config: &RunMatConfig) -> Result<String> {
         .iter()
         .map(|(id, name)| (id.0, name.clone()))
         .collect();
-    Ok(disassemble_bytecode(&bytecode))
+    Ok(bytecode)
 }
 
 pub fn write_bytecode_output(path: &PathBuf, output: &str) -> Result<()> {

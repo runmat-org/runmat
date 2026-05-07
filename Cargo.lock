@@ -5454,6 +5454,7 @@ dependencies = [
  "runmat-gc",
  "runmat-hir",
  "runmat-kernel",
+ "runmat-mir",
  "runmat-parser",
  "runmat-plot",
  "runmat-runtime",

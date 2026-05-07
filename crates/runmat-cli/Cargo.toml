@@ -55,6 +55,7 @@ runmat-kernel = { version = "=0.4.1", path = "../runmat-kernel" }
 runmat-core = { version = "=0.4.1", path = "../runmat-core" }
 runmat-parser = { version = "=0.4.1", path = "../runmat-parser" }
 runmat-hir = { version = "=0.4.1", path = "../runmat-hir" }
+runmat-mir = { version = "=0.4.1", path = "../runmat-mir" }
 runmat-vm = { version = "=0.4.1", path = "../runmat-vm" }
 runmat-runtime = { version = "=0.4.1", path = "../runmat-runtime" }
 runmat-turbine = { version = "=0.4.1", path = "../runmat-turbine" }
