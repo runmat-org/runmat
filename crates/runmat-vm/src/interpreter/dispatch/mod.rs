@@ -808,6 +808,25 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
+                function.0,
+                args.as_slice(),
+                *out_count,
+            )
+            .await
+            else {
+                return Err(RuntimeError::from(format!(
+                    "semantic function invoker unavailable for {:?}",
+                    function
+                )));
+            };
+            stack.push(result?);
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CallMethod(name, arg_count) => {
             handle_method_call(stack, name, *arg_count).await?;
             Ok(Some(DispatchHandled::Generic(

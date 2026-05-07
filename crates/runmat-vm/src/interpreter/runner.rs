@@ -632,6 +632,7 @@ async fn run_interpreter_inner(
             | Instr::CallFunctionMulti(_, _, _)
             | Instr::CallFunctionExpandMulti(_, _)
             | Instr::CallSemanticFunctionExpandMulti(_, _)
+            | Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
             | Instr::CallBuiltinExpandLast(_, _, _)
             | Instr::CallBuiltinExpandAt(_, _, _, _)
             | Instr::CallBuiltinExpandMulti(_, _)

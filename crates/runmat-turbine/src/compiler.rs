@@ -654,6 +654,7 @@ impl BytecodeCompiler {
                     | Instr::CallBuiltinExpandMulti(_, _)
                     | Instr::CallFunctionExpandMulti(_, _)
                     | Instr::CallSemanticFunctionExpandMulti(_, _)
+                    | Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
                     | Instr::CallFunctionMulti(_, _, _)
                     | Instr::CallFunctionExpandAt(_, _, _, _)
                     | Instr::Swap

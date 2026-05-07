@@ -563,9 +563,12 @@ impl Compiler {
         match &call.callee {
             HirCallableRef::Function(function) => {
                 if has_expansion {
-                    return Err(self.compile_error(
-                        "MIR bytecode lowering for expanded semantic multi-output calls is not implemented yet",
+                    self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
+                        *function,
+                        specs,
+                        output_count,
                     ));
+                    return Ok(());
                 }
                 self.emit(Instr::CallSemanticFunctionMulti(
                     *function,
