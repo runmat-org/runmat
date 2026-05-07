@@ -1006,9 +1006,7 @@ fn compile_eval_hook_bytecode(
     if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
         if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
             if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
-                if super::compile::bytecode_has_only_semantic_ready_runtime_calls(&bytecode) {
-                    return Ok(bytecode);
-                }
+                return Ok(bytecode);
             }
         }
     }

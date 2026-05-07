@@ -72,9 +72,7 @@ impl RunMatSession {
         if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
             if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
                 if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
-                    if bytecode_has_only_semantic_ready_runtime_calls(&bytecode) {
-                        return Ok(bytecode);
-                    }
+                    return Ok(bytecode);
                 }
             }
         }
@@ -203,19 +201,4 @@ impl RunMatSession {
 
         user_functions
     }
-}
-
-pub(crate) fn bytecode_has_only_semantic_ready_runtime_calls(
-    bytecode: &runmat_vm::Bytecode,
-) -> bool {
-    bytecode.instructions.iter().all(|instr| match instr {
-        runmat_vm::Instr::CallBuiltin(_, _) => true,
-        runmat_vm::Instr::CallBuiltinExpandLast(_, _, _)
-        | runmat_vm::Instr::CallBuiltinExpandAt(_, _, _, _)
-        | runmat_vm::Instr::CallFunction(_, _)
-        | runmat_vm::Instr::CallFunctionMulti(_, _, _)
-        | runmat_vm::Instr::CallFunctionExpandAt(_, _, _, _)
-        | runmat_vm::Instr::CallFunctionExpandMulti(_, _) => false,
-        _ => true,
-    })
 }
