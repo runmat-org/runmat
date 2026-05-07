@@ -452,6 +452,27 @@ fn dynamic_function_handle_call_uses_semantic_vm() {
 }
 
 #[test]
+fn dynamic_anonymous_handle_call_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "f = @(x) x + 1; y = f(2);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile dynamic anonymous handle call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "dynamic anonymous handle call should compile through semantic HIR/MIR/VM"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "3");
+}
+
+#[test]
 fn local_function_multi_output_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "[a, b] = pair(2);\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend";
