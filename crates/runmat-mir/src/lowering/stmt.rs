@@ -1,8 +1,10 @@
-use crate::{MirOutputTarget, MirOutputTargetList, MirRvalue, MirStmt, MirStmtKind};
+use crate::{
+    MirOutputTarget, MirOutputTargetList, MirPlaceMutation, MirRvalue, MirStmt, MirStmtKind,
+};
 use runmat_hir::{
     AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, ExprId, HirCallableRef,
-    HirExpr, HirExprKind, HirPlace, HirStmt, HirStmtKind, OutputTarget, PlaceMutation,
-    PlaceMutationKind, QualifiedName, SemanticError, Span, WorkspaceEffect,
+    HirExpr, HirExprKind, HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind, QualifiedName,
+    SemanticError, Span, WorkspaceEffect,
 };
 use std::collections::HashMap;
 
@@ -18,16 +20,16 @@ pub(crate) fn lower_stmt_with_replacements(
             let mut stmts = Vec::new();
             let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
-            if !matches!(place, HirPlace::Binding(_)) || is_empty_array_expr(expr) {
+            let place = lower_place(ctx, place, &mut stmts)?;
+            if !matches!(place, crate::MirPlace::Local(_)) || is_empty_array_expr(expr) {
                 stmts.push(MirStmt {
                     kind: MirStmtKind::PlaceMutation(place_mutation(
-                        place,
+                        place.clone(),
                         is_empty_array_expr(expr),
                     )),
                     span: stmt.span,
                 });
             }
-            let place = lower_place(ctx, place, &mut stmts)?;
             stmts.push(MirStmt {
                 kind: MirStmtKind::Assign { place, value },
                 span: stmt.span,
@@ -150,37 +152,38 @@ fn environment_effect_for_name(name: &str) -> Option<EnvironmentEffect> {
     }
 }
 
-fn place_mutation(place: &HirPlace, deletion: bool) -> PlaceMutation {
-    PlaceMutation {
-        place: place.clone(),
-        kind: mutation_kind_for_place(place, deletion),
-        creation_policy: creation_policy_for_place(place, deletion),
+fn place_mutation(place: crate::MirPlace, deletion: bool) -> MirPlaceMutation {
+    MirPlaceMutation {
+        kind: mutation_kind_for_place(&place, deletion),
+        creation_policy: creation_policy_for_place(&place, deletion),
         shape_policy: AssignmentShapePolicy::MatlabCompatible,
+        place,
     }
 }
 
-fn mutation_kind_for_place(place: &HirPlace, deletion: bool) -> PlaceMutationKind {
+fn mutation_kind_for_place(place: &crate::MirPlace, deletion: bool) -> PlaceMutationKind {
     if deletion {
         return PlaceMutationKind::Delete;
     }
     match place {
-        HirPlace::Binding(_) => PlaceMutationKind::BindOrAssign,
-        HirPlace::Index(_, _) => PlaceMutationKind::IndexedAssign,
-        HirPlace::IndexCell(_, _) => PlaceMutationKind::CellAssign,
-        HirPlace::Member(_, _) | HirPlace::MemberDynamic(_, _) => PlaceMutationKind::MemberAssign,
+        crate::MirPlace::Local(_) | crate::MirPlace::Binding(_) => PlaceMutationKind::BindOrAssign,
+        crate::MirPlace::Index(_, _) => PlaceMutationKind::IndexedAssign,
+        crate::MirPlace::Member(_, _) | crate::MirPlace::DynamicMember(_, _) => {
+            PlaceMutationKind::MemberAssign
+        }
     }
 }
 
-fn creation_policy_for_place(place: &HirPlace, deletion: bool) -> AssignmentCreationPolicy {
+fn creation_policy_for_place(place: &crate::MirPlace, deletion: bool) -> AssignmentCreationPolicy {
     if deletion {
         return AssignmentCreationPolicy::ExistingOnly;
     }
     match place {
-        HirPlace::Binding(_) => AssignmentCreationPolicy::CreateBinding,
-        HirPlace::Index(_, _) | HirPlace::IndexCell(_, _) => {
-            AssignmentCreationPolicy::CreateArrayByIndex
+        crate::MirPlace::Local(_) | crate::MirPlace::Binding(_) => {
+            AssignmentCreationPolicy::CreateBinding
         }
-        HirPlace::Member(_, _) | HirPlace::MemberDynamic(_, _) => {
+        crate::MirPlace::Index(_, _) => AssignmentCreationPolicy::CreateArrayByIndex,
+        crate::MirPlace::Member(_, _) | crate::MirPlace::DynamicMember(_, _) => {
             AssignmentCreationPolicy::CreateStructFieldPath
         }
     }

@@ -49,6 +49,7 @@ struct SemanticCtx {
     scopes: Vec<SemanticScope>,
     function_modifiers: Vec<FunctionModifiers>,
     top_level_await: Vec<bool>,
+    compatibility_mode: Option<crate::CompatibilityMode>,
     function_names: HashMap<String, FunctionId>,
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
 }
@@ -93,7 +94,8 @@ pub fn lower(
         }
     }
 
-    let (mut assembly, semantic_index) = SemanticCtx::lower_program(prog)?;
+    let (mut assembly, semantic_index) =
+        SemanticCtx::lower_program(prog, context.compatibility_mode.clone())?;
     assembly.compatibility_mode = context.compatibility_mode.clone();
 
     Ok(LoweringResult {
@@ -112,7 +114,10 @@ pub fn lower(
 }
 
 impl SemanticCtx {
-    fn lower_program(prog: &AstProgram) -> Result<(HirAssembly, SemanticIndex), SemanticError> {
+    fn lower_program(
+        prog: &AstProgram,
+        compatibility_mode: Option<crate::CompatibilityMode>,
+    ) -> Result<(HirAssembly, SemanticIndex), SemanticError> {
         let mut ctx = Self {
             assembly: HirAssembly::default(),
             semantic_index: SemanticIndex::default(),
@@ -123,6 +128,7 @@ impl SemanticCtx {
             scopes: Vec::new(),
             function_modifiers: Vec::new(),
             top_level_await: Vec::new(),
+            compatibility_mode,
             function_names: HashMap::new(),
             captures: HashMap::new(),
         };
@@ -997,6 +1003,15 @@ impl SemanticCtx {
                     .map(|arg| self.lower_call_argument(arg))
                     .collect::<Result<_, _>>()?;
                 if name == "await" && args.len() == 1 {
+                    if matches!(
+                        self.compatibility_mode,
+                        Some(crate::CompatibilityMode::MatlabStrict)
+                    ) {
+                        return Err(SemanticError::new(
+                            "await is a RunMat extension and is not available in MATLAB strict mode",
+                        )
+                        .with_span(span));
+                    }
                     if !self.current_allows_await() {
                         return Err(SemanticError::new(
                             "await is only allowed in async functions or top-level script code",
@@ -1005,6 +1020,15 @@ impl SemanticCtx {
                     }
                     HirExprKind::Await(Box::new(args.into_iter().next().unwrap()))
                 } else if name == "spawn" && args.len() == 1 {
+                    if matches!(
+                        self.compatibility_mode,
+                        Some(crate::CompatibilityMode::MatlabStrict)
+                    ) {
+                        return Err(SemanticError::new(
+                            "spawn is a RunMat extension and is not available in MATLAB strict mode",
+                        )
+                        .with_span(span));
+                    }
                     let arg = args.into_iter().next().unwrap();
                     if self.spawn_arg_captures_lexical_binding(&arg) {
                         return Err(SemanticError::new(

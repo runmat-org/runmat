@@ -82,6 +82,7 @@ pub(crate) fn lower_expr_with_replacements(
                         args,
                         syntax: call.syntax.clone(),
                         requested_outputs: call.requested_outputs.clone(),
+                        async_behavior: call_async_behavior(&call.callee),
                     })
                 }
             } else {
@@ -90,6 +91,7 @@ pub(crate) fn lower_expr_with_replacements(
                     args,
                     syntax: call.syntax.clone(),
                     requested_outputs: call.requested_outputs.clone(),
+                    async_behavior: call_async_behavior(&call.callee),
                 })
             }
         }
@@ -222,7 +224,20 @@ fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
             .collect(),
         syntax: runmat_hir::CallSyntax::Command,
         requested_outputs: RequestedOutputCount::Zero,
+        async_behavior: crate::AsyncBehaviorFact::NeverSuspends,
     })
+}
+
+fn call_async_behavior(callee: &HirCallableRef) -> crate::AsyncBehaviorFact {
+    match callee {
+        HirCallableRef::DynamicExpr(_)
+        | HirCallableRef::Unresolved(_)
+        | HirCallableRef::Builtin(_)
+        | HirCallableRef::Imported(_) => crate::AsyncBehaviorFact::MaySuspend,
+        HirCallableRef::Function(_) | HirCallableRef::ClassConstructor(_) => {
+            crate::AsyncBehaviorFact::NeverSuspends
+        }
+    }
 }
 
 fn command_arg_constant(arg: &CommandArgument) -> MirConstant {

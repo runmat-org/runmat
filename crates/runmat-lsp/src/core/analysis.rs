@@ -86,15 +86,7 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
                     };
                 }
             };
-            if let Err(err) = compile(&lowering.hir, &HashMap::new()) {
-                return DocumentAnalysis {
-                    tokens,
-                    syntax_error: None,
-                    lowering_error: None,
-                    compile_error: Some(err),
-                    semantic: None,
-                };
-            }
+            let compile_error = compile(&lowering.hir, &HashMap::new()).err();
 
             let semantic = build_semantic_model(lowering, &tokens, text);
 
@@ -102,7 +94,7 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
                 tokens,
                 syntax_error: None,
                 lowering_error: None,
-                compile_error: None,
+                compile_error,
                 semantic: Some(semantic),
             }
         }

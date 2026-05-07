@@ -3,7 +3,7 @@ use crate::{
     MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
 };
 use runmat_hir::{
-    AsyncValueFact, BindingId, FunctionHandleTarget, FunctionId, HirCallableRef, PlaceMutation,
+    AsyncValueFact, BindingId, FunctionHandleTarget, FunctionId, HirCallableRef,
     RequestedOutputCount, ShapeFact, SpawnSafetyFact, TypeFact, ValueFlowFact, WorkspaceEffect,
 };
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,7 @@ pub struct FunctionSummary {
     pub writes_globals: BTreeSet<BindingId>,
     pub writes_persistents: BTreeSet<BindingId>,
     pub may_call_unknown: bool,
-    pub place_mutations: Vec<PlaceMutation>,
+    pub place_mutations: Vec<crate::MirPlaceMutation>,
     pub function_handles: Vec<FunctionHandleTarget>,
     pub calls: Vec<CallSummary>,
     pub spawn_safety: SpawnSafetyFact,
@@ -247,7 +247,7 @@ pub fn summarize_body(body: &MirBody, store: &mut AnalysisStore) -> FunctionSumm
         place_mutations,
         function_handles,
         calls,
-        spawn_safety: SpawnSafetyFact::RequiresIsolation,
+        spawn_safety: super::spawn_safety::summarize_spawn_safety(body).safety,
         fusibility,
         parallel_safety,
         accel_eligibility,
@@ -443,7 +443,7 @@ fn scan_rvalue(
             if is_unknown_call(&call.callee) {
                 *may_call_unknown = true;
             }
-            if matches!(async_behavior_for_call(call), AsyncBehaviorFact::MaySuspend)
+            if matches!(call.async_behavior, AsyncBehaviorFact::MaySuspend)
                 && matches!(*async_behavior, AsyncBehaviorFact::NeverSuspends)
             {
                 *async_behavior = AsyncBehaviorFact::MaySuspend;
@@ -499,19 +499,8 @@ fn call_summary(call: &MirCall) -> CallSummary {
             .iter()
             .filter(|arg| matches!(arg, MirCallArg::Expansion(_)))
             .count(),
-        async_behavior: async_behavior_for_call(call),
+        async_behavior: call.async_behavior.clone(),
         dispatch: dispatch_hook(call),
-    }
-}
-
-fn async_behavior_for_call(call: &MirCall) -> AsyncBehaviorFact {
-    if matches!(
-        call.callee,
-        HirCallableRef::DynamicExpr(_) | HirCallableRef::Unresolved(_)
-    ) {
-        AsyncBehaviorFact::MaySuspend
-    } else {
-        AsyncBehaviorFact::NeverSuspends
     }
 }
 

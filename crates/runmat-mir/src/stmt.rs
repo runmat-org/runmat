@@ -1,5 +1,8 @@
 use crate::{MirLocalId, MirPlace, MirRvalue};
-use runmat_hir::{EnvironmentEffect, PlaceMutation, Span, WorkspaceEffect};
+use runmat_hir::{
+    AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, PlaceMutationKind, Span,
+    WorkspaceEffect,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -19,12 +22,20 @@ pub enum MirStmtKind {
         value: MirRvalue,
     },
     Expr(MirRvalue),
-    PlaceMutation(PlaceMutation),
+    PlaceMutation(MirPlaceMutation),
     WorkspaceEffect {
         effect: WorkspaceEffect,
         bindings: Vec<MirLocalId>,
     },
     EnvironmentEffect(EnvironmentEffect),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MirPlaceMutation {
+    pub place: MirPlace,
+    pub kind: PlaceMutationKind,
+    pub creation_policy: AssignmentCreationPolicy,
+    pub shape_policy: AssignmentShapePolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -1,4 +1,4 @@
-use crate::MirOperand;
+use crate::{AsyncBehaviorFact, MirOperand};
 use runmat_hir::{CallSyntax, HirCallableRef, RequestedOutputCount};
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +8,7 @@ pub struct MirCall {
     pub args: Vec<MirCallArg>,
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
+    pub async_behavior: AsyncBehaviorFact,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

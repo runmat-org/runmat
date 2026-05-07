@@ -733,6 +733,44 @@ fn analyze_assembly_rejects_spawned_future_with_lexical_capture_read() {
 }
 
 #[test]
+fn spawn_safety_uses_future_target_visible_at_spawn_site() {
+    let mir = lower_mir(
+        "function y = outer(); cap = 1; async function z = safe(); z = 1; end; async function z = unsafe(); z = cap; end; fut = safe(); task = spawn(fut); fut = unsafe(); y = cap; end",
+    );
+
+    let store = analyze_assembly(&mir);
+
+    assert!(store
+        .spawn_boundaries
+        .values()
+        .flatten()
+        .any(|boundary| matches!(boundary.safety, runmat_hir::SpawnSafetyFact::SpawnSafe)));
+    assert!(!store.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RM-MIR0003" && diagnostic.category.as_deref() == Some("spawn-safety")
+    }));
+}
+
+#[test]
+fn spawn_safety_joins_future_targets_across_cfg_paths() {
+    let mir = lower_mir(
+        "function y = outer(c); cap = 1; async function z = safe(); z = 1; end; async function z = unsafe(); z = cap; end; if c; fut = safe(); else; fut = unsafe(); end; task = spawn(fut); y = cap; end",
+    );
+
+    let store = analyze_assembly(&mir);
+
+    assert!(store
+        .spawn_boundaries
+        .values()
+        .flatten()
+        .any(|boundary| matches!(
+            boundary.safety,
+            runmat_hir::SpawnSafetyFact::NotSpawnSafe {
+                reason: runmat_hir::SpawnSafetyReason::MutableLexicalCapture
+            }
+        )));
+}
+
+#[test]
 fn analyze_assembly_rejects_spawned_future_with_unknown_target() {
     let mir = lower_mir("function y = f(g); y = spawn(g); end");
 
@@ -748,6 +786,20 @@ fn analyze_assembly_rejects_spawned_future_with_unknown_target() {
                 reason: runmat_hir::SpawnSafetyReason::UnknownDynamicCapture
             }
         )));
+    assert!(store.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RM-MIR0003" && diagnostic.category.as_deref() == Some("spawn-safety")
+    }));
+}
+
+#[test]
+fn dataflow_marks_spawn_as_task_handle_even_when_safety_diagnostic_rejects_target() {
+    let mir = lower_mir("function y = f(); task = spawn(@(x) x); y = 1; end");
+    let store = analyze_assembly(&mir);
+
+    assert!(store.mir_locals.values().any(|fact| matches!(
+        fact.async_value,
+        Some(runmat_hir::AsyncValueFact::TaskHandle(_))
+    )));
     assert!(store.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "RM-MIR0003" && diagnostic.category.as_deref() == Some("spawn-safety")
     }));
@@ -825,6 +877,7 @@ fn analyze_assembly_collects_semantic_marker_diagnostics() {
         args: vec![MirCallArg::Expansion(MirOperand::Local(local))],
         syntax: runmat_hir::CallSyntax::Plain,
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        async_behavior: runmat_mir::AsyncBehaviorFact::MaySuspend,
     }));
 
     let store = analyze_assembly(&mir);
@@ -999,6 +1052,29 @@ fn liveness_records_locals_live_across_await() {
 }
 
 #[test]
+fn liveness_does_not_mark_locals_defined_after_await_as_live_across() {
+    let mir = lower_mir("async function y = f(g); y = await(g); z = 1; y = z; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let facts = analyze_liveness(body);
+    let live = &facts.live_across_await[0].1;
+    let z_local = body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|stmt| match &stmt.kind {
+            MirStmtKind::Assign {
+                place: MirPlace::Local(local),
+                value: MirRvalue::Use(MirOperand::Constant(runmat_mir::MirConstant::Number(value))),
+            } if value == "1" => Some(*local),
+            _ => None,
+        })
+        .unwrap();
+
+    assert!(!live.contains(&z_local));
+}
+
+#[test]
 fn global_statement_lowers_to_workspace_effect() {
     let mir = lower_mir("function y = f(); global g; y = 1; end");
     let body = mir.bodies.values().next().unwrap();
@@ -1156,6 +1232,24 @@ fn direct_function_call_preserves_callee_and_requested_outputs() {
         call.requested_outputs,
         runmat_hir::RequestedOutputCount::One
     ));
+}
+
+#[test]
+fn mir_call_records_explicit_async_behavior() {
+    let mir = lower_mir("function y = f(x); y = unknown_call(x); end");
+    let body = mir.bodies.values().next().unwrap();
+
+    assert!(body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .any(|stmt| matches!(
+            &stmt.kind,
+            MirStmtKind::Assign {
+                value: MirRvalue::Call(call),
+                ..
+            } if matches!(call.async_behavior, runmat_mir::AsyncBehaviorFact::MaySuspend)
+        )));
 }
 
 #[test]

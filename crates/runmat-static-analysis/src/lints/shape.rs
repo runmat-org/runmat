@@ -1,25 +1,30 @@
 use runmat_hir::{
-    BindingId, HirBlock, HirCallableRef, HirDiagnostic, HirDiagnosticSeverity, HirExpr,
-    HirExprKind, HirPlace, HirStmt, HirStmtKind, IndexComponent, OperatorKind, QualifiedName, Span,
+    BindingId, HirCallableRef, HirDiagnostic, HirDiagnosticSeverity, OperatorKind, QualifiedName,
+    Span,
 };
 use runmat_mir::analysis::{AnalysisStore, MirLocalKey};
 use std::collections::HashMap;
 
 pub fn lint_shapes(result: &runmat_hir::LoweringResult) -> Vec<HirDiagnostic> {
-    let analysis = runmat_mir::lowering::lower_assembly(&result.assembly)
-        .ok()
-        .map(|mir| {
-            let store = runmat_mir::analysis::analyze_assembly(&mir);
-            (mir, store)
-        });
+    let mir = match runmat_mir::lowering::lower_assembly(&result.assembly) {
+        Ok(mir) => mir,
+        Err(err) => return vec![mir_lowering_diagnostic(err)],
+    };
+    let store = runmat_mir::analysis::analyze_assembly(&mir);
     let mut ctx = ShapeLintContext::default();
-    if let Some((mir, store)) = &analysis {
-        ctx.seed_from_analysis(mir, store);
-    }
-    for function in &result.assembly.functions {
-        ctx.walk_block(&function.body);
-    }
+    ctx.seed_from_analysis(&mir, &store);
+    ctx.walk_mir_assembly(&mir);
     ctx.diagnostics
+}
+
+fn mir_lowering_diagnostic(err: runmat_hir::SemanticError) -> HirDiagnostic {
+    HirDiagnostic::new(
+        "lint.mir.lowering_failed",
+        HirDiagnosticSeverity::Error,
+        format!("MIR lowering failed: {}", err.message),
+        err.span.unwrap_or(runmat_hir::Span { start: 0, end: 0 }),
+    )
+    .with_category("mir-lowering")
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,7 +33,17 @@ struct Shape(Vec<Option<usize>>);
 #[derive(Default)]
 struct ShapeLintContext {
     env: HashMap<BindingId, Shape>,
+    local_env: HashMap<MirLocalKey, Shape>,
+    number_env: HashMap<MirLocalKey, f64>,
+    int_vector_env: HashMap<MirLocalKey, Vec<usize>>,
     diagnostics: Vec<HirDiagnostic>,
+}
+
+#[derive(Default)]
+struct MirShapeValue {
+    shape: Option<Shape>,
+    number: Option<f64>,
+    int_vector: Option<Vec<usize>>,
 }
 
 impl ShapeLintContext {
@@ -51,146 +66,178 @@ impl ShapeLintContext {
         }
     }
 
-    fn walk_block(&mut self, block: &HirBlock) {
-        for stmt in &block.statements {
-            self.walk_stmt(stmt);
-        }
-    }
-
-    fn walk_stmt(&mut self, stmt: &HirStmt) {
-        match &stmt.kind {
-            HirStmtKind::Assign(place, expr, _) => {
-                let shape = self.infer_expr(expr);
-                if let (HirPlace::Binding(binding), Some(shape)) = (place, shape) {
-                    self.env.insert(*binding, shape);
-                }
-            }
-            HirStmtKind::MultiAssign(_, expr, _) | HirStmtKind::ExprStmt(expr, _) => {
-                self.infer_expr(expr);
-            }
-            HirStmtKind::If {
-                cond,
-                then_body,
-                elseif_blocks,
-                else_body,
-            } => {
-                self.infer_expr(cond);
-                self.walk_block(then_body);
-                for (cond, block) in elseif_blocks {
-                    self.infer_expr(cond);
-                    self.walk_block(block);
-                }
-                if let Some(block) = else_body {
-                    self.walk_block(block);
-                }
-            }
-            HirStmtKind::While { cond, body } => {
-                self.infer_expr(cond);
-                self.walk_block(body);
-            }
-            HirStmtKind::For { range, body, .. } => {
-                self.infer_expr(range);
-                self.walk_block(body);
-            }
-            HirStmtKind::Switch {
-                expr,
-                cases,
-                otherwise,
-            } => {
-                self.infer_expr(expr);
-                for (case, block) in cases {
-                    self.infer_expr(case);
-                    self.walk_block(block);
-                }
-                if let Some(block) = otherwise {
-                    self.walk_block(block);
-                }
-            }
-            HirStmtKind::TryCatch {
-                try_body,
-                catch_body,
-                ..
-            } => {
-                self.walk_block(try_body);
-                self.walk_block(catch_body);
-            }
-            HirStmtKind::Global(_)
-            | HirStmtKind::Persistent(_)
-            | HirStmtKind::Break
-            | HirStmtKind::Continue
-            | HirStmtKind::Return
-            | HirStmtKind::Import(_) => {}
-        }
-    }
-
-    fn infer_expr(&mut self, expr: &HirExpr) -> Option<Shape> {
-        match &expr.kind {
-            HirExprKind::Number(_) => Some(Shape(vec![Some(1), Some(1)])),
-            HirExprKind::Binding(binding) => self.env.get(binding).cloned(),
-            HirExprKind::Unary(_, inner) => self.infer_expr(inner),
-            HirExprKind::Binary(left, op, right) => self.infer_binary(expr.span, left, op, right),
-            HirExprKind::Tensor(rows) => self.infer_tensor(expr.span, rows),
-            HirExprKind::Cell(rows) => {
-                Some(Shape(vec![Some(1), Some(rows.iter().map(Vec::len).sum())]))
-            }
-            HirExprKind::Range(start, step, end) => {
-                self.infer_expr(start);
-                if let Some(step) = step {
-                    self.infer_expr(step);
-                }
-                self.infer_expr(end);
-                Some(Shape(vec![Some(1), None]))
-            }
-            HirExprKind::Index(base, indexing) => {
-                let base_shape = self.infer_expr(base);
-                for component in &indexing.components {
-                    if let IndexComponent::Expr(idx) | IndexComponent::Logical(idx) = component {
-                        let idx_shape = self.infer_expr(idx);
-                        if indexing.components.len() == 1 {
-                            self.check_logical_index(
-                                expr.span,
-                                base_shape.as_ref(),
-                                idx_shape.as_ref(),
-                            );
+    fn walk_mir_assembly(&mut self, mir: &runmat_mir::MirAssembly) {
+        for body in mir.bodies.values() {
+            for block in &body.blocks {
+                for stmt in &block.statements {
+                    match &stmt.kind {
+                        runmat_mir::MirStmtKind::Assign { place, value } => {
+                            let value = self.infer_mir_rvalue(body, value, stmt.span);
+                            if let runmat_mir::MirPlace::Local(local) = place {
+                                self.record_mir_value(body, *local, value);
+                            }
                         }
+                        runmat_mir::MirStmtKind::MultiAssign { value, .. }
+                        | runmat_mir::MirStmtKind::Expr(value) => {
+                            self.infer_mir_rvalue(body, value, stmt.span);
+                        }
+                        runmat_mir::MirStmtKind::PlaceMutation(_)
+                        | runmat_mir::MirStmtKind::WorkspaceEffect { .. }
+                        | runmat_mir::MirStmtKind::EnvironmentEffect(_) => {}
                     }
                 }
-                None
             }
-            HirExprKind::Member(base, _) => {
-                self.infer_expr(base);
-                None
-            }
-            HirExprKind::MemberDynamic(base, member) => {
-                self.infer_expr(base);
-                self.infer_expr(member);
-                None
-            }
-            HirExprKind::Call(call) => self.infer_call(expr.span, &call.callee, &call.args),
-            HirExprKind::Await(inner) | HirExprKind::Spawn(inner) => self.infer_expr(inner),
-            HirExprKind::String(_)
-            | HirExprKind::Constant(_)
-            | HirExprKind::Colon
-            | HirExprKind::End
-            | HirExprKind::CommandCall(_)
-            | HirExprKind::FunctionHandle(_)
-            | HirExprKind::AnonymousFunction(_)
-            | HirExprKind::MetaClass(_) => None,
         }
     }
 
-    fn infer_binary(
+    fn record_mir_value(
+        &mut self,
+        body: &runmat_mir::MirBody,
+        local: runmat_mir::MirLocalId,
+        value: MirShapeValue,
+    ) {
+        let key = MirLocalKey {
+            function: body.function,
+            local,
+        };
+        if let Some(shape) = value.shape {
+            self.local_env.insert(key, shape);
+        }
+        if let Some(number) = value.number {
+            self.number_env.insert(key, number);
+        }
+        if let Some(vector) = value.int_vector {
+            self.int_vector_env.insert(key, vector);
+        }
+    }
+
+    fn infer_mir_rvalue(
+        &mut self,
+        body: &runmat_mir::MirBody,
+        value: &runmat_mir::MirRvalue,
+        span: Span,
+    ) -> MirShapeValue {
+        match value {
+            runmat_mir::MirRvalue::Use(operand) => self.infer_mir_operand(body, operand),
+            runmat_mir::MirRvalue::Unary(op, operand) => {
+                let inner = self.infer_mir_operand(body, operand);
+                let number = match (op, inner.number) {
+                    (OperatorKind::UnaryMinus, Some(value)) => Some(-value),
+                    _ => None,
+                };
+                MirShapeValue {
+                    shape: inner.shape,
+                    number,
+                    int_vector: None,
+                }
+            }
+            runmat_mir::MirRvalue::Binary(left, op, right) => {
+                let lhs = self.infer_mir_operand(body, left);
+                let rhs = self.infer_mir_operand(body, right);
+                MirShapeValue {
+                    shape: self.infer_mir_binary(span, lhs.shape.as_ref(), op, rhs.shape.as_ref()),
+                    number: None,
+                    int_vector: None,
+                }
+            }
+            runmat_mir::MirRvalue::Range { start, step, end } => {
+                self.infer_mir_operand(body, start);
+                if let Some(step) = step {
+                    self.infer_mir_operand(body, step);
+                }
+                self.infer_mir_operand(body, end);
+                MirShapeValue {
+                    shape: Some(Shape(vec![Some(1), None])),
+                    number: None,
+                    int_vector: None,
+                }
+            }
+            runmat_mir::MirRvalue::Call(call) => self.infer_mir_call(body, span, call),
+            runmat_mir::MirRvalue::Aggregate {
+                kind,
+                rows,
+                elements,
+                ..
+            } => self.infer_mir_aggregate(body, span, kind, *rows, elements),
+            runmat_mir::MirRvalue::Index { base, indexing } => {
+                let base_shape = self.infer_mir_operand(body, base).shape;
+                for component in &indexing.components {
+                    match component {
+                        runmat_mir::MirIndexComponent::Expr(operand)
+                        | runmat_mir::MirIndexComponent::Logical(operand) => {
+                            let idx_shape = self.infer_mir_operand(body, operand).shape;
+                            if indexing.components.len() == 1 {
+                                self.check_logical_index(
+                                    span,
+                                    base_shape.as_ref(),
+                                    idx_shape.as_ref(),
+                                );
+                            }
+                        }
+                        runmat_mir::MirIndexComponent::Colon
+                        | runmat_mir::MirIndexComponent::End { .. } => {}
+                    }
+                }
+                MirShapeValue::default()
+            }
+            runmat_mir::MirRvalue::Member { base, .. } => self.infer_mir_operand(body, base),
+            runmat_mir::MirRvalue::DynamicMember { base, member } => {
+                self.infer_mir_operand(body, member);
+                self.infer_mir_operand(body, base)
+            }
+            runmat_mir::MirRvalue::Future { args, .. } => {
+                for arg in args {
+                    self.infer_mir_operand(body, arg.operand());
+                }
+                MirShapeValue::default()
+            }
+            runmat_mir::MirRvalue::Spawn(operand) => self.infer_mir_operand(body, operand),
+            runmat_mir::MirRvalue::MetaClass(_)
+            | runmat_mir::MirRvalue::Colon
+            | runmat_mir::MirRvalue::End => MirShapeValue::default(),
+        }
+    }
+
+    fn infer_mir_operand(
+        &self,
+        body: &runmat_mir::MirBody,
+        operand: &runmat_mir::MirOperand,
+    ) -> MirShapeValue {
+        match operand {
+            runmat_mir::MirOperand::Constant(runmat_mir::MirConstant::Number(value)) => {
+                MirShapeValue {
+                    shape: Some(Shape(vec![Some(1), Some(1)])),
+                    number: value.parse().ok(),
+                    int_vector: None,
+                }
+            }
+            runmat_mir::MirOperand::Local(local) => {
+                let key = MirLocalKey {
+                    function: body.function,
+                    local: *local,
+                };
+                MirShapeValue {
+                    shape: self.local_env.get(&key).cloned(),
+                    number: self.number_env.get(&key).copied(),
+                    int_vector: self.int_vector_env.get(&key).cloned(),
+                }
+            }
+            runmat_mir::MirOperand::Constant(_)
+            | runmat_mir::MirOperand::Temp(_)
+            | runmat_mir::MirOperand::FunctionHandle(_) => MirShapeValue::default(),
+        }
+    }
+
+    fn infer_mir_binary(
         &mut self,
         span: Span,
-        left: &HirExpr,
+        lhs: Option<&Shape>,
         op: &OperatorKind,
-        right: &HirExpr,
+        rhs: Option<&Shape>,
     ) -> Option<Shape> {
-        let lhs = self.infer_expr(left);
-        let rhs = self.infer_expr(right);
         match op {
             OperatorKind::MatrixMultiply => {
-                if let (Some(lhs), Some(rhs)) = (&lhs, &rhs) {
+                if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
                     if matrix_dims(lhs)
                         .zip(matrix_dims(rhs))
                         .is_some_and(|((_, lc), (rr, _))| lc.is_some() && rr.is_some() && lc != rr)
@@ -202,10 +249,7 @@ impl ShapeLintContext {
                         );
                     }
                 }
-                match (
-                    lhs.as_ref().and_then(matrix_dims),
-                    rhs.as_ref().and_then(matrix_dims),
-                ) {
+                match (lhs.and_then(matrix_dims), rhs.and_then(matrix_dims)) {
                     (Some((rows, _)), Some((_, cols))) => Some(Shape(vec![rows, cols])),
                     _ => None,
                 }
@@ -222,7 +266,7 @@ impl ShapeLintContext {
             | OperatorKind::LessEqual
             | OperatorKind::Equal
             | OperatorKind::NotEqual => {
-                if let (Some(lhs), Some(rhs)) = (&lhs, &rhs) {
+                if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
                     if !broadcast_compatible(lhs, rhs) {
                         self.warn(
                             "lint.shape.broadcast",
@@ -231,75 +275,116 @@ impl ShapeLintContext {
                         );
                     }
                 }
-                lhs.or(rhs)
+                lhs.cloned().or_else(|| rhs.cloned())
             }
-            _ => lhs.or(rhs),
+            _ => lhs.cloned().or_else(|| rhs.cloned()),
         }
     }
 
-    fn infer_tensor(&mut self, span: Span, rows: &[Vec<HirExpr>]) -> Option<Shape> {
-        let mut row_dims = Vec::new();
-        for row in rows {
-            let mut total_cols = 0usize;
-            let mut expected_rows = None;
-            for element in row {
-                let shape = self.infer_expr(element);
-                if let Some((rows, cols)) = shape.as_ref().and_then(matrix_dims) {
-                    if let (Some(expected), Some(rows)) = (expected_rows, rows) {
-                        if expected != rows {
+    fn infer_mir_aggregate(
+        &mut self,
+        body: &runmat_mir::MirBody,
+        span: Span,
+        kind: &runmat_mir::MirAggregateKind,
+        rows: usize,
+        elements: &[runmat_mir::MirOperand],
+    ) -> MirShapeValue {
+        let values: Vec<_> = elements
+            .iter()
+            .map(|element| self.infer_mir_operand(body, element))
+            .collect();
+        let int_vector = values
+            .iter()
+            .map(|value| value.number.and_then(number_to_int))
+            .collect::<Option<Vec<_>>>();
+        let shape = match kind {
+            runmat_mir::MirAggregateKind::Tensor => {
+                let row_count = rows.max(1);
+                let cols_per_row = if row_count == 0 {
+                    0
+                } else {
+                    elements.len() / row_count
+                };
+                let mut row_dims = Vec::new();
+                for row_idx in 0..row_count {
+                    let start = row_idx * cols_per_row;
+                    let end = start + cols_per_row;
+                    let mut total_cols = 0usize;
+                    let mut expected_rows = None;
+                    for value in &values[start..end] {
+                        if let Some((rows, cols)) = value.shape.as_ref().and_then(matrix_dims) {
+                            if let (Some(expected), Some(rows)) = (expected_rows, rows) {
+                                if expected != rows {
+                                    self.warn(
+                                        "lint.shape.horzcat",
+                                        "horizontal concatenation row dimensions do not agree",
+                                        span,
+                                    );
+                                }
+                            }
+                            expected_rows = expected_rows.or(rows);
+                            total_cols += cols.unwrap_or(1);
+                        } else {
+                            total_cols += 1;
+                        }
+                    }
+                    row_dims.push((expected_rows.unwrap_or(1), total_cols));
+                }
+                if let Some((_, first_cols)) = row_dims.first().copied() {
+                    for (_, cols) in &row_dims {
+                        if *cols != first_cols {
                             self.warn(
-                                "lint.shape.horzcat",
-                                "horizontal concatenation row dimensions do not agree",
+                                "lint.shape.vertcat",
+                                "vertical concatenation column dimensions do not agree",
                                 span,
                             );
                         }
                     }
-                    expected_rows = expected_rows.or(rows);
-                    total_cols += cols.unwrap_or(1);
+                    Some(Shape(vec![
+                        Some(row_dims.iter().map(|(rows, _)| rows).sum()),
+                        Some(first_cols),
+                    ]))
                 } else {
-                    total_cols += 1;
+                    Some(Shape(vec![Some(0), Some(0)]))
                 }
             }
-            row_dims.push((expected_rows.unwrap_or(1), total_cols));
-        }
-        if let Some((_, first_cols)) = row_dims.first().copied() {
-            for (_, cols) in &row_dims {
-                if *cols != first_cols {
-                    self.warn(
-                        "lint.shape.vertcat",
-                        "vertical concatenation column dimensions do not agree",
-                        span,
-                    );
-                }
+            runmat_mir::MirAggregateKind::Cell => Some(Shape(vec![Some(1), Some(elements.len())])),
+            runmat_mir::MirAggregateKind::Struct | runmat_mir::MirAggregateKind::ObjectArray(_) => {
+                None
             }
-            Some(Shape(vec![
-                Some(row_dims.iter().map(|(rows, _)| rows).sum()),
-                Some(first_cols),
-            ]))
-        } else {
-            Some(Shape(vec![Some(0), Some(0)]))
+        };
+        MirShapeValue {
+            shape,
+            number: None,
+            int_vector,
         }
     }
 
-    fn infer_call(
+    fn infer_mir_call(
         &mut self,
+        body: &runmat_mir::MirBody,
         span: Span,
-        callee: &HirCallableRef,
-        args: &[HirExpr],
-    ) -> Option<Shape> {
-        let name = call_name(callee);
+        call: &runmat_mir::MirCall,
+    ) -> MirShapeValue {
+        let name = call_name(&call.callee);
         let name = name.as_deref();
-        match name {
+        let arg_values: Vec<_> = call
+            .args
+            .iter()
+            .map(|arg| self.infer_mir_operand(body, arg.operand()))
+            .collect();
+        let shape = match name {
             Some("ones") | Some("zeros") | Some("rand") => Some(Shape(
-                args.iter()
-                    .filter_map(const_int)
+                arg_values
+                    .iter()
+                    .filter_map(|value| value.number.and_then(number_to_int))
                     .map(Some)
-                    .collect::<Vec<_>>(),
+                    .collect(),
             )),
             Some("dot") => {
-                let lhs = args.get(0).and_then(|arg| self.infer_expr(arg));
-                let rhs = args.get(1).and_then(|arg| self.infer_expr(arg));
-                if let (Some(lhs), Some(rhs)) = (&lhs, &rhs) {
+                let lhs = arg_values.first().and_then(|value| value.shape.as_ref());
+                let rhs = arg_values.get(1).and_then(|value| value.shape.as_ref());
+                if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
                     if vector_len(lhs)
                         .zip(vector_len(rhs))
                         .is_some_and(|(l, r)| l != r)
@@ -314,10 +399,10 @@ impl ShapeLintContext {
                 Some(Shape(vec![Some(1), Some(1)]))
             }
             Some("reshape") => {
-                let input = args.get(0).and_then(|arg| self.infer_expr(arg));
-                let dims = parse_dims(&args[1..]);
+                let input = arg_values.first().and_then(|value| value.shape.as_ref());
+                let dims = mir_parse_dims(&arg_values[1..]);
                 if dims.iter().filter(|dim| matches!(dim, Dim::Infer)).count() > 1
-                    || incompatible_element_count(input.as_ref(), &dims)
+                    || incompatible_element_count(input, &dims)
                 {
                     self.warn(
                         "lint.shape.reshape",
@@ -328,21 +413,20 @@ impl ShapeLintContext {
                 Some(Shape(dims.iter().map(|dim| dim.as_shape_dim()).collect()))
             }
             Some("repmat") => {
-                let base = args.get(0).and_then(|arg| self.infer_expr(arg));
-                for arg in &args[1..] {
-                    if !matches!(parse_dim(arg), Dim::Known(_)) {
+                for arg in &arg_values[1..] {
+                    if !matches!(mir_parse_dim(arg), Dim::Known(_)) {
                         self.warn(
                             "lint.shape.repmat",
                             "repmat dimensions must be non-negative integers",
-                            arg.span,
+                            span,
                         );
                     }
                 }
-                base
+                arg_values.first().and_then(|value| value.shape.clone())
             }
             Some("permute") => {
-                let base = args.get(0).and_then(|arg| self.infer_expr(arg));
-                let order = args.get(1).and_then(vector_literal_ints);
+                let base = arg_values.first().and_then(|value| value.shape.clone());
+                let order = arg_values.get(1).and_then(|value| value.int_vector.clone());
                 if let Some(order) = &order {
                     let mut sorted = order.clone();
                     sorted.sort_unstable();
@@ -361,9 +445,14 @@ impl ShapeLintContext {
                 base
             }
             Some("sum") | Some("mean") | Some("max") | Some("min") => {
-                let base = args.get(0).and_then(|arg| self.infer_expr(arg));
-                if let (Some(base), Some(dim)) = (base.as_ref(), args.get(1).and_then(const_int)) {
-                    if dim == 0 || dim > base.0.len() {
+                let base = arg_values.first().and_then(|value| value.shape.clone());
+                if let (Some(base_shape), Some(dim)) = (
+                    base.as_ref(),
+                    arg_values
+                        .get(1)
+                        .and_then(|value| value.number.and_then(number_to_int)),
+                ) {
+                    if dim == 0 || dim > base_shape.0.len() {
                         self.warn(
                             "lint.shape.reduction",
                             "reduction dimension is out of range",
@@ -373,12 +462,12 @@ impl ShapeLintContext {
                 }
                 base
             }
-            _ => {
-                for arg in args {
-                    self.infer_expr(arg);
-                }
-                None
-            }
+            _ => None,
+        };
+        MirShapeValue {
+            shape,
+            number: None,
+            int_vector: None,
         }
     }
 
@@ -421,6 +510,31 @@ impl Dim {
     }
 }
 
+fn number_to_int(value: f64) -> Option<usize> {
+    if value.is_finite() && value >= 0.0 && (value.fract().abs() <= 1e-9) {
+        Some(value as usize)
+    } else {
+        None
+    }
+}
+
+fn mir_parse_dim(value: &MirShapeValue) -> Dim {
+    match value.number {
+        Some(value) if value == -1.0 => Dim::Infer,
+        Some(value) => number_to_int(value).map(Dim::Known).unwrap_or(Dim::Unknown),
+        None => Dim::Unknown,
+    }
+}
+
+fn mir_parse_dims(args: &[MirShapeValue]) -> Vec<Dim> {
+    if args.len() == 1 {
+        if let Some(values) = &args[0].int_vector {
+            return values.iter().copied().map(Dim::Known).collect();
+        }
+    }
+    args.iter().map(mir_parse_dim).collect()
+}
+
 fn call_name(callee: &HirCallableRef) -> Option<String> {
     match callee {
         HirCallableRef::Builtin(id) => Some(id.0.clone()),
@@ -452,55 +566,6 @@ fn shape_from_fact(shape: &runmat_hir::ShapeFact) -> Option<Shape> {
         | runmat_hir::ShapeFact::Unknown
         | runmat_hir::ShapeFact::Unreachable => None,
     }
-}
-
-fn const_num(expr: &HirExpr) -> Option<f64> {
-    match &expr.kind {
-        HirExprKind::Number(value) => value.parse().ok(),
-        HirExprKind::Unary(OperatorKind::UnaryMinus, inner) => const_num(inner).map(|value| -value),
-        _ => None,
-    }
-}
-
-fn const_int(expr: &HirExpr) -> Option<usize> {
-    let value = const_num(expr)?;
-    if value.is_finite() && value >= 0.0 && (value.fract().abs() <= 1e-9) {
-        Some(value as usize)
-    } else {
-        None
-    }
-}
-
-fn parse_dim(expr: &HirExpr) -> Dim {
-    match const_num(expr) {
-        Some(value) if value == -1.0 => Dim::Infer,
-        Some(value) if value.is_finite() && value >= 0.0 && (value.fract().abs() <= 1e-9) => {
-            Dim::Known(value as usize)
-        }
-        _ => Dim::Unknown,
-    }
-}
-
-fn parse_dims(args: &[HirExpr]) -> Vec<Dim> {
-    if args.len() == 1 {
-        if let Some(values) = vector_literal_ints(&args[0]) {
-            return values.into_iter().map(Dim::Known).collect();
-        }
-    }
-    args.iter().map(parse_dim).collect()
-}
-
-fn vector_literal_ints(expr: &HirExpr) -> Option<Vec<usize>> {
-    let HirExprKind::Tensor(rows) = &expr.kind else {
-        return None;
-    };
-    let mut values = Vec::new();
-    for row in rows {
-        for element in row {
-            values.push(const_int(element)?);
-        }
-    }
-    Some(values)
 }
 
 fn matrix_dims(shape: &Shape) -> Option<(Option<usize>, Option<usize>)> {
