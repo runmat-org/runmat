@@ -391,6 +391,29 @@ fn multi_assign_builtin_with_cell_expansion_uses_semantic_vm() {
 }
 
 #[test]
+fn multi_assign_cell_expansion_rhs_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "C = {1, 2}; [a, b] = C{:};";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile multi-assign cell expansion rhs");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "multi-assign cell expansion RHS should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
+            && upsert.value.to_string() == "1"
+    }));
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
+            && upsert.value.to_string() == "2"
+    }));
+}
+
+#[test]
 fn feval_anonymous_handle_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "f = @(x) x + 1; y = feval(f, 2);";

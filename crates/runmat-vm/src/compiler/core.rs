@@ -502,9 +502,26 @@ impl Compiler {
             MirRvalue::Call(call) => {
                 self.compile_mir_call_for_multi_assign(call, targets.targets.len())?
             }
+            MirRvalue::Index { base, indexing }
+                if indexing.kind == IndexKind::Brace
+                    && matches!(indexing.result_context, IndexResultContext::ReadCommaList) =>
+            {
+                self.compile_mir_cell_expand_for_multi_assign(
+                    base,
+                    indexing,
+                    targets.targets.len(),
+                )?
+            }
             _ => self.compile_mir_rvalue(value)?,
         }
-        self.emit(Instr::Unpack(targets.targets.len()));
+        if !matches!(
+            value,
+            MirRvalue::Index { indexing, .. }
+                if indexing.kind == IndexKind::Brace
+                    && matches!(indexing.result_context, IndexResultContext::ReadCommaList)
+        ) {
+            self.emit(Instr::Unpack(targets.targets.len()));
+        }
         for target in targets.targets.iter().rev() {
             match target {
                 MirOutputTarget::Place(place) => {
@@ -520,6 +537,37 @@ impl Compiler {
                     ))
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn compile_mir_cell_expand_for_multi_assign(
+        &mut self,
+        base: &MirOperand,
+        indexing: &MirIndexing,
+        output_count: usize,
+    ) -> Result<(), CompileError> {
+        self.compile_mir_operand(base)?;
+        let mut index_count = 0usize;
+        let mut expand_all = false;
+        for component in &indexing.components {
+            match component {
+                MirIndexComponent::Colon => expand_all = true,
+                MirIndexComponent::Expr(operand) => {
+                    self.compile_mir_operand(operand)?;
+                    index_count += 1;
+                }
+                _ => {
+                    return Err(self.compile_error(
+                        "MIR bytecode lowering for this slice index is not implemented yet",
+                    ))
+                }
+            }
+        }
+        if expand_all {
+            self.emit(Instr::IndexCellExpand(0, output_count));
+        } else {
+            self.emit(Instr::IndexCellExpand(index_count, output_count));
         }
         Ok(())
     }
