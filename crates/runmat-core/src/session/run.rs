@@ -1009,7 +1009,7 @@ fn compile_eval_hook_bytecode(
         if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
             if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
                 if super::compile::semantic_workspace_slots_match_legacy(&bytecode, lowering)
-                    && super::compile::bytecode_has_no_runtime_calls(&bytecode)
+                    && super::compile::bytecode_has_only_semantic_ready_runtime_calls(&bytecode)
                 {
                     return Ok(bytecode);
                 }

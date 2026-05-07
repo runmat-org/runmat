@@ -163,6 +163,42 @@ fn char_literal_assignment_uses_semantic_vm() {
 }
 
 #[test]
+fn direct_display_builtins_use_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("disp('alpha')")
+        .expect("compile disp call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "disp should compile through semantic HIR/MIR/VM"
+    );
+    let outcome = block_on(session.execute_outcome("disp('alpha')")).expect("exec disp");
+    let stdout = outcome
+        .streams
+        .iter()
+        .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
+        .map(|entry| entry.text.as_str())
+        .collect::<String>();
+    assert_eq!(stdout, "alpha\n");
+
+    let prepared = session
+        .compile_input("fprintf('foo')")
+        .expect("compile fprintf call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "fprintf should compile through semantic HIR/MIR/VM"
+    );
+    let outcome = block_on(session.execute_outcome("fprintf('foo')")).expect("exec fprintf");
+    let stdout = outcome
+        .streams
+        .iter()
+        .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
+        .map(|entry| entry.text.as_str())
+        .collect::<String>();
+    assert_eq!(stdout, "foo");
+}
+
+#[test]
 fn workspace_reports_datetime_array_shape() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let result =

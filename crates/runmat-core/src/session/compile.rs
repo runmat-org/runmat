@@ -73,7 +73,7 @@ impl RunMatSession {
             if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
                 if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
                     if semantic_workspace_slots_match_legacy(&bytecode, lowering)
-                        && bytecode_has_no_runtime_calls(&bytecode)
+                        && bytecode_has_only_semantic_ready_runtime_calls(&bytecode)
                     {
                         return Ok(bytecode);
                     }
@@ -207,21 +207,23 @@ impl RunMatSession {
     }
 }
 
-pub(crate) fn bytecode_has_no_runtime_calls(bytecode: &runmat_vm::Bytecode) -> bool {
-    bytecode.instructions.iter().all(|instr| {
-        !matches!(
-            instr,
-            runmat_vm::Instr::CallBuiltin(_, _)
-                | runmat_vm::Instr::CallBuiltinExpandLast(_, _, _)
-                | runmat_vm::Instr::CallBuiltinExpandAt(_, _, _, _)
-                | runmat_vm::Instr::CallBuiltinExpandMulti(..)
-                | runmat_vm::Instr::CallFunction(_, _)
-                | runmat_vm::Instr::CallFunctionMulti(_, _, _)
-                | runmat_vm::Instr::CallFunctionExpandAt(_, _, _, _)
-                | runmat_vm::Instr::CallFunctionExpandMulti(_, _)
-                | runmat_vm::Instr::CallFeval(_)
-                | runmat_vm::Instr::CallFevalExpandMulti(_)
-        )
+pub(crate) fn bytecode_has_only_semantic_ready_runtime_calls(
+    bytecode: &runmat_vm::Bytecode,
+) -> bool {
+    bytecode.instructions.iter().all(|instr| match instr {
+        runmat_vm::Instr::CallBuiltin(name, _) => {
+            matches!(name.as_str(), "disp" | "fprintf")
+        }
+        runmat_vm::Instr::CallBuiltinExpandLast(_, _, _)
+        | runmat_vm::Instr::CallBuiltinExpandAt(_, _, _, _)
+        | runmat_vm::Instr::CallBuiltinExpandMulti(..)
+        | runmat_vm::Instr::CallFunction(_, _)
+        | runmat_vm::Instr::CallFunctionMulti(_, _, _)
+        | runmat_vm::Instr::CallFunctionExpandAt(_, _, _, _)
+        | runmat_vm::Instr::CallFunctionExpandMulti(_, _)
+        | runmat_vm::Instr::CallFeval(_)
+        | runmat_vm::Instr::CallFevalExpandMulti(_) => false,
+        _ => true,
     })
 }
 
