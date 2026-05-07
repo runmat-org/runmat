@@ -115,6 +115,19 @@ pub fn workspace_lookup(name: &str) -> Option<Value> {
     })
 }
 
+pub fn workspace_slot_assigned(index: usize) -> Option<bool> {
+    WORKSPACE_STATE.with(|state| {
+        let state_ref = state.borrow();
+        let ws = state_ref.as_ref()?;
+        let name = ws.idx_to_name.get(&index)?;
+        Some(ws.assigned.contains(name))
+    })
+}
+
+pub fn workspace_state_available() -> bool {
+    WORKSPACE_STATE.with(|state| state.borrow().is_some())
+}
+
 pub fn workspace_assign(name: &str, value: Value) -> Result<(), String> {
     let vars_ptr = WORKSPACE_VARS.with(|slot| *slot.borrow());
     let Some(vars_ptr) = vars_ptr else {

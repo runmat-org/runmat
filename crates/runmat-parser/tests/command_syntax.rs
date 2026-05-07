@@ -153,6 +153,40 @@ fn clear_all_stringifies_bare_word_arg() {
 }
 
 #[test]
+fn clearvars_stringifies_bare_word_args() {
+    let program =
+        parse_with_options("clearvars x y", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::FuncCall(name, args, _), false, _) => {
+            assert_eq!(name, "clearvars");
+            assert_eq!(args.len(), 2);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"x\""));
+            assert!(matches!(args[1], Expr::String(ref s, _) if s == "\"y\""));
+        }
+        _ => panic!("expected clearvars x y to become clearvars(\"x\", \"y\")"),
+    }
+}
+
+#[test]
+fn clearvars_except_stringifies_dash_option_and_names() {
+    let program = parse_with_options(
+        "clearvars -except x y",
+        ParserOptions::new(CompatMode::Matlab),
+    )
+    .unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::FuncCall(name, args, _), false, _) => {
+            assert_eq!(name, "clearvars");
+            assert_eq!(args.len(), 3);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"-except\""));
+            assert!(matches!(args[1], Expr::String(ref s, _) if s == "\"x\""));
+            assert!(matches!(args[2], Expr::String(ref s, _) if s == "\"y\""));
+        }
+        _ => panic!("expected clearvars -except x y to become a clearvars call"),
+    }
+}
+
+#[test]
 fn invalid_keyword_rejected() {
     let err = parse_with_options("grid maybe", ParserOptions::new(CompatMode::Matlab));
     assert!(err.is_err());

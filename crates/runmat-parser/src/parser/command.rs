@@ -98,6 +98,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: CommandArgKind::StringifyWords,
     },
     CommandVerb {
+        name: "clearvars",
+        arg_kind: CommandArgKind::StringifyWords,
+    },
+    CommandVerb {
         name: "format",
         arg_kind: CommandArgKind::Keyword {
             allowed: &[
@@ -117,7 +121,7 @@ impl Parser {
             ));
         }
         let name_token = self.next().unwrap();
-        let mut args = self.parse_command_args();
+        let mut args = self.parse_command_args(&name_token.lexeme);
         if let Some(command) = self.lookup_command(&name_token.lexeme) {
             self.normalize_command_args(command, &mut args[..])?;
         }
@@ -154,7 +158,9 @@ impl Parser {
         let mut saw_arg = false;
         self.skip_command_continuations(&mut i);
 
-        if !matches!(
+        if self.try_skip_dash_option(verb, &mut i) {
+            saw_arg = true;
+        } else if !matches!(
             self.peek_token_at(i),
             Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End)
         ) {
@@ -170,6 +176,9 @@ impl Parser {
                 Some(Token::Ident | Token::Integer | Token::Float | Token::Str | Token::End) => {
                     saw_arg = true;
                     i += 1;
+                }
+                Some(Token::Minus) if self.try_skip_dash_option(verb, &mut i) => {
+                    saw_arg = true;
                 }
                 Some(Token::Ellipsis) => self.skip_command_continuations(&mut i),
                 _ => break,
@@ -191,7 +200,7 @@ impl Parser {
         }
     }
 
-    fn parse_command_args(&mut self) -> Vec<Expr> {
+    fn parse_command_args(&mut self, verb: &str) -> Vec<Expr> {
         let mut args = Vec::new();
         loop {
             if matches!(self.peek_token(), Some(Token::Newline)) {
@@ -225,11 +234,21 @@ impl Parser {
                     let span = self.span_from(token.position, token.end);
                     args.push(Expr::String(token.lexeme, span));
                 }
+                Some(Token::Minus)
+                    if self.can_parse_dash_option_arg(verb)
+                        && matches!(self.peek_token_at(1), Some(Token::Ident)) =>
+                {
+                    let minus = self.next().unwrap();
+                    let Some(option) = self.next() else {
+                        break;
+                    };
+                    let span = self.span_from(minus.position, option.end);
+                    args.push(Expr::Ident(format!("-{}", option.lexeme), span));
+                }
                 Some(Token::Slash)
                 | Some(Token::Star)
                 | Some(Token::Backslash)
                 | Some(Token::Plus)
-                | Some(Token::Minus)
                 | Some(Token::LParen)
                 | Some(Token::Dot)
                 | Some(Token::LBracket)
@@ -239,6 +258,23 @@ impl Parser {
             }
         }
         args
+    }
+
+    fn try_skip_dash_option(&self, verb: &str, offset: &mut usize) -> bool {
+        if !self.can_parse_dash_option_arg(verb) {
+            return false;
+        }
+        if !matches!(self.peek_token_at(*offset), Some(Token::Minus))
+            || !matches!(self.peek_token_at(*offset + 1), Some(Token::Ident))
+        {
+            return false;
+        }
+        *offset += 2;
+        true
+    }
+
+    fn can_parse_dash_option_arg(&self, verb: &str) -> bool {
+        verb.eq_ignore_ascii_case("clearvars")
     }
 
     fn skip_command_continuations(&self, offset: &mut usize) {

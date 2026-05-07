@@ -1,0 +1,109 @@
+{
+  "title": "clearvars",
+  "category": "introspection",
+  "keywords": [
+    "clearvars",
+    "clear variables",
+    "workspace",
+    "variables",
+    "-except"
+  ],
+  "summary": "Clear variables from the active workspace, with optional exclusions.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/clearvars.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs on the host CPU because it mutates the session workspace rather than array contents."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 16,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": null,
+    "integration": "command_controls::clearvars_command_clears_workspace_state"
+  },
+  "description": "`clearvars` removes variables from the active RunMat workspace. RunMat supports MATLAB-style command forms such as `clearvars x y`, whole-workspace exclusion forms such as `clearvars -except keep`, and selected-variable exclusion forms such as `clearvars a b -except b`, updating the session snapshot so hosts can drop cleared bindings.",
+  "behaviors": [
+    "`clearvars` with no inputs clears all workspace variables created in the current session.",
+    "`clearvars x` removes the variable `x` while leaving other workspace bindings intact.",
+    "Multiple names can be supplied as separate inputs or command-form tokens, for example `clearvars x y z`.",
+    "`clearvars -except x y` removes all active workspace variables except `x` and `y`.",
+    "`clearvars a b c -except b` removes only selected variables `a` and `c`, preserves selected exclusion `b`, and leaves variables outside the selected clear set untouched.",
+    "Function-call forms accept variable names as string scalars, row character vectors, or string arrays.",
+    "Clearing a name that does not exist is a no-op.",
+    "`clearvars` is a sink builtin and does not produce a meaningful output value."
+  ],
+  "examples": [
+    {
+      "description": "Clear the entire interactive workspace",
+      "input": "x = 1;\ny = magic(3);\nclearvars",
+      "output": "% x and y are removed from the workspace"
+    },
+    {
+      "description": "Clear selected variables",
+      "input": "a = 1;\nb = 2;\nc = 3;\nclearvars a b",
+      "output": "% a and b are removed; c remains defined"
+    },
+    {
+      "description": "Keep selected variables while clearing the rest",
+      "input": "raw = 1;\nanswer = 42;\ntmp = 3;\nclearvars -except answer",
+      "output": "% answer remains defined; raw and tmp are removed"
+    },
+    {
+      "description": "Clear selected variables while preserving exclusions",
+      "input": "a = 1;\nb = 2;\nc = 3;\nuntouched = 4;\nclearvars a b c -except b",
+      "output": "% a and c are removed; b and untouched remain defined"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `clearvars` different from `clear`?",
+      "answer": "`clearvars` focuses on workspace variables and supports the `-except` option for preserving named bindings while clearing the rest."
+    },
+    {
+      "question": "Can I clear only one variable?",
+      "answer": "Yes. Use `clearvars x` or `clearvars(\"x\")` to remove one variable, and pass multiple names to clear more than one binding in a single call."
+    },
+    {
+      "question": "Does `clearvars -except x` clear figures or the console?",
+      "answer": "No. It only mutates workspace variables. Use `close all` for figures and `clc` for the visible console."
+    },
+    {
+      "question": "Does GPU residency matter?",
+      "answer": "No. `clearvars` operates on session bookkeeping, not on array kernels or provider-managed computations."
+    }
+  ],
+  "links": [
+    {
+      "label": "clear",
+      "url": "./clear"
+    },
+    {
+      "label": "who",
+      "url": "./who"
+    },
+    {
+      "label": "whos",
+      "url": "./whos"
+    },
+    {
+      "label": "clc",
+      "url": "./clc"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/introspection/clearvars.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/introspection/clearvars.rs"
+  },
+  "gpu_behavior": [
+    "`clearvars` performs host-side workspace mutation only. It does not launch GPU kernels, does not participate in fusion, and does not depend on acceleration providers."
+  ]
+}

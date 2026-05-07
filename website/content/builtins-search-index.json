@@ -440,6 +440,18 @@
     ]
   },
   {
+    "title": "clearvars",
+    "slug": "clearvars",
+    "summary": "Clear variables from the active workspace, with optional exclusions.",
+    "keywords": [
+      "clearvars",
+      "clear variables",
+      "workspace",
+      "variables",
+      "-except"
+    ]
+  },
+  {
     "title": "close",
     "slug": "close",
     "summary": "Close TCP clients or servers that were created by tcpclient, tcpserver, or accept.",
