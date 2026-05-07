@@ -647,7 +647,7 @@ fn call_summary(call: &MirCall) -> CallSummary {
         expansion_arg_count: call
             .args
             .iter()
-            .filter(|arg| matches!(arg, MirCallArg::Expansion(_)))
+            .filter(|arg| matches!(arg, MirCallArg::Expansion { .. }))
             .count(),
         async_behavior: call.async_behavior.clone(),
         effects: call.effects,
@@ -668,7 +668,7 @@ fn future_call_summary(
         arg_count: args.len(),
         expansion_arg_count: args
             .iter()
-            .filter(|arg| matches!(arg, MirCallArg::Expansion(_)))
+            .filter(|arg| matches!(arg, MirCallArg::Expansion { .. }))
             .count(),
         async_behavior: AsyncBehaviorFact::NeverSuspends,
         effects: BuiltinEffects::none(),

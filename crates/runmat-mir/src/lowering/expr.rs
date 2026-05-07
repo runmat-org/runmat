@@ -5,7 +5,8 @@ use crate::{
 use runmat_builtins::{BuiltinAsyncBehavior, BuiltinSemantics};
 use runmat_hir::{
     CommandArgument, ExprId, HirCallableRef, HirCommandCall, HirExpr, HirExprKind, IndexComponent,
-    IndexResultContext, IndexingSemantics, RequestedOutputCount, SemanticError, StringLiteral,
+    IndexKind, IndexResultContext, IndexingSemantics, RequestedOutputCount, SemanticError,
+    StringLiteral,
 };
 use std::collections::HashMap;
 
@@ -126,14 +127,45 @@ fn lower_call_arg(
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<MirCallArg, SemanticError> {
-    let operand = lower_operand_with_replacements(ctx, arg, temps, await_replacements)?;
     if matches!(
         &arg.kind,
         HirExprKind::Index(_, indexing)
             if matches!(indexing.result_context, IndexResultContext::FunctionArgumentExpansion)
     ) {
-        Ok(MirCallArg::Expansion(operand))
+        let HirExprKind::Index(base, indexing) = &arg.kind else {
+            unreachable!()
+        };
+        if indexing.kind != IndexKind::Brace {
+            return Err(SemanticError::new(
+                "comma-list expansion requires cell/content indexing",
+            ));
+        }
+        let base = lower_operand_with_replacements(ctx, base, temps, await_replacements)?;
+        let mut indices = Vec::new();
+        let mut expand_all = false;
+        for component in &indexing.components {
+            match component {
+                IndexComponent::Colon => expand_all = true,
+                IndexComponent::Expr(expr) => indices.push(lower_operand_with_replacements(
+                    ctx,
+                    expr,
+                    temps,
+                    await_replacements,
+                )?),
+                _ => {
+                    return Err(SemanticError::new(
+                        "MIR lowering for this expansion index is not implemented yet",
+                    ))
+                }
+            }
+        }
+        Ok(MirCallArg::Expansion {
+            base,
+            indices,
+            expand_all,
+        })
     } else {
+        let operand = lower_operand_with_replacements(ctx, arg, temps, await_replacements)?;
         Ok(MirCallArg::Single(operand))
     }
 }

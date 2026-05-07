@@ -212,7 +212,6 @@ pub(crate) fn bytecode_has_only_semantic_ready_runtime_calls(
         runmat_vm::Instr::CallBuiltin(_, _) => true,
         runmat_vm::Instr::CallBuiltinExpandLast(_, _, _)
         | runmat_vm::Instr::CallBuiltinExpandAt(_, _, _, _)
-        | runmat_vm::Instr::CallBuiltinExpandMulti(..)
         | runmat_vm::Instr::CallFunction(_, _)
         | runmat_vm::Instr::CallFunctionMulti(_, _, _)
         | runmat_vm::Instr::CallFunctionExpandAt(_, _, _, _)

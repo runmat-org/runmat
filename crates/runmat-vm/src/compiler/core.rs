@@ -1,6 +1,6 @@
 use crate::compiler::CompileError;
 use crate::functions::UserFunction;
-use crate::instr::{EmitLabel, Instr};
+use crate::instr::{ArgSpec, EmitLabel, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
@@ -719,21 +719,52 @@ impl Compiler {
             }
         }
 
+        let mut specs = Vec::with_capacity(call.args.len());
+        let mut has_expansion = false;
         for arg in &call.args {
-            let MirCallArg::Single(operand) = arg else {
-                return Err(self.compile_error(
-                    "MIR bytecode lowering for expanded call arguments is not implemented yet",
-                ));
-            };
-            self.compile_mir_operand(operand)?;
+            match arg {
+                MirCallArg::Single(operand) => {
+                    self.compile_mir_operand(operand)?;
+                    specs.push(ArgSpec {
+                        is_expand: false,
+                        num_indices: 0,
+                        expand_all: false,
+                    });
+                }
+                MirCallArg::Expansion {
+                    base,
+                    indices,
+                    expand_all,
+                } => {
+                    has_expansion = true;
+                    self.compile_mir_operand(base)?;
+                    for index in indices {
+                        self.compile_mir_operand(index)?;
+                    }
+                    specs.push(ArgSpec {
+                        is_expand: true,
+                        num_indices: indices.len(),
+                        expand_all: *expand_all,
+                    });
+                }
+            }
         }
         match &call.callee {
             HirCallableRef::Function(function) => {
+                if has_expansion {
+                    return Err(self.compile_error(
+                        "MIR bytecode lowering for expanded semantic function arguments is not implemented yet",
+                    ));
+                }
                 self.emit(Instr::CallSemanticFunction(*function, call.args.len()));
             }
             _ => {
                 let name = self.mir_builtin_call_name(call)?;
-                self.emit(Instr::CallBuiltin(name, call.args.len()));
+                if has_expansion {
+                    self.emit(Instr::CallBuiltinExpandMulti(name, specs));
+                } else {
+                    self.emit(Instr::CallBuiltin(name, call.args.len()));
+                }
             }
         }
         Ok(())

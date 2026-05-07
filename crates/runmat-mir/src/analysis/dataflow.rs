@@ -603,7 +603,7 @@ fn diagnose_rvalue_semantics(value: &MirRvalue, span: Span, diagnostics: &mut Ve
             ) && call
                 .args
                 .iter()
-                .any(|arg| matches!(arg, MirCallArg::Expansion(_)))
+                .any(|arg| matches!(arg, MirCallArg::Expansion { .. }))
             {
                 diagnostics.push(semantic_diagnostic(
                     "RM-MIR0004",

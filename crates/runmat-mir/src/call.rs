@@ -23,13 +23,18 @@ pub struct MirCall {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MirCallArg {
     Single(MirOperand),
-    Expansion(MirOperand),
+    Expansion {
+        base: MirOperand,
+        indices: Vec<MirOperand>,
+        expand_all: bool,
+    },
 }
 
 impl MirCallArg {
     pub fn operand(&self) -> &MirOperand {
         match self {
-            MirCallArg::Single(operand) | MirCallArg::Expansion(operand) => operand,
+            MirCallArg::Single(operand) => operand,
+            MirCallArg::Expansion { base, .. } => base,
         }
     }
 }
