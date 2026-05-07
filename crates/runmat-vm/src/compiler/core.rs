@@ -4,10 +4,14 @@ use crate::instr::{EmitLabel, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
-    EntrypointId, FunctionId, HirAssembly, LegacyHirExpr as HirExpr,
+    BindingId, EntrypointId, FunctionId, HirAssembly, LegacyHirExpr as HirExpr,
     LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt,
+    OperatorKind,
 };
-use runmat_mir::MirAssembly;
+use runmat_mir::{
+    MirAssembly, MirBody, MirConstant, MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind,
+    MirTerminatorKind,
+};
 use std::collections::HashMap;
 
 pub struct LoopLabels {
@@ -27,6 +31,7 @@ pub struct Compiler {
     pub layout: Option<VmAssemblyLayout>,
     pub entrypoint: Option<EntrypointId>,
     pub function: Option<FunctionId>,
+    pub body: Option<MirBody>,
     current_span: Option<runmat_hir::Span>,
 }
 
@@ -106,12 +111,16 @@ impl Compiler {
                 entrypoint_layout.target
             )));
         }
-        if !mir.bodies.contains_key(&entrypoint_layout.target) {
-            return Err(CompileError::new(format!(
-                "missing MIR body for function {:?}",
-                entrypoint_layout.target
-            )));
-        }
+        let body = mir
+            .bodies
+            .get(&entrypoint_layout.target)
+            .ok_or_else(|| {
+                CompileError::new(format!(
+                    "missing MIR body for function {:?}",
+                    entrypoint_layout.target
+                ))
+            })?
+            .clone();
         let function = entrypoint_layout.target;
 
         let var_count = function_layout.local_count;
@@ -130,6 +139,7 @@ impl Compiler {
             layout: Some(layout),
             entrypoint: Some(entrypoint),
             function: Some(function),
+            body: Some(body),
             current_span: None,
         })
     }
@@ -308,6 +318,7 @@ impl Compiler {
             layout: None,
             entrypoint: None,
             function: None,
+            body: None,
             current_span: None,
         }
     }
@@ -316,17 +327,223 @@ impl Compiler {
         let Some(function) = self.function else {
             return Err(CompileError::new("compiler missing selected function"));
         };
-        let Some(layout) = &self.layout else {
+        if self.layout.is_none() {
             return Err(CompileError::new("compiler missing VM layout"));
-        };
-        if !layout.functions.contains_key(&function) {
+        }
+        if !self
+            .layout
+            .as_ref()
+            .is_some_and(|layout| layout.functions.contains_key(&function))
+        {
             return Err(CompileError::new(format!(
                 "missing VM layout for selected function {function:?}"
             )));
         }
+        let body = self
+            .body
+            .clone()
+            .ok_or_else(|| CompileError::new("compiler missing MIR body"))?;
 
-        // MIR statement lowering will be moved into the existing compiler modules next.
+        if body.blocks.len() != 1 || body.blocks[0].id.0 != 0 {
+            return Err(CompileError::new(
+                "MIR bytecode lowering only supports single-block bodies in this migration slice",
+            ));
+        }
+        for stmt in &body.blocks[0].statements {
+            self.compile_mir_stmt(stmt)?;
+        }
+        self.compile_mir_return(&body.blocks[0].terminator.kind)?;
         Ok(())
+    }
+
+    fn compile_mir_stmt(&mut self, stmt: &MirStmt) -> Result<(), CompileError> {
+        let _span_guard = SpanGuard::new(self, stmt.span);
+        match &stmt.kind {
+            MirStmtKind::Assign { place, value } => {
+                self.compile_mir_rvalue(value)?;
+                let slot = self.mir_place_slot(place)?;
+                self.emit(Instr::StoreVar(slot));
+                Ok(())
+            }
+            MirStmtKind::Expr(value) => {
+                self.compile_mir_rvalue(value)?;
+                self.emit(Instr::Pop);
+                Ok(())
+            }
+            MirStmtKind::WorkspaceEffect { .. } | MirStmtKind::EnvironmentEffect(_) => Ok(()),
+            MirStmtKind::MultiAssign { .. } | MirStmtKind::PlaceMutation(_) => Err(self
+                .compile_error("MIR bytecode lowering for this statement is not implemented yet")),
+        }
+    }
+
+    fn compile_mir_return(&mut self, terminator: &MirTerminatorKind) -> Result<(), CompileError> {
+        match terminator {
+            MirTerminatorKind::Return(values) => match values.len() {
+                0 => Ok(()),
+                1 => {
+                    self.compile_mir_operand(&values[0])?;
+                    self.emit(Instr::ReturnValue);
+                    Ok(())
+                }
+                _ => Err(CompileError::new(
+                    "MIR bytecode lowering for multi-value returns is not implemented yet",
+                )),
+            },
+            _ => Err(CompileError::new(
+                "MIR bytecode lowering for control-flow terminators is not implemented yet",
+            )),
+        }
+    }
+
+    fn compile_mir_rvalue(&mut self, value: &MirRvalue) -> Result<(), CompileError> {
+        match value {
+            MirRvalue::Use(operand) => self.compile_mir_operand(operand),
+            MirRvalue::Unary(op, operand) => {
+                self.compile_mir_operand(operand)?;
+                match op {
+                    OperatorKind::UnaryPlus => self.emit(Instr::UPlus),
+                    OperatorKind::UnaryMinus => self.emit(Instr::Neg),
+                    OperatorKind::Not => self.emit(Instr::CallBuiltin("not".to_string(), 1)),
+                    OperatorKind::Transpose => self.emit(Instr::Transpose),
+                    OperatorKind::ConjugateTranspose => self.emit(Instr::ConjugateTranspose),
+                    _ => {
+                        return Err(self
+                            .compile_error(format!("operator {op:?} is not a MIR unary operator")))
+                    }
+                };
+                Ok(())
+            }
+            MirRvalue::Binary(left, op, right) => {
+                self.compile_mir_operand(left)?;
+                self.compile_mir_operand(right)?;
+                match op {
+                    OperatorKind::Add => self.emit(Instr::Add),
+                    OperatorKind::Subtract => self.emit(Instr::Sub),
+                    OperatorKind::MatrixMultiply => self.emit(Instr::Mul),
+                    OperatorKind::Mrdivide => self.emit(Instr::RightDiv),
+                    OperatorKind::Mldivide => self.emit(Instr::LeftDiv),
+                    OperatorKind::MatrixPower => self.emit(Instr::Pow),
+                    OperatorKind::ElementwiseMultiply => self.emit(Instr::ElemMul),
+                    OperatorKind::ElementwiseDivide => self.emit(Instr::ElemDiv),
+                    OperatorKind::ElementwiseLeftDivide => self.emit(Instr::ElemLeftDiv),
+                    OperatorKind::ElementwisePower => self.emit(Instr::ElemPow),
+                    OperatorKind::Equal => self.emit(Instr::Equal),
+                    OperatorKind::NotEqual => self.emit(Instr::NotEqual),
+                    OperatorKind::Less => self.emit(Instr::Less),
+                    OperatorKind::LessEqual => self.emit(Instr::LessEqual),
+                    OperatorKind::Greater => self.emit(Instr::Greater),
+                    OperatorKind::GreaterEqual => self.emit(Instr::GreaterEqual),
+                    _ => {
+                        return Err(self.compile_error(format!(
+                            "operator {op:?} is not supported in primary MIR lowering yet"
+                        )))
+                    }
+                };
+                Ok(())
+            }
+            MirRvalue::Range { start, step, end } => {
+                self.compile_mir_operand(start)?;
+                if let Some(step) = step {
+                    self.compile_mir_operand(step)?;
+                    self.compile_mir_operand(end)?;
+                    self.emit(Instr::CreateRange(true));
+                } else {
+                    self.compile_mir_operand(end)?;
+                    self.emit(Instr::CreateRange(false));
+                }
+                Ok(())
+            }
+            _ => {
+                Err(self
+                    .compile_error("MIR bytecode lowering for this rvalue is not implemented yet"))
+            }
+        }
+    }
+
+    fn compile_mir_operand(&mut self, operand: &MirOperand) -> Result<(), CompileError> {
+        match operand {
+            MirOperand::Local(local) => {
+                let slot = self.mir_local_slot(*local)?;
+                self.emit(Instr::LoadVar(slot));
+                Ok(())
+            }
+            MirOperand::Constant(MirConstant::Number(value)) => {
+                let value = value
+                    .parse()
+                    .map_err(|_| self.compile_error(format!("invalid number literal {value:?}")))?;
+                self.emit(Instr::LoadConst(value));
+                Ok(())
+            }
+            MirOperand::Constant(MirConstant::String(value)) => {
+                self.emit(Instr::LoadString(value.0.clone()));
+                Ok(())
+            }
+            MirOperand::Constant(MirConstant::Bool(value)) => {
+                self.emit(Instr::LoadBool(*value));
+                Ok(())
+            }
+            MirOperand::Constant(MirConstant::Symbol(name)) => {
+                let name = &name.0;
+                let constants = runmat_builtins::constants();
+                let constant = constants
+                    .iter()
+                    .find(|constant| constant.name == name)
+                    .ok_or_else(|| self.compile_error(format!("unknown constant {name}")))?;
+                match &constant.value {
+                    runmat_builtins::Value::Num(value) => self.emit(Instr::LoadConst(*value)),
+                    runmat_builtins::Value::Complex(re, im) => {
+                        self.emit(Instr::LoadComplex(*re, *im))
+                    }
+                    runmat_builtins::Value::Bool(value) => self.emit(Instr::LoadBool(*value)),
+                    _ => {
+                        return Err(self.compile_error(format!(
+                            "constant {name} is not supported in primary MIR lowering yet"
+                        )))
+                    }
+                };
+                Ok(())
+            }
+            MirOperand::Constant(MirConstant::EmptyArray)
+            | MirOperand::FunctionHandle(_)
+            | MirOperand::Temp(_) => {
+                Err(self
+                    .compile_error("MIR bytecode lowering for this operand is not implemented yet"))
+            }
+        }
+    }
+
+    fn mir_place_slot(&self, place: &MirPlace) -> Result<usize, CompileError> {
+        match place {
+            MirPlace::Local(local) => self.mir_local_slot(*local),
+            MirPlace::Binding(binding) => self.binding_slot(*binding),
+            _ => Err(CompileError::new(
+                "MIR bytecode lowering for this assignment place is not implemented yet",
+            )),
+        }
+    }
+
+    fn mir_local_slot(&self, local: runmat_mir::MirLocalId) -> Result<usize, CompileError> {
+        let function = self
+            .function
+            .ok_or_else(|| CompileError::new("compiler missing selected function"))?;
+        self.layout
+            .as_ref()
+            .and_then(|layout| layout.functions.get(&function))
+            .and_then(|layout| layout.mir_local_slots.get(&local))
+            .map(|slot| slot.0)
+            .ok_or_else(|| CompileError::new(format!("missing VM slot for MIR local {local:?}")))
+    }
+
+    fn binding_slot(&self, binding: BindingId) -> Result<usize, CompileError> {
+        let function = self
+            .function
+            .ok_or_else(|| CompileError::new("compiler missing selected function"))?;
+        self.layout
+            .as_ref()
+            .and_then(|layout| layout.functions.get(&function))
+            .and_then(|layout| layout.binding_slots.get(&binding))
+            .map(|slot| slot.0)
+            .ok_or_else(|| CompileError::new(format!("missing VM slot for binding {binding:?}")))
     }
 
     fn ensure_var(&mut self, id: usize) {

@@ -69,6 +69,7 @@ pub fn compile_legacy(
 #[cfg(test)]
 mod tests {
     use super::compile;
+    use crate::Instr;
     use runmat_hir::{lower, LoweringContext};
     use runmat_mir::lowering::lower_assembly;
 
@@ -86,5 +87,21 @@ mod tests {
         let function_layout = &layout.functions[&entrypoint_layout.target];
         assert_eq!(bytecode.var_count, function_layout.local_count);
         assert_eq!(bytecode.var_types.len(), function_layout.local_count);
+    }
+
+    #[test]
+    fn primary_compile_lowers_simple_assignment_arithmetic() {
+        let ast = runmat_parser::parse("x = 1 + 2;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+
+        assert_eq!(bytecode.instructions.len(), 4);
+        assert!(matches!(bytecode.instructions[0], Instr::LoadConst(1.0)));
+        assert!(matches!(bytecode.instructions[1], Instr::LoadConst(2.0)));
+        assert!(matches!(bytecode.instructions[2], Instr::Add));
+        assert!(matches!(bytecode.instructions[3], Instr::StoreVar(_)));
     }
 }
