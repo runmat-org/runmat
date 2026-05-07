@@ -364,6 +364,7 @@ fn is_invalid_graphics_handle_error(err: &RuntimeError) -> bool {
     text.contains("unsupported or invalid plotting handle")
         || text.contains("invalid plotting handle")
         || text.contains("invalid figure handle")
+        || text.contains("invalid axes handle")
 }
 
 fn is_possible_graphics_handle_value(value: &Value) -> bool {

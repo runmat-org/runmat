@@ -35,3 +35,27 @@ fn figure_dot_property_access_routes_to_graphics_get() {
     let vars = execute(&hir).expect("execute figure property script");
     assert_eq!(vars.last(), Some(&Value::String("figure".into())));
 }
+
+#[test]
+fn invalid_axes_shaped_handle_member_access_reports_non_object() {
+    unsafe {
+        std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
+    }
+    let input = "bad_axes_handle = 1049575; out = bad_axes_handle.Type;";
+    let ast = parse(input).expect("parse invalid axes handle script");
+    let hir = lower(&ast).expect("lower invalid axes handle script");
+    let err = execute(&hir).expect_err("invalid axes handle should fail");
+    assert!(
+        err.to_string().contains("LoadMember on non-object"),
+        "unexpected error: {err:?}"
+    );
+
+    let input = "bad_axes_handle = 1049575; bad_axes_handle.Title = 'bad';";
+    let ast = parse(input).expect("parse invalid axes store script");
+    let hir = lower(&ast).expect("lower invalid axes store script");
+    let err = execute(&hir).expect_err("invalid axes store should fail");
+    assert!(
+        err.to_string().contains("StoreMember on non-object"),
+        "unexpected error: {err:?}"
+    );
+}
