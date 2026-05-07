@@ -70,6 +70,8 @@ pub struct RunMatSession {
     variable_names: HashMap<String, usize>,
     /// Persistent workspace values keyed by variable name
     workspace_values: HashMap<String, Value>,
+    /// Stable ABI identity for this interactive workspace.
+    abi_workspace_handle: crate::abi::WorkspaceHandle,
     /// User-defined functions context for session state
     function_definitions: HashMap<String, runmat_hir::LegacyHirStmt>,
     /// Interned source pool for user-defined functions

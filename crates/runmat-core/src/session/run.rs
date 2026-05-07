@@ -11,7 +11,16 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
-        self.run(input).await.map(Into::into)
+        let result = self.run(input).await?;
+        let workspace_names = result
+            .workspace
+            .values
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect::<Vec<_>>();
+        let mut outcome = crate::abi::ExecutionOutcome::from(result);
+        outcome.workspace_delta.upserts = self.abi_workspace_upserts(workspace_names);
+        Ok(outcome)
     }
 
     /// Parse, lower, compile, and execute input.
@@ -815,6 +824,29 @@ impl RunMatSession {
             Some(source_name.as_str()),
         )
         .await
+    }
+
+    fn abi_workspace_upserts(
+        &self,
+        workspace_names: Vec<String>,
+    ) -> Vec<crate::abi::WorkspaceBindingValue> {
+        let mut workspace_names = workspace_names;
+        workspace_names.sort();
+        workspace_names.dedup();
+        workspace_names
+            .into_iter()
+            .filter_map(|name| {
+                let value = self.workspace_values.get(&name)?.clone();
+                let binding = runmat_hir::BindingName(name);
+                Some(crate::abi::WorkspaceBindingValue {
+                    key: crate::abi::WorkspaceBindingKey::Interactive {
+                        session: self.abi_workspace_handle.0,
+                        name: binding,
+                    },
+                    value,
+                })
+            })
+            .collect()
     }
 }
 

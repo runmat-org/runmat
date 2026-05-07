@@ -27,6 +27,24 @@ fn execute_outcome_exposes_runtime_flow() {
 }
 
 #[test]
+fn execute_outcome_exposes_workspace_upserts() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_outcome("x = 42;")).expect("exec succeeds");
+    let upsert = outcome
+        .workspace_delta
+        .upserts
+        .iter()
+        .find(|upsert| {
+            matches!(
+                &upsert.key,
+                abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "x"
+            )
+        })
+        .expect("ABI workspace delta should expose assigned x");
+    assert_eq!(upsert.value, runmat_builtins::Value::Num(42.0));
+}
+
+#[test]
 fn compile_input_uses_semantic_vm_when_supported() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let prepared = session

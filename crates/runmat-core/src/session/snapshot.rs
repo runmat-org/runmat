@@ -102,6 +102,7 @@ impl RunMatSession {
             variable_array: Vec::new(),
             variable_names: HashMap::new(),
             workspace_values: HashMap::new(),
+            abi_workspace_handle: crate::abi::WorkspaceHandle(Uuid::new_v4()),
             function_definitions: HashMap::new(),
             source_pool: SourcePool::default(),
             function_source_ids: HashMap::new(),
