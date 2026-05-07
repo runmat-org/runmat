@@ -359,20 +359,43 @@ impl Compiler {
     fn compile_mir_stmt(&mut self, stmt: &MirStmt) -> Result<(), CompileError> {
         let _span_guard = SpanGuard::new(self, stmt.span);
         match &stmt.kind {
-            MirStmtKind::Assign { place, value } => {
-                self.compile_mir_rvalue(value)?;
-                let slot = self.mir_place_slot(place)?;
-                self.emit(Instr::StoreVar(slot));
-                Ok(())
-            }
+            MirStmtKind::Assign { place, value } => self.compile_mir_assign(place, value),
             MirStmtKind::Expr(value) => {
                 self.compile_mir_rvalue(value)?;
                 self.emit(Instr::Pop);
                 Ok(())
             }
             MirStmtKind::WorkspaceEffect { .. } | MirStmtKind::EnvironmentEffect(_) => Ok(()),
-            MirStmtKind::MultiAssign { .. } | MirStmtKind::PlaceMutation(_) => Err(self
+            MirStmtKind::PlaceMutation(_) => Ok(()),
+            MirStmtKind::MultiAssign { .. } => Err(self
                 .compile_error("MIR bytecode lowering for this statement is not implemented yet")),
+        }
+    }
+
+    fn compile_mir_assign(
+        &mut self,
+        place: &MirPlace,
+        value: &MirRvalue,
+    ) -> Result<(), CompileError> {
+        match place {
+            MirPlace::Local(_) | MirPlace::Binding(_) => {
+                self.compile_mir_rvalue(value)?;
+                let slot = self.mir_place_slot(place)?;
+                self.emit(Instr::StoreVar(slot));
+                Ok(())
+            }
+            MirPlace::Index(base, indexing) => {
+                let base_slot = self.mir_place_slot(base)?;
+                self.emit(Instr::LoadVar(base_slot));
+                self.compile_mir_index_components(indexing, IndexResultContext::AssignmentTarget)?;
+                self.compile_mir_rvalue(value)?;
+                self.emit(Instr::StoreIndex(indexing.components.len()));
+                self.emit(Instr::StoreVar(base_slot));
+                Ok(())
+            }
+            _ => Err(self.compile_error(
+                "MIR bytecode lowering for this assignment place is not implemented yet",
+            )),
         }
     }
 
@@ -543,15 +566,44 @@ impl Compiler {
         base: &MirOperand,
         indexing: &MirIndexing,
     ) -> Result<(), CompileError> {
-        if indexing.kind != IndexKind::Paren
-            || indexing.result_context != IndexResultContext::ReadSingle
-        {
+        if !matches!(
+            indexing.result_context,
+            IndexResultContext::ReadSingle | IndexResultContext::ReadCommaList
+        ) {
             return Err(self.compile_error(
                 "MIR bytecode lowering for this indexing form is not implemented yet",
             ));
         }
 
         self.compile_mir_operand(base)?;
+        match indexing.kind {
+            IndexKind::Paren => {
+                self.compile_mir_index_components(indexing, IndexResultContext::ReadSingle)?;
+                self.emit(Instr::Index(indexing.components.len()));
+            }
+            IndexKind::Brace => {
+                self.compile_mir_index_components(indexing, indexing.result_context.clone())?;
+                self.emit(Instr::IndexCell(indexing.components.len()));
+            }
+            IndexKind::Dot => {
+                return Err(self.compile_error(
+                    "MIR bytecode lowering for dot indexing is not implemented yet",
+                ))
+            }
+        };
+        Ok(())
+    }
+
+    fn compile_mir_index_components(
+        &mut self,
+        indexing: &MirIndexing,
+        expected_context: IndexResultContext,
+    ) -> Result<(), CompileError> {
+        if indexing.result_context != expected_context {
+            return Err(self.compile_error(
+                "MIR bytecode lowering for this indexing form is not implemented yet",
+            ));
+        }
         for component in &indexing.components {
             let MirIndexComponent::Expr(operand) = component else {
                 return Err(self.compile_error(
@@ -560,7 +612,6 @@ impl Compiler {
             };
             self.compile_mir_operand(operand)?;
         }
-        self.emit(Instr::Index(indexing.components.len()));
         Ok(())
     }
 
