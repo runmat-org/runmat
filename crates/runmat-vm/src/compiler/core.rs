@@ -560,6 +560,14 @@ impl Compiler {
                 elements,
             } => self.compile_mir_aggregate(kind, *rows, *cols, elements),
             MirRvalue::Index { base, indexing } => self.compile_mir_index(base, indexing),
+            MirRvalue::Colon => {
+                self.emit(Instr::LoadConst(0.0));
+                Ok(())
+            }
+            MirRvalue::End => {
+                self.emit(Instr::LoadConst(-0.0));
+                Ok(())
+            }
             _ => {
                 Err(self
                     .compile_error("MIR bytecode lowering for this rvalue is not implemented yet"))
@@ -654,8 +662,19 @@ impl Compiler {
         self.compile_mir_operand(base)?;
         match indexing.kind {
             IndexKind::Paren => {
-                self.compile_mir_index_components(indexing, IndexResultContext::ReadSingle)?;
-                self.emit(Instr::Index(indexing.components.len()));
+                if indexing
+                    .components
+                    .iter()
+                    .all(|component| matches!(component, MirIndexComponent::Expr(_)))
+                    && !indexing.components.iter().any(|component| {
+                        matches!(component, MirIndexComponent::Expr(MirOperand::Local(local)) if self.mir_local_is_colon(*local) || self.mir_local_is_end(*local))
+                    })
+                {
+                    self.compile_mir_index_components(indexing, IndexResultContext::ReadSingle)?;
+                    self.emit(Instr::Index(indexing.components.len()));
+                } else {
+                    self.compile_mir_slice_index(indexing)?;
+                }
             }
             IndexKind::Brace => {
                 self.compile_mir_index_components(indexing, indexing.result_context.clone())?;
@@ -689,6 +708,75 @@ impl Compiler {
             self.compile_mir_operand(operand)?;
         }
         Ok(())
+    }
+
+    fn compile_mir_slice_index(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
+        let mut colon_mask = 0u32;
+        let mut end_mask = 0u32;
+        let mut numeric_count = 0usize;
+
+        for (dim, component) in indexing.components.iter().enumerate() {
+            match component {
+                MirIndexComponent::Colon => colon_mask |= 1u32 << dim,
+                MirIndexComponent::End { offset, .. } if *offset == 0 => end_mask |= 1u32 << dim,
+                MirIndexComponent::Expr(MirOperand::Local(local))
+                    if self.mir_local_is_colon(*local) =>
+                {
+                    colon_mask |= 1u32 << dim;
+                }
+                MirIndexComponent::Expr(MirOperand::Local(local))
+                    if self.mir_local_is_end(*local) =>
+                {
+                    end_mask |= 1u32 << dim;
+                }
+                MirIndexComponent::Expr(operand) => {
+                    self.compile_mir_operand(operand)?;
+                    numeric_count += 1;
+                }
+                MirIndexComponent::Logical(_) | MirIndexComponent::End { .. } => {
+                    return Err(self.compile_error(
+                        "MIR bytecode lowering for this slice index is not implemented yet",
+                    ))
+                }
+            }
+        }
+
+        self.emit(Instr::IndexSlice(
+            indexing.components.len(),
+            numeric_count,
+            colon_mask,
+            end_mask,
+        ));
+        Ok(())
+    }
+
+    fn mir_local_is_colon(&self, local: runmat_mir::MirLocalId) -> bool {
+        self.mir_local_matches_rvalue(local, |value| matches!(value, MirRvalue::Colon))
+    }
+
+    fn mir_local_is_end(&self, local: runmat_mir::MirLocalId) -> bool {
+        self.mir_local_matches_rvalue(local, |value| matches!(value, MirRvalue::End))
+    }
+
+    fn mir_local_matches_rvalue(
+        &self,
+        local: runmat_mir::MirLocalId,
+        predicate: impl Fn(&MirRvalue) -> bool,
+    ) -> bool {
+        let Some(body) = &self.body else {
+            return false;
+        };
+        body.blocks.iter().any(|block| {
+            block.statements.iter().any(|stmt| {
+                matches!(
+                    &stmt.kind,
+                    MirStmtKind::Assign {
+                        place: MirPlace::Local(candidate),
+                        value,
+                    } if *candidate == local && predicate(value)
+                )
+            })
+        })
     }
 
     fn compile_mir_operand(&mut self, operand: &MirOperand) -> Result<(), CompileError> {

@@ -212,6 +212,34 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_interprets_simple_colon_slice() {
+        let ast = runmat_parser::parse("x = [1 2; 3 4]; y = x(:, 2);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let y_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "y")
+            .expect("y export");
+
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::IndexSlice(2, 1, 1, 0))));
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[y_export.slot.0] else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.shape, vec![2, 1]);
+        assert_eq!(tensor.data, vec![2.0, 4.0]);
+    }
+
+    #[test]
     fn primary_compile_interprets_simple_indexed_assignment() {
         let ast = runmat_parser::parse("x = [1 2; 3 4]; x(1, 2) = 9;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
