@@ -1446,6 +1446,7 @@ fn is_builtin(name: &str) -> bool {
     runmat_builtins::builtin_functions()
         .iter()
         .any(|builtin| builtin.name == name)
+        || runmat_builtins::builtin_semantics_for_name(name).is_some()
 }
 
 fn unary_op(op: UnOp) -> OperatorKind {
@@ -1559,8 +1560,7 @@ impl Ctx {
     pub(crate) fn is_static_method_class(&self, name: &str) -> bool {
         matches!(
             name,
-            "gpuArray"
-                | "logical"
+            "logical"
                 | "double"
                 | "single"
                 | "int8"

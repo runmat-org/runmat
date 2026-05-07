@@ -52,11 +52,3 @@ pub enum AccelEligibilityFact {
     Eligible,
     Preferred,
 }
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum DataMovementPolicyHint {
-    Unknown,
-    KeepHost,
-    KeepDeviceIfAlreadyThere,
-    PreferDeviceForLargeInputs,
-}

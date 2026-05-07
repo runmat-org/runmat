@@ -245,15 +245,7 @@ fn call_semantics(callee: &HirCallableRef) -> BuiltinSemantics {
             .map(|builtin| builtin.semantics())
             .or_else(|| runmat_builtins::builtin_semantics_for_name(&id.0))
             .unwrap_or_else(BuiltinSemantics::unknown),
-        HirCallableRef::Unresolved(name) => runmat_builtins::builtin_semantics_for_name(
-            &name
-                .0
-                .iter()
-                .map(|part| part.0.as_str())
-                .collect::<Vec<_>>()
-                .join("."),
-        )
-        .unwrap_or_else(BuiltinSemantics::unknown),
+        HirCallableRef::Unresolved(_) => BuiltinSemantics::unknown(),
         HirCallableRef::DynamicExpr(_) | HirCallableRef::Imported(_) => BuiltinSemantics::unknown(),
         HirCallableRef::Function(_) | HirCallableRef::ClassConstructor(_) => BuiltinSemantics {
             compatibility: runmat_builtins::BuiltinCompatibility::Matlab,

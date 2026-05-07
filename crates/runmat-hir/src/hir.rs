@@ -1112,6 +1112,7 @@ mod tests {
         let entrypoint = EntrypointId(0);
 
         let assembly = HirAssembly {
+            compatibility_mode: None,
             modules: vec![HirModule {
                 id: module,
                 name: QualifiedName(vec![SymbolName("demo".into())]),
