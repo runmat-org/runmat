@@ -9,6 +9,13 @@ use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
 
+mod runmat_hir {
+    pub use ::runmat_hir::{
+        LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, LegacyHirStmt as HirStmt, Span,
+        VarId,
+    };
+}
+
 #[test]
 fn test_turbine_engine_creation() {
     let engine = TurbineEngine::new();

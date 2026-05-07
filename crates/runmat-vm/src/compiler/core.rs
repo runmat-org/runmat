@@ -1,11 +1,13 @@
 use crate::compiler::CompileError;
 use crate::functions::UserFunction;
 use crate::instr::{EmitLabel, Instr};
+use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
-    LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram,
-    LegacyHirStmt as HirStmt,
+    EntrypointId, FunctionId, HirAssembly, LegacyHirExpr as HirExpr,
+    LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt,
 };
+use runmat_mir::MirAssembly;
 use std::collections::HashMap;
 
 pub struct LoopLabels {
@@ -22,6 +24,9 @@ pub struct Compiler {
     pub functions: HashMap<String, UserFunction>,
     pub imports: Vec<(Vec<String>, bool)>,
     pub var_types: Vec<Type>,
+    pub layout: Option<VmAssemblyLayout>,
+    pub entrypoint: Option<EntrypointId>,
+    pub function: Option<FunctionId>,
     current_span: Option<runmat_hir::Span>,
 }
 
@@ -73,7 +78,63 @@ impl Compiler {
         }
     }
 
-    pub fn new(prog: &HirProgram) -> Self {
+    pub fn new(
+        hir: &HirAssembly,
+        mir: &MirAssembly,
+        layout: VmAssemblyLayout,
+        entrypoint: EntrypointId,
+    ) -> Result<Self, CompileError> {
+        let entrypoint_layout = layout.entrypoints.get(&entrypoint).ok_or_else(|| {
+            CompileError::new(format!("missing VM layout for entrypoint {entrypoint:?}"))
+        })?;
+        let function_layout = layout
+            .functions
+            .get(&entrypoint_layout.target)
+            .ok_or_else(|| {
+                CompileError::new(format!(
+                    "missing VM layout for entrypoint target {:?}",
+                    entrypoint_layout.target
+                ))
+            })?;
+        if !hir
+            .functions
+            .iter()
+            .any(|f| f.id == entrypoint_layout.target)
+        {
+            return Err(CompileError::new(format!(
+                "missing HIR function {:?}",
+                entrypoint_layout.target
+            )));
+        }
+        if !mir.bodies.contains_key(&entrypoint_layout.target) {
+            return Err(CompileError::new(format!(
+                "missing MIR body for function {:?}",
+                entrypoint_layout.target
+            )));
+        }
+        let function = entrypoint_layout.target;
+
+        let var_count = function_layout.local_count;
+        let mut var_types = Vec::new();
+        var_types.resize(var_count, Type::Unknown);
+
+        Ok(Self {
+            instructions: Vec::new(),
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count,
+            loop_stack: Vec::new(),
+            functions: HashMap::new(),
+            imports: Vec::new(),
+            var_types,
+            layout: Some(layout),
+            entrypoint: Some(entrypoint),
+            function: Some(function),
+            current_span: None,
+        })
+    }
+
+    pub fn new_legacy(prog: &HirProgram) -> Self {
         let mut max_var = 0;
         fn visit_expr(expr: &HirExpr, max: &mut usize) {
             match &expr.kind {
@@ -244,8 +305,28 @@ impl Compiler {
             functions: HashMap::new(),
             imports: Vec::new(),
             var_types,
+            layout: None,
+            entrypoint: None,
+            function: None,
             current_span: None,
         }
+    }
+
+    pub fn compile(&mut self) -> Result<(), CompileError> {
+        let Some(function) = self.function else {
+            return Err(CompileError::new("compiler missing selected function"));
+        };
+        let Some(layout) = &self.layout else {
+            return Err(CompileError::new("compiler missing VM layout"));
+        };
+        if !layout.functions.contains_key(&function) {
+            return Err(CompileError::new(format!(
+                "missing VM layout for selected function {function:?}"
+            )));
+        }
+
+        // MIR statement lowering will be moved into the existing compiler modules next.
+        Ok(())
     }
 
     fn ensure_var(&mut self, id: usize) {
@@ -305,7 +386,7 @@ impl Compiler {
         err
     }
 
-    pub fn compile_program(&mut self, prog: &HirProgram) -> Result<(), CompileError> {
+    pub fn compile_program_legacy(&mut self, prog: &HirProgram) -> Result<(), CompileError> {
         // Validate imports early for duplicate/specific-name ambiguities
         runmat_hir::validate_imports(prog)?;
         // Validate class definitions for attribute correctness and name conflicts

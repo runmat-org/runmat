@@ -2,7 +2,7 @@
 
 use futures::executor::block_on;
 use runmat_builtins::Value;
-use runmat_hir::{HirProgram, LoweringContext, SemanticError};
+use runmat_hir::{LegacyHirProgram as HirProgram, LoweringContext, SemanticError};
 use runmat_runtime::RuntimeError;
 
 const EXEC_STACK_BYTES: usize = 32 * 1024 * 1024;
@@ -25,7 +25,7 @@ where
 pub fn execute(program: &HirProgram) -> Result<Vec<Value>, RuntimeError> {
     let program = program.clone();
     run_with_stack(move || {
-        let bc = runmat_vm::compile(&program, &std::collections::HashMap::new())
+        let bc = runmat_vm::compile_legacy(&program, &std::collections::HashMap::new())
             .map_err(RuntimeError::from)?;
         block_on(runmat_vm::interpret(&bc))
     })?

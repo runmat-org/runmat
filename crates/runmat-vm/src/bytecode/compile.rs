@@ -16,29 +16,19 @@ pub fn compile(
 ) -> Result<Bytecode, CompileError> {
     let layout = derive_layout(hir, mir)
         .map_err(|err| CompileError::new(format!("failed to derive VM layout: {err:?}")))?;
-    let entrypoint_layout = layout.entrypoints.get(&entrypoint).ok_or_else(|| {
-        CompileError::new(format!("missing VM layout for entrypoint {entrypoint:?}"))
-    })?;
-    let function_layout = layout
-        .functions
-        .get(&entrypoint_layout.target)
-        .ok_or_else(|| {
-            CompileError::new(format!(
-                "missing VM layout for entrypoint target {:?}",
-                entrypoint_layout.target
-            ))
-        })?;
+    let mut c = Compiler::new(hir, mir, layout, entrypoint)?;
+    c.compile()?;
 
     Ok(Bytecode {
-        instructions: Vec::new(),
-        instr_spans: Vec::new(),
-        call_arg_spans: Vec::new(),
+        instructions: c.instructions,
+        instr_spans: c.instr_spans,
+        call_arg_spans: c.call_arg_spans,
         source_id: None,
-        var_count: function_layout.local_count,
+        var_count: c.var_count,
         functions: HashMap::new(),
-        var_types: Vec::new(),
+        var_types: c.var_types,
         var_names: HashMap::new(),
-        layout: Some(layout),
+        layout: c.layout,
         #[cfg(feature = "native-accel")]
         accel_graph: None,
         #[cfg(feature = "native-accel")]
@@ -50,9 +40,9 @@ pub fn compile_legacy(
     prog: &HirProgram,
     existing_functions: &HashMap<String, UserFunction>,
 ) -> Result<Bytecode, CompileError> {
-    let mut c = Compiler::new(prog);
+    let mut c = Compiler::new_legacy(prog);
     c.functions = existing_functions.clone();
-    c.compile_program(prog)?;
+    c.compile_program_legacy(prog)?;
     #[cfg(feature = "native-accel")]
     let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
     #[cfg(feature = "native-accel")]
@@ -74,4 +64,27 @@ pub fn compile_legacy(
         #[cfg(feature = "native-accel")]
         fusion_groups,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compile;
+    use runmat_hir::{lower, LoweringContext};
+    use runmat_mir::lowering::lower_assembly;
+
+    #[test]
+    fn primary_compile_attaches_derived_layout() {
+        let ast = runmat_parser::parse("x = 1 + 2;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let entrypoint_layout = &layout.entrypoints[&entrypoint];
+        let function_layout = &layout.functions[&entrypoint_layout.target];
+        assert_eq!(bytecode.var_count, function_layout.local_count);
+        assert_eq!(bytecode.var_types.len(), function_layout.local_count);
+    }
 }

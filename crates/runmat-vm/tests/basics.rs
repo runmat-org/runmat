@@ -4,7 +4,7 @@ mod test_helpers;
 use runmat_accelerate::ShapeInfo;
 use runmat_builtins::Value;
 use runmat_parser::parse;
-use runmat_vm::{compile, Instr};
+use runmat_vm::{compile_legacy as compile, Instr};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use test_helpers::execute;
@@ -49,7 +49,7 @@ fn array_construct_like_and_size_vector_inference() {
     let ast_like = parse(src_like).expect("parse like");
     let hir_like = lower(&ast_like).expect("lower like");
     let bytecode_like =
-        runmat_vm::bytecode::compile(&hir_like, &HashMap::new()).expect("compile like");
+        runmat_vm::bytecode::compile_legacy(&hir_like, &HashMap::new()).expect("compile like");
     let graph_like = runmat_vm::accel::graph::build_accel_graph(
         &bytecode_like.instructions,
         &hir_like.var_types,
@@ -68,7 +68,8 @@ fn array_construct_like_and_size_vector_inference() {
     let src_sz = "sz = [5,6]; B = zeros(sz);";
     let ast_sz = parse(src_sz).expect("parse sz");
     let hir_sz = lower(&ast_sz).expect("lower sz");
-    let bytecode_sz = runmat_vm::bytecode::compile(&hir_sz, &HashMap::new()).expect("compile sz");
+    let bytecode_sz =
+        runmat_vm::bytecode::compile_legacy(&hir_sz, &HashMap::new()).expect("compile sz");
     let graph_sz =
         runmat_vm::accel::graph::build_accel_graph(&bytecode_sz.instructions, &hir_sz.var_types);
     let last_sz = graph_sz.nodes.last().expect("node");

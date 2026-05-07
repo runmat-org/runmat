@@ -1,9 +1,9 @@
 use runmat_builtins::Value;
 use runmat_gc::{gc_allocate, gc_test_context};
-use runmat_hir::{HirProgram, LoweringContext, SemanticError};
+use runmat_hir::{LegacyHirProgram as HirProgram, LoweringContext, SemanticError};
 use runmat_parser::parse;
 use runmat_turbine::TurbineEngine;
-use runmat_vm::{compile, Bytecode};
+use runmat_vm::{compile_legacy as compile, Bytecode};
 use std::collections::HashMap;
 
 fn lower(ast: &runmat_parser::Program) -> Result<HirProgram, SemanticError> {

@@ -4,7 +4,7 @@ mod test_helpers;
 use runmat_accelerate::graph::{AccelNodeLabel, PrimitiveOp};
 use runmat_builtins::Value;
 use runmat_parser::parse;
-use runmat_vm::{compile, Instr};
+use runmat_vm::{compile_legacy as compile, Instr};
 use std::collections::HashMap;
 use test_helpers::{execute, lower};
 

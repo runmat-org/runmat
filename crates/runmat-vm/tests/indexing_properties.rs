@@ -20,7 +20,7 @@ fn find_last_tensor(vars: &[runmat_builtins::Value]) -> runmat_builtins::Tensor 
         .expect("no tensor found")
 }
 
-fn lower_with_vars(src: &str) -> (runmat_hir::HirProgram, HashMap<String, usize>) {
+fn lower_with_vars(src: &str) -> (runmat_hir::LegacyHirProgram, HashMap<String, usize>) {
     let program = parse(src).unwrap();
     let result = runmat_hir::lower(&program, &LoweringContext::empty()).unwrap();
     (result.hir, result.variables)

@@ -50,12 +50,18 @@ fn meshgrid_accepts_precomputed_ranges() {
     let hir = lower(&ast).unwrap();
     // Sanity-check the lowering: we should be calling the meshgrid builtin with args [Var(a), Var(b)].
     match hir.body.last().expect("expected statements") {
-        runmat_hir::HirStmt::MultiAssign(_vars, expr, _suppressed, _) => match &expr.kind {
-            runmat_hir::HirExprKind::FuncCall(name, args) => {
+        runmat_hir::LegacyHirStmt::MultiAssign(_vars, expr, _suppressed, _) => match &expr.kind {
+            runmat_hir::LegacyHirExprKind::FuncCall(name, args) => {
                 assert_eq!(name, "meshgrid");
                 assert_eq!(args.len(), 2);
-                assert!(matches!(args[0].kind, runmat_hir::HirExprKind::Var(_)));
-                assert!(matches!(args[1].kind, runmat_hir::HirExprKind::Var(_)));
+                assert!(matches!(
+                    args[0].kind,
+                    runmat_hir::LegacyHirExprKind::Var(_)
+                ));
+                assert!(matches!(
+                    args[1].kind,
+                    runmat_hir::LegacyHirExprKind::Var(_)
+                ));
             }
             other => panic!("expected FuncCall(meshgrid, ...), got {other:?}"),
         },
