@@ -739,7 +739,11 @@ pub async fn handle_builtin_expand_multi_call(
     let args = build_builtin_expand_multi_args(stack, specs).await?;
     let output_hint = output_hint_for_next(next_instr);
     let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
-    push_single_result(stack, call_builtin_auto(name, &args).await?);
+    let result = match requested_output_count_from_next(next_instr) {
+        Some(count) => runmat_runtime::call_builtin_async_with_outputs(name, &args, count).await?,
+        None => call_builtin_auto(name, &args).await?,
+    };
+    push_single_result(stack, result);
     Ok(BuiltinHandling::Completed)
 }
 

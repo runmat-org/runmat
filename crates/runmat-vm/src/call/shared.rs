@@ -405,7 +405,7 @@ where
                     }
                 }
             };
-            temp.extend(expanded);
+            temp.extend(expanded.into_iter().rev());
         } else {
             temp.push(stack.pop().ok_or_else(|| {
                 crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
