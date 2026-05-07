@@ -339,7 +339,9 @@ impl RunMatSession {
             (None, false)
         };
 
-        bytecode.var_names = id_to_name.clone();
+        if bytecode.layout.is_none() {
+            bytecode.var_names = id_to_name.clone();
+        }
         if self.verbose {
             debug!(
                 "Bytecode compiled: {} instructions",
