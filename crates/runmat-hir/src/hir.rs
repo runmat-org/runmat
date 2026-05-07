@@ -19,6 +19,7 @@ pub struct HirAssembly {
     pub classes: Vec<HirClass>,
     pub bindings: Vec<HirBinding>,
     pub entrypoints: Vec<HirEntrypoint>,
+    pub compatibility_mode: Option<CompatibilityMode>,
 }
 
 /// Source unit metadata plus references to module-owned semantic items.
@@ -1076,6 +1077,7 @@ pub struct LegacyHirProgram {
 #[derive(Debug, Clone)]
 pub struct LoweringResult {
     pub assembly: HirAssembly,
+    pub compatibility_mode: Option<CompatibilityMode>,
     pub semantic_index: SemanticIndex,
     pub hir: LegacyHirProgram,
     pub variables: HashMap<String, usize>,

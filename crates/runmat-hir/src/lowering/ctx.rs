@@ -93,10 +93,12 @@ pub fn lower(
         }
     }
 
-    let (assembly, semantic_index) = SemanticCtx::lower_program(prog)?;
+    let (mut assembly, semantic_index) = SemanticCtx::lower_program(prog)?;
+    assembly.compatibility_mode = context.compatibility_mode.clone();
 
     Ok(LoweringResult {
         assembly,
+        compatibility_mode: context.compatibility_mode.clone(),
         semantic_index,
         hir,
         variables,

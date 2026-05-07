@@ -402,6 +402,16 @@ fn direct_spawn_of_anonymous_function_uses_function_handle_temp_operand() {
         store.expressions[&handle_expr].ty,
         runmat_hir::TypeFact::Function(_)
     ));
+    assert!(store
+        .spawn_boundaries
+        .values()
+        .flatten()
+        .any(|boundary| matches!(
+            boundary.safety,
+            runmat_hir::SpawnSafetyFact::NotSpawnSafe {
+                reason: runmat_hir::SpawnSafetyReason::UnknownDynamicCapture
+            }
+        )));
 }
 
 #[test]
@@ -682,7 +692,7 @@ fn spawn_safety_summary_is_conservative_for_spawn_sites() {
 #[test]
 fn analyze_assembly_rejects_spawned_future_with_mutable_lexical_capture() {
     let mir = lower_mir(
-        "function y = outer(); acc = 0; function bump(); acc = acc + 1; end; task = spawn(@bump); y = acc; end",
+        "function y = outer(); acc = 0; async function z = bump(); acc = acc + 1; z = acc; end; fut = bump(); task = spawn(fut); y = acc; end",
     );
 
     let store = analyze_assembly(&mir);
@@ -690,6 +700,26 @@ fn analyze_assembly_rejects_spawned_future_with_mutable_lexical_capture() {
     assert!(store.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "RM-MIR0003" && diagnostic.category.as_deref() == Some("spawn-safety")
     }));
+    assert!(store
+        .spawn_boundaries
+        .values()
+        .flatten()
+        .any(|boundary| matches!(
+            boundary.safety,
+            runmat_hir::SpawnSafetyFact::NotSpawnSafe {
+                reason: runmat_hir::SpawnSafetyReason::MutableLexicalCapture
+            }
+        )));
+}
+
+#[test]
+fn analyze_assembly_rejects_spawned_future_with_lexical_capture_read() {
+    let mir = lower_mir(
+        "function y = outer(); acc = 1; async function z = read_acc(); z = acc; end; fut = read_acc(); task = spawn(fut); y = acc; end",
+    );
+
+    let store = analyze_assembly(&mir);
+
     assert!(store
         .spawn_boundaries
         .values()
@@ -825,8 +855,15 @@ fn analysis_store_diagnostics_serialize_with_store() {
 
 #[test]
 fn product_cache_key_serializes_semantic_product_dependencies() {
+    let function_path = runmat_hir::DefPath {
+        package: runmat_hir::PackageName("pkg".into()),
+        module: runmat_hir::QualifiedName(vec![runmat_hir::SymbolName("mod".into())]),
+        item: vec![runmat_hir::DefPathSegment::Function(
+            runmat_hir::SymbolName("f".into()),
+        )],
+    };
     let key = ProductCacheKey {
-        product: CacheProduct::FunctionSummary(runmat_hir::FunctionId(7)),
+        product: CacheProduct::FunctionSummary(function_path),
         source_hash: "source".into(),
         manifest_hash: "manifest".into(),
         dependency_graph_hash: "deps".into(),
@@ -842,7 +879,9 @@ fn product_cache_key_serializes_semantic_product_dependencies() {
     assert!(json.contains("dependency_graph_hash"));
 
     let module_key = ProductCacheKey {
-        product: CacheProduct::ModuleSummary(runmat_hir::ModuleId(3)),
+        product: CacheProduct::ModuleSummary(runmat_hir::QualifiedName(vec![
+            runmat_hir::SymbolName("mod".into()),
+        ])),
         source_hash: "source".into(),
         manifest_hash: "manifest".into(),
         dependency_graph_hash: "deps".into(),
@@ -897,6 +936,29 @@ fn await_assignment_lowers_to_result_place() {
     };
     assert!(matches!(result, Some(MirPlace::Local(_))));
     assert_eq!(*resume, body.blocks[1].id);
+}
+
+#[test]
+fn nested_await_expression_lowers_to_temp_and_resume_block() {
+    let mir = lower_mir("async function y = f(g); y = 1 + await(g); end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let MirTerminatorKind::Await { result, resume, .. } = &body.blocks[0].terminator.kind else {
+        panic!("expected await terminator");
+    };
+    assert!(matches!(result, Some(MirPlace::Local(_))));
+    let resume_block = body
+        .blocks
+        .iter()
+        .find(|block| block.id == *resume)
+        .unwrap();
+    assert!(resume_block.statements.iter().any(|stmt| matches!(
+        stmt.kind,
+        MirStmtKind::Assign {
+            value: MirRvalue::Binary(_, _, _),
+            ..
+        }
+    )));
 }
 
 #[test]

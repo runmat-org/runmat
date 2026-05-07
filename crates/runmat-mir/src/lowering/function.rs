@@ -1,5 +1,5 @@
 use crate::{MirAssembly, MirBody, MirOperand, MirSourceMap, MirTerminator, MirTerminatorKind};
-use runmat_hir::{HirAssembly, HirFunction, SemanticError, SourceUnitKind};
+use runmat_hir::{CompatibilityMode, HirAssembly, HirFunction, SemanticError, SourceUnitKind};
 use std::collections::{HashMap, HashSet};
 
 use super::{control_flow::ControlFlowBuilder, expr::lower_simple_operand, MirLoweringContext};
@@ -10,6 +10,11 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, SemanticError> {
         .modules
         .iter()
         .map(|module| (module.id, module.source_unit.clone()))
+        .collect();
+    let compatibility_modes: HashMap<_, _> = hir
+        .modules
+        .iter()
+        .filter_map(|module| hir.compatibility_mode.clone().map(|mode| (module.id, mode)))
         .collect();
     let async_functions: HashSet<_> = hir
         .functions
@@ -23,6 +28,7 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, SemanticError> {
             lower_function_with_context(
                 function,
                 &source_units,
+                &compatibility_modes,
                 MirLoweringContext::with_async_functions(async_functions.clone()),
             )?,
         );
@@ -31,19 +37,26 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, SemanticError> {
 }
 
 pub fn lower_function(function: &HirFunction) -> Result<MirBody, SemanticError> {
-    lower_function_with_source_units(function, &HashMap::new())
+    lower_function_with_source_units(function, &HashMap::new(), &HashMap::new())
 }
 
 fn lower_function_with_source_units(
     function: &HirFunction,
     source_units: &HashMap<runmat_hir::ModuleId, SourceUnitKind>,
+    compatibility_modes: &HashMap<runmat_hir::ModuleId, CompatibilityMode>,
 ) -> Result<MirBody, SemanticError> {
-    lower_function_with_context(function, source_units, MirLoweringContext::new())
+    lower_function_with_context(
+        function,
+        source_units,
+        compatibility_modes,
+        MirLoweringContext::new(),
+    )
 }
 
 fn lower_function_with_context(
     function: &HirFunction,
     source_units: &HashMap<runmat_hir::ModuleId, SourceUnitKind>,
+    compatibility_modes: &HashMap<runmat_hir::ModuleId, CompatibilityMode>,
     mut ctx: MirLoweringContext,
 ) -> Result<MirBody, SemanticError> {
     let (locals, local_sources) = ctx.locals_for_function(function);
@@ -82,7 +95,7 @@ fn lower_function_with_context(
             function: Some(function.id),
             module: Some(function.module),
             source_unit: source_units.get(&function.module).cloned(),
-            compatibility_mode: None,
+            compatibility_mode: compatibility_modes.get(&function.module).cloned(),
             enclosing_class: function.enclosing_class,
             statements: statement_sources,
             locals: local_sources,

@@ -6,7 +6,8 @@ use lsp_types::{
 };
 use runmat_builtins::{self, BuiltinFunction, Constant, Type};
 use runmat_hir::{
-    HirDiagnostic, HirDiagnosticSeverity, HirStmt, LoweringContext, LoweringResult, SemanticError,
+    CompatibilityMode, HirDiagnostic, HirDiagnosticSeverity, HirStmt, LoweringContext,
+    LoweringResult, SemanticError,
 };
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
@@ -71,7 +72,9 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
     let tokens = tokenize_detailed(text);
     match parse_with_options(text, ParserOptions::new(compat)) {
         Ok(ast) => {
-            let lowering = match runmat_hir::lower(&ast, &LoweringContext::empty()) {
+            let lowering_context =
+                LoweringContext::empty().with_compatibility_mode(hir_compatibility_mode(compat));
+            let lowering = match runmat_hir::lower(&ast, &lowering_context) {
                 Ok(result) => result,
                 Err(err) => {
                     return DocumentAnalysis {
@@ -123,6 +126,13 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
                 semantic: None,
             }
         }
+    }
+}
+
+fn hir_compatibility_mode(compat: CompatMode) -> CompatibilityMode {
+    match compat {
+        CompatMode::Matlab => CompatibilityMode::RunMatExtended,
+        CompatMode::Strict => CompatibilityMode::MatlabStrict,
     }
 }
 

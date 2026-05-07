@@ -274,13 +274,14 @@ fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
             })),
             ..SimpleValueFact::default()
         },
-        MirRvalue::Spawn(_) => SimpleValueFact {
+        MirRvalue::Spawn(MirOperand::Local(_)) => SimpleValueFact {
             async_value: Some(AsyncValueFact::TaskHandle(TaskHandleFact {
                 output: Box::new(TypeFact::Unknown),
                 spawn_safety: SpawnSafetyFact::RequiresIsolation,
             })),
             ..SimpleValueFact::default()
         },
+        MirRvalue::Spawn(_) => SimpleValueFact::default(),
         MirRvalue::Aggregate {
             kind,
             rows,

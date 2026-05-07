@@ -2,7 +2,7 @@ use crate::{
     MirBody, MirDiagnostic, MirDiagnosticSeverity, MirOperand, MirPlace, MirRvalue, MirStmtKind,
     SpawnBoundary,
 };
-use runmat_hir::{FunctionHandleTarget, FunctionId, Span, SpawnSafetyFact, SpawnSafetyReason};
+use runmat_hir::{FunctionId, Span, SpawnSafetyFact, SpawnSafetyReason};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -115,10 +115,6 @@ fn collect_future_targets(body: &MirBody) -> HashMap<crate::MirLocalId, Function
 fn future_target(value: &MirRvalue) -> Option<FunctionId> {
     match value {
         MirRvalue::Future { function, .. } => Some(*function),
-        MirRvalue::Use(MirOperand::FunctionHandle(FunctionHandleTarget::Function(function)))
-        | MirRvalue::Use(MirOperand::FunctionHandle(FunctionHandleTarget::Anonymous(function))) => {
-            Some(*function)
-        }
         _ => None,
     }
 }
@@ -136,7 +132,7 @@ fn classify_spawn_boundary(
     let Some(summary) = summaries.get(&target) else {
         return SpawnSafetyFact::RequiresIsolation;
     };
-    if !summary.writes_captures.is_empty() {
+    if !summary.reads_captures.is_empty() || !summary.writes_captures.is_empty() {
         return SpawnSafetyFact::NotSpawnSafe {
             reason: SpawnSafetyReason::MutableLexicalCapture,
         };
@@ -150,8 +146,6 @@ fn spawn_target(
 ) -> Option<FunctionId> {
     match future {
         MirOperand::Local(local) => future_targets.get(local).copied(),
-        MirOperand::FunctionHandle(FunctionHandleTarget::Function(function))
-        | MirOperand::FunctionHandle(FunctionHandleTarget::Anonymous(function)) => Some(*function),
         MirOperand::FunctionHandle(_) | MirOperand::Temp(_) | MirOperand::Constant(_) => None,
     }
 }

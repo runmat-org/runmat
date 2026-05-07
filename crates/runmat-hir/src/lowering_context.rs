@@ -1,10 +1,11 @@
-use crate::LegacyHirStmt as HirStmt;
+use crate::{CompatibilityMode, LegacyHirStmt as HirStmt};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 pub struct LoweringContext<'a> {
     pub variables: &'a HashMap<String, usize>,
     pub functions: &'a HashMap<String, HirStmt>,
+    pub compatibility_mode: Option<CompatibilityMode>,
 }
 
 impl<'a> LoweringContext<'a> {
@@ -15,7 +16,13 @@ impl<'a> LoweringContext<'a> {
         Self {
             variables,
             functions,
+            compatibility_mode: None,
         }
+    }
+
+    pub fn with_compatibility_mode(mut self, compatibility_mode: CompatibilityMode) -> Self {
+        self.compatibility_mode = Some(compatibility_mode);
+        self
     }
 
     pub fn empty() -> Self {
@@ -24,6 +31,7 @@ impl<'a> LoweringContext<'a> {
         Self {
             variables: EMPTY_VARS.get_or_init(HashMap::new),
             functions: EMPTY_FUNCS.get_or_init(HashMap::new),
+            compatibility_mode: None,
         }
     }
 }

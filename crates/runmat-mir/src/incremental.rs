@@ -1,4 +1,4 @@
-use runmat_hir::{ClassId, FunctionId, ModuleId, QualifiedName};
+use runmat_hir::{DefPath, QualifiedName};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -13,10 +13,10 @@ pub struct ProductCacheKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CacheProduct {
-    HirModule(ModuleId),
-    MirBody(FunctionId),
-    FunctionSummary(FunctionId),
-    ModuleSummary(ModuleId),
-    ClassMetadata(ClassId),
-    AnalysisFacts(QualifiedName),
+    HirModule(QualifiedName),
+    MirBody(DefPath),
+    FunctionSummary(DefPath),
+    ModuleSummary(QualifiedName),
+    ClassMetadata(DefPath),
+    AnalysisFacts(DefPath),
 }

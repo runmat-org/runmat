@@ -96,7 +96,9 @@ fn lint_data_api_from_mir(
                                 call.args.first().and_then(mir_arg_local),
                                 call.args.get(1).and_then(mir_literal_string),
                             ) {
-                                if let Some(dataset) = datasets.get(&mir_local_key(body, dataset_local)) {
+                                if let Some(dataset) =
+                                    datasets.get(&mir_local_key(body, dataset_local))
+                                {
                                     let rank = dataset.arrays.get(&array_name).copied();
                                     if rank.is_none() {
                                         diagnostics.push(diagnostic(
@@ -144,11 +146,13 @@ fn lint_data_api_from_mir(
                         } else if call.syntax == runmat_hir::CallSyntax::Method
                             && name.as_deref() == Some("write")
                         {
-                            let in_tx = call
-                                .args
-                                .first()
-                                .and_then(mir_arg_local)
-                                .is_some_and(|local| tx_locals.contains(&mir_local_key(body, local)));
+                            let in_tx =
+                                call.args
+                                    .first()
+                                    .and_then(mir_arg_local)
+                                    .is_some_and(|local| {
+                                        tx_locals.contains(&mir_local_key(body, local))
+                                    });
                             if !in_tx {
                                 non_tx_write_count += 1;
                                 if non_tx_write_count > 1 {
