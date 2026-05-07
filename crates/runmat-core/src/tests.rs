@@ -414,6 +414,25 @@ fn local_function_with_cell_expansion_uses_semantic_vm() {
 }
 
 #[test]
+fn struct_member_access_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "s = struct(); s.a = 3; y = s.a;";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile struct member access");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "struct member access should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "3"
+    }));
+}
+
+#[test]
 fn workspace_reports_datetime_array_shape() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let result =

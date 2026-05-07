@@ -610,9 +610,23 @@ impl Compiler {
                 self.emit(Instr::StoreVar(base_slot));
                 Ok(())
             }
-            _ => Err(self.compile_error(
-                "MIR bytecode lowering for this assignment place is not implemented yet",
-            )),
+            MirPlace::Member(base, member) => {
+                let base_slot = self.mir_place_slot(base)?;
+                self.emit(Instr::LoadVar(base_slot));
+                self.compile_mir_rvalue(value)?;
+                self.emit(Instr::StoreMemberOrInit(member.0.clone()));
+                self.emit(Instr::StoreVar(base_slot));
+                Ok(())
+            }
+            MirPlace::DynamicMember(base, member) => {
+                let base_slot = self.mir_place_slot(base)?;
+                self.emit(Instr::LoadVar(base_slot));
+                self.compile_mir_operand(member)?;
+                self.compile_mir_rvalue(value)?;
+                self.emit(Instr::StoreMemberDynamicOrInit);
+                self.emit(Instr::StoreVar(base_slot));
+                Ok(())
+            }
         }
     }
 
@@ -702,6 +716,17 @@ impl Compiler {
                 elements,
             } => self.compile_mir_aggregate(kind, *rows, *cols, elements),
             MirRvalue::Index { base, indexing } => self.compile_mir_index(base, indexing),
+            MirRvalue::Member { base, member } => {
+                self.compile_mir_operand(base)?;
+                self.emit(Instr::LoadMember(member.0.clone()));
+                Ok(())
+            }
+            MirRvalue::DynamicMember { base, member } => {
+                self.compile_mir_operand(base)?;
+                self.compile_mir_operand(member)?;
+                self.emit(Instr::LoadMemberDynamic);
+                Ok(())
+            }
             MirRvalue::Colon => {
                 self.emit(Instr::LoadConst(0.0));
                 Ok(())
