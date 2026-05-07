@@ -868,6 +868,7 @@ fn build_semantic_model(
 
     let mut diagnostics = runmat_static_analysis::lint_shapes(&lowering);
     diagnostics.extend(runmat_static_analysis::lint_data_api(&lowering));
+    diagnostics.extend(runmat_static_analysis::lint_mir_analysis(&lowering));
 
     SemanticModel {
         globals,

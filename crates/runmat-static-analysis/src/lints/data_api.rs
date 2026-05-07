@@ -57,12 +57,12 @@ fn lint_data_api_from_mir(
     provider: &dyn DatasetSchemaProvider,
 ) -> Vec<HirDiagnostic> {
     let mut diagnostics = Vec::new();
-    let mut datasets = HashMap::<runmat_mir::MirLocalId, DatasetBinding>::new();
-    let mut arrays = HashMap::<runmat_mir::MirLocalId, ArrayBinding>::new();
-    let mut tx_locals = HashSet::<runmat_mir::MirLocalId>::new();
-    let mut non_tx_write_count = 0usize;
+    let mut datasets = HashMap::<runmat_mir::analysis::MirLocalKey, DatasetBinding>::new();
+    let mut arrays = HashMap::<runmat_mir::analysis::MirLocalKey, ArrayBinding>::new();
+    let mut tx_locals = HashSet::<runmat_mir::analysis::MirLocalKey>::new();
 
     for body in mir.bodies.values() {
+        let mut non_tx_write_count = 0usize;
         for block in &body.blocks {
             for stmt in &block.statements {
                 match &stmt.kind {
@@ -74,12 +74,13 @@ fn lint_data_api_from_mir(
                             continue;
                         };
                         let name = mir_call_name(&call.callee);
+                        let local_key = mir_local_key(body, local);
                         if is_mir_data_open(call.syntax.clone(), name.as_deref(), &call.args) {
                             if let Some(path) = mir_data_open_path(name.as_deref(), &call.args)
                                 .and_then(mir_literal_string)
                             {
                                 if let Some(dataset) = infer_dataset_binding(provider, &path) {
-                                    datasets.insert(local, dataset);
+                                    datasets.insert(local_key, dataset);
                                 }
                             } else {
                                 diagnostics.push(diagnostic(
@@ -95,7 +96,7 @@ fn lint_data_api_from_mir(
                                 call.args.first().and_then(mir_arg_local),
                                 call.args.get(1).and_then(mir_literal_string),
                             ) {
-                                if let Some(dataset) = datasets.get(&dataset_local) {
+                                if let Some(dataset) = datasets.get(&mir_local_key(body, dataset_local)) {
                                     let rank = dataset.arrays.get(&array_name).copied();
                                     if rank.is_none() {
                                         diagnostics.push(diagnostic(
@@ -106,13 +107,13 @@ fn lint_data_api_from_mir(
                                             stmt.span,
                                         ));
                                     }
-                                    arrays.insert(local, ArrayBinding { rank });
+                                    arrays.insert(local_key, ArrayBinding { rank });
                                 }
                             }
                         } else if call.syntax == runmat_hir::CallSyntax::Method
                             && name.as_deref() == Some("begin")
                         {
-                            tx_locals.insert(local);
+                            tx_locals.insert(local_key);
                         }
                     }
                     runmat_mir::MirStmtKind::Expr(runmat_mir::MirRvalue::Call(call)) => {
@@ -124,7 +125,7 @@ fn lint_data_api_from_mir(
                                 call.args.first().and_then(mir_arg_local),
                                 call.args.get(1).map(|arg| arg.operand()),
                             ) {
-                                if let Some(array) = arrays.get(&array_local) {
+                                if let Some(array) = arrays.get(&mir_local_key(body, array_local)) {
                                     if let (Some(expected), Some(actual)) =
                                         (array.rank, mir_slice_rank(slice))
                                     {
@@ -147,7 +148,7 @@ fn lint_data_api_from_mir(
                                 .args
                                 .first()
                                 .and_then(mir_arg_local)
-                                .is_some_and(|local| tx_locals.contains(&local));
+                                .is_some_and(|local| tx_locals.contains(&mir_local_key(body, local)));
                             if !in_tx {
                                 non_tx_write_count += 1;
                                 if non_tx_write_count > 1 {
@@ -174,6 +175,16 @@ fn lint_data_api_from_mir(
         }
     }
     diagnostics
+}
+
+fn mir_local_key(
+    body: &runmat_mir::MirBody,
+    local: runmat_mir::MirLocalId,
+) -> runmat_mir::analysis::MirLocalKey {
+    runmat_mir::analysis::MirLocalKey {
+        function: body.function,
+        local,
+    }
 }
 
 struct DataLintContext<'a> {

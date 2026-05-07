@@ -3,17 +3,23 @@ use crate::{
     MirPlace, MirRvalue, MirStmt, MirStmtKind,
 };
 use runmat_hir::{
-    CommandArgument, HirCallableRef, HirCommandCall, HirExpr, HirExprKind, IndexComponent,
+    CommandArgument, ExprId, HirCallableRef, HirCommandCall, HirExpr, HirExprKind, IndexComponent,
     IndexResultContext, IndexingSemantics, RequestedOutputCount, SemanticError, StringLiteral,
 };
+use std::collections::HashMap;
 
 use super::MirLoweringContext;
 
-pub(crate) fn lower_expr(
+pub(crate) fn lower_expr_with_replacements(
     ctx: &MirLoweringContext,
     expr: &HirExpr,
     temps: &mut Vec<MirStmt>,
+    await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<MirRvalue, SemanticError> {
+    if let Some(operand) = await_replacements.get(&expr.id) {
+        return Ok(MirRvalue::Use(operand.clone()));
+    }
+
     Ok(match &expr.kind {
         HirExprKind::Number(value) => {
             MirRvalue::Use(MirOperand::Constant(MirConstant::Number(value.clone())))
@@ -27,39 +33,40 @@ pub(crate) fn lower_expr(
         HirExprKind::Binding(binding) => {
             MirRvalue::Use(MirOperand::Local(ctx.local_for_binding(*binding)?))
         }
-        HirExprKind::Unary(op, inner) => {
-            MirRvalue::Unary(op.clone(), lower_operand(ctx, inner, temps)?)
-        }
-        HirExprKind::Binary(left, op, right) => MirRvalue::Binary(
-            lower_operand(ctx, left, temps)?,
+        HirExprKind::Unary(op, inner) => MirRvalue::Unary(
             op.clone(),
-            lower_operand(ctx, right, temps)?,
+            lower_operand_with_replacements(ctx, inner, temps, await_replacements)?,
+        ),
+        HirExprKind::Binary(left, op, right) => MirRvalue::Binary(
+            lower_operand_with_replacements(ctx, left, temps, await_replacements)?,
+            op.clone(),
+            lower_operand_with_replacements(ctx, right, temps, await_replacements)?,
         ),
         HirExprKind::Range(start, step, end) => MirRvalue::Range {
-            start: lower_operand(ctx, start, temps)?,
+            start: lower_operand_with_replacements(ctx, start, temps, await_replacements)?,
             step: step
                 .as_ref()
-                .map(|step| lower_operand(ctx, step, temps))
+                .map(|step| lower_operand_with_replacements(ctx, step, temps, await_replacements))
                 .transpose()?,
-            end: lower_operand(ctx, end, temps)?,
+            end: lower_operand_with_replacements(ctx, end, temps, await_replacements)?,
         },
         HirExprKind::Tensor(rows) => MirRvalue::Aggregate {
             kind: MirAggregateKind::Tensor,
             rows: rows.len(),
             cols: aggregate_col_count(rows),
-            elements: lower_aggregate_elements(ctx, rows, temps)?,
+            elements: lower_aggregate_elements(ctx, rows, temps, await_replacements)?,
         },
         HirExprKind::Cell(rows) => MirRvalue::Aggregate {
             kind: MirAggregateKind::Cell,
             rows: rows.len(),
             cols: aggregate_col_count(rows),
-            elements: lower_aggregate_elements(ctx, rows, temps)?,
+            elements: lower_aggregate_elements(ctx, rows, temps, await_replacements)?,
         },
         HirExprKind::Call(call) => {
             let args = call
                 .args
                 .iter()
-                .map(|arg| lower_call_arg(ctx, arg, temps))
+                .map(|arg| lower_call_arg(ctx, arg, temps, await_replacements))
                 .collect::<Result<_, _>>()?;
             if let HirCallableRef::Function(function) = call.callee {
                 if ctx.is_async_function(function) {
@@ -88,28 +95,37 @@ pub(crate) fn lower_expr(
         }
         HirExprKind::CommandCall(call) => lower_command_call(call),
         HirExprKind::Index(base, indexing) => MirRvalue::Index {
-            base: lower_operand(ctx, base, temps)?,
-            indexing: lower_indexing(ctx, indexing, temps)?,
+            base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
+            indexing: lower_indexing_with_replacements(ctx, indexing, temps, await_replacements)?,
         },
         HirExprKind::Member(base, member) => MirRvalue::Member {
-            base: lower_operand(ctx, base, temps)?,
+            base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
             member: member.clone(),
         },
         HirExprKind::MemberDynamic(base, member) => MirRvalue::DynamicMember {
-            base: lower_operand(ctx, base, temps)?,
-            member: lower_operand(ctx, member, temps)?,
+            base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
+            member: lower_operand_with_replacements(ctx, member, temps, await_replacements)?,
         },
         HirExprKind::MetaClass(name) => MirRvalue::MetaClass(name.clone()),
         HirExprKind::Colon => MirRvalue::Colon,
         HirExprKind::End => MirRvalue::End,
-        HirExprKind::Spawn(inner) => MirRvalue::Spawn(lower_operand(ctx, inner, temps)?),
+        HirExprKind::Spawn(inner) => MirRvalue::Spawn(lower_operand_with_replacements(
+            ctx,
+            inner,
+            temps,
+            await_replacements,
+        )?),
         HirExprKind::FunctionHandle(target) => {
             MirRvalue::Use(MirOperand::FunctionHandle(target.clone()))
         }
         HirExprKind::AnonymousFunction(function) => MirRvalue::Use(MirOperand::FunctionHandle(
             runmat_hir::FunctionHandleTarget::Anonymous(*function),
         )),
-        HirExprKind::Await(future) => MirRvalue::Use(lower_operand(ctx, future, temps)?),
+        HirExprKind::Await(_) => {
+            return Err(SemanticError::new(
+                "await expression was not lowered through an await terminator",
+            ))
+        }
     })
 }
 
@@ -117,8 +133,9 @@ fn lower_call_arg(
     ctx: &MirLoweringContext,
     arg: &HirExpr,
     temps: &mut Vec<MirStmt>,
+    await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<MirCallArg, SemanticError> {
-    let operand = lower_operand(ctx, arg, temps)?;
+    let operand = lower_operand_with_replacements(ctx, arg, temps, await_replacements)?;
     if matches!(
         &arg.kind,
         HirExprKind::Index(_, indexing)
@@ -134,10 +151,11 @@ fn lower_aggregate_elements(
     ctx: &MirLoweringContext,
     rows: &[Vec<HirExpr>],
     temps: &mut Vec<MirStmt>,
+    await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<Vec<MirOperand>, SemanticError> {
     rows.iter()
         .flat_map(|row| row.iter())
-        .map(|element| lower_operand(ctx, element, temps))
+        .map(|element| lower_operand_with_replacements(ctx, element, temps, await_replacements))
         .collect()
 }
 
@@ -150,12 +168,21 @@ pub(crate) fn lower_indexing(
     indexing: &IndexingSemantics,
     temps: &mut Vec<MirStmt>,
 ) -> Result<MirIndexing, SemanticError> {
+    lower_indexing_with_replacements(ctx, indexing, temps, &HashMap::new())
+}
+
+pub(crate) fn lower_indexing_with_replacements(
+    ctx: &MirLoweringContext,
+    indexing: &IndexingSemantics,
+    temps: &mut Vec<MirStmt>,
+    await_replacements: &HashMap<ExprId, MirOperand>,
+) -> Result<MirIndexing, SemanticError> {
     Ok(MirIndexing {
         kind: indexing.kind.clone(),
         components: indexing
             .components
             .iter()
-            .map(|component| lower_index_component(ctx, component, temps))
+            .map(|component| lower_index_component(ctx, component, temps, await_replacements))
             .collect::<Result<_, _>>()?,
         result_context: indexing.result_context.clone(),
     })
@@ -165,6 +192,7 @@ fn lower_index_component(
     ctx: &MirLoweringContext,
     component: &IndexComponent,
     temps: &mut Vec<MirStmt>,
+    await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<MirIndexComponent, SemanticError> {
     Ok(match component {
         IndexComponent::Colon => MirIndexComponent::Colon,
@@ -172,10 +200,15 @@ fn lower_index_component(
             dim: *dim,
             offset: *offset,
         },
-        IndexComponent::Expr(expr) => MirIndexComponent::Expr(lower_operand(ctx, expr, temps)?),
-        IndexComponent::Logical(expr) => {
-            MirIndexComponent::Logical(lower_operand(ctx, expr, temps)?)
-        }
+        IndexComponent::Expr(expr) => MirIndexComponent::Expr(lower_operand_with_replacements(
+            ctx,
+            expr,
+            temps,
+            await_replacements,
+        )?),
+        IndexComponent::Logical(expr) => MirIndexComponent::Logical(
+            lower_operand_with_replacements(ctx, expr, temps, await_replacements)?,
+        ),
     })
 }
 
@@ -209,11 +242,23 @@ pub(crate) fn lower_operand(
     expr: &HirExpr,
     temps: &mut Vec<MirStmt>,
 ) -> Result<MirOperand, SemanticError> {
+    lower_operand_with_replacements(ctx, expr, temps, &HashMap::new())
+}
+
+pub(crate) fn lower_operand_with_replacements(
+    ctx: &MirLoweringContext,
+    expr: &HirExpr,
+    temps: &mut Vec<MirStmt>,
+    await_replacements: &HashMap<ExprId, MirOperand>,
+) -> Result<MirOperand, SemanticError> {
+    if let Some(operand) = await_replacements.get(&expr.id) {
+        return Ok(operand.clone());
+    }
     if let Some(operand) = lower_simple_operand(ctx, expr)? {
         return Ok(operand);
     }
 
-    let value = lower_expr(ctx, expr, temps)?;
+    let value = lower_expr_with_replacements(ctx, expr, temps, await_replacements)?;
     let local = ctx.fresh_temp(expr.span, Some(expr.id));
     temps.push(MirStmt {
         kind: MirStmtKind::Assign {

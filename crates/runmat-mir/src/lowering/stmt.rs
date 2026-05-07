@@ -1,20 +1,22 @@
 use crate::{MirOutputTarget, MirOutputTargetList, MirRvalue, MirStmt, MirStmtKind};
 use runmat_hir::{
-    AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, HirCallableRef, HirExpr,
-    HirExprKind, HirPlace, HirStmt, HirStmtKind, OutputTarget, PlaceMutation, PlaceMutationKind,
-    QualifiedName, SemanticError, Span, WorkspaceEffect,
+    AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, ExprId, HirCallableRef,
+    HirExpr, HirExprKind, HirPlace, HirStmt, HirStmtKind, OutputTarget, PlaceMutation,
+    PlaceMutationKind, QualifiedName, SemanticError, Span, WorkspaceEffect,
 };
+use std::collections::HashMap;
 
-use super::{expr::lower_expr, place::lower_place, MirLoweringContext};
+use super::{expr::lower_expr_with_replacements, place::lower_place, MirLoweringContext};
 
-pub(crate) fn lower_stmt(
+pub(crate) fn lower_stmt_with_replacements(
     ctx: &MirLoweringContext,
     stmt: &HirStmt,
+    await_replacements: &HashMap<ExprId, crate::MirOperand>,
 ) -> Result<Vec<MirStmt>, SemanticError> {
     Ok(match &stmt.kind {
         HirStmtKind::Assign(place, expr, _) => {
             let mut stmts = Vec::new();
-            let value = lower_expr(ctx, expr, &mut stmts)?;
+            let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
             if !matches!(place, HirPlace::Binding(_)) || is_empty_array_expr(expr) {
                 stmts.push(MirStmt {
@@ -34,7 +36,7 @@ pub(crate) fn lower_stmt(
         }
         HirStmtKind::MultiAssign(targets, expr, _) => {
             let mut stmts = Vec::new();
-            let value = lower_expr(ctx, expr, &mut stmts)?;
+            let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
             let lowered_targets = lower_output_targets(ctx, &targets.targets, &mut stmts)?;
             stmts.push(MirStmt {
@@ -50,7 +52,7 @@ pub(crate) fn lower_stmt(
         }
         HirStmtKind::ExprStmt(expr, _) => {
             let mut stmts = Vec::new();
-            let value = lower_expr(ctx, expr, &mut stmts)?;
+            let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
             stmts.push(MirStmt {
                 kind: MirStmtKind::Expr(value),
