@@ -16,6 +16,17 @@ fn captures_basic_workspace_assignments() {
 }
 
 #[test]
+fn execute_outcome_exposes_runtime_flow() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_outcome("1 + 1")).expect("exec succeeds");
+    assert!(
+        matches!(outcome.flow, abi::RuntimeFlow::Single(_)),
+        "unsuppressed expression should adapt to a single-value ABI flow"
+    );
+    assert!(outcome.diagnostics.is_empty());
+}
+
+#[test]
 fn compile_input_uses_semantic_vm_when_supported() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let prepared = session

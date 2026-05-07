@@ -2,7 +2,7 @@ use runmat_builtins::Value;
 use runmat_hir::{BindingName, DefPath, EntrypointId, Span};
 use uuid::Uuid;
 
-use crate::execution::ExecutionProfiling;
+use crate::execution::{ExecutionProfiling, ExecutionResult};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SourceInput {
@@ -79,6 +79,50 @@ impl Default for ExecutionOutcome {
             effects: Vec::new(),
             suspension: None,
             profiling: None,
+        }
+    }
+}
+
+impl From<ExecutionResult> for ExecutionOutcome {
+    fn from(result: ExecutionResult) -> Self {
+        let mut diagnostics = Vec::new();
+        if let Some(error) = result.error {
+            diagnostics.push(RuntimeDiagnostic {
+                code: error
+                    .identifier()
+                    .unwrap_or("RunMat:RuntimeError")
+                    .to_string(),
+                severity: DiagnosticSeverity::Error,
+                message: error.message().to_string(),
+                span: None,
+            });
+        }
+        diagnostics.extend(
+            result
+                .warnings
+                .into_iter()
+                .map(|warning| RuntimeDiagnostic {
+                    code: warning.identifier,
+                    severity: DiagnosticSeverity::Warning,
+                    message: warning.message,
+                    span: None,
+                }),
+        );
+
+        Self {
+            flow: result
+                .value
+                .map(RuntimeFlow::Single)
+                .unwrap_or(RuntimeFlow::NoValue),
+            workspace_delta: WorkspaceDelta {
+                full_snapshot_required: result.workspace.full,
+                ..WorkspaceDelta::default()
+            },
+            display_events: Vec::new(),
+            diagnostics,
+            effects: Vec::new(),
+            suspension: None,
+            profiling: result.profiling,
         }
     }
 }

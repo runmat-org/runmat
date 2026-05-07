@@ -6,6 +6,14 @@ impl RunMatSession {
         self.run(input).await
     }
 
+    /// Execute MATLAB/Octave code and adapt the result to the runtime/workspace ABI.
+    pub async fn execute_outcome(
+        &mut self,
+        input: &str,
+    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
+        self.run(input).await.map(Into::into)
+    }
+
     /// Parse, lower, compile, and execute input.
     pub async fn run(&mut self, input: &str) -> std::result::Result<ExecutionResult, RunError> {
         let _active = ActiveExecutionGuard::new(self).map_err(|err| {
