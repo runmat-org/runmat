@@ -47,16 +47,14 @@ pub fn format_tokens(input: &str) -> String {
 /// Execute MATLAB/Octave code and return the result as a formatted string
 pub async fn execute_and_format(input: &str) -> String {
     match RunMatSession::new() {
-        Ok(mut engine) => match engine.execute(input).await {
-            Ok(result) => {
-                if let Some(error) = result.error {
-                    format!("Error: {error}")
-                } else if let Some(value) = result.value {
-                    format!("{value:?}")
-                } else {
-                    "".to_string()
-                }
-            }
+        Ok(mut engine) => match engine.execute_outcome(input).await {
+            Ok(outcome) => match outcome.diagnostics.first() {
+                Some(diagnostic) => format!("Error: {}", diagnostic.message),
+                None => match outcome.flow {
+                    abi::RuntimeFlow::Single(value) => format!("{value:?}"),
+                    _ => "".to_string(),
+                },
+            },
             Err(e) => format!("Error: {e}"),
         },
         Err(e) => format!("Engine Error: {e}"),
