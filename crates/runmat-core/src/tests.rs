@@ -128,6 +128,25 @@ fn compile_input_uses_semantic_vm_when_supported() {
 }
 
 #[test]
+fn workspace_read_across_submissions_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(session.execute_outcome("x = 42;")).expect("seed workspace");
+
+    let prepared = session.compile_input("x").expect("compile workspace read");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "workspace read should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = block_on(session.execute_outcome("x")).expect("read workspace value");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("workspace read should return a durable value");
+    assert_eq!(value.to_string(), "42");
+}
+
+#[test]
 fn workspace_reports_datetime_array_shape() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let result =

@@ -94,8 +94,7 @@ pub fn lower(
         }
     }
 
-    let (mut assembly, semantic_index) =
-        SemanticCtx::lower_program(prog, context.compatibility_mode.clone())?;
+    let (mut assembly, semantic_index) = SemanticCtx::lower_program(prog, context)?;
     assembly.compatibility_mode = context.compatibility_mode.clone();
 
     Ok(LoweringResult {
@@ -116,7 +115,7 @@ pub fn lower(
 impl SemanticCtx {
     fn lower_program(
         prog: &AstProgram,
-        compatibility_mode: Option<crate::CompatibilityMode>,
+        context: &LoweringContext<'_>,
     ) -> Result<(HirAssembly, SemanticIndex), SemanticError> {
         let mut ctx = Self {
             assembly: HirAssembly::default(),
@@ -128,7 +127,7 @@ impl SemanticCtx {
             scopes: Vec::new(),
             function_modifiers: Vec::new(),
             top_level_await: Vec::new(),
-            compatibility_mode,
+            compatibility_mode: context.compatibility_mode.clone(),
             function_names: HashMap::new(),
             captures: HashMap::new(),
         };
@@ -190,7 +189,10 @@ impl SemanticCtx {
                 WorkspaceVisibility::TopLevel,
                 FunctionModifiers::default(),
                 true,
-                |ctx| ctx.lower_stmt_refs(&executable),
+                |ctx| {
+                    ctx.seed_existing_workspace_bindings(context.variables, entry_function);
+                    ctx.lower_stmt_refs(&executable)
+                },
             )?;
             let locals = ctx.binding_ids_for_owner(entry_function);
             ctx.assembly.functions.push(HirFunction {
@@ -385,6 +387,31 @@ impl SemanticCtx {
             span,
         });
         Some(binding)
+    }
+
+    fn seed_existing_workspace_bindings(
+        &mut self,
+        variables: &HashMap<String, usize>,
+        owner: FunctionId,
+    ) {
+        let mut variables = variables.iter().collect::<Vec<_>>();
+        variables.sort_by_key(|(_, slot)| **slot);
+        for (name, _) in variables {
+            if self.current_scope().bindings.contains_key(name) {
+                continue;
+            }
+            let id = self.alloc_binding_id();
+            self.current_scope_mut().bindings.insert(name.clone(), id);
+            self.assembly.bindings.push(HirBinding {
+                id,
+                owner: BindingOwner::Function(owner),
+                name: BindingName(name.clone()),
+                role: BindingRole::Local,
+                storage: BindingStorage::Lexical,
+                workspace_visibility: WorkspaceVisibility::TopLevel,
+                declared_span: Span { start: 0, end: 0 },
+            });
+        }
     }
 
     fn binding_for_write(&mut self, name: &str, span: Span) -> BindingId {
