@@ -1,6 +1,6 @@
 use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
-use crate::bytecode::{Bytecode, Instr, UserFunction};
+use crate::bytecode::{Bytecode, Instr, SemanticFunctionBytecode, UserFunction};
 use crate::call::shared as call_shared;
 use crate::call::user as call_user;
 use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
@@ -201,6 +201,68 @@ async fn invoke_user_function_value(
     ))
 }
 
+async fn invoke_semantic_function_value(
+    function: usize,
+    args: &[Value],
+    semantic_functions: &HashMap<runmat_hir::FunctionId, SemanticFunctionBytecode>,
+) -> Result<Value, RuntimeError> {
+    let function_id = runmat_hir::FunctionId(function);
+    let func = semantic_functions.get(&function_id).ok_or_else(|| {
+        let message = format!("Undefined semantic function: {function}");
+        mex("UndefinedSemanticFunction", &message)
+    })?;
+    if args.len() < func.capture_slots.len() {
+        let message = format!(
+            "semantic function {} received too few arguments",
+            func.display_name
+        );
+        return Err(mex("SemanticFunctionArity", &message));
+    }
+    let runtime_arg_count = args.len() - func.capture_slots.len();
+    if runtime_arg_count != func.input_slots.len() {
+        let message = format!(
+            "semantic function {} expected {} inputs, got {}",
+            func.display_name,
+            func.input_slots.len(),
+            runtime_arg_count
+        );
+        return Err(mex("SemanticFunctionArity", &message));
+    }
+
+    let mut vars = vec![Value::Num(0.0); func.var_count];
+    for (slot, value) in func.capture_slots.iter().zip(args.iter()) {
+        if *slot < vars.len() {
+            vars[*slot] = value.clone();
+        }
+    }
+    for (slot, value) in func
+        .input_slots
+        .iter()
+        .zip(args.iter().skip(func.capture_slots.len()))
+    {
+        if *slot < vars.len() {
+            vars[*slot] = value.clone();
+        }
+    }
+
+    let mut bytecode = Bytecode::with_instructions(func.instructions.clone(), func.var_count);
+    bytecode.instr_spans = func.instr_spans.clone();
+    bytecode.call_arg_spans = func.call_arg_spans.clone();
+    bytecode.semantic_functions = semantic_functions.clone();
+    let result_vars = interpret_function_with_counts(
+        &bytecode,
+        vars,
+        &func.display_name,
+        func.output_slots.len().max(1),
+        runtime_arg_count,
+    )
+    .await?;
+    let Some(slot) = func.output_slots.first() else {
+        return Ok(Value::Num(0.0));
+    };
+    Ok(result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
+}
+
 pub async fn interpret_with_vars(
     bytecode: &Bytecode,
     initial_vars: &mut [Value],
@@ -267,6 +329,7 @@ async fn run_interpreter_inner(
         bytecode,
     } = state;
     let functions = Arc::new(context.functions.clone());
+    let semantic_functions = Arc::new(bytecode.semantic_functions.clone());
     let _user_function_vars_guard = install_user_function_vars(&mut vars);
     let _user_function_guard = user_functions::install_user_function_invoker(Some(Arc::new(
         move |name: &str, args: &[Value]| {
@@ -286,6 +349,15 @@ async fn run_interpreter_inner(
             })
         },
     )));
+    let _semantic_function_guard = user_functions::install_semantic_function_invoker(Some(
+        Arc::new(move |function: usize, args: &[Value]| {
+            let args = args.to_vec();
+            let semantic_functions = Arc::clone(&semantic_functions);
+            Box::pin(async move {
+                invoke_semantic_function_value(function, &args, &semantic_functions).await
+            })
+        }),
+    ));
     CALL_COUNTS.with(|cc| {
         *cc.borrow_mut() = call_counts.clone();
     });
@@ -530,6 +602,7 @@ async fn run_interpreter_inner(
             | Instr::CallMethodOrMemberIndex(_, _)
             | Instr::LoadMethod(_)
             | Instr::CreateClosure(_, _)
+            | Instr::CreateSemanticClosure(_, _, _)
             | Instr::LoadStaticProperty(_, _)
             | Instr::CallStaticMethod(_, _, _)
             | Instr::RegisterClass { .. }

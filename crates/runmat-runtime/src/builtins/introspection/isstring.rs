@@ -84,6 +84,7 @@ pub(crate) mod tests {
         let object = Value::Object(ObjectInstance::new("ExampleClass".to_string()));
         let closure = Value::Closure(Closure {
             function_name: "some_func".to_string(),
+            semantic_function: None,
             captures: Vec::new(),
         });
         let class_ref = Value::ClassRef("pkg.Type".to_string());

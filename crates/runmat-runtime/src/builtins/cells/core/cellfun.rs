@@ -513,6 +513,13 @@ impl Callable {
             Callable::Closure(c) => {
                 let mut captures = c.captures.clone();
                 captures.extend_from_slice(args);
+                if let Some(function) = c.semantic_function {
+                    if let Some(result) =
+                        user_functions::try_call_semantic_function(function, &captures).await
+                    {
+                        return result;
+                    }
+                }
                 if let Some(result) =
                     user_functions::try_call_user_function(&c.function_name, &captures).await
                 {
@@ -822,6 +829,7 @@ pub(crate) mod tests {
         .expect("cell");
         let handler = Value::Closure(Closure {
             function_name: "__cellfun_test_handler".into(),
+            semantic_function: None,
             captures: vec![Value::Num(0.0)],
         });
         let result = cellfun_builtin(

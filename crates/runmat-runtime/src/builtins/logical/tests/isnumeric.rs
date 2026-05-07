@@ -213,6 +213,7 @@ pub(crate) mod tests {
         );
         let closure = Closure {
             function_name: "anon".into(),
+            semantic_function: None,
             captures: vec![Value::Num(1.0)],
         };
         assert_eq!(

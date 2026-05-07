@@ -154,6 +154,7 @@ pub fn load_static_member(cls: &str, field: &str) -> Result<Value, RuntimeError>
         }
         Ok(Value::Closure(Closure {
             function_name: m.function_name,
+            semantic_function: None,
             captures: vec![],
         }))
     } else {
@@ -164,6 +165,7 @@ pub fn load_static_member(cls: &str, field: &str) -> Result<Value, RuntimeError>
         {
             Ok(Value::Closure(Closure {
                 function_name: qualified,
+                semantic_function: None,
                 captures: vec![],
             }))
         } else {

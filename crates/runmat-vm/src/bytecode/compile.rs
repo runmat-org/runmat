@@ -2,10 +2,10 @@
 use crate::accel::graph::build_accel_graph;
 #[cfg(feature = "native-accel")]
 use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
-use crate::bytecode::{Bytecode, UserFunction};
+use crate::bytecode::{Bytecode, SemanticFunctionBytecode, UserFunction};
 use crate::compiler::{CompileError, Compiler};
 use crate::layout::derive_layout;
-use runmat_hir::{EntrypointId, HirAssembly, LegacyHirProgram as HirProgram};
+use runmat_hir::{EntrypointId, FunctionId, HirAssembly, LegacyHirProgram as HirProgram};
 use runmat_mir::MirAssembly;
 use std::collections::HashMap;
 
@@ -18,6 +18,8 @@ pub fn compile(
         .map_err(|err| CompileError::new(format!("failed to derive VM layout: {err:?}")))?;
     let mut c = Compiler::new(hir, mir, layout, entrypoint)?;
     c.compile()?;
+    let semantic_functions =
+        compile_semantic_functions(hir, mir, c.layout.as_ref().unwrap(), entrypoint)?;
     let var_names = c
         .layout
         .as_ref()
@@ -38,6 +40,7 @@ pub fn compile(
         source_id: None,
         var_count: c.var_count,
         functions: HashMap::new(),
+        semantic_functions,
         var_types: c.var_types,
         var_names,
         layout: c.layout,
@@ -46,6 +49,58 @@ pub fn compile(
         #[cfg(feature = "native-accel")]
         fusion_groups: Vec::new(),
     })
+}
+
+fn compile_semantic_functions(
+    hir: &HirAssembly,
+    mir: &MirAssembly,
+    layout: &crate::layout::VmAssemblyLayout,
+    entrypoint: EntrypointId,
+) -> Result<HashMap<FunctionId, SemanticFunctionBytecode>, CompileError> {
+    let entry_target = layout
+        .entrypoints
+        .get(&entrypoint)
+        .map(|entry| entry.target);
+    let mut functions = HashMap::new();
+    for function in &hir.functions {
+        if Some(function.id) == entry_target {
+            continue;
+        }
+        let mut compiler = Compiler::new_for_function(hir, mir, layout.clone(), function.id)?;
+        compiler.compile()?;
+        let function_layout = layout.functions.get(&function.id).ok_or_else(|| {
+            CompileError::new(format!("missing VM layout for function {:?}", function.id))
+        })?;
+        functions.insert(
+            function.id,
+            SemanticFunctionBytecode {
+                function: function.id,
+                display_name: function_layout.display_name.clone(),
+                instructions: compiler.instructions,
+                instr_spans: compiler.instr_spans,
+                call_arg_spans: compiler.call_arg_spans,
+                var_count: compiler.var_count,
+                input_slots: function_layout
+                    .frame_abi
+                    .fixed_inputs
+                    .iter()
+                    .map(|slot| slot.0)
+                    .collect(),
+                output_slots: function_layout
+                    .frame_abi
+                    .fixed_outputs
+                    .iter()
+                    .map(|slot| slot.0)
+                    .collect(),
+                capture_slots: function_layout
+                    .captures
+                    .iter()
+                    .map(|capture| capture.slot.0)
+                    .collect(),
+            },
+        );
+    }
+    Ok(functions)
 }
 
 pub fn compile_legacy(
@@ -68,6 +123,7 @@ pub fn compile_legacy(
         source_id: None,
         var_count: c.var_count,
         functions: c.functions,
+        semantic_functions: HashMap::new(),
         var_types: c.var_types,
         var_names: HashMap::new(),
         layout: None,

@@ -47,6 +47,14 @@ pub async fn execute_feval(
     match func_val {
         Value::Closure(c) => {
             let (name, call_args) = closure_call_args(&c, args);
+            if let Some(function) = c.semantic_function {
+                if let Some(result) =
+                    runmat_runtime::user_functions::try_call_semantic_function(function, &call_args)
+                        .await
+                {
+                    return Ok(FevalDispatch::Completed(result?));
+                }
+            }
             if let Some(result) = try_closure_builtin_fallback(&name, &call_args).await? {
                 return Ok(FevalDispatch::Completed(result));
             }

@@ -1,3 +1,4 @@
+use runmat_hir::FunctionId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +150,7 @@ pub enum Instr {
 
     // Closure and static class dispatch.
     CreateClosure(String, usize),
+    CreateSemanticClosure(FunctionId, String, usize),
     LoadStaticProperty(String, String),
     CallStaticMethod(String, String, usize),
 
@@ -308,7 +310,8 @@ impl Instr {
             | Instr::StoreMemberDynamic
             | Instr::StoreMemberDynamicOrInit => effect(2, 1),
             Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => effect(2, 1),
-            Instr::CreateClosure(_, capture_count) => effect(*capture_count, 1),
+            Instr::CreateClosure(_, capture_count)
+            | Instr::CreateSemanticClosure(_, _, capture_count) => effect(*capture_count, 1),
             Instr::LoadStaticProperty(_, _) => effect(0, 1),
             Instr::RegisterClass { .. } => effect(0, 0),
             Instr::CallFevalExpandMulti(specs)

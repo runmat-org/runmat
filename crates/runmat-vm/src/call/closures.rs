@@ -18,6 +18,26 @@ pub fn create_closure(
     captures.reverse();
     stack.push(Value::Closure(Closure {
         function_name: func_name,
+        semantic_function: None,
+        captures,
+    }));
+    Ok(())
+}
+
+pub fn create_semantic_closure(
+    stack: &mut Vec<Value>,
+    function: runmat_hir::FunctionId,
+    display_name: String,
+    capture_count: usize,
+) -> Result<(), RuntimeError> {
+    let mut captures = Vec::with_capacity(capture_count);
+    for _ in 0..capture_count {
+        captures.push(pop_value(stack)?);
+    }
+    captures.reverse();
+    stack.push(Value::Closure(Closure {
+        function_name: display_name,
+        semantic_function: Some(function.0),
         captures,
     }));
     Ok(())
@@ -27,6 +47,7 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
     match base {
         Value::Object(obj) => Ok(Value::Closure(Closure {
             function_name: format!("{}.{}", obj.class_name, name),
+            semantic_function: None,
             captures: vec![Value::Object(obj)],
         })),
         Value::ClassRef(cls) => {
@@ -36,6 +57,7 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
                 }
                 return Ok(Value::Closure(Closure {
                     function_name: m.function_name,
+                    semantic_function: None,
                     captures: vec![],
                 }));
             }
@@ -43,6 +65,7 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
             if builtin_functions().iter().any(|b| b.name == qualified) {
                 Ok(Value::Closure(Closure {
                     function_name: qualified,
+                    semantic_function: None,
                     captures: vec![],
                 }))
             } else {

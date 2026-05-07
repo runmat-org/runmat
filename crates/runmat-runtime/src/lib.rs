@@ -1383,6 +1383,7 @@ async fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Val
             // Return a closure capturing the receiver; feval will call runtime builtin call_method
             Ok(Value::Closure(runmat_builtins::Closure {
                 function_name: "call_method".to_string(),
+                semantic_function: None,
                 captures: vec![Value::Object(o), Value::String(name)],
             }))
         }

@@ -635,6 +635,13 @@ impl Callable {
             Callable::Closure(c) => {
                 let mut merged = c.captures.clone();
                 merged.extend_from_slice(args);
+                if let Some(function) = c.semantic_function {
+                    if let Some(result) =
+                        user_functions::try_call_semantic_function(function, &merged).await
+                    {
+                        return result;
+                    }
+                }
                 if let Some(result) =
                     user_functions::try_call_user_function(&c.function_name, &merged).await
                 {
@@ -1148,6 +1155,7 @@ pub(crate) mod tests {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let handler = Value::Closure(Closure {
             function_name: "__arrayfun_test_handler".into(),
+            semantic_function: None,
             captures: vec![Value::Num(42.0)],
         });
         let result = call(

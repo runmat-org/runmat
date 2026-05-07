@@ -263,6 +263,33 @@ fn builtin_function_handle_call_uses_semantic_vm() {
 }
 
 #[test]
+fn anonymous_function_handle_call_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "A = [1, 2, 3]; B = arrayfun(@(x) x.^2, A);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile anonymous handle call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "anonymous function handle call should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let b = outcome
+        .workspace_delta
+        .upserts
+        .iter()
+        .find(|upsert| {
+            matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "B")
+        })
+        .expect("B should be exported");
+    assert_eq!(
+        b.value.to_string().split_whitespace().collect::<Vec<_>>(),
+        vec!["1", "4", "9"]
+    );
+}
+
+#[test]
 fn workspace_reports_datetime_array_shape() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let result =

@@ -145,6 +145,49 @@ impl Compiler {
         })
     }
 
+    pub fn new_for_function(
+        hir: &HirAssembly,
+        mir: &MirAssembly,
+        layout: VmAssemblyLayout,
+        function: FunctionId,
+    ) -> Result<Self, CompileError> {
+        let function_layout = layout.functions.get(&function).ok_or_else(|| {
+            CompileError::new(format!("missing VM layout for function {function:?}"))
+        })?;
+        if !hir.functions.iter().any(|f| f.id == function) {
+            return Err(CompileError::new(format!(
+                "missing HIR function {function:?}"
+            )));
+        }
+        let body = mir
+            .bodies
+            .get(&function)
+            .ok_or_else(|| {
+                CompileError::new(format!("missing MIR body for function {function:?}"))
+            })?
+            .clone();
+
+        let var_count = function_layout.local_count;
+        let mut var_types = Vec::new();
+        var_types.resize(var_count, Type::Unknown);
+
+        Ok(Self {
+            instructions: Vec::new(),
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count,
+            loop_stack: Vec::new(),
+            functions: HashMap::new(),
+            imports: Vec::new(),
+            var_types,
+            layout: Some(layout),
+            entrypoint: None,
+            function: Some(function),
+            body: Some(body),
+            current_span: None,
+        })
+    }
+
     pub fn new_legacy(prog: &HirProgram) -> Self {
         let mut max_var = 0;
         fn visit_expr(expr: &HirExpr, max: &mut usize) {
@@ -938,6 +981,28 @@ impl Compiler {
             runmat_hir::FunctionHandleTarget::DynamicName(name) => {
                 self.emit(Instr::LoadString(name.0.clone()));
                 self.emit(Instr::CallBuiltin("make_handle".to_string(), 1));
+                Ok(())
+            }
+            runmat_hir::FunctionHandleTarget::Anonymous(function)
+            | runmat_hir::FunctionHandleTarget::Function(function) => {
+                let (captures, display_name) = self
+                    .layout
+                    .as_ref()
+                    .and_then(|layout| layout.functions.get(function))
+                    .ok_or_else(|| {
+                        self.compile_error(format!(
+                            "missing VM layout for function handle target {function:?}"
+                        ))
+                    })
+                    .map(|layout| (layout.captures.clone(), layout.display_name.clone()))?;
+                for capture in &captures {
+                    self.emit(Instr::LoadVar(capture.slot.0));
+                }
+                self.emit(Instr::CreateSemanticClosure(
+                    *function,
+                    display_name,
+                    captures.len(),
+                ));
                 Ok(())
             }
             _ => Err(self.compile_error(

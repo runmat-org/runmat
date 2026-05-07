@@ -147,6 +147,7 @@ pub(crate) mod tests {
 
         let closure = Value::Closure(Closure {
             function_name: "anon".into(),
+            semantic_function: None,
             captures: vec![],
         });
         assert_eq!(class_name_for_value(&closure), "function_handle");

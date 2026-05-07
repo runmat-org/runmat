@@ -1128,10 +1128,20 @@ impl SemanticCtx {
                                 )
                             })
                             .collect::<Vec<_>>();
+                        let output_id = ctx.define_binding(
+                            "__anon_out",
+                            BindingRole::Output,
+                            BindingStorage::Lexical,
+                            *span,
+                        );
                         let body_expr = ctx.lower_expr_semantic(body)?;
                         let stmt = SemanticHirStmt {
                             id: ctx.alloc_stmt_id(),
-                            kind: HirStmtKind::ExprStmt(body_expr, false),
+                            kind: HirStmtKind::Assign(
+                                HirPlace::Binding(output_id),
+                                body_expr,
+                                true,
+                            ),
                             span: *span,
                         };
                         let locals = ctx.binding_ids_for_owner(function_id);
@@ -1143,11 +1153,11 @@ impl SemanticCtx {
                             name: FunctionName(format!("anonymous#{}", function_id.0)),
                             kind: FunctionKind::Anonymous,
                             params: param_ids.clone(),
-                            outputs: vec![],
+                            outputs: vec![output_id],
                             abi: FunctionAbi {
                                 fixed_inputs: param_ids,
                                 varargin: None,
-                                fixed_outputs: vec![],
+                                fixed_outputs: vec![output_id],
                                 varargout: None,
                                 implicit_nargin: None,
                                 implicit_nargout: None,

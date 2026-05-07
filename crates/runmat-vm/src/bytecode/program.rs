@@ -5,7 +5,7 @@ use runmat_accelerate::graph::AccelGraph;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::FusionGroup;
 use runmat_builtins::{Type, Value};
-use runmat_hir::{LegacyHirStmt as HirStmt, VarId};
+use runmat_hir::{FunctionId, LegacyHirStmt as HirStmt, VarId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -42,6 +42,21 @@ pub struct ExecutionContext {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticFunctionBytecode {
+    pub function: FunctionId,
+    pub display_name: String,
+    pub instructions: Vec<Instr>,
+    #[serde(default)]
+    pub instr_spans: Vec<runmat_hir::Span>,
+    #[serde(default)]
+    pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
+    pub var_count: usize,
+    pub input_slots: Vec<usize>,
+    pub output_slots: Vec<usize>,
+    pub capture_slots: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bytecode {
     pub instructions: Vec<Instr>,
     #[serde(default)]
@@ -52,6 +67,8 @@ pub struct Bytecode {
     pub source_id: Option<runmat_hir::SourceId>,
     pub var_count: usize,
     pub functions: HashMap<String, UserFunction>,
+    #[serde(default)]
+    pub semantic_functions: HashMap<FunctionId, SemanticFunctionBytecode>,
     #[serde(default)]
     pub var_types: Vec<Type>,
     #[serde(default)]
@@ -75,6 +92,7 @@ impl Bytecode {
             source_id: None,
             var_count: 0,
             functions: HashMap::new(),
+            semantic_functions: HashMap::new(),
             var_types: Vec::new(),
             var_names: HashMap::new(),
             layout: None,

@@ -213,6 +213,7 @@ pub(crate) mod tests {
             run_isreal(Value::FunctionHandle("runmat_builtin".into())).expect("isreal fn");
         let closure_flag = run_isreal(Value::Closure(Closure {
             function_name: "anon".into(),
+            semantic_function: None,
             captures: vec![Value::Num(1.0)],
         }))
         .expect("isreal closure");

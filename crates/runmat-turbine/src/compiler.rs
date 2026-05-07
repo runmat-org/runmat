@@ -629,6 +629,7 @@ impl BytecodeCompiler {
                     | Instr::StoreMemberDynamic
                     | Instr::StoreMemberDynamicOrInit
                     | Instr::CreateClosure(_, _)
+                    | Instr::CreateSemanticClosure(_, _, _)
                     | Instr::CallMethod(_, _)
                     | Instr::CallMethodOrMemberIndex(_, _)
                     | Instr::IndexCellExpand(_, _)

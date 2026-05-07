@@ -817,6 +817,16 @@ pub fn handle_create_closure(
     Ok(MethodHandling::Completed)
 }
 
+pub fn handle_create_semantic_closure(
+    stack: &mut Vec<Value>,
+    function: runmat_hir::FunctionId,
+    display_name: String,
+    capture_count: usize,
+) -> Result<MethodHandling, RuntimeError> {
+    call_closures::create_semantic_closure(stack, function, display_name, capture_count)?;
+    Ok(MethodHandling::Completed)
+}
+
 pub fn handle_load_static_property(
     stack: &mut Vec<Value>,
     class_name: &str,
