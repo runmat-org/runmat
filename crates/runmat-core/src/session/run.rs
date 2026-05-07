@@ -309,25 +309,22 @@ impl RunMatSession {
         );
         let display_context = display.context;
         let display_var_ids = display.display_var_ids;
-        let (hir, updated_vars, updated_functions, var_names_map) = (
-            lowering.hir,
-            lowering.variables,
-            lowering.functions,
-            lowering.var_names,
-        );
-        let max_var_id = updated_vars.values().copied().max().unwrap_or(0);
+        let (hir, updated_vars, updated_functions) =
+            (lowering.hir, lowering.variables, lowering.functions);
+        let execution_vars = execution_workspace_mapping(&bytecode, &updated_vars);
+        let max_var_id = execution_vars.values().copied().max().unwrap_or(0);
         if debug_trace {
-            debug!(?updated_vars, "[repl] updated_vars");
+            debug!(?execution_vars, "[repl] execution vars");
         }
         if debug_trace {
             debug!(workspace_values_before = ?self.workspace_values, "[repl] workspace snapshot before execution");
         }
-        let id_to_name: HashMap<usize, String> = var_names_map
+        let id_to_name: HashMap<usize, String> = execution_vars
             .iter()
-            .map(|(var_id, name)| (var_id.0, name.clone()))
+            .map(|(name, var_id)| (*var_id, name.clone()))
             .collect();
         let mut assigned_this_execution: HashSet<String> = HashSet::new();
-        let assigned_snapshot: HashSet<String> = updated_vars
+        let assigned_snapshot: HashSet<String> = execution_vars
             .keys()
             .filter(|name| self.workspace_values.contains_key(name.as_str()))
             .cloned()
@@ -337,7 +334,7 @@ impl RunMatSession {
             debug!(?assigned_snapshot, "[repl] assigned snapshot");
         }
         let _pending_workspace_guard =
-            runmat_vm::push_pending_workspace(updated_vars.clone(), assigned_snapshot.clone());
+            runmat_vm::push_pending_workspace(execution_vars.clone(), assigned_snapshot.clone());
         if self.verbose {
             debug!("HIR generated successfully");
         }
@@ -369,7 +366,7 @@ impl RunMatSession {
         let fusion_snapshot: Option<FusionPlanSnapshot> = None;
 
         // Prepare variable array with existing values before execution
-        self.prepare_variable_array_for_execution(&bytecode, &updated_vars, debug_trace);
+        self.prepare_variable_array_for_execution(&bytecode, &execution_vars, debug_trace);
 
         if self.verbose {
             debug!(
@@ -1009,9 +1006,7 @@ fn compile_eval_hook_bytecode(
     if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
         if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
             if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
-                if super::compile::semantic_workspace_slots_match_legacy(&bytecode, lowering)
-                    && super::compile::bytecode_has_only_semantic_ready_runtime_calls(&bytecode)
-                {
+                if super::compile::bytecode_has_only_semantic_ready_runtime_calls(&bytecode) {
                     return Ok(bytecode);
                 }
             }
@@ -1024,6 +1019,26 @@ fn compile_eval_hook_with_legacy_hir_fallback(
     lowering: &runmat_hir::LoweringResult,
 ) -> Result<runmat_vm::Bytecode, runmat_vm::CompileError> {
     runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
+}
+
+fn execution_workspace_mapping(
+    bytecode: &runmat_vm::Bytecode,
+    legacy_mapping: &HashMap<String, usize>,
+) -> HashMap<String, usize> {
+    let Some(layout) = &bytecode.layout else {
+        return legacy_mapping.clone();
+    };
+    let mut mapping = HashMap::new();
+    for entrypoint in layout.entrypoints.values() {
+        for export in &entrypoint.exports {
+            mapping.insert(export.name.clone(), export.slot.0);
+        }
+    }
+    if mapping.is_empty() {
+        legacy_mapping.clone()
+    } else {
+        mapping
+    }
 }
 
 struct SessionExecution {

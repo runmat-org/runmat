@@ -72,9 +72,7 @@ impl RunMatSession {
         if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
             if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
                 if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
-                    if semantic_workspace_slots_match_legacy(&bytecode, lowering)
-                        && bytecode_has_only_semantic_ready_runtime_calls(&bytecode)
-                    {
+                    if bytecode_has_only_semantic_ready_runtime_calls(&bytecode) {
                         return Ok(bytecode);
                     }
                 }
@@ -222,28 +220,5 @@ pub(crate) fn bytecode_has_only_semantic_ready_runtime_calls(
         | runmat_vm::Instr::CallFeval(_)
         | runmat_vm::Instr::CallFevalExpandMulti(_) => false,
         _ => true,
-    })
-}
-
-pub(crate) fn semantic_workspace_slots_match_legacy(
-    bytecode: &runmat_vm::Bytecode,
-    lowering: &LoweringResult,
-) -> bool {
-    let Some(layout) = &bytecode.layout else {
-        return false;
-    };
-    lowering.assembly.entrypoints.iter().all(|entrypoint| {
-        layout
-            .entrypoints
-            .get(&entrypoint.id)
-            .map(|entrypoint_layout| {
-                entrypoint_layout.exports.iter().all(|export| {
-                    lowering
-                        .variables
-                        .get(&export.name)
-                        .is_some_and(|legacy_slot| *legacy_slot == export.slot.0)
-                })
-            })
-            .unwrap_or(false)
     })
 }
