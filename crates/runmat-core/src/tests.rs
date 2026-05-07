@@ -147,6 +147,22 @@ fn workspace_read_across_submissions_uses_semantic_vm() {
 }
 
 #[test]
+fn char_literal_assignment_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("w = 'hello';")
+        .expect("compile char literal assignment");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "char literal assignment should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = block_on(session.execute_outcome("w = 'hello';")).expect("exec succeeds");
+    assert!(outcome.flow.is_no_value());
+    assert_eq!(outcome.type_info, Some("1x5 char array".to_string()));
+}
+
+#[test]
 fn workspace_reports_datetime_array_shape() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let result =

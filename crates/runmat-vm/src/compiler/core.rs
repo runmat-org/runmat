@@ -829,7 +829,7 @@ impl Compiler {
                 Ok(())
             }
             MirOperand::Constant(MirConstant::String(value)) => {
-                self.emit(Instr::LoadString(value.0.clone()));
+                emit_string_literal(self, &value.0);
                 Ok(())
             }
             MirOperand::Constant(MirConstant::Bool(value)) => {
@@ -1002,5 +1002,17 @@ impl Compiler {
     pub fn compile_expr(&mut self, expr: &HirExpr) -> Result<(), CompileError> {
         let _span_guard = SpanGuard::new(self, expr.span);
         self.compile_expr_impl(expr)
+    }
+}
+
+fn emit_string_literal(compiler: &mut Compiler, value: &str) {
+    if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+        let inner = &value[1..value.len() - 1];
+        compiler.emit(Instr::LoadString(inner.replace("\"\"", "\"")));
+    } else if value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2 {
+        let inner = &value[1..value.len() - 1];
+        compiler.emit(Instr::LoadCharRow(inner.replace("''", "'")));
+    } else {
+        compiler.emit(Instr::LoadString(value.to_string()));
     }
 }
