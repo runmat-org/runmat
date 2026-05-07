@@ -4,13 +4,13 @@ use crate::instr::{EmitLabel, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
-    BindingId, EntrypointId, FunctionId, HirAssembly, LegacyHirExpr as HirExpr,
+    BindingId, EntrypointId, FunctionId, HirAssembly, HirCallableRef, LegacyHirExpr as HirExpr,
     LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt,
-    OperatorKind,
+    OperatorKind, RequestedOutputCount,
 };
 use runmat_mir::{
-    MirAssembly, MirBody, MirConstant, MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind,
-    MirTerminatorKind,
+    MirAssembly, MirBody, MirCall, MirCallArg, MirConstant, MirOperand, MirPlace, MirRvalue,
+    MirStmt, MirStmtKind, MirTerminatorKind,
 };
 use std::collections::HashMap;
 
@@ -453,11 +453,54 @@ impl Compiler {
                 }
                 Ok(())
             }
+            MirRvalue::Call(call) => self.compile_mir_call(call),
             _ => {
                 Err(self
                     .compile_error("MIR bytecode lowering for this rvalue is not implemented yet"))
             }
         }
+    }
+
+    fn compile_mir_call(&mut self, call: &MirCall) -> Result<(), CompileError> {
+        let name = self.mir_builtin_call_name(call)?;
+        match call.requested_outputs {
+            RequestedOutputCount::Zero
+            | RequestedOutputCount::One
+            | RequestedOutputCount::UnknownDynamic
+            | RequestedOutputCount::Exactly(1)
+            | RequestedOutputCount::AtLeast(1) => {}
+            RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count) => {
+                return Err(self.compile_error(format!(
+                    "MIR bytecode lowering for {count} call outputs is not implemented yet"
+                )))
+            }
+        }
+
+        for arg in &call.args {
+            let MirCallArg::Single(operand) = arg else {
+                return Err(self.compile_error(
+                    "MIR bytecode lowering for expanded call arguments is not implemented yet",
+                ));
+            };
+            self.compile_mir_operand(operand)?;
+        }
+        self.emit(Instr::CallBuiltin(name, call.args.len()));
+        Ok(())
+    }
+
+    fn mir_builtin_call_name(&self, call: &MirCall) -> Result<String, CompileError> {
+        let candidate = match &call.callee {
+            HirCallableRef::Builtin(id) => id.0.clone(),
+            HirCallableRef::Unresolved(name) if name.0.len() == 1 => name.0[0].0.clone(),
+            _ => {
+                return Err(CompileError::new(
+                    "MIR bytecode lowering for this call callee is not implemented yet",
+                ))
+            }
+        };
+        runmat_builtins::builtin_function_by_name(&candidate)
+            .map(|builtin| builtin.name.to_string())
+            .ok_or_else(|| CompileError::new(format!("unknown builtin function {candidate}")))
     }
 
     fn compile_mir_operand(&mut self, operand: &MirOperand) -> Result<(), CompileError> {

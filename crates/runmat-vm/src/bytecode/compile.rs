@@ -135,4 +135,24 @@ mod tests {
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert_eq!(vars[export.slot.0], Value::Num(3.0));
     }
+
+    #[test]
+    fn primary_compile_interprets_builtin_assignment() {
+        let ast = runmat_parser::parse("x = sqrt(9);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let export = &layout.entrypoints[&entrypoint].exports[0];
+
+        assert!(matches!(
+            bytecode.instructions.as_slice(),
+            [Instr::LoadConst(9.0), Instr::CallBuiltin(name, 1), Instr::StoreVar(_)] if name == "sqrt"
+        ));
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[export.slot.0], Value::Num(3.0));
+    }
 }
