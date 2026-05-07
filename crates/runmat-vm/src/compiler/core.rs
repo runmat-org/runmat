@@ -4,13 +4,13 @@ use crate::instr::{EmitLabel, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
-    BindingId, EntrypointId, FunctionId, HirAssembly, HirCallableRef, LegacyHirExpr as HirExpr,
-    LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt,
-    OperatorKind, RequestedOutputCount,
+    BindingId, EntrypointId, FunctionId, HirAssembly, HirCallableRef, IndexKind,
+    IndexResultContext, LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind,
+    LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt, OperatorKind, RequestedOutputCount,
 };
 use runmat_mir::{
-    MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirConstant, MirOperand, MirPlace,
-    MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
+    MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirConstant, MirIndexComponent,
+    MirIndexing, MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
 };
 use std::collections::HashMap;
 
@@ -460,6 +460,7 @@ impl Compiler {
                 cols,
                 elements,
             } => self.compile_mir_aggregate(kind, *rows, *cols, elements),
+            MirRvalue::Index { base, indexing } => self.compile_mir_index(base, indexing),
             _ => {
                 Err(self
                     .compile_error("MIR bytecode lowering for this rvalue is not implemented yet"))
@@ -534,6 +535,32 @@ impl Compiler {
                 ))
             }
         };
+        Ok(())
+    }
+
+    fn compile_mir_index(
+        &mut self,
+        base: &MirOperand,
+        indexing: &MirIndexing,
+    ) -> Result<(), CompileError> {
+        if indexing.kind != IndexKind::Paren
+            || indexing.result_context != IndexResultContext::ReadSingle
+        {
+            return Err(self.compile_error(
+                "MIR bytecode lowering for this indexing form is not implemented yet",
+            ));
+        }
+
+        self.compile_mir_operand(base)?;
+        for component in &indexing.components {
+            let MirIndexComponent::Expr(operand) = component else {
+                return Err(self.compile_error(
+                    "MIR bytecode lowering for non-expression indices is not implemented yet",
+                ));
+            };
+            self.compile_mir_operand(operand)?;
+        }
+        self.emit(Instr::Index(indexing.components.len()));
         Ok(())
     }
 
