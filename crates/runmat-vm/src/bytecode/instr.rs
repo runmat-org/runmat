@@ -175,6 +175,7 @@ pub enum Instr {
 
     // User-function invocation variants.
     CallFunction(String, usize),
+    CallSemanticFunction(FunctionId, usize),
 
     // Calls a user function and shapes the result list to `out_count`.
     CallFunctionMulti(String, usize, usize),
@@ -269,7 +270,9 @@ impl Instr {
             | Instr::LoadMember(_)
             | Instr::LoadMemberOrInit(_)
             | Instr::LoadMethod(_) => effect(1, 1),
-            Instr::CallBuiltin(_, argc) | Instr::CallFunction(_, argc) => effect(*argc, 1),
+            Instr::CallBuiltin(_, argc)
+            | Instr::CallFunction(_, argc)
+            | Instr::CallSemanticFunction(_, argc) => effect(*argc, 1),
             Instr::CallFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
             Instr::CallMethod(_, argc) | Instr::CallMethodOrMemberIndex(_, argc) => {
                 effect(argc + 1, 1)

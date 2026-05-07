@@ -582,6 +582,21 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CallSemanticFunction(function, arg_count) => {
+            let args = crate::interpreter::stack::pop_args(stack, *arg_count)?;
+            let Some(result) =
+                runmat_runtime::user_functions::try_call_semantic_function(function.0, &args).await
+            else {
+                return Err(RuntimeError::from(format!(
+                    "semantic function invoker unavailable for {:?}",
+                    function
+                )));
+            };
+            stack.push(result?);
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CallFunctionMulti(name, arg_count, out_count) => {
             match handle_user_function_call(
                 calls::UserCallContext {

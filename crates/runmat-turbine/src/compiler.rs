@@ -575,6 +575,12 @@ impl BytecodeCompiler {
                         )?;
                         local_stack.push(result);
                     }
+                    Instr::CallSemanticFunction(_, _) => {
+                        return Err(execution_error(
+                            "Semantic function calls are not supported in JIT; use interpreter"
+                                .to_string(),
+                        ));
+                    }
                     Instr::LoadLocal(offset) => {
                         // Load from local variable slot
                         let offset_val = builder.ins().iconst(types::I64, *offset as i64);

@@ -706,7 +706,6 @@ impl Compiler {
     }
 
     fn compile_mir_call(&mut self, call: &MirCall) -> Result<(), CompileError> {
-        let name = self.mir_builtin_call_name(call)?;
         match call.requested_outputs {
             RequestedOutputCount::Zero
             | RequestedOutputCount::One
@@ -728,7 +727,15 @@ impl Compiler {
             };
             self.compile_mir_operand(operand)?;
         }
-        self.emit(Instr::CallBuiltin(name, call.args.len()));
+        match &call.callee {
+            HirCallableRef::Function(function) => {
+                self.emit(Instr::CallSemanticFunction(*function, call.args.len()));
+            }
+            _ => {
+                let name = self.mir_builtin_call_name(call)?;
+                self.emit(Instr::CallBuiltin(name, call.args.len()));
+            }
+        }
         Ok(())
     }
 

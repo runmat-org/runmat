@@ -610,6 +610,7 @@ async fn run_interpreter_inner(
             | Instr::CallFevalExpandMulti(_)
             | Instr::CallBuiltin(_, _)
             | Instr::CallFunction(_, _)
+            | Instr::CallSemanticFunction(_, _)
             | Instr::CallFunctionMulti(_, _, _)
             | Instr::CallFunctionExpandMulti(_, _)
             | Instr::CallBuiltinExpandLast(_, _, _)
