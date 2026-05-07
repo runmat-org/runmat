@@ -124,6 +124,10 @@ pub fn workspace_slot_assigned(index: usize) -> Option<bool> {
     })
 }
 
+pub fn workspace_state_available() -> bool {
+    WORKSPACE_STATE.with(|state| state.borrow().is_some())
+}
+
 pub fn workspace_assign(name: &str, value: Value) -> Result<(), String> {
     let vars_ptr = WORKSPACE_VARS.with(|slot| *slot.borrow());
     let Some(vars_ptr) = vars_ptr else {

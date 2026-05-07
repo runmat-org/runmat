@@ -9,7 +9,9 @@ mod stack;
 
 use crate::bytecode::Instr;
 use crate::interpreter::debug;
-use crate::runtime::workspace::{refresh_workspace_state, workspace_slot_assigned};
+use crate::runtime::workspace::{
+    refresh_workspace_state, workspace_slot_assigned, workspace_state_available,
+};
 use runmat_builtins::Value;
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
@@ -250,7 +252,9 @@ pub async fn dispatch_instruction(
         Instr::LoadVar(index) => {
             if call_counts.is_empty() {
                 if let Some(name) = var_names.get(index) {
-                    if !matches!(workspace_slot_assigned(*index), Some(true)) {
+                    if workspace_state_available()
+                        && !matches!(workspace_slot_assigned(*index), Some(true))
+                    {
                         return Err(crate::interpreter::errors::mex(
                             "UndefinedVariable",
                             &format!("Undefined variable: {name}"),
