@@ -938,6 +938,12 @@ fn compile_eval_hook_bytecode(
             }
         }
     }
+    compile_eval_hook_with_legacy_hir_fallback(lowering)
+}
+
+fn compile_eval_hook_with_legacy_hir_fallback(
+    lowering: &runmat_hir::LoweringResult,
+) -> Result<runmat_vm::Bytecode, runmat_vm::CompileError> {
     runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
 }
 

@@ -24,7 +24,7 @@ impl RunMatSession {
         let existing_functions = self.convert_hir_functions_to_user_functions();
         let mut bytecode = {
             let _span = info_span!("runtime.compile.bytecode").entered();
-            self.compile_semantic_or_legacy(&lowering, &existing_functions)?
+            self.compile_semantic_or_explicit_legacy_fallback(&lowering, &existing_functions)?
         };
         bytecode.source_id = Some(source_id);
         let new_function_names: HashSet<String> = lowering.functions.keys().cloned().collect();
@@ -64,7 +64,7 @@ impl RunMatSession {
         error.context.call_stack = rendered;
     }
 
-    fn compile_semantic_or_legacy(
+    fn compile_semantic_or_explicit_legacy_fallback(
         &self,
         lowering: &LoweringResult,
         existing_functions: &HashMap<String, runmat_vm::UserFunction>,
@@ -80,6 +80,14 @@ impl RunMatSession {
                 }
             }
         }
+        self.compile_with_legacy_hir_fallback(lowering, existing_functions)
+    }
+
+    fn compile_with_legacy_hir_fallback(
+        &self,
+        lowering: &LoweringResult,
+        existing_functions: &HashMap<String, runmat_vm::UserFunction>,
+    ) -> std::result::Result<runmat_vm::Bytecode, RunError> {
         Ok(runmat_vm::compile_legacy(
             &lowering.hir,
             existing_functions,
