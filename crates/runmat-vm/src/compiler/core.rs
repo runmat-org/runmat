@@ -616,7 +616,8 @@ impl Compiler {
                     IndexKind::Paren => {
                         if indexing.components.iter().all(|component| {
                             matches!(component, MirIndexComponent::Expr(_))
-                                && !matches!(component, MirIndexComponent::Expr(MirOperand::Local(local)) if self.mir_local_is_colon(*local) || self.mir_local_is_end(*local))
+                                && !matches!(component, MirIndexComponent::Expr(MirOperand::Local(local)) if self.mir_local_is_colon(*local))
+                                && !matches!(component, MirIndexComponent::Expr(operand) if self.mir_operand_end_expr(operand).is_some())
                         }) {
                             self.compile_mir_index_components(
                                 indexing,
@@ -625,15 +626,33 @@ impl Compiler {
                             self.compile_mir_rvalue(value)?;
                             self.emit(Instr::StoreIndex(indexing.components.len()));
                         } else {
-                            let (numeric_count, colon_mask, end_mask) =
-                                self.compile_mir_slice_components(indexing)?;
-                            self.compile_mir_rvalue(value)?;
-                            self.emit(Instr::StoreSlice(
-                                indexing.components.len(),
-                                numeric_count,
-                                colon_mask,
-                                end_mask,
-                            ));
+                            if self.indexing_needs_slice_expr(indexing) {
+                                let (numeric_count, colon_mask, end_mask, end_numeric_exprs) =
+                                    self.compile_mir_slice_expr_components(indexing)?;
+                                self.compile_mir_rvalue(value)?;
+                                self.emit(Instr::StoreSliceExpr {
+                                    dims: indexing.components.len(),
+                                    numeric_count,
+                                    colon_mask,
+                                    end_mask,
+                                    range_dims: Vec::new(),
+                                    range_has_step: Vec::new(),
+                                    range_start_exprs: Vec::new(),
+                                    range_step_exprs: Vec::new(),
+                                    range_end_exprs: Vec::new(),
+                                    end_numeric_exprs,
+                                });
+                            } else {
+                                let (numeric_count, colon_mask, end_mask) =
+                                    self.compile_mir_slice_components(indexing)?;
+                                self.compile_mir_rvalue(value)?;
+                                self.emit(Instr::StoreSlice(
+                                    indexing.components.len(),
+                                    numeric_count,
+                                    colon_mask,
+                                    end_mask,
+                                ));
+                            }
                         }
                     }
                     IndexKind::Brace => {
@@ -973,11 +992,7 @@ impl Compiler {
     }
 
     fn compile_mir_slice_index(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
-        if indexing.components.iter().any(|component| match component {
-            MirIndexComponent::End { offset, .. } => *offset != 0,
-            MirIndexComponent::Expr(operand) => self.mir_operand_end_expr(operand).is_some(),
-            _ => false,
-        }) {
+        if self.indexing_needs_slice_expr(indexing) {
             let (numeric_count, colon_mask, end_mask, end_numeric_exprs) =
                 self.compile_mir_slice_expr_components(indexing)?;
             self.emit(Instr::IndexSliceExpr {
@@ -1003,6 +1018,14 @@ impl Compiler {
             end_mask,
         ));
         Ok(())
+    }
+
+    fn indexing_needs_slice_expr(&self, indexing: &MirIndexing) -> bool {
+        indexing.components.iter().any(|component| match component {
+            MirIndexComponent::End { offset, .. } => *offset != 0,
+            MirIndexComponent::Expr(operand) => self.mir_operand_end_expr(operand).is_some(),
+            _ => false,
+        })
     }
 
     fn compile_mir_slice_components(
