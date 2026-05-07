@@ -159,8 +159,8 @@ impl RunMatSession {
                                 .build()
                         })?;
                         let result_idx = lowering.variables.get("__runmat_input_result__").copied();
-                        let bc = runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
-                            .map_err(RuntimeError::from)?;
+                        let bc =
+                            compile_eval_hook_bytecode(&lowering).map_err(RuntimeError::from)?;
                         let vars = runmat_vm::interpret(&bc).await?;
                         result_idx
                             .and_then(|idx| vars.get(idx).cloned())
@@ -808,4 +808,21 @@ impl RunMatSession {
         )
         .await
     }
+}
+
+fn compile_eval_hook_bytecode(
+    lowering: &runmat_hir::LoweringResult,
+) -> Result<runmat_vm::Bytecode, runmat_vm::CompileError> {
+    if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
+        if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
+            if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
+                if super::compile::semantic_workspace_slots_match_legacy(&bytecode, lowering)
+                    && super::compile::bytecode_has_no_runtime_calls(&bytecode)
+                {
+                    return Ok(bytecode);
+                }
+            }
+        }
+    }
+    runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
 }

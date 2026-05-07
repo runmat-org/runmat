@@ -196,7 +196,7 @@ impl RunMatSession {
     }
 }
 
-fn bytecode_has_no_runtime_calls(bytecode: &runmat_vm::Bytecode) -> bool {
+pub(crate) fn bytecode_has_no_runtime_calls(bytecode: &runmat_vm::Bytecode) -> bool {
     bytecode.instructions.iter().all(|instr| {
         !matches!(
             instr,
@@ -214,7 +214,7 @@ fn bytecode_has_no_runtime_calls(bytecode: &runmat_vm::Bytecode) -> bool {
     })
 }
 
-fn semantic_workspace_slots_match_legacy(
+pub(crate) fn semantic_workspace_slots_match_legacy(
     bytecode: &runmat_vm::Bytecode,
     lowering: &LoweringResult,
 ) -> bool {
