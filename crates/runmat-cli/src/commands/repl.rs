@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use log::info;
 use owo_colors::OwoColorize;
 use runmat_config::{GcPreset, JitOptLevel, RunMatConfig};
-use runmat_core::{RunMatSession, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish};
+use runmat_core::{
+    abi::RuntimeFlow, RunMatSession, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
+};
 use runmat_gc::gc_collect_major;
 use runmat_time::Instant;
 use std::io::{self, Read};
@@ -378,27 +380,22 @@ async fn process_repl_line(
         return Ok(true);
     }
 
-    match engine.execute(line).await {
-        Ok(result) => {
-            emit_execution_streams(&result.streams);
-            if let Some(error) = result.error {
-                eprintln!(
-                    "{}",
-                    error.format_diagnostic_with_source(Some("<repl>"), Some(line))
-                );
-            } else if result.value.is_some()
+    match engine.execute_outcome(line).await {
+        Ok(outcome) => {
+            emit_execution_streams(&outcome.streams);
+            for diagnostic in &outcome.diagnostics {
+                eprintln!("{}: {}", diagnostic.code, diagnostic.message);
+            }
+            if !matches!(outcome.flow, RuntimeFlow::NoValue)
                 && config.runtime.verbose
-                && result.execution_time_ms > 10
+                && outcome
+                    .profiling
+                    .as_ref()
+                    .is_some_and(|profiling| profiling.total_ms > 10)
             {
-                println!(
-                    "  ({}ms {})",
-                    result.execution_time_ms,
-                    if result.used_jit {
-                        "JIT"
-                    } else {
-                        "interpreter"
-                    }
-                );
+                if let Some(profiling) = outcome.profiling {
+                    println!("  ({}ms)", profiling.total_ms);
+                }
             }
         }
         Err(e) => {

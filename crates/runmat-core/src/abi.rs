@@ -2,7 +2,7 @@ use runmat_builtins::Value;
 use runmat_hir::{BindingName, DefPath, EntrypointId, Span};
 use uuid::Uuid;
 
-use crate::execution::{ExecutionProfiling, ExecutionResult};
+use crate::execution::{ExecutionProfiling, ExecutionResult, ExecutionStreamEntry};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SourceInput {
@@ -63,6 +63,7 @@ pub struct ExecutionOutcome {
     pub flow: RuntimeFlow,
     pub workspace_delta: WorkspaceDelta,
     pub display_events: Vec<DisplayEvent>,
+    pub streams: Vec<ExecutionStreamEntry>,
     pub diagnostics: Vec<RuntimeDiagnostic>,
     pub effects: Vec<ObservedEffect>,
     pub suspension: Option<Suspension>,
@@ -75,6 +76,7 @@ impl Default for ExecutionOutcome {
             flow: RuntimeFlow::NoValue,
             workspace_delta: WorkspaceDelta::default(),
             display_events: Vec::new(),
+            streams: Vec::new(),
             diagnostics: Vec::new(),
             effects: Vec::new(),
             suspension: None,
@@ -130,6 +132,7 @@ impl From<ExecutionResult> for ExecutionOutcome {
                 ..WorkspaceDelta::default()
             },
             display_events,
+            streams: result.streams,
             diagnostics,
             effects: Vec::new(),
             suspension: None,
@@ -320,6 +323,7 @@ mod tests {
         assert!(outcome.workspace_delta.removals.is_empty());
         assert!(!outcome.workspace_delta.full_snapshot_required);
         assert!(outcome.display_events.is_empty());
+        assert!(outcome.streams.is_empty());
         assert!(outcome.diagnostics.is_empty());
         assert!(outcome.effects.is_empty());
         assert!(outcome.suspension.is_none());
