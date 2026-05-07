@@ -199,6 +199,23 @@ fn direct_display_builtins_use_semantic_vm() {
 }
 
 #[test]
+fn simple_builtin_call_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session.compile_input("sin(0)").expect("compile sin call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "simple builtin call should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = block_on(session.execute_outcome("sin(0)")).expect("exec sin");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("sin should return a value");
+    assert_eq!(value.to_string(), "0");
+}
+
+#[test]
 fn workspace_reports_datetime_array_shape() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let result =

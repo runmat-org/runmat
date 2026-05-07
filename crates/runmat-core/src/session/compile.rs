@@ -211,9 +211,7 @@ pub(crate) fn bytecode_has_only_semantic_ready_runtime_calls(
     bytecode: &runmat_vm::Bytecode,
 ) -> bool {
     bytecode.instructions.iter().all(|instr| match instr {
-        runmat_vm::Instr::CallBuiltin(name, _) => {
-            matches!(name.as_str(), "disp" | "fprintf")
-        }
+        runmat_vm::Instr::CallBuiltin(_, _) => true,
         runmat_vm::Instr::CallBuiltinExpandLast(_, _, _)
         | runmat_vm::Instr::CallBuiltinExpandAt(_, _, _, _)
         | runmat_vm::Instr::CallBuiltinExpandMulti(..)
