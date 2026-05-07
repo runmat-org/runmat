@@ -61,8 +61,6 @@ pub struct RunMatSession {
     verbose: bool,
     /// Execution statistics
     stats: ExecutionStats,
-    /// Legacy persistent variable context keyed by source name.
-    legacy_variables: HashMap<String, Value>,
     /// Current variable array for bytecode execution
     variable_array: Vec<Value>,
     /// Legacy mapping from variable names to VarId indices.

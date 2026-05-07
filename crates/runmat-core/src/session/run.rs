@@ -843,15 +843,11 @@ impl RunMatSession {
             entries.sort_by(|a, b| a.name.cmp(&b.name));
             (entries, true)
         } else if workspace_updates.is_empty() {
-            let source_map = if self.workspace_values.is_empty() {
-                &self.legacy_variables
-            } else {
-                &self.workspace_values
-            };
-            if source_map.is_empty() {
+            if self.workspace_values.is_empty() {
                 (workspace_updates, false)
             } else {
-                let mut entries: Vec<WorkspaceEntry> = source_map
+                let mut entries: Vec<WorkspaceEntry> = self
+                    .workspace_values
                     .iter()
                     .map(|(name, value)| workspace_entry(name, value))
                     .collect();

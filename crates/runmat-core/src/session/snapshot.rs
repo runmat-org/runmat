@@ -98,7 +98,6 @@ impl RunMatSession {
             jit_engine,
             verbose,
             stats: ExecutionStats::default(),
-            legacy_variables: HashMap::new(),
             variable_array: Vec::new(),
             legacy_variable_names: HashMap::new(),
             workspace_values: HashMap::new(),

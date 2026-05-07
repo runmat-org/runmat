@@ -2,7 +2,6 @@ use super::*;
 
 impl RunMatSession {
     pub fn clear_variables(&mut self) {
-        self.legacy_variables.clear();
         self.variable_array.clear();
         self.legacy_variable_names.clear();
         self.workspace_values.clear();
@@ -17,14 +16,8 @@ impl RunMatSession {
             return Ok(None);
         }
 
-        let source_map = if self.workspace_values.is_empty() {
-            &self.legacy_variables
-        } else {
-            &self.workspace_values
-        };
-
-        let mut entries: Vec<(String, Value)> = Vec::with_capacity(source_map.len());
-        for (name, value) in source_map {
+        let mut entries: Vec<(String, Value)> = Vec::with_capacity(self.workspace_values.len());
+        for (name, value) in &self.workspace_values {
             let gathered = gather_if_needed_async(value).await?;
             entries.push((name.clone(), gathered));
         }
@@ -51,7 +44,6 @@ impl RunMatSession {
         for (index, (name, value)) in entries.into_iter().enumerate() {
             self.legacy_variable_names.insert(name.clone(), index);
             self.variable_array.push(value.clone());
-            self.legacy_variables.insert(name.clone(), value.clone());
             self.workspace_values.insert(name, value);
         }
 
@@ -61,13 +53,8 @@ impl RunMatSession {
     }
 
     pub fn workspace_snapshot(&mut self) -> WorkspaceSnapshot {
-        let source_map = if self.workspace_values.is_empty() {
-            &self.legacy_variables
-        } else {
-            &self.workspace_values
-        };
-
-        let mut entries: Vec<WorkspaceEntry> = source_map
+        let mut entries: Vec<WorkspaceEntry> = self
+            .workspace_values
             .iter()
             .map(|(name, value)| workspace_entry(name, value))
             .collect();
@@ -97,7 +84,6 @@ impl RunMatSession {
         let value = self
             .workspace_values
             .get(&name)
-            .or_else(|| self.legacy_variables.get(&name))
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Variable '{name}' not found in workspace"))?;
 
@@ -160,9 +146,9 @@ impl RunMatSession {
         })
     }
 
-    /// Get a copy of current legacy variables.
+    /// Get the current persistent workspace values keyed by source name.
     pub fn get_variables(&self) -> &HashMap<String, Value> {
-        &self.legacy_variables
+        &self.workspace_values
     }
 
     pub(crate) fn build_workspace_snapshot(
