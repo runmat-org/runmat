@@ -3,11 +3,19 @@ use super::*;
 impl RunMatSession {
     /// Execute MATLAB/Octave code
     pub async fn execute(&mut self, input: &str) -> std::result::Result<ExecutionResult, RunError> {
+        self.run_legacy_result(input).await
+    }
+
+    /// Execute MATLAB/Octave code and return the runtime/workspace ABI outcome.
+    pub async fn execute_outcome(
+        &mut self,
+        input: &str,
+    ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
         self.run(input).await
     }
 
-    /// Execute MATLAB/Octave code and adapt the result to the runtime/workspace ABI.
-    pub async fn execute_outcome(
+    /// Parse, lower, compile, and execute input through the runtime/workspace ABI boundary.
+    pub async fn run(
         &mut self,
         input: &str,
     ) -> std::result::Result<crate::abi::ExecutionOutcome, RunError> {
@@ -16,7 +24,7 @@ impl RunMatSession {
             .keys()
             .cloned()
             .collect::<HashSet<_>>();
-        let result = self.run(input).await?;
+        let result = self.run_legacy_result(input).await?;
         let workspace_names = result
             .workspace
             .values
@@ -67,8 +75,11 @@ impl RunMatSession {
         })
     }
 
-    /// Parse, lower, compile, and execute input.
-    pub async fn run(&mut self, input: &str) -> std::result::Result<ExecutionResult, RunError> {
+    /// Legacy execution result path retained for compatibility callers.
+    async fn run_legacy_result(
+        &mut self,
+        input: &str,
+    ) -> std::result::Result<ExecutionResult, RunError> {
         let _active = ActiveExecutionGuard::new(self).map_err(|err| {
             RunError::Runtime(
                 build_runtime_error(err.to_string())
