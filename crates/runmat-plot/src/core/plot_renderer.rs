@@ -2790,6 +2790,18 @@ impl PlotRenderer {
             .and_then(|f| f.categorical_axis_labels_for_axes(axes_index))
     }
 
+    pub fn overlay_x_tick_labels_for_axes(&self, axes_index: usize) -> Option<Vec<String>> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.x_axis_tick_labels_for_axes(axes_index))
+    }
+
+    pub fn overlay_y_tick_labels_for_axes(&self, axes_index: usize) -> Option<Vec<String>> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.y_axis_tick_labels_for_axes(axes_index))
+    }
+
     pub fn overlay_histogram_edges_for_axes(&self, axes_index: usize) -> Option<(bool, Vec<f64>)> {
         self.last_figure
             .as_ref()

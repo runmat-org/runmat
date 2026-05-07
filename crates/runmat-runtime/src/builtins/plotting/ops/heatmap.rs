@@ -95,6 +95,8 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut surface = Some(surface);
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
+    let render_x_labels = x_labels.clone();
+    let render_y_labels = y_labels.clone();
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(
         BUILTIN_NAME,
@@ -111,6 +113,11 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 axes,
             );
             figure.set_axes_colorbar_enabled(axes, true);
+            figure.set_axes_tick_labels(
+                axes,
+                Some(render_x_labels.clone()),
+                Some(render_y_labels.clone()),
+            );
             *plot_index_slot.borrow_mut() = Some((axes, plot_index));
             Ok(())
         },
@@ -380,6 +387,25 @@ mod tests {
         assert_eq!(
             get_builtin(vec![Value::Num(handle), Value::String("XLabel".into())]).unwrap(),
             Value::String("Sizes".into())
+        );
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let meta = fig.axes_metadata(0).unwrap();
+        assert_eq!(
+            meta.x_tick_labels.as_ref().unwrap(),
+            &vec![
+                "Small".to_string(),
+                "Medium".to_string(),
+                "Large".to_string()
+            ]
+        );
+        assert_eq!(
+            meta.y_tick_labels.as_ref().unwrap(),
+            &vec![
+                "Green".to_string(),
+                "Red".to_string(),
+                "Blue".to_string(),
+                "Gray".to_string()
+            ]
         );
         let labels = get_builtin(vec![
             Value::Num(handle),

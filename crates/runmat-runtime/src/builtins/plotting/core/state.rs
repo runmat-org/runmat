@@ -896,6 +896,21 @@ pub fn set_colorbar_enabled_for_axes(
     Ok(())
 }
 
+pub fn set_tick_labels_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    x_labels: Option<Vec<String>>,
+    y_labels: Option<Vec<String>>,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state
+            .figure
+            .set_axes_tick_labels(axes_index, x_labels, y_labels);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
 pub fn set_legend_for_axes(
     handle: FigureHandle,
     axes_index: usize,

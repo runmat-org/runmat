@@ -125,6 +125,8 @@ pub struct AxesMetadata {
     pub x_label: Option<String>,
     pub y_label: Option<String>,
     pub z_label: Option<String>,
+    pub x_tick_labels: Option<Vec<String>>,
+    pub y_tick_labels: Option<Vec<String>>,
     pub x_limits: Option<(f64, f64)>,
     pub y_limits: Option<(f64, f64)>,
     pub z_limits: Option<(f64, f64)>,
@@ -497,6 +499,20 @@ impl Figure {
         }
         if axes_index == self.active_axes_index {
             self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_tick_labels(
+        &mut self,
+        axes_index: usize,
+        x_labels: Option<Vec<String>>,
+        y_labels: Option<Vec<String>>,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_tick_labels = x_labels;
+            meta.y_tick_labels = y_labels;
         }
         self.dirty = true;
     }
@@ -1338,6 +1354,18 @@ impl Figure {
             }
         }
         None
+    }
+
+    pub fn x_axis_tick_labels_for_axes(&self, axes_index: usize) -> Option<Vec<String>> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.x_tick_labels.clone())
+    }
+
+    pub fn y_axis_tick_labels_for_axes(&self, axes_index: usize) -> Option<Vec<String>> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.y_tick_labels.clone())
     }
 
     pub fn histogram_axis_edges_for_axes(&self, axes_index: usize) -> Option<(bool, Vec<f64>)> {
