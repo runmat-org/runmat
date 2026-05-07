@@ -23,3 +23,15 @@ fn heatmap_dot_property_assignment_routes_to_graphics_set() {
     let vars = execute(&hir).expect("execute heatmap script");
     assert_eq!(vars.last(), Some(&Value::String("T-Shirt Orders".into())));
 }
+
+#[test]
+fn figure_dot_property_access_routes_to_graphics_get() {
+    unsafe {
+        std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
+    }
+    let input = "f = figure(); out = f.Type;";
+    let ast = parse(input).expect("parse figure property script");
+    let hir = lower(&ast).expect("lower figure property script");
+    let vars = execute(&hir).expect("execute figure property script");
+    assert_eq!(vars.last(), Some(&Value::String("figure".into())));
+}

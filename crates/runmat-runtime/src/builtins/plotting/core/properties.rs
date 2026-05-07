@@ -178,6 +178,67 @@ pub fn parse_text_style_pairs(builtin: &'static str, args: &[Value]) -> BuiltinR
     Ok(style)
 }
 
+pub fn validate_heatmap_property_pairs(
+    args: &[Value],
+    x_label_len: usize,
+    y_label_len: usize,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if args.is_empty() {
+        return Ok(());
+    }
+    if !args.len().is_multiple_of(2) {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: property/value arguments must come in pairs"),
+        ));
+    }
+    for pair in args.chunks_exact(2) {
+        let key = property_name(&pair[0], builtin)?;
+        match key.as_str() {
+            "title" => validate_axes_text_alias(PlotObjectKind::Title, &pair[1], builtin)?,
+            "xlabel" => validate_axes_text_alias(PlotObjectKind::XLabel, &pair[1], builtin)?,
+            "ylabel" => validate_axes_text_alias(PlotObjectKind::YLabel, &pair[1], builtin)?,
+            "colorbar" | "colorbarvisible" => {
+                value_as_bool(&pair[1]).ok_or_else(|| {
+                    plotting_error(builtin, format!("{builtin}: Colorbar must be logical"))
+                })?;
+            }
+            "colormap" => {
+                let name = value_as_string(&pair[1]).ok_or_else(|| {
+                    plotting_error(builtin, format!("{builtin}: Colormap must be a string"))
+                })?;
+                parse_colormap_name(&name, builtin)?;
+            }
+            "xdisplaylabels" => {
+                let labels = string_labels_from_value(&pair[1], builtin)?;
+                if labels.len() != x_label_len {
+                    return Err(plotting_error(
+                        builtin,
+                        format!("{builtin}: XDisplayLabels length must match heatmap columns"),
+                    ));
+                }
+            }
+            "ydisplaylabels" => {
+                let labels = string_labels_from_value(&pair[1], builtin)?;
+                if labels.len() != y_label_len {
+                    return Err(plotting_error(
+                        builtin,
+                        format!("{builtin}: YDisplayLabels length must match heatmap rows"),
+                    ));
+                }
+            }
+            other => {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: unsupported heatmap property `{other}`"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn split_legend_style_pairs<'a>(
     builtin: &'static str,
     args: &'a [Value],
@@ -2986,6 +3047,31 @@ fn apply_axes_text_alias(
     };
     set_text_properties_for_axes(handle, axes_index, kind, text, Some(style))
         .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn validate_axes_text_alias(
+    kind: PlotObjectKind,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    if value_as_string(value).is_some() {
+        return Ok(());
+    }
+
+    let scalar = handle_scalar(value, builtin)?;
+    let (src_handle, src_axes, src_kind) =
+        decode_plot_object_handle(scalar).map_err(|err| map_figure_error(builtin, err))?;
+    if src_kind != kind {
+        return Err(plotting_error(
+            builtin,
+            format!(
+                "{builtin}: expected a matching text handle for `{}`",
+                key_name(kind)
+            ),
+        ));
+    }
+    axes_metadata_snapshot(src_handle, src_axes).map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }
 

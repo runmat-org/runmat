@@ -62,6 +62,13 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         rest,
     } = parse_heatmap_args(args).await?;
 
+    crate::builtins::plotting::properties::validate_heatmap_property_pairs(
+        &rest,
+        x_labels.len(),
+        y_labels.len(),
+        BUILTIN_NAME,
+    )?;
+
     let rows = color_data.rows;
     let cols = color_data.cols;
     let render_data = transpose_for_surface(&color_data);
@@ -383,5 +390,42 @@ mod tests {
             panic!("expected string array");
         };
         assert_eq!(labels.data, vec!["Small", "Medium", "Large"]);
+    }
+
+    #[test]
+    fn heatmap_rejects_bad_property_pairs_before_mutating_figure() {
+        let _guard = setup();
+        let before = clone_figure(current_figure_handle())
+            .map(|figure| figure.plots().count())
+            .unwrap_or(0);
+
+        let err = futures::executor::block_on(heatmap_builtin(vec![
+            Value::Cell(
+                CellArray::new(
+                    vec![Value::String("A".into()), Value::String("B".into())],
+                    1,
+                    2,
+                )
+                .unwrap(),
+            ),
+            Value::Cell(
+                CellArray::new(
+                    vec![Value::String("C".into()), Value::String("D".into())],
+                    1,
+                    2,
+                )
+                .unwrap(),
+            ),
+            Value::Tensor(tensor(vec![1.0, 2.0, 3.0, 4.0], 2, 2)),
+            Value::String("NotAHeatmapProperty".into()),
+            Value::Num(1.0),
+        ]))
+        .expect_err("invalid property should fail");
+        assert!(err.to_string().contains("unsupported heatmap property"));
+
+        let after = clone_figure(current_figure_handle())
+            .map(|figure| figure.plots().count())
+            .unwrap_or(0);
+        assert_eq!(after, before);
     }
 }

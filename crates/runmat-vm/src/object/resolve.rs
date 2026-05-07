@@ -76,7 +76,7 @@ pub async fn load_member(
         }
         Value::ClassRef(cls) => load_static_member(&cls, &field),
         base @ (Value::Num(_) | Value::Int(_)) => {
-            if !is_encoded_graphics_handle_value(&base) {
+            if !is_possible_graphics_handle_value(&base) {
                 return Err(mex("LoadMember", "LoadMember on non-object"));
             }
             load_graphics_member(base, &field).await.map_err(|err| {
@@ -270,7 +270,7 @@ where
             Ok(Value::Struct(st))
         }
         base @ (Value::Num(_) | Value::Int(_)) => {
-            if !is_encoded_graphics_handle_value(&base) {
+            if !is_possible_graphics_handle_value(&base) {
                 return Err(mex("StoreMember", "StoreMember on non-object"));
             }
             store_graphics_member(base, &field, rhs)
@@ -366,11 +366,10 @@ fn is_invalid_graphics_handle_error(err: &RuntimeError) -> bool {
         || text.contains("invalid figure handle")
 }
 
-fn is_encoded_graphics_handle_value(value: &Value) -> bool {
-    const MIN_ENCODED_GRAPHICS_HANDLE: f64 = (1u64 << 20) as f64;
+fn is_possible_graphics_handle_value(value: &Value) -> bool {
     match value {
-        Value::Num(v) => v.is_finite() && *v >= MIN_ENCODED_GRAPHICS_HANDLE,
-        Value::Int(i) => i.to_f64() >= MIN_ENCODED_GRAPHICS_HANDLE,
+        Value::Num(v) => v.is_finite() && *v > 0.0,
+        Value::Int(i) => i.to_f64() > 0.0,
         _ => false,
     }
 }
