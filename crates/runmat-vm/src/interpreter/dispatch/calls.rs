@@ -5,9 +5,9 @@ use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
 use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
-    build_expanded_args_from_specs, collect_multi_outputs, expand_cell_indices,
-    lookup_user_function, prepare_user_call, subsref_empty_brace_cell,
-    validate_user_function_arity, PreparedUserCall,
+    build_expanded_args_from_specs, call_object_index_method, collect_multi_outputs,
+    expand_cell_indices, lookup_user_function, prepare_user_call, subsref_empty_brace_cell,
+    validate_user_function_arity, ObjectIndexKind, ObjectIndexOp, PreparedUserCall,
 };
 use crate::functions::UserFunction;
 use crate::interpreter::debug;
@@ -311,13 +311,14 @@ pub async fn build_builtin_expand_multi_args(
             match base {
                 Value::Object(obj) => {
                     let empty = subsref_empty_brace_cell()?;
-                    let args = vec![
+                    let v = call_object_index_method(
                         Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Brace,
                         empty,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                        None,
+                    )
+                    .await?;
                     match v {
                         Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                         other => Ok(vec![other]),
@@ -333,13 +334,14 @@ pub async fn build_builtin_expand_multi_args(
             match base {
                 Value::Object(obj) => {
                     let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
-                    let args = vec![
+                    let v = call_object_index_method(
                         Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Brace,
                         cell,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                        None,
+                    )
+                    .await?;
                     Ok(vec![v])
                 }
                 _ => Err(crate::interpreter::errors::mex(
@@ -365,13 +367,14 @@ pub async fn build_feval_expand_multi_args(
             match base {
                 Value::Object(obj) => {
                     let empty = subsref_empty_brace_cell()?;
-                    let args = vec![
+                    let v = call_object_index_method(
                         Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Brace,
                         empty,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                        None,
+                    )
+                    .await?;
                     match v {
                         Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                         other => Ok(vec![other]),
@@ -387,13 +390,14 @@ pub async fn build_feval_expand_multi_args(
             match base {
                 Value::Object(obj) => {
                     let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
-                    let args = vec![
+                    let v = call_object_index_method(
                         Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Brace,
                         cell,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                        None,
+                    )
+                    .await?;
                     Ok(vec![v])
                 }
                 _ => Err(crate::interpreter::errors::mex(
@@ -420,13 +424,14 @@ pub async fn build_user_function_expand_multi_args(
                 Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                 Value::Object(obj) => {
                     let empty = subsref_empty_brace_cell()?;
-                    let args = vec![
+                    let v = call_object_index_method(
                         Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Brace,
                         empty,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                        None,
+                    )
+                    .await?;
                     match v {
                         Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                         other => Ok(vec![other]),
@@ -443,13 +448,14 @@ pub async fn build_user_function_expand_multi_args(
                 (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices),
                 (Value::Object(obj), _) => {
                     let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
-                    let args = vec![
+                    let v = call_object_index_method(
                         Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Brace,
                         cell,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                        None,
+                    )
+                    .await?;
                     Ok(vec![v])
                 }
                 _ => Err(crate::interpreter::errors::mex(

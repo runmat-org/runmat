@@ -8,6 +8,7 @@ mod object;
 mod stack;
 
 use crate::bytecode::Instr;
+use crate::call::shared::{call_object_index_method, ObjectIndexKind, ObjectIndexOp};
 use crate::interpreter::debug;
 use crate::runtime::workspace::refresh_workspace_state;
 use runmat_builtins::Value;
@@ -664,14 +665,12 @@ pub async fn dispatch_instruction(
                         _ => unreachable!(),
                     };
                     let cell = crate::call::shared::subsref_paren_index_cell(&indices)?;
-                    let v = runmat_runtime::call_builtin_async(
-                        "call_method",
-                        &[
-                            Value::Object(obj),
-                            Value::String("subsref".to_string()),
-                            Value::String("()".to_string()),
-                            cell,
-                        ],
+                    let v = call_object_index_method(
+                        Value::Object(obj),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Paren,
+                        cell,
+                        None,
                     )
                     .await?;
                     Ok(vec![v])
@@ -696,14 +695,12 @@ pub async fn dispatch_instruction(
                         _ => unreachable!(),
                     };
                     let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
-                    let v = runmat_runtime::call_builtin_async(
-                        "call_method",
-                        &[
-                            Value::Object(obj),
-                            Value::String("subsref".to_string()),
-                            Value::String("{}".to_string()),
-                            cell,
-                        ],
+                    let v = call_object_index_method(
+                        Value::Object(obj),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Brace,
+                        cell,
+                        None,
                     )
                     .await?;
                     Ok(vec![v])
@@ -733,14 +730,12 @@ pub async fn dispatch_instruction(
                         _ => unreachable!(),
                     };
                     let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
-                    let v = runmat_runtime::call_builtin_async(
-                        "call_method",
-                        &[
-                            Value::Object(obj),
-                            Value::String("subsref".to_string()),
-                            Value::String("{}".to_string()),
-                            cell,
-                        ],
+                    let v = call_object_index_method(
+                        Value::Object(obj),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Brace,
+                        cell,
+                        None,
                     )
                     .await?;
                     Ok(vec![v])

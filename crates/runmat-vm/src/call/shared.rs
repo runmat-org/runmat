@@ -286,6 +286,65 @@ pub fn subsref_empty_brace_cell() -> Result<Value, RuntimeError> {
     ))
 }
 
+#[derive(Clone, Copy)]
+pub enum ObjectIndexOp {
+    Subsref,
+    Subsasgn,
+}
+
+impl ObjectIndexOp {
+    fn protocol_name(self) -> &'static str {
+        match self {
+            Self::Subsref => "subsref",
+            Self::Subsasgn => "subsasgn",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum ObjectIndexKind {
+    Paren,
+    Brace,
+}
+
+impl ObjectIndexKind {
+    fn protocol_name(self) -> &'static str {
+        match self {
+            Self::Paren => "()",
+            Self::Brace => "{}",
+        }
+    }
+}
+
+pub fn object_protocol_index_cell(
+    values: Vec<Value>,
+    context: &str,
+) -> Result<Value, RuntimeError> {
+    let cols = values.len();
+    let cell =
+        runmat_builtins::CellArray::new(values, 1, cols).map_err(|e| format!("{context}: {e}"))?;
+    Ok(Value::Cell(cell))
+}
+
+pub async fn call_object_index_method(
+    base: Value,
+    op: ObjectIndexOp,
+    kind: ObjectIndexKind,
+    cell: Value,
+    rhs: Option<Value>,
+) -> Result<Value, RuntimeError> {
+    let mut args = vec![
+        base,
+        Value::String(op.protocol_name().to_string()),
+        Value::String(kind.protocol_name().to_string()),
+        cell,
+    ];
+    if let Some(rhs) = rhs {
+        args.push(rhs);
+    }
+    runmat_runtime::call_builtin_async("call_method", &args).await
+}
+
 pub async fn build_expanded_args_from_specs<ExpandObjectAll, ExpandObjectIndices, FutAll, FutIdx>(
     stack: &mut Vec<Value>,
     specs: &[ArgSpec],

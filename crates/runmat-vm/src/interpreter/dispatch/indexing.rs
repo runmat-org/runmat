@@ -1,4 +1,7 @@
 use crate::bytecode::{EndExpr, UserFunction};
+use crate::call::shared::{
+    call_object_index_method, object_protocol_index_cell, ObjectIndexKind, ObjectIndexOp,
+};
 use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan as idx_plan;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
@@ -35,13 +38,6 @@ fn numeric_indices_from_values(values: &[Value]) -> Result<Vec<usize>, RuntimeEr
             Ok(index as usize)
         })
         .collect()
-}
-
-fn object_protocol_index_cell(values: Vec<Value>, context: &str) -> Result<Value, RuntimeError> {
-    let cols = values.len();
-    let cell =
-        runmat_builtins::CellArray::new(values, 1, cols).map_err(|e| format!("{context}: {e}"))?;
-    Ok(Value::Cell(cell))
 }
 
 async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, RuntimeError> {
@@ -490,13 +486,16 @@ where
                 Value::Object(_) | Value::HandleObject(_) => {
                     let numeric = linear_index_values_to_f64(&raw_indices).await?;
                     let cell = idx_read_linear::build_object_subsref_cell(&numeric)?;
-                    let args = vec![
-                        base,
-                        Value::String("subsref".to_string()),
-                        Value::String("()".to_string()),
-                        cell,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
+                    stack.push(
+                        call_object_index_method(
+                            base,
+                            ObjectIndexOp::Subsref,
+                            ObjectIndexKind::Paren,
+                            cell,
+                            None,
+                        )
+                        .await?,
+                    );
                 }
                 Value::FunctionHandle(_) | Value::Closure(_) => {
                     let numeric = linear_index_values_to_f64(&raw_indices).await?;
@@ -549,13 +548,16 @@ where
                         indices.iter().map(|n| Value::Num(*n as f64)).collect(),
                         "subsref build error",
                     )?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
-                        cell,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
+                    stack.push(
+                        call_object_index_method(
+                            Value::Object(obj),
+                            ObjectIndexOp::Subsref,
+                            ObjectIndexKind::Brace,
+                            cell,
+                            None,
+                        )
+                        .await?,
+                    );
                 }
                 Value::HandleObject(handle) => {
                     let indices = numeric_indices_from_values(&raw_indices)?;
@@ -563,13 +565,16 @@ where
                         indices.iter().map(|n| Value::Num(*n as f64)).collect(),
                         "subsref build error",
                     )?;
-                    let args = vec![
-                        Value::HandleObject(handle),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
-                        cell,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
+                    stack.push(
+                        call_object_index_method(
+                            Value::HandleObject(handle),
+                            ObjectIndexOp::Subsref,
+                            ObjectIndexKind::Brace,
+                            cell,
+                            None,
+                        )
+                        .await?,
+                    );
                 }
                 Value::Cell(ca) => {
                     let indices = resolve_cell_indices(&raw_indices, ca.rows, ca.cols)?;
@@ -618,13 +623,14 @@ where
                 }
                 Value::Object(obj) => {
                     let cell = object_protocol_index_cell(indices.clone(), "subsref build error")?;
-                    let args = vec![
+                    let v = call_object_index_method(
                         Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Brace,
                         cell,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                        None,
+                    )
+                    .await?;
                     stack.push(v);
                     for _ in 1..*out_count {
                         stack.push(Value::Num(0.0));
@@ -632,13 +638,14 @@ where
                 }
                 Value::HandleObject(handle) => {
                     let cell = object_protocol_index_cell(indices.clone(), "subsref build error")?;
-                    let args = vec![
+                    let v = call_object_index_method(
                         Value::HandleObject(handle),
-                        Value::String("subsref".to_string()),
-                        Value::String("{}".to_string()),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Brace,
                         cell,
-                    ];
-                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                        None,
+                    )
+                    .await?;
                     stack.push(v);
                     for _ in 1..*out_count {
                         stack.push(Value::Num(0.0));
@@ -680,14 +687,16 @@ where
                         indices.len(),
                     )
                     .map_err(|e| format!("subsasgn build error: {e}"))?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsasgn".to_string()),
-                        Value::String("{}".to_string()),
-                        Value::Cell(cell),
-                        rhs,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
+                    stack.push(
+                        call_object_index_method(
+                            Value::Object(obj),
+                            ObjectIndexOp::Subsasgn,
+                            ObjectIndexKind::Brace,
+                            Value::Cell(cell),
+                            Some(rhs),
+                        )
+                        .await?,
+                    );
                 }
                 Value::HandleObject(handle) => {
                     let indices = numeric_indices_from_values(&raw_indices)?;
@@ -697,14 +706,16 @@ where
                         indices.len(),
                     )
                     .map_err(|e| format!("subsasgn build error: {e}"))?;
-                    let args = vec![
-                        Value::HandleObject(handle),
-                        Value::String("subsasgn".to_string()),
-                        Value::String("{}".to_string()),
-                        Value::Cell(cell),
-                        rhs,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
+                    stack.push(
+                        call_object_index_method(
+                            Value::HandleObject(handle),
+                            ObjectIndexOp::Subsasgn,
+                            ObjectIndexKind::Brace,
+                            Value::Cell(cell),
+                            Some(rhs),
+                        )
+                        .await?,
+                    );
                 }
                 Value::Cell(ca) => {
                     let indices = resolve_cell_indices(&raw_indices, ca.rows, ca.cols)?;
@@ -754,28 +765,32 @@ where
                         indices.iter().map(|n| Value::Num(*n as f64)).collect(),
                         "subsasgn build error",
                     )?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsasgn".to_string()),
-                        Value::String("()".to_string()),
-                        cell,
-                        rhs,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
+                    stack.push(
+                        call_object_index_method(
+                            Value::Object(obj),
+                            ObjectIndexOp::Subsasgn,
+                            ObjectIndexKind::Paren,
+                            cell,
+                            Some(rhs),
+                        )
+                        .await?,
+                    );
                 }
                 Value::HandleObject(handle) => {
                     let cell = object_protocol_index_cell(
                         indices.iter().map(|n| Value::Num(*n as f64)).collect(),
                         "subsasgn build error",
                     )?;
-                    let args = vec![
-                        Value::HandleObject(handle),
-                        Value::String("subsasgn".to_string()),
-                        Value::String("()".to_string()),
-                        cell,
-                        rhs,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
+                    stack.push(
+                        call_object_index_method(
+                            Value::HandleObject(handle),
+                            ObjectIndexOp::Subsasgn,
+                            ObjectIndexKind::Paren,
+                            cell,
+                            Some(rhs),
+                        )
+                        .await?,
+                    );
                 }
                 Value::Tensor(t) => {
                     stack.push(idx_write_linear::assign_tensor_scalar(t, &indices, &rhs).await?)
@@ -1809,16 +1824,17 @@ where
                             }
                         }
                     }
-                    let cell = runmat_builtins::CellArray::new(idx_values, 1, *dims)
-                        .map_err(|e| format!("subsasgn build error: {e}"))?;
-                    let args = vec![
-                        Value::Object(obj),
-                        Value::String("subsasgn".to_string()),
-                        Value::String("()".to_string()),
-                        Value::Cell(cell),
-                        rhs,
-                    ];
-                    stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
+                    let cell = object_protocol_index_cell(idx_values, "subsasgn build error")?;
+                    stack.push(
+                        call_object_index_method(
+                            Value::Object(obj),
+                            ObjectIndexOp::Subsasgn,
+                            ObjectIndexKind::Paren,
+                            cell,
+                            Some(rhs),
+                        )
+                        .await?,
+                    );
                 }
                 _ => {
                     return Err("StoreSliceExpr only supports tensors currently"
