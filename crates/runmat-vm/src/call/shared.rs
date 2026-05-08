@@ -168,8 +168,8 @@ pub fn first_output_value(
         if let Some(varargout_oid) = func.outputs.last() {
             if let Some(local_id) = var_map.get(varargout_oid) {
                 if let Some(Value::Cell(ca)) = func_result_vars.get(local_id.0) {
-                    if let Some(first) = ca.data.first() {
-                        return (**first).clone();
+                    if let Some(first) = crate::ops::cells::first_cell_value(ca) {
+                        return first;
                     }
                 }
             }
@@ -216,7 +216,7 @@ pub fn collect_multi_outputs(
             if let Some(varargout_oid) = func.outputs.last() {
                 if let Some(local_id) = var_map.get(varargout_oid) {
                     if let Some(Value::Cell(ca)) = func_result_vars.get(local_id.0) {
-                        let available = ca.data.len();
+                        let available = crate::ops::cells::cell_value_count(ca);
                         let need = out_count - pushed;
                         if need > available {
                             return Err(crate::interpreter::errors::mex(
@@ -226,9 +226,7 @@ pub fn collect_multi_outputs(
                                 ),
                             ));
                         }
-                        for vi in 0..need {
-                            outputs.push((*ca.data[vi]).clone());
-                        }
+                        outputs.extend(crate::ops::cells::cell_value_prefix(ca, need)?);
                     }
                 }
             }
