@@ -302,11 +302,7 @@ impl RunMatSession {
         if self.verbose {
             debug!("AST: {ast:?}");
         }
-        let display = execution_display_context(
-            &lowering.assembly,
-            bytecode.layout.as_ref(),
-            &lowering.hir.body,
-        );
+        let display = execution_display_context(&lowering.assembly, bytecode.layout.as_ref());
         let display_context = display.context;
         let display_var_ids = display.display_var_ids;
         let (hir, updated_vars, updated_functions) =
