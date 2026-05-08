@@ -727,6 +727,7 @@ where
                     Value::Object(_)
                         | Value::HandleObject(_)
                         | Value::Struct(_)
+                        | Value::Cell(_)
                         | Value::Tensor(_)
                         | Value::ComplexTensor(_)
                         | Value::GpuTensor(_)
@@ -873,6 +874,9 @@ where
                 }
                 Value::ComplexTensor(t) => {
                     stack.push(idx_write_linear::assign_complex_scalar(t, &indices, &rhs).await?)
+                }
+                Value::Cell(ca) => {
+                    stack.push(crate::ops::cells::assign_cell_paren(ca, &indices, &rhs)?)
                 }
                 Value::Struct(st) => stack.push(assign_scalar_struct_index(st, &indices, rhs)?),
                 Value::GpuTensor(h) => {
