@@ -33,6 +33,15 @@ fn delete_tensor_linear(mut t: Tensor, idx: usize) -> Result<Value, RuntimeError
     Ok(Value::Tensor(t))
 }
 
+fn tensor_to_complex(t: Tensor) -> ComplexTensor {
+    ComplexTensor {
+        data: t.data.into_iter().map(|re| (re, 0.0)).collect(),
+        shape: t.shape,
+        rows: t.rows,
+        cols: t.cols,
+    }
+}
+
 fn delete_complex_linear(mut t: ComplexTensor, idx: usize) -> Result<Value, RuntimeError> {
     let total = t.rows * t.cols;
     if idx == 0 || idx > total {
@@ -134,6 +143,9 @@ pub async fn assign_tensor_scalar(
         }
         if is_empty_tensor(rhs) {
             return delete_tensor_linear(t, idx);
+        }
+        if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+            return assign_complex_scalar(tensor_to_complex(t), indices, rhs).await;
         }
         let val = rhs_to_real_scalar(rhs).await?;
         t.data[idx - 1] = val;
