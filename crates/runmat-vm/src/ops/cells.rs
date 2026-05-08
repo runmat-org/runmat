@@ -55,7 +55,9 @@ pub fn expand_cell_values(
 ) -> Result<Vec<Value>, RuntimeError> {
     let mut values: Vec<Value> = Vec::new();
     if indices.is_empty() {
-        values.extend(ca.data.iter().map(|p| (*(*p)).clone()));
+        for idx in 1..=ca.data.len() {
+            values.push(index_cell_value(ca, &[idx])?);
+        }
     } else {
         values.push(index_cell_value(ca, indices)?);
     }
