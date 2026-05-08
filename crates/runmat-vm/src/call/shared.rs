@@ -260,59 +260,7 @@ pub fn expand_cell_indices(
     cell: &runmat_builtins::CellArray,
     indices: &[Value],
 ) -> Result<Vec<Value>, RuntimeError> {
-    match indices.len() {
-        1 => match &indices[0] {
-            Value::Num(n) if *n == 0.0 && n.is_sign_negative() => {
-                Ok(vec![(*cell.data[cell.data.len() - 1]).clone()])
-            }
-            Value::Num(n) if *n < 0.0 => {
-                let idx = cell.data.len() as isize + *n as isize;
-                if idx < 1 || idx as usize > cell.data.len() {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellIndexOutOfBounds",
-                        "Cell index out of bounds",
-                    ));
-                }
-                Ok(vec![(*cell.data[idx as usize - 1]).clone()])
-            }
-            Value::Num(n) => {
-                let idx = *n as usize;
-                Ok(vec![crate::ops::cells::index_cell_value(cell, &[idx])?])
-            }
-            Value::Int(i) => {
-                let idx = i.to_i64() as usize;
-                Ok(vec![crate::ops::cells::index_cell_value(cell, &[idx])?])
-            }
-            Value::Tensor(t) => {
-                let mut out = Vec::with_capacity(t.data.len());
-                for &val in &t.data {
-                    let idx = val as usize;
-                    out.push(crate::ops::cells::index_cell_value(cell, &[idx])?);
-                }
-                Ok(out)
-            }
-            _ => Err(crate::interpreter::errors::mex(
-                "CellIndexType",
-                "Unsupported cell index type",
-            )),
-        },
-        2 => {
-            let r: f64 = (&indices[0]).try_into()?;
-            let c: f64 = (&indices[1]).try_into()?;
-            let (ir, ic) = (r as usize, c as usize);
-            if ir == 0 || ir > cell.rows || ic == 0 || ic > cell.cols {
-                return Err(crate::interpreter::errors::mex(
-                    "CellSubscriptOutOfBounds",
-                    "Cell subscript out of bounds",
-                ));
-            }
-            Ok(vec![(*cell.data[(ir - 1) * cell.cols + (ic - 1)]).clone()])
-        }
-        _ => Err(crate::interpreter::errors::mex(
-            "CellIndexType",
-            "Unsupported cell index type",
-        )),
-    }
+    crate::ops::cells::expand_cell_indices(cell, indices)
 }
 
 pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Result<Vec<Value>, RuntimeError> {

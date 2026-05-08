@@ -76,6 +76,37 @@ pub fn expand_all_cell_values(ca: &CellArray) -> Result<Vec<Value>, RuntimeError
         .collect()
 }
 
+pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Value>, RuntimeError> {
+    match indices.len() {
+        1 => match &indices[0] {
+            Value::Num(n) if *n == 0.0 && n.is_sign_negative() => {
+                Ok(vec![index_cell_value(ca, &[ca.data.len()])?])
+            }
+            Value::Num(n) if *n < 0.0 => {
+                let idx = ca.data.len() as isize + *n as isize;
+                if idx < 1 || idx as usize > ca.data.len() {
+                    return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+                }
+                Ok(vec![index_cell_value(ca, &[idx as usize])?])
+            }
+            Value::Num(n) => Ok(vec![index_cell_value(ca, &[*n as usize])?]),
+            Value::Int(i) => Ok(vec![index_cell_value(ca, &[i.to_i64() as usize])?]),
+            Value::Tensor(t) => t
+                .data
+                .iter()
+                .map(|&val| index_cell_value(ca, &[val as usize]))
+                .collect(),
+            _ => Err(mex("CellIndexType", "Unsupported cell index type")),
+        },
+        2 => {
+            let r: f64 = (&indices[0]).try_into()?;
+            let c: f64 = (&indices[1]).try_into()?;
+            Ok(vec![index_cell_value(ca, &[r as usize, c as usize])?])
+        }
+        _ => Err(mex("CellIndexType", "Unsupported cell index type")),
+    }
+}
+
 pub fn assign_cell_value<OnWrite>(
     mut ca: CellArray,
     indices: &[usize],
