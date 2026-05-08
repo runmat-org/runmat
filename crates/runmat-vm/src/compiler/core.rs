@@ -13,7 +13,7 @@ use runmat_mir::{
     MirConstant, MirIndexComponent, MirIndexing, MirOperand, MirOutputTarget, MirPlace, MirRvalue,
     MirStmt, MirStmtKind, MirTerminatorKind,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct LoopLabels {
     pub break_jumps: Vec<usize>,
@@ -413,14 +413,26 @@ impl Compiler {
 
         let mut block_starts = HashMap::new();
         let mut pending_jumps: Vec<(usize, BasicBlockId, bool)> = Vec::new();
+        let mut pending_try_entries: Vec<(usize, BasicBlockId)> = Vec::new();
+        let try_entry_blocks: HashSet<BasicBlockId> = blocks
+            .iter()
+            .filter_map(|block| match block.terminator.kind {
+                MirTerminatorKind::TryCatch { try_block, .. } => Some(try_block),
+                _ => None,
+            })
+            .collect();
 
         for (block_index, block) in blocks.iter().enumerate() {
             block_starts.insert(block.id, self.instructions.len());
             for stmt in &block.statements {
                 self.compile_mir_stmt(stmt)?;
             }
+            let exits_try_scope = try_entry_blocks.contains(&block.id);
             match &block.terminator.kind {
                 MirTerminatorKind::Goto(target) => {
+                    if exits_try_scope {
+                        self.emit(Instr::PopTry);
+                    }
                     let pc = self.emit(Instr::Jump(usize::MAX));
                     pending_jumps.push((pc, *target, false));
                 }
@@ -429,6 +441,9 @@ impl Compiler {
                     then_block,
                     else_block,
                 } => {
+                    if exits_try_scope {
+                        self.emit(Instr::PopTry);
+                    }
                     self.compile_mir_operand(cond)?;
                     let false_pc = self.emit(Instr::JumpIfFalse(usize::MAX));
                     pending_jumps.push((false_pc, *else_block, true));
@@ -440,6 +455,9 @@ impl Compiler {
                     cases,
                     otherwise,
                 } => {
+                    if exits_try_scope {
+                        self.emit(Instr::PopTry);
+                    }
                     let discr_temp = self.alloc_temp();
                     self.compile_mir_operand(discr)?;
                     self.emit(Instr::StoreVar(discr_temp));
@@ -455,7 +473,19 @@ impl Compiler {
                     let otherwise_pc = self.emit(Instr::Jump(usize::MAX));
                     pending_jumps.push((otherwise_pc, *otherwise, false));
                 }
+                MirTerminatorKind::TryCatch {
+                    try_block,
+                    catch_block,
+                } => {
+                    let enter_pc = self.emit(Instr::EnterTry(usize::MAX, None));
+                    pending_try_entries.push((enter_pc, *catch_block));
+                    let try_pc = self.emit(Instr::Jump(usize::MAX));
+                    pending_jumps.push((try_pc, *try_block, false));
+                }
                 MirTerminatorKind::Return(values) => {
+                    if exits_try_scope {
+                        self.emit(Instr::PopTry);
+                    }
                     if values.is_empty() && block_index + 1 < blocks.len() {
                         self.emit(Instr::Return);
                     } else {
@@ -477,6 +507,13 @@ impl Compiler {
             } else {
                 self.patch(pc, Instr::Jump(target_pc));
             }
+        }
+
+        for (pc, target) in pending_try_entries {
+            let target_pc = *block_starts
+                .get(&target)
+                .ok_or_else(|| CompileError::new(format!("missing MIR catch block {target:?}")))?;
+            self.patch(pc, Instr::EnterTry(target_pc, None));
         }
 
         Ok(())
