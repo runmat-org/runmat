@@ -475,6 +475,27 @@ fn range_assignment_uses_semantic_vm() {
 }
 
 #[test]
+fn range_assignment_vector_rhs_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "A = [1, 2, 3, 4]; A(2:3) = [8, 9]; y = A(3);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile range vector assignment");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "range vector assignment should compile through semantic HIR/MIR/VM"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "9");
+}
+
+#[test]
 fn workspace_read_across_submissions_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("x = 42;")).expect("seed workspace");
