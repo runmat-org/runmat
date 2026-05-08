@@ -869,33 +869,52 @@ where
             }
             if indices.is_empty() {
                 if *num_indices == 1 && raw_contiguous_indices.len() == 1 {
-                    if let Value::Tensor(mut t) = base {
-                        let total = t.data.len();
+                    let total = match &base {
+                        Value::Tensor(t) => t.data.len(),
+                        Value::Cell(ca) => ca.data.len(),
+                        _ => 0,
+                    };
+                    if total > 0 {
                         let selected =
                             indices_from_value_linear(&raw_contiguous_indices[0], total).await?;
-                        if let Value::Complex(re, im) = rhs {
-                            let mut ct = runmat_builtins::ComplexTensor {
-                                data: t.data.into_iter().map(|re| (re, 0.0)).collect(),
-                                shape: t.shape,
-                                rows: t.rows,
-                                cols: t.cols,
-                            };
-                            for &idx in &selected {
-                                ct.data[idx - 1] = (re, im);
-                            }
-                            stack.remove(base_pos);
-                            stack.push(Value::ComplexTensor(ct));
-                            return Ok(true);
-                        }
-                        let rhs_values =
-                            idx_write_slice::materialize_rhs_linear_real(&rhs, selected.len())
+                        match base {
+                            Value::Tensor(mut t) => {
+                                if let Value::Complex(re, im) = rhs {
+                                    let mut ct = runmat_builtins::ComplexTensor {
+                                        data: t.data.into_iter().map(|re| (re, 0.0)).collect(),
+                                        shape: t.shape,
+                                        rows: t.rows,
+                                        cols: t.cols,
+                                    };
+                                    for &idx in &selected {
+                                        ct.data[idx - 1] = (re, im);
+                                    }
+                                    stack.remove(base_pos);
+                                    stack.push(Value::ComplexTensor(ct));
+                                    return Ok(true);
+                                }
+                                let rhs_values = idx_write_slice::materialize_rhs_linear_real(
+                                    &rhs,
+                                    selected.len(),
+                                )
                                 .await?;
-                        for (&idx, &value) in selected.iter().zip(rhs_values.iter()) {
-                            t.data[idx - 1] = value;
+                                for (&idx, &value) in selected.iter().zip(rhs_values.iter()) {
+                                    t.data[idx - 1] = value;
+                                }
+                                stack.remove(base_pos);
+                                stack.push(Value::Tensor(t));
+                                return Ok(true);
+                            }
+                            Value::Cell(ca) => {
+                                let updated = crate::ops::cells::assign_cell_paren_linear_indices(
+                                    ca, &selected, &rhs,
+                                )?;
+                                stack.remove(base_pos);
+                                stack.push(updated);
+                                return Ok(true);
+                            }
+                            _ => {}
                         }
-                        stack.remove(base_pos);
-                        stack.push(Value::Tensor(t));
-                        return Ok(true);
                     }
                 }
                 return Err(crate::interpreter::errors::mex(

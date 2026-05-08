@@ -155,6 +155,35 @@ pub fn assign_cell_paren(
     ))
 }
 
+pub fn assign_cell_paren_linear_indices(
+    mut ca: CellArray,
+    indices: &[usize],
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    let Value::Cell(rhs_cell) = rhs else {
+        return Err(mex(
+            "UnsupportedCellParenAssignment",
+            "Cell paren assignment requires a cell RHS",
+        ));
+    };
+    if rhs_cell.data.len() != indices.len() && rhs_cell.data.len() != 1 {
+        return Err(mex(
+            "UnsupportedCellParenAssignment",
+            "Cell RHS must be scalar or match assignment size",
+        ));
+    }
+    for (k, &idx) in indices.iter().enumerate() {
+        let pos = row_major_pos_from_linear(&ca, idx)?;
+        let rhs_pos = if rhs_cell.data.len() == 1 { 0 } else { k };
+        let newv = (*rhs_cell.data[rhs_pos]).clone();
+        if let Some(oldv) = ca.data.get(pos) {
+            runmat_gc::gc_record_write(oldv, &newv);
+        }
+        *ca.data[pos] = newv;
+    }
+    Ok(Value::Cell(ca))
+}
+
 fn assign_cell_paren_from_cell(
     mut ca: CellArray,
     indices: &[usize],
