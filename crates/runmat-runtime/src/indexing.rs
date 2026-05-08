@@ -302,6 +302,16 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 )))
             }
         }
+        Value::Struct(_) => {
+            if matches!(indices, [1.0] | [1.0, 1.0]) {
+                Ok(base.clone())
+            } else {
+                Err(indexing_error_with_identifier(
+                    "Struct subscript out of bounds",
+                    "RunMat:IndexOutOfBounds",
+                ))
+            }
+        }
         _ => Err(indexing_error_with_identifier(
             format!("Cannot index value of type {base:?}"),
             "RunMat:SliceNonTensor",

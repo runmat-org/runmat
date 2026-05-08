@@ -36,6 +36,20 @@ fn numeric_indices_from_values(values: &[Value]) -> Result<Vec<usize>, RuntimeEr
         .collect()
 }
 
+fn assign_scalar_struct_index(
+    _base: runmat_builtins::StructValue,
+    indices: &[usize],
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    match indices {
+        [1] | [1, 1] => Ok(rhs),
+        _ => Err(crate::interpreter::errors::mex(
+            "IndexOutOfBounds",
+            "Struct subscript out of bounds",
+        )),
+    }
+}
+
 fn resolve_cell_indices(
     values: &[Value],
     rows: usize,
@@ -695,6 +709,7 @@ where
                     v,
                     Value::Object(_)
                         | Value::HandleObject(_)
+                        | Value::Struct(_)
                         | Value::Tensor(_)
                         | Value::ComplexTensor(_)
                         | Value::GpuTensor(_)
@@ -842,6 +857,7 @@ where
                 Value::ComplexTensor(t) => {
                     stack.push(idx_write_linear::assign_complex_scalar(t, &indices, &rhs).await?)
                 }
+                Value::Struct(st) => stack.push(assign_scalar_struct_index(st, &indices, rhs)?),
                 Value::GpuTensor(h) => {
                     stack.push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs).await?)
                 }
@@ -849,6 +865,7 @@ where
                     if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                         let kind = |v: &Value| match v {
                             Value::Object(_) => "Object",
+                            Value::Struct(_) => "Struct",
                             Value::Tensor(_) => "Tensor",
                             Value::GpuTensor(_) => "GpuTensor",
                             Value::Num(_) => "Num",
