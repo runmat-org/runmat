@@ -514,6 +514,27 @@ fn cell_end_indexing_uses_semantic_vm() {
 }
 
 #[test]
+fn cell_end_offset_indexing_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "C = {1, 2, 3}; y = C{end-1};";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile cell end-offset indexing");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "cell end-offset indexing should compile through semantic HIR/MIR/VM"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "2");
+}
+
+#[test]
 fn cell_end_assignment_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "C = {1, 2}; C{end} = 9; y = C{2};";
@@ -523,6 +544,25 @@ fn cell_end_assignment_uses_semantic_vm() {
     assert!(
         prepared.bytecode.layout.is_some(),
         "cell end assignment should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "9"
+    }));
+}
+
+#[test]
+fn cell_end_offset_assignment_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "C = {1, 2, 3}; C{end-1} = 9; y = C{2};";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile cell end-offset assignment");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "cell end-offset assignment should compile through semantic HIR/MIR/VM"
     );
 
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");

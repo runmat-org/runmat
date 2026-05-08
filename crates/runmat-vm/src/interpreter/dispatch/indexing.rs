@@ -68,6 +68,23 @@ fn resolve_cell_indices(
                     cols
                 })
             }
+            Value::Num(index) if *index < 0.0 => {
+                let len = if values.len() == 1 {
+                    rows * cols
+                } else if dim == 0 {
+                    rows
+                } else {
+                    cols
+                };
+                let resolved = len as isize + *index as isize;
+                if resolved < 1 || resolved as usize > len {
+                    return Err(crate::interpreter::errors::mex(
+                        "CellIndexOutOfBounds",
+                        "Cell index out of bounds",
+                    ));
+                }
+                Ok(resolved as usize)
+            }
             _ => {
                 let index: f64 = value.try_into()?;
                 Ok(index as usize)
