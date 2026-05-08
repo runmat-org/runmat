@@ -725,203 +725,30 @@ where
             Ok(true)
         }
         crate::bytecode::Instr::StoreIndex(num_indices) => {
-            if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
-                let snap = stack
-                    .iter()
-                    .rev()
-                    .take(6)
-                    .map(|v| match v {
-                        Value::Object(_) => "Object",
-                        Value::HandleObject(_) => "HandleObject",
-                        Value::Tensor(t) => {
-                            log::debug!("[vm] StoreIndex pre-snap tensor shape={:?}", t.shape);
-                            "Tensor"
-                        }
-                        Value::GpuTensor(h) => {
-                            log::debug!("[vm] StoreIndex pre-snap GPU tensor shape={:?}", h.shape);
-                            "GpuTensor"
-                        }
-                        Value::Num(_) => "Num",
-                        Value::Int(_) => "Int",
-                        Value::String(_) => "String",
-                        Value::Cell(_) => "Cell",
-                        _ => "Other",
-                    })
-                    .collect::<Vec<_>>();
-                log::debug!(
-                    "[vm] StoreIndex pre-snap pc={} stack_top_types={:?}",
-                    pc,
-                    snap
-                );
-            }
             let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let assignable = |v: &Value| {
-                matches!(
-                    v,
-                    Value::Object(_)
-                        | Value::HandleObject(_)
-                        | Value::Struct(_)
-                        | Value::Cell(_)
-                        | Value::Tensor(_)
-                        | Value::ComplexTensor(_)
-                        | Value::GpuTensor(_)
-                )
-            };
-            let base_idx_opt = (0..stack.len()).rev().find(|&j| {
-                assignable(&stack[j]) && (*num_indices == 0 || j + *num_indices < stack.len())
-            });
-            let base_pos = if let Some(j) = base_idx_opt {
-                j
-            } else {
-                return Err(crate::interpreter::errors::mex(
-                    "IndexAssignmentUnsupportedBase",
-                    "Index assignment only for tensors",
-                ));
-            };
-            let base = stack.remove(base_pos);
-            clear_value_residency(&base);
             let mut indices: Vec<usize> = Vec::new();
-            let mut raw_contiguous_indices: Vec<Value> = Vec::new();
-            if *num_indices > 0 {
-                let mut contiguous_ok = true;
-                if base_pos + *num_indices > stack.len() {
-                    contiguous_ok = false;
-                } else {
-                    for k in 0..*num_indices {
-                        let idx_pos = base_pos + k;
-                        raw_contiguous_indices.push(stack[idx_pos].clone());
-                        let idx_val = match index_scalar_from_value(&stack[idx_pos]).await {
-                            Ok(Some(val)) => val,
-                            Ok(None) => {
-                                contiguous_ok = false;
-                                indices.clear();
-                                break;
-                            }
-                            Err(err) => return Err(err),
-                        };
-                        let idx_val = if idx_val <= 0 { 0 } else { idx_val as usize };
-                        indices.push(idx_val);
-                    }
-                }
-                if contiguous_ok {
-                    for k in (0..*num_indices).rev() {
-                        stack.remove(base_pos + k);
-                    }
-                } else {
-                    indices.clear();
-                }
+            for _ in 0..*num_indices {
+                let value = stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow",
+                ))?;
+                let idx_val = index_scalar_from_value(&value).await?.ok_or_else(|| {
+                    crate::interpreter::errors::mex(
+                        "ScalarIndexRequired",
+                        "StoreIndex requires scalar indices; use StoreSlice for vector, range, or logical indices",
+                    )
+                })?;
+                indices.push(if idx_val <= 0 { 0 } else { idx_val as usize });
             }
-            let (rows_opt, cols_opt) = match &base {
-                Value::Tensor(t) => (Some(t.rows()), Some(t.cols())),
-                Value::GpuTensor(h) => (
-                    Some(h.shape.first().copied().unwrap_or(1).max(1)),
-                    Some(h.shape.get(1).copied().unwrap_or(1).max(1)),
-                ),
-                _ => (None, None),
-            };
-            if indices.is_empty() {
-                let mut numeric_above: Vec<(usize, usize)> = Vec::new();
-                let mut scan_limit = 12usize;
-                let mut kk = stack.len();
-                while kk > 0 && scan_limit > 0 {
-                    let idx = kk - 1;
-                    if assignable(&stack[idx]) {
-                        break;
-                    }
-                    if let Some(v) = index_scalar_from_value(&stack[idx]).await? {
-                        let v = if v <= 0 { 0 } else { v as usize };
-                        numeric_above.push((idx, v));
-                    }
-                    kk -= 1;
-                    scan_limit -= 1;
-                }
-                if numeric_above.len() >= 2 {
-                    let mut picked: Option<((usize, usize), (usize, usize))> = None;
-                    for w in (1..numeric_above.len()).rev() {
-                        let (j_idx, j_val) = numeric_above[w];
-                        let (i_idx, i_val) = numeric_above[w - 1];
-                        let fits = match (rows_opt, cols_opt) {
-                            (Some(r), Some(c)) => {
-                                i_val >= 1 && i_val <= r && j_val >= 1 && j_val <= c
-                            }
-                            _ => true,
-                        };
-                        if fits {
-                            picked = Some(((i_idx, i_val), (j_idx, j_val)));
-                            break;
-                        }
-                    }
-                    if let Some(((i_idx, i_val), (j_idx, j_val))) = picked {
-                        let mut to_remove = [i_idx, j_idx];
-                        to_remove.sort_unstable();
-                        stack.remove(to_remove[1]);
-                        stack.remove(to_remove[0]);
-                        indices = vec![i_val, j_val];
-                    }
-                } else if numeric_above.len() == 1 {
-                    let (k_idx, k_val) = numeric_above[0];
-                    stack.remove(k_idx);
-                    indices = vec![k_val];
-                }
-            }
-            if indices.is_empty() {
-                if *num_indices == 1 && raw_contiguous_indices.len() == 1 {
-                    let total = match &base {
-                        Value::Tensor(t) => t.data.len(),
-                        Value::Cell(ca) => ca.data.len(),
-                        _ => 0,
-                    };
-                    if total > 0 {
-                        let selected =
-                            indices_from_value_linear(&raw_contiguous_indices[0], total).await?;
-                        match base {
-                            Value::Tensor(mut t) => {
-                                if let Value::Complex(re, im) = rhs {
-                                    let mut ct = runmat_builtins::ComplexTensor {
-                                        data: t.data.into_iter().map(|re| (re, 0.0)).collect(),
-                                        shape: t.shape,
-                                        rows: t.rows,
-                                        cols: t.cols,
-                                    };
-                                    for &idx in &selected {
-                                        ct.data[idx - 1] = (re, im);
-                                    }
-                                    stack.remove(base_pos);
-                                    stack.push(Value::ComplexTensor(ct));
-                                    return Ok(true);
-                                }
-                                let rhs_values = idx_write_slice::materialize_rhs_linear_real(
-                                    &rhs,
-                                    selected.len(),
-                                )
-                                .await?;
-                                for (&idx, &value) in selected.iter().zip(rhs_values.iter()) {
-                                    t.data[idx - 1] = value;
-                                }
-                                stack.remove(base_pos);
-                                stack.push(Value::Tensor(t));
-                                return Ok(true);
-                            }
-                            Value::Cell(ca) => {
-                                let updated = crate::ops::cells::assign_cell_paren_linear_indices(
-                                    ca, &selected, &rhs,
-                                )?;
-                                stack.remove(base_pos);
-                                stack.push(updated);
-                                return Ok(true);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                return Err(crate::interpreter::errors::mex(
-                    "IndexAssignmentUnsupportedBase",
-                    "Index assignment only for tensors",
-                ));
-            }
+            indices.reverse();
+            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
+            clear_value_residency(&base);
             match base {
                 Value::Object(obj) => {
                     let cell = runmat_runtime::call_builtin_async(

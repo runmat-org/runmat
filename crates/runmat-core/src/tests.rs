@@ -509,6 +509,22 @@ fn range_assignment_vector_rhs_uses_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "range vector assignment should compile through semantic HIR/MIR/VM"
     );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreSlice(..))),
+        "range vector assignment should lower to slice store bytecode"
+    );
+    assert!(
+        !prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreIndex(1))),
+        "range vector assignment should not rely on StoreIndex fallback"
+    );
 
     block_on(session.execute_outcome(source)).expect("exec succeeds");
     let outcome = block_on(session.execute_outcome("y")).expect("read y");
@@ -672,6 +688,22 @@ fn cell_range_paren_assignment_uses_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "cell range paren assignment should compile through semantic HIR/MIR/VM"
     );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreSlice(..))),
+        "cell range paren assignment should lower to slice store bytecode"
+    );
+    assert!(
+        !prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreIndex(1))),
+        "cell range paren assignment should not rely on StoreIndex fallback"
+    );
 
     block_on(session.execute_outcome(source)).expect("exec succeeds");
     let outcome = block_on(session.execute_outcome("y")).expect("read y");
@@ -713,6 +745,14 @@ fn cell_colon_paren_assignment_uses_semantic_vm() {
     assert!(
         prepared.bytecode.layout.is_some(),
         "cell colon paren assignment should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreSlice(..))),
+        "cell colon paren assignment should lower to slice store bytecode"
     );
 
     block_on(session.execute_outcome(source)).expect("exec succeeds");
