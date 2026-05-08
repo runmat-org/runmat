@@ -4,6 +4,7 @@ use runmat_runtime::RuntimeError;
 
 fn is_empty_tensor(value: &Value) -> bool {
     matches!(value, Value::Tensor(t) if t.data.is_empty() || t.rows == 0 || t.cols == 0)
+        || matches!(value, Value::ComplexTensor(t) if t.data.is_empty() || t.rows == 0 || t.cols == 0)
 }
 
 fn delete_tensor_linear(mut t: Tensor, idx: usize) -> Result<Value, RuntimeError> {
@@ -30,6 +31,32 @@ fn delete_tensor_linear(mut t: Tensor, idx: usize) -> Result<Value, RuntimeError
         t.shape = vec![t.rows, 1];
     }
     Ok(Value::Tensor(t))
+}
+
+fn delete_complex_linear(mut t: ComplexTensor, idx: usize) -> Result<Value, RuntimeError> {
+    let total = t.rows * t.cols;
+    if idx == 0 || idx > total {
+        return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+    }
+    if !(t.rows == 1 || t.cols == 1) {
+        return Err(mex(
+            "UnsupportedDeletion",
+            "Linear deletion is only supported for vectors",
+        ));
+    }
+    t.data.remove(idx - 1);
+    if t.data.is_empty() {
+        t.rows = 0;
+        t.cols = 0;
+        t.shape = vec![0, 0];
+    } else if t.rows == 1 {
+        t.cols = t.data.len();
+        t.shape = vec![1, t.cols];
+    } else {
+        t.rows = t.data.len();
+        t.shape = vec![t.rows, 1];
+    }
+    Ok(Value::ComplexTensor(t))
 }
 
 pub async fn rhs_to_real_scalar(rhs: &Value) -> Result<f64, RuntimeError> {
@@ -147,6 +174,9 @@ pub async fn assign_complex_scalar(
         let idx = indices[0];
         if idx == 0 || idx > total {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        if is_empty_tensor(rhs) {
+            return delete_complex_linear(t, idx);
         }
         let val = rhs_to_complex_scalar(rhs).await?;
         t.data[idx - 1] = val;
