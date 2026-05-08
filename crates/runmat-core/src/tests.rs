@@ -494,6 +494,25 @@ fn for_range_loop_uses_semantic_vm_without_rerunning_prefix() {
 }
 
 #[test]
+fn while_loop_uses_semantic_vm_without_rerunning_prefix() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "x = 0; while x < 3; x = x + 1; end; y = x;";
+    let prepared = session.compile_input(source).expect("compile while loop");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "while loops should compile through semantic HIR/MIR/VM"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "3");
+}
+
+#[test]
 fn range_assignment_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "A = [1, 2, 3, 4]; A(2:3) = 9; y = A(3);";

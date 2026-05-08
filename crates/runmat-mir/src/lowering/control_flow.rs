@@ -189,6 +189,11 @@ impl ControlFlowBuilder {
                 body: loop_body,
             } = &stmt.kind
             {
+                let header_id = if statements.is_empty() {
+                    id
+                } else {
+                    self.fresh_block()
+                };
                 let loop_body_id = self.fresh_block();
                 let exit_id = self.lower_continuation_target(
                     ctx,
@@ -205,7 +210,7 @@ impl ControlFlowBuilder {
                     loop_body,
                     0,
                     MirTerminator {
-                        kind: MirTerminatorKind::Goto(id),
+                        kind: MirTerminatorKind::Goto(header_id),
                         span: stmt.span,
                     },
                     return_terminator,
@@ -213,15 +218,16 @@ impl ControlFlowBuilder {
                     await_replacements,
                 )?;
                 self.blocks.push(body_block);
+                let mut header_statements = Vec::new();
                 let cond = lower_operand_with_replacements(
                     ctx,
                     cond,
-                    &mut statements,
+                    &mut header_statements,
                     await_replacements,
                 )?;
-                return Ok(BasicBlock {
-                    id,
-                    statements,
+                let header_block = BasicBlock {
+                    id: header_id,
+                    statements: header_statements,
                     terminator: MirTerminator {
                         kind: MirTerminatorKind::Branch {
                             cond,
@@ -230,7 +236,19 @@ impl ControlFlowBuilder {
                         },
                         span: stmt.span,
                     },
-                });
+                };
+                if header_id != id {
+                    self.blocks.push(header_block);
+                    return Ok(BasicBlock {
+                        id,
+                        statements,
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Goto(header_id),
+                            span: stmt.span,
+                        },
+                    });
+                }
+                return Ok(header_block);
             }
             if let HirStmtKind::For {
                 binding,
@@ -239,6 +257,13 @@ impl ControlFlowBuilder {
                 semantics,
             } = &stmt.kind
             {
+                let iterable =
+                    lower_expr_with_replacements(ctx, range, &mut statements, await_replacements)?;
+                let header_id = if statements.is_empty() {
+                    id
+                } else {
+                    self.fresh_block()
+                };
                 let body_id = self.fresh_block();
                 let exit_id = self.lower_continuation_target(
                     ctx,
@@ -255,7 +280,7 @@ impl ControlFlowBuilder {
                     loop_body,
                     0,
                     MirTerminator {
-                        kind: MirTerminatorKind::Goto(id),
+                        kind: MirTerminatorKind::Goto(header_id),
                         span: stmt.span,
                     },
                     return_terminator,
@@ -263,11 +288,9 @@ impl ControlFlowBuilder {
                     await_replacements,
                 )?;
                 self.blocks.push(body_block);
-                let iterable =
-                    lower_expr_with_replacements(ctx, range, &mut statements, await_replacements)?;
-                return Ok(BasicBlock {
-                    id,
-                    statements,
+                let header_block = BasicBlock {
+                    id: header_id,
+                    statements: Vec::new(),
                     terminator: MirTerminator {
                         kind: MirTerminatorKind::For {
                             binding: ctx.local_for_binding(*binding)?,
@@ -278,7 +301,19 @@ impl ControlFlowBuilder {
                         },
                         span: stmt.span,
                     },
-                });
+                };
+                if header_id != id {
+                    self.blocks.push(header_block);
+                    return Ok(BasicBlock {
+                        id,
+                        statements,
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Goto(header_id),
+                            span: stmt.span,
+                        },
+                    });
+                }
+                return Ok(header_block);
             }
             if let HirStmtKind::Switch {
                 expr,
