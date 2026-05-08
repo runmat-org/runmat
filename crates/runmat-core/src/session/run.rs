@@ -305,9 +305,8 @@ impl RunMatSession {
         let display = execution_display_context(&lowering.assembly, bytecode.layout.as_ref());
         let display_context = display.context;
         let display_var_ids = display.display_var_ids;
-        let (hir, updated_vars, updated_functions) =
-            (lowering.hir, lowering.variables, lowering.functions);
-        let execution_vars = execution_workspace_mapping(&bytecode, &updated_vars);
+        let (hir, updated_functions) = (lowering.hir, lowering.functions);
+        let execution_vars = execution_workspace_mapping(&bytecode);
         let max_var_id = execution_vars.values().copied().max().unwrap_or(0);
         if debug_trace {
             debug!(?execution_vars, "[repl] execution vars");
@@ -369,7 +368,6 @@ impl RunMatSession {
                 "Variable array after preparation: {:?}",
                 self.variable_array
             );
-            debug!("Updated variable mapping: {updated_vars:?}");
             debug!("Bytecode instructions: {:?}", bytecode.instructions);
         }
 
@@ -998,12 +996,9 @@ fn compile_eval_hook_bytecode(
     runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)
 }
 
-fn execution_workspace_mapping(
-    bytecode: &runmat_vm::Bytecode,
-    legacy_mapping: &HashMap<String, usize>,
-) -> HashMap<String, usize> {
+fn execution_workspace_mapping(bytecode: &runmat_vm::Bytecode) -> HashMap<String, usize> {
     let Some(layout) = &bytecode.layout else {
-        return legacy_mapping.clone();
+        return HashMap::new();
     };
     let mut mapping = HashMap::new();
     for entrypoint in layout.entrypoints.values() {
@@ -1011,11 +1006,7 @@ fn execution_workspace_mapping(
             mapping.insert(export.name.clone(), export.slot.0);
         }
     }
-    if mapping.is_empty() {
-        legacy_mapping.clone()
-    } else {
-        mapping
-    }
+    mapping
 }
 
 struct SessionExecution {
