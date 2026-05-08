@@ -70,6 +70,12 @@ pub fn expand_cell_values(
     }
 }
 
+pub fn expand_all_cell_values(ca: &CellArray) -> Result<Vec<Value>, RuntimeError> {
+    (1..=ca.data.len())
+        .map(|idx| index_cell_value(ca, &[idx]))
+        .collect()
+}
+
 pub fn assign_cell_value<OnWrite>(
     mut ca: CellArray,
     indices: &[usize],

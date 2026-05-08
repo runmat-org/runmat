@@ -318,10 +318,10 @@ pub async fn build_builtin_expand_multi_args(
                         empty,
                     ];
                     let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                    Ok(match v {
+                    match v {
                         Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
-                        other => vec![other],
-                    })
+                        other => Ok(vec![other]),
+                    }
                 }
                 _ => Err(crate::interpreter::errors::mex(
                     "ExpandError",
@@ -373,10 +373,10 @@ pub async fn build_feval_expand_multi_args(
                         empty,
                     ];
                     let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                    Ok(match v {
+                    match v {
                         Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
-                        other => vec![other],
-                    })
+                        other => Ok(vec![other]),
+                    }
                 }
                 _ => Err(crate::interpreter::errors::mex(
                     "InvalidExpandAllTarget",
@@ -418,7 +418,7 @@ pub async fn build_user_function_expand_multi_args(
         "CallFunctionExpandMulti requires cell or object cell access",
         |base| async move {
             match base {
-                Value::Cell(ca) => Ok(crate::call::shared::expand_all_cell(&ca)),
+                Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                 Value::Object(obj) => {
                     let empty = subsref_empty_brace_cell()?;
                     let args = vec![
@@ -428,10 +428,10 @@ pub async fn build_user_function_expand_multi_args(
                         empty,
                     ];
                     let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                    Ok(match v {
+                    match v {
                         Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
-                        other => vec![other],
-                    })
+                        other => Ok(vec![other]),
+                    }
                 }
                 _ => Err(crate::interpreter::errors::mex(
                     "InvalidExpandAllTarget",

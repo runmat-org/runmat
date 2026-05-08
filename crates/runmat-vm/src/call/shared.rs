@@ -315,8 +315,8 @@ pub fn expand_cell_indices(
     }
 }
 
-pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Vec<Value> {
-    cell.data.iter().map(|p| (*(*p)).clone()).collect()
+pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Result<Vec<Value>, RuntimeError> {
+    crate::ops::cells::expand_all_cell_values(cell)
 }
 
 pub fn subsref_paren_index_cell(indices: &[Value]) -> Result<Value, RuntimeError> {
@@ -377,7 +377,7 @@ where
 
             let expanded = if spec.expand_all {
                 match base {
-                    Value::Cell(ca) => expand_all_cell(&ca),
+                    Value::Cell(ca) => expand_all_cell(&ca)?,
                     other @ Value::Object(_) => expand_object_all(other).await?,
                     _ => {
                         return Err(crate::interpreter::errors::mex(

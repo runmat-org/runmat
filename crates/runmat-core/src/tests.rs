@@ -1380,6 +1380,33 @@ fn feval_with_cell_expansion_uses_semantic_vm() {
 }
 
 #[test]
+fn feval_with_2d_cell_expansion_is_column_major_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "f = @(a, b, c, d) c; C = {1, 2; 3, 4}; y = feval(f, C{:});";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile 2d feval expansion call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "2d feval expansion should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMulti(_))),
+        "2d expanded feval should use the VM feval ABI instruction"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "2"
+    }));
+}
+
+#[test]
 fn local_function_with_cell_expansion_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "C = {2}; y = inc(C{:});\nfunction z = inc(x)\n  z = x + 1;\nend";
