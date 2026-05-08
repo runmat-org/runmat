@@ -142,6 +142,7 @@ mod tests {
     use runmat_builtins::Value;
     use runmat_hir::{lower, LoweringContext};
     use runmat_mir::lowering::lower_assembly;
+    use runmat_mir::MirTerminatorKind;
 
     #[test]
     fn primary_compile_attaches_derived_layout() {
@@ -447,5 +448,24 @@ mod tests {
 
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert_eq!(vars[x_export.slot.0], Value::Num(2.0));
+    }
+
+    #[test]
+    fn primary_compile_lowers_unreachable_terminator() {
+        let ast = runmat_parser::parse("x = 1;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+        body.blocks.last_mut().expect("entry block").terminator.kind =
+            MirTerminatorKind::Unreachable;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::Return)));
     }
 }

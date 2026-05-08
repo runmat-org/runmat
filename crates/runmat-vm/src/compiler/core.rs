@@ -496,6 +496,12 @@ impl Compiler {
                         self.compile_mir_return(&block.terminator.kind)?;
                     }
                 }
+                MirTerminatorKind::Unreachable => {
+                    if exits_try_scope {
+                        self.emit(Instr::PopTry);
+                    }
+                    self.emit(Instr::Return);
+                }
                 _ => return Err(CompileError::new(
                     "MIR bytecode lowering for this control-flow terminator is not implemented yet",
                 )),
