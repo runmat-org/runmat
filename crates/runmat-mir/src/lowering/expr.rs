@@ -168,6 +168,17 @@ fn lower_call_arg(
                     temps,
                     await_replacements,
                 )?),
+                IndexComponent::End { offset, .. } if *offset == 0 => {
+                    let local = ctx.fresh_temp(arg.span, Some(arg.id));
+                    temps.push(MirStmt {
+                        kind: MirStmtKind::Assign {
+                            place: MirPlace::Local(local),
+                            value: MirRvalue::End,
+                        },
+                        span: arg.span,
+                    });
+                    indices.push(MirOperand::Local(local));
+                }
                 _ => {
                     return Err(SemanticError::new(
                         "MIR lowering for this expansion index is not implemented yet",

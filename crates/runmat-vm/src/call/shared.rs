@@ -262,6 +262,9 @@ pub fn expand_cell_indices(
 ) -> Result<Vec<Value>, RuntimeError> {
     match indices.len() {
         1 => match &indices[0] {
+            Value::Num(n) if *n == 0.0 && n.is_sign_negative() => {
+                Ok(vec![(*cell.data[cell.data.len() - 1]).clone()])
+            }
             Value::Num(n) => {
                 let idx = *n as usize;
                 if idx == 0 || idx > cell.data.len() {
