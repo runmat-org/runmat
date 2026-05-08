@@ -279,13 +279,6 @@ pub fn subsref_brace_index_cell_raw(indices: &[Value]) -> Result<Value, RuntimeE
     ))
 }
 
-pub fn subsref_brace_numeric_index_values(indices: &[Value]) -> Vec<Value> {
-    indices
-        .iter()
-        .map(|v| Value::Num((v).try_into().unwrap_or(0.0)))
-        .collect()
-}
-
 pub fn subsref_empty_brace_cell() -> Result<Value, RuntimeError> {
     Ok(Value::Cell(
         runmat_builtins::CellArray::new(vec![], 1, 0)

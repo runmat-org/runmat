@@ -695,9 +695,7 @@ pub async fn dispatch_instruction(
                         Value::Object(obj) => obj,
                         _ => unreachable!(),
                     };
-                    let idx_vals =
-                        crate::call::shared::subsref_brace_numeric_index_values(&indices);
-                    let cell = runmat_runtime::call_builtin_async("__make_cell", &idx_vals).await?;
+                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
                     let v = runmat_runtime::call_builtin_async(
                         "call_method",
                         &[

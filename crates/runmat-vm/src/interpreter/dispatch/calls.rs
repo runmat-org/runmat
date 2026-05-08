@@ -6,8 +6,8 @@ use crate::call::closures as call_closures;
 use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
     build_expanded_args_from_specs, collect_multi_outputs, expand_cell_indices,
-    lookup_user_function, prepare_user_call, subsref_brace_numeric_index_values,
-    subsref_empty_brace_cell, validate_user_function_arity, PreparedUserCall,
+    lookup_user_function, prepare_user_call, subsref_empty_brace_cell,
+    validate_user_function_arity, PreparedUserCall,
 };
 use crate::functions::UserFunction;
 use crate::interpreter::debug;
@@ -332,8 +332,7 @@ pub async fn build_builtin_expand_multi_args(
         |base, indices| async move {
             match base {
                 Value::Object(obj) => {
-                    let idx_vals = subsref_brace_numeric_index_values(&indices);
-                    let cell = runmat_runtime::call_builtin_async("__make_cell", &idx_vals).await?;
+                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
                     let args = vec![
                         Value::Object(obj),
                         Value::String("subsref".to_string()),
