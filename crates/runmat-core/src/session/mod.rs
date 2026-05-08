@@ -73,8 +73,6 @@ pub struct RunMatSession {
     legacy_function_definitions: HashMap<String, runmat_hir::LegacyHirStmt>,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
-    /// Legacy source IDs for user-defined functions keyed by name.
-    legacy_function_source_ids: HashMap<String, SourceId>,
     /// Loaded snapshot for standard library preloading
     snapshot: Option<Arc<Snapshot>>,
     /// Cooperative cancellation flag shared with the runtime.

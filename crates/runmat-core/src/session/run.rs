@@ -734,15 +734,6 @@ impl RunMatSession {
                     }
                 }
             }
-            let mut repl_source_id: Option<SourceId> = None;
-            for (name, stmt) in &updated_functions {
-                if matches!(stmt, runmat_hir::LegacyHirStmt::Function { .. }) {
-                    let source_id = *repl_source_id
-                        .get_or_insert_with(|| self.source_pool.intern("<repl>", input));
-                    self.legacy_function_source_ids
-                        .insert(name.clone(), source_id);
-                }
-            }
             self.legacy_function_definitions = updated_functions;
             // Apply 'ans' update if applicable (persisting expression result)
             if let Some((var_id, value)) = ans_update {

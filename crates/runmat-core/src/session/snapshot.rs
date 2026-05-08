@@ -104,7 +104,6 @@ impl RunMatSession {
             abi_workspace_handle: crate::abi::WorkspaceHandle(Uuid::new_v4()),
             legacy_function_definitions: HashMap::new(),
             source_pool: SourcePool::default(),
-            legacy_function_source_ids: HashMap::new(),
             snapshot,
             interrupt_flag: Arc::new(AtomicBool::new(false)),
             is_executing: false,
