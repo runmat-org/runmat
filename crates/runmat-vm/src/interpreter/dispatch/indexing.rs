@@ -500,7 +500,7 @@ where
                 Value::FunctionHandle(_) | Value::Closure(_) => {
                     let numeric = linear_index_values_to_f64(&raw_indices).await?;
                     let args = numeric.into_iter().map(Value::Num).collect::<Vec<_>>();
-                    match crate::call::feval::execute_feval(base, args, functions, functions)
+                    match crate::call::feval::execute_feval(base, args, 1, functions, functions)
                         .await?
                     {
                         crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),

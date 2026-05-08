@@ -1346,6 +1346,68 @@ fn local_function_multi_output_uses_semantic_vm() {
 }
 
 #[test]
+fn dynamic_function_handle_multi_output_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source =
+        "f = @pair; [a, b] = feval(f, 2);\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile dynamic multi-output function handle call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "dynamic multi-output function handle call should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::bytecode::Instr::CallFevalMulti(_, 2)
+        )),
+        "dynamic multi-output function handle call should lower to typed feval multi-output bytecode"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
+            && upsert.value.to_string() == "2"
+    }));
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
+            && upsert.value.to_string() == "3"
+    }));
+}
+
+#[test]
+fn dynamic_function_handle_multi_output_with_expansion_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source =
+        "f = @pair; C = {2}; [a, b] = feval(f, C{:});\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile dynamic multi-output expansion call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "dynamic multi-output expansion call should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::bytecode::Instr::CallFevalExpandMultiOutput(_, 2)
+        )),
+        "dynamic multi-output expansion call should lower to typed feval expansion bytecode"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
+            && upsert.value.to_string() == "2"
+    }));
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
+            && upsert.value.to_string() == "3"
+    }));
+}
+
+#[test]
 fn feval_with_cell_expansion_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "f = @(x) x + 1; C = {2}; y = feval(f, C{:});";

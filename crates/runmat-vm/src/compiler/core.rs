@@ -622,9 +622,18 @@ impl Compiler {
                 ));
             }
             MirCallee::Dynamic(_) => {
-                return Err(self.compile_error(
-                    "MIR bytecode lowering for dynamic multi-output calls is not implemented yet",
-                ))
+                self.compile_mir_operand(match &call.callee {
+                    MirCallee::Dynamic(callee) => callee,
+                    _ => unreachable!(),
+                })?;
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                if has_expansion {
+                    self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
+                } else {
+                    self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                }
             }
             MirCallee::Static(_) => {
                 for arg in &call.args {

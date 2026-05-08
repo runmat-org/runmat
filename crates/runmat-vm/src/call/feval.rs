@@ -41,6 +41,7 @@ pub enum FevalDispatch {
 pub async fn execute_feval(
     func_val: Value,
     args: Vec<Value>,
+    requested_outputs: usize,
     context_functions: &HashMap<String, UserFunction>,
     bytecode_functions: &HashMap<String, UserFunction>,
 ) -> Result<FevalDispatch, RuntimeError> {
@@ -49,7 +50,9 @@ pub async fn execute_feval(
             let (name, call_args) = closure_call_args(&c, args);
             if let Some(function) = c.semantic_function {
                 if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
-                    function, &call_args, 1,
+                    function,
+                    &call_args,
+                    requested_outputs,
                 )
                 .await
                 {

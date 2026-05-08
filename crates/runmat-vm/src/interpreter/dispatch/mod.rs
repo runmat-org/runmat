@@ -500,6 +500,7 @@ pub async fn dispatch_instruction(
                 crate::call::feval::execute_feval(
                     func_val,
                     args,
+                    1,
                     &context.functions,
                     bytecode_functions,
                 )
@@ -520,6 +521,60 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CallFevalMulti(argc, out_count) => {
+            let args = crate::call::builtins::collect_call_args(stack, *argc)?;
+            let func_val = crate::interpreter::stack::pop_value(stack)?;
+            match crate::call::feval::execute_feval(
+                func_val,
+                args,
+                *out_count,
+                &context.functions,
+                bytecode_functions,
+            )
+            .await?
+            {
+                crate::call::feval::FevalDispatch::Completed(result) => {
+                    stack.push(result);
+                }
+                crate::call::feval::FevalDispatch::InvokeUser {
+                    name,
+                    args,
+                    functions,
+                } => {
+                    let arg_count = args.len();
+                    let prepared = prepare_named_user_dispatch(&name, &functions, &args, vars)?;
+                    let PreparedUserDispatch {
+                        func,
+                        var_map,
+                        func_program,
+                        func_vars,
+                    } = prepared;
+                    let mut func_bytecode = crate::compile_legacy(&func_program, &functions)?;
+                    func_bytecode.source_id = func.source_id;
+                    for (k, v) in func_bytecode.functions.iter() {
+                        context.functions.insert(k.clone(), v.clone());
+                    }
+                    let func_result_vars = interpret_function_counts(
+                        func_bytecode,
+                        func_vars,
+                        name.clone(),
+                        *out_count,
+                        arg_count,
+                    )
+                    .await?;
+                    stack.push(output_list_for_user_call(
+                        &name,
+                        &func,
+                        &var_map,
+                        &func_result_vars,
+                        *out_count,
+                    )?);
+                }
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CallFevalExpandMulti(specs) => {
             let args = build_feval_expand_multi_args(stack, specs).await?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
@@ -527,6 +582,7 @@ pub async fn dispatch_instruction(
                 crate::call::feval::execute_feval(
                     func_val,
                     args,
+                    1,
                     &context.functions,
                     bytecode_functions,
                 )
@@ -541,6 +597,60 @@ pub async fn dispatch_instruction(
                 } => {
                     let value = invoke_user_for_end_expr(&name, args, &functions, vars).await?;
                     stack.push(value);
+                }
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallFevalExpandMultiOutput(specs, out_count) => {
+            let args = build_feval_expand_multi_args(stack, specs).await?;
+            let func_val = crate::interpreter::stack::pop_value(stack)?;
+            match crate::call::feval::execute_feval(
+                func_val,
+                args,
+                *out_count,
+                &context.functions,
+                bytecode_functions,
+            )
+            .await?
+            {
+                crate::call::feval::FevalDispatch::Completed(result) => {
+                    stack.push(result);
+                }
+                crate::call::feval::FevalDispatch::InvokeUser {
+                    name,
+                    args,
+                    functions,
+                } => {
+                    let arg_count = args.len();
+                    let prepared = prepare_named_user_dispatch(&name, &functions, &args, vars)?;
+                    let PreparedUserDispatch {
+                        func,
+                        var_map,
+                        func_program,
+                        func_vars,
+                    } = prepared;
+                    let mut func_bytecode = crate::compile_legacy(&func_program, &functions)?;
+                    func_bytecode.source_id = func.source_id;
+                    for (k, v) in func_bytecode.functions.iter() {
+                        context.functions.insert(k.clone(), v.clone());
+                    }
+                    let func_result_vars = interpret_function_counts(
+                        func_bytecode,
+                        func_vars,
+                        name.clone(),
+                        *out_count,
+                        arg_count,
+                    )
+                    .await?;
+                    stack.push(output_list_for_user_call(
+                        &name,
+                        &func,
+                        &var_map,
+                        &func_result_vars,
+                        *out_count,
+                    )?);
                 }
             }
             Ok(Some(DispatchHandled::Generic(

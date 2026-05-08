@@ -625,7 +625,9 @@ async fn run_interpreter_inner(
             | Instr::CallStaticMethod(_, _, _)
             | Instr::RegisterClass { .. }
             | Instr::CallFeval(_)
+            | Instr::CallFevalMulti(_, _)
             | Instr::CallFevalExpandMulti(_)
+            | Instr::CallFevalExpandMultiOutput(_, _)
             | Instr::CallBuiltin(_, _)
             | Instr::CallFunction(_, _)
             | Instr::CallSemanticFunction(_, _)
