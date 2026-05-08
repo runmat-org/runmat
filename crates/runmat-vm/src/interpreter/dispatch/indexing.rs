@@ -1247,6 +1247,12 @@ where
                         ca, &selected, &rhs,
                     )?);
                 }
+                Value::Cell(ca) if *dims == 1 && (*colon_mask & 1u32) != 0 => {
+                    let selected = (1..=ca.data.len()).collect::<Vec<_>>();
+                    stack.push(crate::ops::cells::assign_cell_paren_linear_indices(
+                        ca, &selected, &rhs,
+                    )?);
+                }
                 Value::StringArray(mut sa) => {
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
