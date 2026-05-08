@@ -277,35 +277,17 @@ pub fn expand_cell_indices(
             }
             Value::Num(n) => {
                 let idx = *n as usize;
-                if idx == 0 || idx > cell.data.len() {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellIndexOutOfBounds",
-                        "Cell index out of bounds",
-                    ));
-                }
-                Ok(vec![(*cell.data[idx - 1]).clone()])
+                Ok(vec![crate::ops::cells::index_cell_value(cell, &[idx])?])
             }
             Value::Int(i) => {
                 let idx = i.to_i64() as usize;
-                if idx == 0 || idx > cell.data.len() {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellIndexOutOfBounds",
-                        "Cell index out of bounds",
-                    ));
-                }
-                Ok(vec![(*cell.data[idx - 1]).clone()])
+                Ok(vec![crate::ops::cells::index_cell_value(cell, &[idx])?])
             }
             Value::Tensor(t) => {
                 let mut out = Vec::with_capacity(t.data.len());
                 for &val in &t.data {
                     let idx = val as usize;
-                    if idx == 0 || idx > cell.data.len() {
-                        return Err(crate::interpreter::errors::mex(
-                            "CellIndexOutOfBounds",
-                            "Cell index out of bounds",
-                        ));
-                    }
-                    out.push((*cell.data[idx - 1]).clone());
+                    out.push(crate::ops::cells::index_cell_value(cell, &[idx])?);
                 }
                 Ok(out)
             }

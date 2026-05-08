@@ -601,6 +601,27 @@ fn mixed_logical_complex_matrix_uses_semantic_vm() {
 }
 
 #[test]
+fn cell_2d_range_expansion_is_column_major_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "C = {1, 2; 3, 4}; [a, b] = C{2:3}; y = b;";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile 2d cell range expansion");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "2d cell range expansion should compile through semantic HIR/MIR/VM"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "2");
+}
+
+#[test]
 fn workspace_read_across_submissions_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("x = 42;")).expect("seed workspace");
