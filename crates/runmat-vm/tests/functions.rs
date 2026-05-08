@@ -338,7 +338,7 @@ fn mixed_member_cell_and_index_read_chain() {
 
 #[test]
 fn function_handle_anon_round_trip() {
-    let input = "h = make_handle('sin'); g = make_anon('x', 'x+1');";
+    let input = "h = @sin; g = make_anon('x', 'x+1');";
     let ast = parse(input).unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();

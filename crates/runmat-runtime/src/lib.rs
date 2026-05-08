@@ -120,14 +120,6 @@ pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<
     make_cell_with_shape(values, vec![rows, cols])
 }
 
-// Internal builtin to construct a cell from a vector of values (used by the VM)
-#[runmat_macros::runtime_builtin(name = "__make_cell", builtin_path = "crate")]
-async fn make_cell_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let rows = 1usize;
-    let cols = rest.len();
-    make_cell(rest, rows, cols).map_err(Into::into)
-}
-
 fn to_string_scalar(v: &Value) -> Result<String, String> {
     let s: String = v.try_into()?;
     Ok(s)
@@ -462,11 +454,6 @@ async fn set_p_builtin(obj: Value, val: Value) -> crate::BuiltinResult<Value> {
         }
         other => Err((format!("set.p requires object, got {other:?}")).into()),
     }
-}
-
-#[runmat_macros::runtime_builtin(name = "make_handle", builtin_path = "crate")]
-async fn make_handle_builtin(name: String) -> crate::BuiltinResult<Value> {
-    Ok(Value::FunctionHandle(name))
 }
 
 #[runmat_macros::runtime_builtin(name = "make_anon", builtin_path = "crate")]

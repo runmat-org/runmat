@@ -229,50 +229,9 @@ fn ensure_getrandom_js() {
 }
 
 fn ensure_internal_builtins() {
-    if runmat_builtins::builtin_function_by_name("make_handle").is_none() {
-        register_make_handle_fallback();
-    }
     if runmat_builtins::builtin_function_by_name("make_anon").is_none() {
         register_make_anon_fallback();
     }
-}
-
-fn register_make_handle_fallback() {
-    use runmat_builtins::wasm_registry::submit_builtin_function;
-    use runmat_builtins::{BuiltinFunction, Type};
-
-    fn make_handle_impl(args: &[Value]) -> runmat_builtins::BuiltinFuture {
-        let args = args.to_vec();
-        Box::pin(async move {
-            if args.len() != 1 {
-                return Err(build_runtime_error("make_handle: expected 1 input")
-                    .with_identifier("RunMat:make_handle:InvalidInput")
-                    .build());
-            }
-            let name: String = std::convert::TryInto::try_into(&args[0]).map_err(|err| {
-                build_runtime_error(format!("make_handle: {err}"))
-                    .with_identifier("RunMat:make_handle:InvalidInput")
-                    .build()
-            })?;
-            Ok(Value::FunctionHandle(name))
-        })
-    }
-
-    let builtin = BuiltinFunction::new(
-        "make_handle",
-        "",
-        "",
-        "",
-        "",
-        vec![Type::String],
-        Type::Unknown,
-        None,
-        make_handle_impl,
-        &[],
-        false,
-        true,
-    );
-    submit_builtin_function(builtin);
 }
 
 fn register_make_anon_fallback() {
