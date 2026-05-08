@@ -4,8 +4,9 @@ use crate::indexing::plan as idx_plan;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
 use crate::indexing::read_linear as idx_read_linear;
 use crate::indexing::read_slice as idx_read_slice;
-use crate::indexing::selectors::build_slice_selectors;
-use crate::indexing::selectors::index_scalar_from_value;
+use crate::indexing::selectors::{
+    build_slice_selectors, index_scalar_from_value, indices_from_value_linear,
+};
 use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
 use runmat_builtins::Value;
@@ -769,7 +770,9 @@ where
                         | Value::GpuTensor(_)
                 )
             };
-            let base_idx_opt = (0..stack.len()).rev().find(|&j| assignable(&stack[j]));
+            let base_idx_opt = (0..stack.len()).rev().find(|&j| {
+                assignable(&stack[j]) && (*num_indices == 0 || j + *num_indices < stack.len())
+            });
             let base_pos = if let Some(j) = base_idx_opt {
                 j
             } else {
@@ -781,6 +784,7 @@ where
             let base = stack.remove(base_pos);
             clear_value_residency(&base);
             let mut indices: Vec<usize> = Vec::new();
+            let mut raw_contiguous_indices: Vec<Value> = Vec::new();
             if *num_indices > 0 {
                 let mut contiguous_ok = true;
                 if base_pos + *num_indices > stack.len() {
@@ -788,6 +792,7 @@ where
                 } else {
                     for k in 0..*num_indices {
                         let idx_pos = base_pos + k;
+                        raw_contiguous_indices.push(stack[idx_pos].clone());
                         let idx_val = match index_scalar_from_value(&stack[idx_pos]).await {
                             Ok(Some(val)) => val,
                             Ok(None) => {
@@ -863,6 +868,22 @@ where
                 }
             }
             if indices.is_empty() {
+                if *num_indices == 1 && raw_contiguous_indices.len() == 1 {
+                    if let Value::Tensor(mut t) = base {
+                        let total = t.data.len();
+                        let selected =
+                            indices_from_value_linear(&raw_contiguous_indices[0], total).await?;
+                        let rhs_values =
+                            idx_write_slice::materialize_rhs_linear_real(&rhs, selected.len())
+                                .await?;
+                        for (&idx, &value) in selected.iter().zip(rhs_values.iter()) {
+                            t.data[idx - 1] = value;
+                        }
+                        stack.remove(base_pos);
+                        stack.push(Value::Tensor(t));
+                        return Ok(true);
+                    }
+                }
                 return Err(crate::interpreter::errors::mex(
                     "IndexAssignmentUnsupportedBase",
                     "Index assignment only for tensors",
