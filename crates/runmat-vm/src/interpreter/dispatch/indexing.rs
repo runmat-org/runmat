@@ -36,6 +36,26 @@ fn numeric_indices_from_values(values: &[Value]) -> Result<Vec<usize>, RuntimeEr
         .collect()
 }
 
+async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, RuntimeError> {
+    let mut out = Vec::with_capacity(values.len());
+    for value in values {
+        let mut index_value = value.clone();
+        if matches!(index_value, Value::GpuTensor(_)) {
+            index_value = runmat_runtime::dispatcher::gather_if_needed_async(&index_value).await?;
+        }
+        let index_val = index_scalar_from_value(&index_value)
+            .await?
+            .ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "UnsupportedIndexType",
+                    &format!("Unsupported index type: expected numeric scalar, got {value:?}"),
+                )
+            })?;
+        out.push(index_val as f64);
+    }
+    Ok(out)
+}
+
 fn assign_scalar_struct_index(
     _base: runmat_builtins::StructValue,
     indices: &[usize],
@@ -446,13 +466,21 @@ where
 {
     match instr {
         crate::bytecode::Instr::Index(num_indices) => {
-            let numeric = idx_read_linear::collect_linear_indices(stack, *num_indices).await?;
+            let mut raw_indices = Vec::with_capacity(*num_indices);
+            for _ in 0..*num_indices {
+                raw_indices.push(stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow",
+                ))?);
+            }
+            raw_indices.reverse();
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
             match &base {
                 Value::Object(_) | Value::HandleObject(_) => {
+                    let numeric = linear_index_values_to_f64(&raw_indices).await?;
                     let cell = idx_read_linear::build_object_subsref_cell(&numeric)?;
                     let args = vec![
                         base,
@@ -463,6 +491,7 @@ where
                     stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
                 }
                 Value::FunctionHandle(_) | Value::Closure(_) => {
+                    let numeric = linear_index_values_to_f64(&raw_indices).await?;
                     let args = numeric.into_iter().map(Value::Num).collect::<Vec<_>>();
                     match crate::call::feval::execute_feval(base, args, functions, functions)
                         .await?
@@ -478,7 +507,14 @@ where
                         }
                     }
                 }
+                Value::Tensor(t)
+                    if raw_indices.len() == 1
+                        && index_scalar_from_value(&raw_indices[0]).await?.is_none() =>
+                {
+                    stack.push(idx_read_slice::read_tensor_slice_1d(t, 0, 0, &raw_indices).await?);
+                }
                 _ => {
+                    let numeric = linear_index_values_to_f64(&raw_indices).await?;
                     stack.push(idx_read_linear::generic_index(&base, &numeric).await?);
                 }
             }
