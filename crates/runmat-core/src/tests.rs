@@ -308,6 +308,29 @@ fn elementwise_logical_ops_use_semantic_vm() {
 }
 
 #[test]
+fn short_circuit_logical_ops_use_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "a = 0 && 1; b = 1 || 0;";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile short-circuit logical ops");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "short-circuit logical ops should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
+            && upsert.value.to_string() == "0"
+    }));
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
+            && upsert.value.to_string() == "1"
+    }));
+}
+
+#[test]
 fn builtin_function_handle_call_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "A = [0, pi/2]; B = arrayfun(@sin, A);";

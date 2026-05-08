@@ -926,6 +926,15 @@ impl Compiler {
                 Ok(())
             }
             MirRvalue::Binary(left, op, right) => {
+                match op {
+                    OperatorKind::ShortCircuitAnd => {
+                        return self.compile_mir_short_circuit_and(left, right);
+                    }
+                    OperatorKind::ShortCircuitOr => {
+                        return self.compile_mir_short_circuit_or(left, right);
+                    }
+                    _ => {}
+                }
                 self.compile_mir_operand(left)?;
                 self.compile_mir_operand(right)?;
                 match op {
@@ -1003,6 +1012,47 @@ impl Compiler {
                     .compile_error("MIR bytecode lowering for this rvalue is not implemented yet"))
             }
         }
+    }
+
+    fn compile_mir_truthy_operand(&mut self, operand: &MirOperand) -> Result<(), CompileError> {
+        self.compile_mir_operand(operand)?;
+        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::NotEqual);
+        Ok(())
+    }
+
+    fn compile_mir_short_circuit_and(
+        &mut self,
+        left: &MirOperand,
+        right: &MirOperand,
+    ) -> Result<(), CompileError> {
+        self.compile_mir_truthy_operand(left)?;
+        let jump_false = self.emit(Instr::JumpIfFalse(usize::MAX));
+        self.compile_mir_truthy_operand(right)?;
+        let end = self.emit(Instr::Jump(usize::MAX));
+        let false_pc = self.instructions.len();
+        self.patch(jump_false, Instr::JumpIfFalse(false_pc));
+        self.emit(Instr::LoadConst(0.0));
+        let end_pc = self.instructions.len();
+        self.patch(end, Instr::Jump(end_pc));
+        Ok(())
+    }
+
+    fn compile_mir_short_circuit_or(
+        &mut self,
+        left: &MirOperand,
+        right: &MirOperand,
+    ) -> Result<(), CompileError> {
+        self.compile_mir_truthy_operand(left)?;
+        let jump_false = self.emit(Instr::JumpIfFalse(usize::MAX));
+        self.emit(Instr::LoadConst(1.0));
+        let end = self.emit(Instr::Jump(usize::MAX));
+        let right_pc = self.instructions.len();
+        self.patch(jump_false, Instr::JumpIfFalse(right_pc));
+        self.compile_mir_truthy_operand(right)?;
+        let end_pc = self.instructions.len();
+        self.patch(end, Instr::Jump(end_pc));
+        Ok(())
     }
 
     fn compile_mir_call(&mut self, call: &MirCall) -> Result<(), CompileError> {
