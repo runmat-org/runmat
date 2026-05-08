@@ -9,9 +9,9 @@ use runmat_hir::{
     LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt, OperatorKind, RequestedOutputCount,
 };
 use runmat_mir::{
-    BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirConstant,
-    MirIndexComponent, MirIndexing, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt,
-    MirStmtKind, MirTerminatorKind,
+    BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirCallee,
+    MirConstant, MirIndexComponent, MirIndexing, MirOperand, MirOutputTarget, MirPlace, MirRvalue,
+    MirStmt, MirStmtKind, MirTerminatorKind,
 };
 use std::collections::HashMap;
 
@@ -601,38 +601,12 @@ impl Compiler {
                 )
             }
         }
-        let mut specs = Vec::with_capacity(call.args.len());
-        let mut has_expansion = false;
-        for arg in &call.args {
-            match arg {
-                MirCallArg::Single(operand) => {
-                    self.compile_mir_operand(operand)?;
-                    specs.push(ArgSpec {
-                        is_expand: false,
-                        num_indices: 0,
-                        expand_all: false,
-                    });
-                }
-                MirCallArg::Expansion {
-                    base,
-                    indices,
-                    expand_all,
-                } => {
-                    has_expansion = true;
-                    self.compile_mir_operand(base)?;
-                    for index in indices {
-                        self.compile_mir_operand(index)?;
-                    }
-                    specs.push(ArgSpec {
-                        is_expand: true,
-                        num_indices: indices.len(),
-                        expand_all: *expand_all,
-                    });
-                }
-            }
-        }
+        let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         match &call.callee {
-            HirCallableRef::Function(function) => {
+            MirCallee::Static(HirCallableRef::Function(function)) => {
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
                 if has_expansion {
                     self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
                         *function,
@@ -647,7 +621,15 @@ impl Compiler {
                     output_count,
                 ));
             }
-            _ => {
+            MirCallee::Dynamic(_) => {
+                return Err(self.compile_error(
+                    "MIR bytecode lowering for dynamic multi-output calls is not implemented yet",
+                ))
+            }
+            MirCallee::Static(_) => {
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
                 let name = self.mir_builtin_call_name(call)?;
                 if has_expansion {
                     self.emit(Instr::CallBuiltinExpandMulti(name, specs));
@@ -1100,62 +1082,36 @@ impl Compiler {
             }
         }
 
-        let mut specs = Vec::with_capacity(call.args.len());
-        let mut has_expansion = false;
-        for arg in &call.args {
-            match arg {
-                MirCallArg::Single(operand) => {
-                    self.compile_mir_operand(operand)?;
-                    specs.push(ArgSpec {
-                        is_expand: false,
-                        num_indices: 0,
-                        expand_all: false,
-                    });
-                }
-                MirCallArg::Expansion {
-                    base,
-                    indices,
-                    expand_all,
-                } => {
-                    has_expansion = true;
-                    self.compile_mir_operand(base)?;
-                    for index in indices {
-                        self.compile_mir_operand(index)?;
-                    }
-                    specs.push(ArgSpec {
-                        is_expand: true,
-                        num_indices: indices.len(),
-                        expand_all: *expand_all,
-                    });
-                }
-            }
-        }
+        let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         match &call.callee {
-            HirCallableRef::Function(function) => {
+            MirCallee::Static(HirCallableRef::Function(function)) => {
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
                 if has_expansion {
                     self.emit(Instr::CallSemanticFunctionExpandMulti(*function, specs));
                 } else {
                     self.emit(Instr::CallSemanticFunction(*function, call.args.len()));
                 }
             }
-            _ => {
+            MirCallee::Dynamic(callee) => {
+                self.compile_mir_operand(callee)?;
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                if has_expansion {
+                    self.emit(Instr::CallFevalExpandMulti(specs));
+                } else {
+                    self.emit(Instr::CallFeval(call.args.len()));
+                }
+            }
+            MirCallee::Static(_) => {
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
                 let name = self.mir_builtin_call_name(call)?;
-                if has_expansion && name == "feval" {
-                    if call.args.is_empty() {
-                        return Err(self.compile_error("feval: missing function argument"));
-                    }
-                    let rest_specs = specs
-                        .get(1..)
-                        .ok_or_else(|| self.compile_error("feval: missing function argument"))?
-                        .to_vec();
-                    self.emit(Instr::CallFevalExpandMulti(rest_specs));
-                } else if has_expansion {
+                if has_expansion {
                     self.emit(Instr::CallBuiltinExpandMulti(name, specs));
-                } else if name == "feval" {
-                    if call.args.is_empty() {
-                        return Err(self.compile_error("feval: missing function argument"));
-                    }
-                    self.emit(Instr::CallFeval(call.args.len() - 1));
                 } else {
                     self.emit(Instr::CallBuiltin(name, call.args.len()));
                 }
@@ -1164,10 +1120,52 @@ impl Compiler {
         Ok(())
     }
 
+    fn mir_call_arg_specs(&self, args: &[MirCallArg]) -> (Vec<ArgSpec>, bool) {
+        let mut has_expansion = false;
+        let specs = args
+            .iter()
+            .map(|arg| match arg {
+                MirCallArg::Single(_) => ArgSpec {
+                    is_expand: false,
+                    num_indices: 0,
+                    expand_all: false,
+                },
+                MirCallArg::Expansion {
+                    indices,
+                    expand_all,
+                    ..
+                } => {
+                    has_expansion = true;
+                    ArgSpec {
+                        is_expand: true,
+                        num_indices: indices.len(),
+                        expand_all: *expand_all,
+                    }
+                }
+            })
+            .collect();
+        (specs, has_expansion)
+    }
+
+    fn compile_mir_call_arg(&mut self, arg: &MirCallArg) -> Result<(), CompileError> {
+        match arg {
+            MirCallArg::Single(operand) => self.compile_mir_operand(operand),
+            MirCallArg::Expansion { base, indices, .. } => {
+                self.compile_mir_operand(base)?;
+                for index in indices {
+                    self.compile_mir_operand(index)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
     fn mir_builtin_call_name(&self, call: &MirCall) -> Result<String, CompileError> {
         let candidate = match &call.callee {
-            HirCallableRef::Builtin(id) => id.0.clone(),
-            HirCallableRef::Unresolved(name) if name.0.len() == 1 => name.0[0].0.clone(),
+            MirCallee::Static(HirCallableRef::Builtin(id)) => id.0.clone(),
+            MirCallee::Static(HirCallableRef::Unresolved(name)) if name.0.len() == 1 => {
+                name.0[0].0.clone()
+            }
             _ => {
                 return Err(CompileError::new(
                     "MIR bytecode lowering for this call callee is not implemented yet",

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MirCall {
-    pub callee: HirCallableRef,
+    pub callee: MirCallee,
     pub args: Vec<MirCallArg>,
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
@@ -18,6 +18,12 @@ pub struct MirCall {
     pub environment_effect: Option<BuiltinEnvironmentEffect>,
     pub purity: BuiltinPurity,
     pub semantic_kind: BuiltinSemanticKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MirCallee {
+    Static(HirCallableRef),
+    Dynamic(MirOperand),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

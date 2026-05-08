@@ -1203,6 +1203,21 @@ fn feval_anonymous_handle_uses_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "feval over anonymous handle should compile through semantic HIR/MIR/VM"
     );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFeval(1))),
+        "feval should lower from dynamic MIR callee to the VM feval ABI instruction"
+    );
+    assert!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CallBuiltin(name, _) if name == "feval"
+        )),
+        "feval should not lower as a string-keyed builtin call"
+    );
 
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -1308,6 +1323,13 @@ fn feval_with_cell_expansion_uses_semantic_vm() {
             .iter()
             .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMulti(_))),
         "expanded feval should use the VM feval ABI instruction"
+    );
+    assert!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CallBuiltin(name, _) if name == "feval"
+        )),
+        "expanded feval should not lower as a string-keyed builtin call"
     );
 
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");

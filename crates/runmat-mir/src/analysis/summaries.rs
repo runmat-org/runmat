@@ -1,6 +1,7 @@
 use crate::{
-    AsyncBehaviorFact, MirBody, MirCall, MirCallArg, MirIndexComponent, MirIndexing, MirLocal,
-    MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
+    AsyncBehaviorFact, MirBody, MirCall, MirCallArg, MirCallee, MirIndexComponent, MirIndexing,
+    MirLocal, MirLocalId, MirLocalKind, MirOperand, MirPlace, MirRvalue, MirStmtKind,
+    MirTerminatorKind,
 };
 use runmat_builtins::{BuiltinEffects, BuiltinPurity, BuiltinSemanticKind};
 use runmat_hir::{
@@ -60,7 +61,7 @@ impl Default for OutputFact {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CallSummary {
-    pub callee: HirCallableRef,
+    pub callee: MirCallee,
     pub requested_outputs: RequestedOutputCount,
     pub arg_count: usize,
     pub expansion_arg_count: usize,
@@ -296,7 +297,7 @@ pub fn propagate_function_summaries(store: &mut AnalysisStore) {
 
 fn call_function_id(call: &CallSummary) -> Option<FunctionId> {
     match &call.callee {
-        HirCallableRef::Function(function) => Some(*function),
+        MirCallee::Static(HirCallableRef::Function(function)) => Some(*function),
         _ => None,
     }
 }
@@ -576,6 +577,9 @@ fn scan_rvalue(
             }
             merge_async_behavior(async_behavior, &call.async_behavior);
             calls.push(call_summary(call));
+            if let MirCallee::Dynamic(callee) = &call.callee {
+                scan_operand(body, callee, reads_captures, function_handles);
+            }
             for arg in &call.args {
                 scan_operand(body, arg.operand(), reads_captures, function_handles);
             }
@@ -632,11 +636,12 @@ fn merge_async_behavior(current: &mut AsyncBehaviorFact, incoming: &AsyncBehavio
     }
 }
 
-fn is_unknown_call(callee: &HirCallableRef) -> bool {
-    matches!(
-        callee,
-        HirCallableRef::DynamicExpr(_) | HirCallableRef::Unresolved(_)
-    )
+fn is_unknown_call(callee: &MirCallee) -> bool {
+    matches!(callee, MirCallee::Dynamic(_))
+        || matches!(
+            callee,
+            MirCallee::Static(HirCallableRef::DynamicExpr(_) | HirCallableRef::Unresolved(_))
+        )
 }
 
 fn call_summary(call: &MirCall) -> CallSummary {
@@ -663,7 +668,7 @@ fn future_call_summary(
     requested_outputs: RequestedOutputCount,
 ) -> CallSummary {
     CallSummary {
-        callee: HirCallableRef::Function(function),
+        callee: MirCallee::Static(HirCallableRef::Function(function)),
         requested_outputs,
         arg_count: args.len(),
         expansion_arg_count: args
@@ -680,13 +685,16 @@ fn future_call_summary(
 
 fn dispatch_hook(call: &MirCall) -> NominalDispatchHook {
     match (&call.callee, &call.syntax) {
-        (HirCallableRef::Function(_), _) => NominalDispatchHook::DirectFunction,
-        (HirCallableRef::Builtin(_), _) => NominalDispatchHook::Builtin,
-        (HirCallableRef::ClassConstructor(_), _) => NominalDispatchHook::Constructor,
+        (MirCallee::Static(HirCallableRef::Function(_)), _) => NominalDispatchHook::DirectFunction,
+        (MirCallee::Static(HirCallableRef::Builtin(_)), _) => NominalDispatchHook::Builtin,
+        (MirCallee::Static(HirCallableRef::ClassConstructor(_)), _) => {
+            NominalDispatchHook::Constructor
+        }
         (_, runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke) => {
             NominalDispatchHook::MethodSyntax
         }
-        (HirCallableRef::DynamicExpr(_) | HirCallableRef::Unresolved(_), _) => {
+        (MirCallee::Dynamic(_), _)
+        | (MirCallee::Static(HirCallableRef::DynamicExpr(_) | HirCallableRef::Unresolved(_)), _) => {
             NominalDispatchHook::Dynamic
         }
         _ => NominalDispatchHook::None,

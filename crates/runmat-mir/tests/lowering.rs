@@ -7,9 +7,9 @@ use runmat_mir::{
         ParallelSafetyFact,
     },
     lowering::lower_assembly,
-    AsyncBehaviorFact, CacheProduct, MirAggregateKind, MirBody, MirCallArg, MirLocalKind,
-    MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
-    ProductCacheKey,
+    AsyncBehaviorFact, CacheProduct, MirAggregateKind, MirBody, MirCallArg, MirCallee,
+    MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind,
+    MirTerminatorKind, ProductCacheKey,
 };
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
@@ -871,10 +871,14 @@ fn analyze_assembly_collects_semantic_marker_diagnostics() {
     let body = mir.bodies.values_mut().next().unwrap();
     let local = first_local_of_kind(body, MirLocalKind::Parameter);
     body.blocks[0].statements[0].kind = MirStmtKind::Expr(MirRvalue::Call(runmat_mir::MirCall {
-        callee: HirCallableRef::Unresolved(runmat_hir::QualifiedName(vec![
+        callee: MirCallee::Static(HirCallableRef::Unresolved(runmat_hir::QualifiedName(vec![
             runmat_hir::SymbolName("sink".into()),
-        ])),
-        args: vec![MirCallArg::Expansion(MirOperand::Local(local))],
+        ]))),
+        args: vec![MirCallArg::Expansion {
+            base: MirOperand::Local(local),
+            indices: Vec::new(),
+            expand_all: true,
+        }],
         syntax: runmat_hir::CallSyntax::Plain,
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         async_behavior: runmat_mir::AsyncBehaviorFact::MaySuspend,
@@ -1232,11 +1236,38 @@ fn direct_function_call_preserves_callee_and_requested_outputs() {
         panic!("expected call assignment");
     };
 
-    assert!(matches!(call.callee, HirCallableRef::Function(_)));
+    assert!(matches!(
+        call.callee,
+        MirCallee::Static(HirCallableRef::Function(_))
+    ));
     assert!(matches!(
         call.requested_outputs,
         runmat_hir::RequestedOutputCount::One
     ));
+}
+
+#[test]
+fn feval_lowers_to_dynamic_mir_callee() {
+    let mir = lower_mir("f = @sin; y = feval(f, 0);");
+    let body = mir.bodies.values().next().unwrap();
+    let call = body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|stmt| match &stmt.kind {
+            MirStmtKind::Assign {
+                value: MirRvalue::Call(call),
+                ..
+            } => Some(call),
+            _ => None,
+        })
+        .expect("expected feval call");
+
+    assert!(matches!(
+        call.callee,
+        MirCallee::Dynamic(MirOperand::Local(_))
+    ));
+    assert_eq!(call.args.len(), 1);
 }
 
 #[test]
@@ -1251,7 +1282,7 @@ fn function_summary_propagates_user_callee_effects() {
             summary
                 .calls
                 .iter()
-                .any(|call| matches!(call.callee, HirCallableRef::Function(_)))
+                .any(|call| matches!(call.callee, MirCallee::Static(HirCallableRef::Function(_))))
         })
         .unwrap();
 
@@ -1279,7 +1310,7 @@ fn function_summary_records_async_future_dependency_edges() {
             summary
                 .calls
                 .iter()
-                .any(|call| matches!(call.callee, HirCallableRef::Function(_)))
+                .any(|call| matches!(call.callee, MirCallee::Static(HirCallableRef::Function(_))))
         })
         .unwrap();
 
@@ -1446,7 +1477,10 @@ fn function_argument_expansion_lowers_to_expansion_call_arg() {
     assert_eq!(call.args.len(), 1);
     assert!(matches!(
         call.args[0],
-        MirCallArg::Expansion(MirOperand::Local(_))
+        MirCallArg::Expansion {
+            base: MirOperand::Local(_),
+            ..
+        }
     ));
 }
 

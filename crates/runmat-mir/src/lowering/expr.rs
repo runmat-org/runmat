@@ -1,12 +1,12 @@
 use crate::{
-    MirAggregateKind, MirCall, MirCallArg, MirConstant, MirIndexComponent, MirIndexing, MirOperand,
-    MirPlace, MirRvalue, MirStmt, MirStmtKind,
+    MirAggregateKind, MirCall, MirCallArg, MirCallee, MirConstant, MirIndexComponent, MirIndexing,
+    MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind,
 };
 use runmat_builtins::{BuiltinAsyncBehavior, BuiltinSemantics};
 use runmat_hir::{
     CommandArgument, ExprId, HirCallableRef, HirCommandCall, HirExpr, HirExprKind, IndexComponent,
-    IndexKind, IndexResultContext, IndexingSemantics, QualifiedName, RequestedOutputCount,
-    SemanticError, StringLiteral, SymbolName,
+    IndexKind, IndexResultContext, IndexingSemantics, RequestedOutputCount, SemanticError,
+    StringLiteral,
 };
 use std::collections::HashMap;
 
@@ -71,21 +71,21 @@ pub(crate) fn lower_expr_with_replacements(
                 .map(|arg| lower_call_arg(ctx, arg, temps, await_replacements))
                 .collect::<Result<_, _>>()?;
             if let HirCallableRef::DynamicExpr(callee) = &call.callee {
-                args.insert(
-                    0,
-                    MirCallArg::Single(lower_operand_with_replacements(
-                        ctx,
-                        callee,
-                        temps,
-                        await_replacements,
-                    )?),
-                );
-                let mut call = call.clone();
-                call.callee = HirCallableRef::Unresolved(QualifiedName(vec![SymbolName(
-                    "feval".to_string(),
-                )]));
-                call.requested_outputs = RequestedOutputCount::One;
-                call_rvalue(&call, args)
+                dynamic_call_rvalue(
+                    call,
+                    lower_operand_with_replacements(ctx, callee, temps, await_replacements)?,
+                    args,
+                )
+            } else if is_feval_call(&call.callee) {
+                if args.is_empty() {
+                    return Err(SemanticError::new("feval: missing function argument"));
+                }
+                let MirCallArg::Single(callee) = args.remove(0) else {
+                    return Err(SemanticError::new(
+                        "feval: function argument cannot be a comma-list expansion",
+                    ));
+                };
+                dynamic_call_rvalue(call, callee, args)
             } else if let HirCallableRef::Function(function) = call.callee {
                 if ctx.is_async_function(function) {
                     MirRvalue::Future {
@@ -263,9 +263,10 @@ fn lower_index_component(
 }
 
 fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
-    let semantics = call_semantics(&call.command);
+    let callee = MirCallee::Static(call.command.clone());
+    let semantics = call_semantics(&callee);
     MirRvalue::Call(MirCall {
-        callee: call.command.clone(),
+        callee,
         args: call
             .args
             .iter()
@@ -283,9 +284,10 @@ fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
 }
 
 fn call_rvalue(call: &runmat_hir::HirCall, args: Vec<MirCallArg>) -> MirRvalue {
-    let semantics = call_semantics(&call.callee);
+    let callee = MirCallee::Static(call.callee.clone());
+    let semantics = call_semantics(&callee);
     MirRvalue::Call(MirCall {
-        callee: call.callee.clone(),
+        callee,
         args,
         syntax: call.syntax.clone(),
         requested_outputs: call.requested_outputs.clone(),
@@ -298,23 +300,60 @@ fn call_rvalue(call: &runmat_hir::HirCall, args: Vec<MirCallArg>) -> MirRvalue {
     })
 }
 
-fn call_semantics(callee: &HirCallableRef) -> BuiltinSemantics {
+fn dynamic_call_rvalue(
+    call: &runmat_hir::HirCall,
+    callee: MirOperand,
+    args: Vec<MirCallArg>,
+) -> MirRvalue {
+    let callee = MirCallee::Dynamic(callee);
+    let semantics = call_semantics(&callee);
+    MirRvalue::Call(MirCall {
+        callee,
+        args,
+        syntax: call.syntax.clone(),
+        requested_outputs: call.requested_outputs.clone(),
+        async_behavior: map_async_behavior(semantics.async_behavior),
+        effects: semantics.effects,
+        workspace_effect: semantics.workspace_effect,
+        environment_effect: semantics.environment_effect,
+        purity: semantics.purity,
+        semantic_kind: semantics.semantic_kind,
+    })
+}
+
+fn is_feval_call(callee: &HirCallableRef) -> bool {
     match callee {
-        HirCallableRef::Builtin(id) => runmat_builtins::builtin_function_by_name(&id.0)
-            .map(|builtin| builtin.semantics())
-            .or_else(|| runmat_builtins::builtin_semantics_for_name(&id.0))
-            .unwrap_or_else(BuiltinSemantics::unknown),
-        HirCallableRef::Unresolved(_) => BuiltinSemantics::unknown(),
-        HirCallableRef::DynamicExpr(_) | HirCallableRef::Imported(_) => BuiltinSemantics::unknown(),
-        HirCallableRef::Function(_) | HirCallableRef::ClassConstructor(_) => BuiltinSemantics {
-            compatibility: runmat_builtins::BuiltinCompatibility::Matlab,
-            async_behavior: BuiltinAsyncBehavior::NeverSuspends,
-            effects: runmat_builtins::BuiltinEffects::none(),
-            workspace_effect: None,
-            environment_effect: None,
-            purity: runmat_builtins::BuiltinPurity::Impure,
-            semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
-        },
+        HirCallableRef::Builtin(id) => id.0 == "feval",
+        HirCallableRef::Unresolved(name) if name.0.len() == 1 => name.0[0].0 == "feval",
+        _ => false,
+    }
+}
+
+fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
+    match callee {
+        MirCallee::Static(HirCallableRef::Builtin(id)) => {
+            runmat_builtins::builtin_function_by_name(&id.0)
+                .map(|builtin| builtin.semantics())
+                .or_else(|| runmat_builtins::builtin_semantics_for_name(&id.0))
+                .unwrap_or_else(BuiltinSemantics::unknown)
+        }
+        MirCallee::Static(HirCallableRef::Unresolved(_)) | MirCallee::Dynamic(_) => {
+            BuiltinSemantics::unknown()
+        }
+        MirCallee::Static(HirCallableRef::DynamicExpr(_) | HirCallableRef::Imported(_)) => {
+            BuiltinSemantics::unknown()
+        }
+        MirCallee::Static(HirCallableRef::Function(_) | HirCallableRef::ClassConstructor(_)) => {
+            BuiltinSemantics {
+                compatibility: runmat_builtins::BuiltinCompatibility::Matlab,
+                async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+                effects: runmat_builtins::BuiltinEffects::none(),
+                workspace_effect: None,
+                environment_effect: None,
+                purity: runmat_builtins::BuiltinPurity::Impure,
+                semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+            }
+        }
     }
 }
 
