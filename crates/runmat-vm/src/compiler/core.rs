@@ -50,6 +50,12 @@ fn end_expr_with_offset(offset: isize) -> EndExpr {
     }
 }
 
+fn mir_indexing_context_matches(actual: IndexResultContext, expected: IndexResultContext) -> bool {
+    actual == expected
+        || (expected == IndexResultContext::AssignmentTarget
+            && actual == IndexResultContext::DeletionTarget)
+}
+
 impl SpanGuard {
     fn new(compiler: &mut Compiler, span: runmat_hir::Span) -> Self {
         let prev = compiler.current_span;
@@ -1236,7 +1242,7 @@ impl Compiler {
         indexing: &MirIndexing,
         expected_context: IndexResultContext,
     ) -> Result<(), CompileError> {
-        if indexing.result_context != expected_context {
+        if !mir_indexing_context_matches(indexing.result_context.clone(), expected_context) {
             return Err(self.compile_error(
                 "MIR bytecode lowering for this indexing form is not implemented yet",
             ));
@@ -1272,7 +1278,7 @@ impl Compiler {
         indexing: &MirIndexing,
         expected_context: IndexResultContext,
     ) -> Result<(), CompileError> {
-        if indexing.result_context != expected_context {
+        if !mir_indexing_context_matches(indexing.result_context.clone(), expected_context) {
             return Err(self.compile_error(
                 "MIR bytecode lowering for this indexing form is not implemented yet",
             ));
@@ -1578,7 +1584,11 @@ impl Compiler {
                 Ok(())
             }
             MirOperand::FunctionHandle(target) => self.compile_mir_function_handle(target),
-            MirOperand::Constant(MirConstant::EmptyArray) | MirOperand::Temp(_) => {
+            MirOperand::Constant(MirConstant::EmptyArray) => {
+                self.emit(Instr::CreateMatrix(0, 0));
+                Ok(())
+            }
+            MirOperand::Temp(_) => {
                 Err(self
                     .compile_error("MIR bytecode lowering for this operand is not implemented yet"))
             }
