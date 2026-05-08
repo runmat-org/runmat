@@ -235,7 +235,7 @@ impl ControlFlowBuilder {
             if let HirStmtKind::For {
                 binding,
                 range,
-                body,
+                body: loop_body,
                 semantics,
             } = &stmt.kind
             {
@@ -252,7 +252,7 @@ impl ControlFlowBuilder {
                 let body_block = self.lower_block_from(
                     ctx,
                     body_id,
-                    body,
+                    loop_body,
                     0,
                     MirTerminator {
                         kind: MirTerminatorKind::Goto(id),

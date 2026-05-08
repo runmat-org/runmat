@@ -465,7 +465,7 @@ fn range_slice_uses_semantic_vm() {
 fn for_range_loop_uses_semantic_vm_without_rerunning_prefix() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("prefix = 0;")).expect("seed prefix");
-    let source = "prefix = prefix + 1; s = 0; for i = 1:3; s = s + i; end";
+    let source = "prefix = prefix + 1; s = 0; for i = 1:3; s = s + i; end; y = s + prefix;";
     let prepared = session.compile_input(source).expect("compile for loop");
     assert!(
         prepared.bytecode.layout.is_some(),
@@ -473,6 +473,12 @@ fn for_range_loop_uses_semantic_vm_without_rerunning_prefix() {
     );
 
     block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let y_outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let y = y_outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(y.to_string(), "7");
     let s_outcome = block_on(session.execute_outcome("s")).expect("read s");
     let s = s_outcome
         .flow

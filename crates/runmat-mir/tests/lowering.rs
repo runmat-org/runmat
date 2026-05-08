@@ -1802,6 +1802,23 @@ fn for_loop_lowers_to_iteration_terminator_body_backedge_and_exit() {
 }
 
 #[test]
+fn for_loop_exit_flows_to_following_statements() {
+    let mir =
+        lower_mir("function y = after_loop(n); y = 0; for i = 1:n; y = y + i; end; y = y + 1; end");
+    let body = mir.bodies.values().next().unwrap();
+
+    let MirTerminatorKind::For { exit_block, .. } = body.blocks[0].terminator.kind else {
+        panic!("expected for terminator");
+    };
+    assert_eq!(exit_block, body.blocks[2].id);
+    assert_eq!(body.blocks[2].statements.len(), 1);
+    assert!(matches!(
+        body.blocks[2].terminator.kind,
+        MirTerminatorKind::Return(_)
+    ));
+}
+
+#[test]
 fn try_catch_lowers_to_try_catch_blocks_and_merge() {
     let mir = lower_mir("function y = guarded(x); try; y = x; catch err; y = 0; end; end");
     let body = mir.bodies.values().next().unwrap();
