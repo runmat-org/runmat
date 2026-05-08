@@ -945,6 +945,12 @@ impl Compiler {
                     OperatorKind::LessEqual => self.emit(Instr::LessEqual),
                     OperatorKind::Greater => self.emit(Instr::Greater),
                     OperatorKind::GreaterEqual => self.emit(Instr::GreaterEqual),
+                    OperatorKind::ElementwiseAnd => {
+                        self.emit(Instr::CallBuiltin("and".to_string(), 2))
+                    }
+                    OperatorKind::ElementwiseOr => {
+                        self.emit(Instr::CallBuiltin("or".to_string(), 2))
+                    }
                     _ => {
                         return Err(self.compile_error(format!(
                             "operator {op:?} is not supported in primary MIR lowering yet"
