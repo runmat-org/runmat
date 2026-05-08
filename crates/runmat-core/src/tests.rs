@@ -294,6 +294,27 @@ fn cell_paren_deletion_uses_semantic_vm() {
 }
 
 #[test]
+fn cell_paren_assignment_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "C = {1, 2, 3}; C(2) = {4}; y = C{2};";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile cell paren assignment");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "cell paren assignment should compile through semantic HIR/MIR/VM"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "4");
+}
+
+#[test]
 fn workspace_read_across_submissions_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("x = 42;")).expect("seed workspace");

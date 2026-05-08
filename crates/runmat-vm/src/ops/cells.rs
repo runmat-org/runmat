@@ -136,8 +136,56 @@ pub fn assign_cell_paren(
     if indices.len() == 1 && is_empty_tensor(rhs) {
         return delete_cell_linear(ca, indices[0]);
     }
+    if let Value::Cell(rhs_cell) = rhs {
+        return assign_cell_paren_from_cell(ca, indices, rhs_cell);
+    }
     Err(mex(
         "UnsupportedCellParenAssignment",
         "Only vector cell deletion is supported for cell paren assignment",
     ))
+}
+
+fn assign_cell_paren_from_cell(
+    mut ca: CellArray,
+    indices: &[usize],
+    rhs: &CellArray,
+) -> Result<Value, RuntimeError> {
+    if rhs.data.len() != 1 {
+        return Err(mex(
+            "UnsupportedCellParenAssignment",
+            "Only scalar cell paren assignment is supported",
+        ));
+    }
+    let newv = (*rhs.data[0]).clone();
+    let lin = match indices.len() {
+        1 => {
+            let i = indices[0];
+            if i == 0 || i > ca.data.len() {
+                return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+            }
+            i - 1
+        }
+        2 => {
+            let i = indices[0];
+            let j = indices[1];
+            if i == 0 || i > ca.rows || j == 0 || j > ca.cols {
+                return Err(mex(
+                    "CellSubscriptOutOfBounds",
+                    "Cell subscript out of bounds",
+                ));
+            }
+            (i - 1) * ca.cols + (j - 1)
+        }
+        _ => {
+            return Err(mex(
+                "UnsupportedCellIndexCount",
+                "Unsupported number of cell indices",
+            ))
+        }
+    };
+    if let Some(oldv) = ca.data.get(lin) {
+        runmat_gc::gc_record_write(oldv, &newv);
+    }
+    *ca.data[lin] = newv;
+    Ok(Value::Cell(ca))
 }
