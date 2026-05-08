@@ -580,6 +580,27 @@ fn mixed_logical_numeric_matrix_uses_semantic_vm() {
 }
 
 #[test]
+fn mixed_logical_complex_matrix_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "A = [true, 2+3i, false]; y = A(1);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile mixed logical complex matrix");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "mixed logical complex matrix should compile through semantic HIR/MIR/VM"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "1");
+}
+
+#[test]
 fn workspace_read_across_submissions_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("x = 42;")).expect("seed workspace");
