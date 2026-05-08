@@ -1,3 +1,4 @@
+use crate::call::shared::{call_object_member_method, ObjectIndexOp};
 use crate::interpreter::errors::mex;
 use runmat_builtins::{self, Access, Closure, StructValue, Value};
 use runmat_runtime::RuntimeError;
@@ -47,13 +48,13 @@ pub async fn load_member(
                 .into())
             } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
                 if cls.methods.contains_key("subsref") {
-                    let args = vec![
+                    call_object_member_method(
                         Value::Object(obj),
-                        Value::String("subsref".to_string()),
-                        Value::String(".".to_string()),
-                        Value::String(field),
-                    ];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
+                        ObjectIndexOp::Subsref,
+                        field,
+                        None,
+                    )
+                    .await
                 } else {
                     Err(format!(
                         "Undefined property '{}' for class {}",
@@ -66,13 +67,13 @@ pub async fn load_member(
             }
         }
         Value::HandleObject(handle) => {
-            let args = vec![
+            call_object_member_method(
                 Value::HandleObject(handle),
-                Value::String("subsref".to_string()),
-                Value::String(".".to_string()),
-                Value::String(field),
-            ];
-            runmat_runtime::call_builtin_async("call_method", &args).await
+                ObjectIndexOp::Subsref,
+                field,
+                None,
+            )
+            .await
         }
         Value::ClassRef(cls) => load_static_member(&cls, &field),
         Value::Struct(st) => {
@@ -198,14 +199,13 @@ where
                 Ok(Value::Object(obj))
             } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
                 if cls.methods.contains_key("subsasgn") {
-                    let args = vec![
+                    call_object_member_method(
                         Value::Object(obj),
-                        Value::String("subsasgn".to_string()),
-                        Value::String(".".to_string()),
-                        Value::String(field),
-                        rhs,
-                    ];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
+                        ObjectIndexOp::Subsasgn,
+                        field,
+                        Some(rhs),
+                    )
+                    .await
                 } else {
                     Err(format!("Undefined property '{}' for class {}", field, cls.name).into())
                 }
@@ -228,14 +228,13 @@ where
             }
         }
         Value::HandleObject(handle) => {
-            let args = vec![
+            call_object_member_method(
                 Value::HandleObject(handle),
-                Value::String("subsasgn".to_string()),
-                Value::String(".".to_string()),
-                Value::String(field),
-                rhs,
-            ];
-            runmat_runtime::call_builtin_async("call_method", &args).await
+                ObjectIndexOp::Subsasgn,
+                field,
+                Some(rhs),
+            )
+            .await
         }
         Value::Struct(mut st) => {
             if let Some(oldv) = st.fields.get(&field) {

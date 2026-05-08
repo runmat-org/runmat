@@ -345,6 +345,24 @@ pub async fn call_object_index_method(
     runmat_runtime::call_builtin_async("call_method", &args).await
 }
 
+pub async fn call_object_member_method(
+    base: Value,
+    op: ObjectIndexOp,
+    field: String,
+    rhs: Option<Value>,
+) -> Result<Value, RuntimeError> {
+    let mut args = vec![
+        base,
+        Value::String(op.protocol_name().to_string()),
+        Value::String(".".to_string()),
+        Value::String(field),
+    ];
+    if let Some(rhs) = rhs {
+        args.push(rhs);
+    }
+    runmat_runtime::call_builtin_async("call_method", &args).await
+}
+
 pub async fn build_expanded_args_from_specs<ExpandObjectAll, ExpandObjectIndices, FutAll, FutIdx>(
     stack: &mut Vec<Value>,
     specs: &[ArgSpec],
