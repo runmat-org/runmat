@@ -387,6 +387,26 @@ fn builtin_call_with_cell_end_expansion_uses_semantic_vm() {
 }
 
 #[test]
+fn builtin_call_with_cell_end_offset_expansion_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "C = {1, 2, 3}; y = plus(C{end-1}, 1);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile builtin cell end-offset expansion call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "builtin call with cell end-offset expansion should compile through semantic HIR/MIR/VM"
+    );
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "3");
+}
+
+#[test]
 fn multi_assign_builtin_with_cell_expansion_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "C = {1, 2}; [a, b] = deal(C{:});";

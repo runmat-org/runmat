@@ -265,6 +265,16 @@ pub fn expand_cell_indices(
             Value::Num(n) if *n == 0.0 && n.is_sign_negative() => {
                 Ok(vec![(*cell.data[cell.data.len() - 1]).clone()])
             }
+            Value::Num(n) if *n < 0.0 => {
+                let idx = cell.data.len() as isize + *n as isize;
+                if idx < 1 || idx as usize > cell.data.len() {
+                    return Err(crate::interpreter::errors::mex(
+                        "CellIndexOutOfBounds",
+                        "Cell index out of bounds",
+                    ));
+                }
+                Ok(vec![(*cell.data[idx as usize - 1]).clone()])
+            }
             Value::Num(n) => {
                 let idx = *n as usize;
                 if idx == 0 || idx > cell.data.len() {
