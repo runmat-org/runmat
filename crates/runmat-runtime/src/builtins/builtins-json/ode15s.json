@@ -1,0 +1,46 @@
+{
+  "title": "ode15s",
+  "category": "math/ode",
+  "keywords": ["ode15s", "ode", "stiff", "implicit", "adaptive step"],
+  "summary": "Solve stiff ordinary differential equations with an adaptive implicit host-side integrator.",
+  "references": ["https://www.mathworks.com/help/matlab/ref/ode15s.html"],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "The stiff integrator runs on the host. RHS callback functions may still call GPU-aware builtins."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::ode::ode15s::tests"
+  },
+  "description": "`ode15s` integrates stiff first-order ODE systems `y' = f(t, y)` using adaptive implicit stepping. For two outputs, it returns `[t, y]` where each row of `y` corresponds to one time in `t`.",
+  "behaviors": [
+    "Supports scalar, vector, and matrix-valued initial conditions.",
+    "Accepts options as a struct, including `RelTol`, `AbsTol`, `InitialStep`, and `MaxStep`.",
+    "When `tspan` has more than two points, the solver returns values at each requested time.",
+    "With one output, returns only the `y` trajectory matrix."
+  ],
+  "examples": [
+    {
+      "description": "Integrate a stiff scalar decay system",
+      "input": "[t, y] = ode15s(@(t, y) -15*y, [0 1], 1)",
+      "output": "y(end) is small and positive"
+    }
+  ],
+  "links": [
+    { "label": "ode45", "url": "./ode45" },
+    { "label": "ode23", "url": "./ode23" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/ode/ode15s.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/ode/ode15s.rs"
+  }
+}

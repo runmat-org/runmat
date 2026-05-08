@@ -54,6 +54,8 @@ pub(crate) mod gca;
 pub(crate) mod gcf;
 #[path = "ops/get.rs"]
 pub(crate) mod get;
+#[path = "ops/heatmap.rs"]
+pub(crate) mod heatmap;
 #[path = "ops/hist.rs"]
 pub mod hist;
 #[path = "ops/histogram.rs"]

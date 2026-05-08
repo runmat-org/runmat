@@ -4,10 +4,11 @@ mod test_helpers;
 use runmat_accelerate::ShapeInfo;
 use runmat_builtins::Value;
 use runmat_parser::parse;
-use runmat_vm::{compile, Instr};
+use runmat_vm::{compile, Bytecode, Instr};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use test_helpers::execute;
+use test_helpers::interpret;
 use test_helpers::lower;
 
 #[test]
@@ -40,6 +41,19 @@ fn call_builtin_multi_output_advances_pc_for_zero_outputs() {
     let vars = execute(&hir).expect("execute disp script");
     let x: f64 = (&vars[0]).try_into().expect("convert x to f64");
     assert_eq!(x, 42.0);
+}
+
+#[test]
+fn direct_interpret_loads_named_slot_without_workspace_state() {
+    let mut bytecode = Bytecode::with_instructions(
+        vec![Instr::LoadConst(7.0), Instr::StoreVar(0), Instr::LoadVar(0)],
+        1,
+    );
+    bytecode.var_names.insert(0, "x".to_string());
+
+    let vars = interpret(&bytecode).expect("direct VM interpret should load x");
+    let x: f64 = (&vars[0]).try_into().unwrap();
+    assert_eq!(x, 7.0);
 }
 
 #[test]

@@ -221,6 +221,54 @@ fn next_normal_pair(state: &mut u64) -> (f64, f64) {
     (radius * angle.cos(), radius * angle.sin())
 }
 
+pub(crate) fn generate_exponential(mu: f64, len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    for _ in 0..len {
+        let u = next_uniform_state(&mut guard.state).max(MIN_UNIFORM);
+        out.push(-mu * u.ln());
+    }
+    Ok(out)
+}
+
+pub(crate) fn generate_normal_scaled(
+    mu: f64,
+    sigma: f64,
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<f64>> {
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    while out.len() < len {
+        let (z0, z1) = next_normal_pair(&mut guard.state);
+        out.push(mu + sigma * z0);
+        if out.len() < len {
+            out.push(mu + sigma * z1);
+        }
+    }
+    Ok(out)
+}
+
+pub(crate) fn generate_uniform_scaled(
+    a: f64,
+    b: f64,
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<f64>> {
+    let mut guard = rng_state()
+        .lock()
+        .map_err(|_| random_error(label, format!("{label}: failed to acquire RNG lock")))?;
+    let mut out = Vec::with_capacity(len);
+    for _ in 0..len {
+        out.push(a + (b - a) * next_uniform_state(&mut guard.state));
+    }
+    Ok(out)
+}
+
 pub(crate) fn generate_normal(len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
     let mut guard = rng_state()
         .lock()
@@ -257,6 +305,41 @@ pub(crate) fn reset_rng() {
     } else {
         let _ = RNG_STATE.set(Mutex::new(GlobalRng::new()));
     }
+}
+
+#[cfg(test)]
+pub(crate) fn expected_exponential_sequence(mu: f64, count: usize) -> Vec<f64> {
+    let mut seed = DEFAULT_RNG_SEED;
+    let mut seq = Vec::with_capacity(count);
+    for _ in 0..count {
+        let u = next_uniform_state(&mut seed).max(MIN_UNIFORM);
+        seq.push(-mu * u.ln());
+    }
+    seq
+}
+
+#[cfg(test)]
+pub(crate) fn expected_normal_scaled_sequence(mu: f64, sigma: f64, count: usize) -> Vec<f64> {
+    let mut seed = DEFAULT_RNG_SEED;
+    let mut seq = Vec::with_capacity(count);
+    while seq.len() < count {
+        let (z0, z1) = next_normal_pair(&mut seed);
+        seq.push(mu + sigma * z0);
+        if seq.len() < count {
+            seq.push(mu + sigma * z1);
+        }
+    }
+    seq
+}
+
+#[cfg(test)]
+pub(crate) fn expected_uniform_scaled_sequence(a: f64, b: f64, count: usize) -> Vec<f64> {
+    let mut seed = DEFAULT_RNG_SEED;
+    let mut seq = Vec::with_capacity(count);
+    for _ in 0..count {
+        seq.push(a + (b - a) * next_uniform_state(&mut seed));
+    }
+    seq
 }
 
 #[cfg(test)]

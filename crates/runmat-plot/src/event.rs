@@ -553,6 +553,10 @@ pub struct SerializedAxesMetadata {
     pub y_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub z_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x_tick_labels: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y_tick_labels: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x_limits: Option<[f64; 2]>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -603,6 +607,8 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             x_label: value.x_label,
             y_label: value.y_label,
             z_label: value.z_label,
+            x_tick_labels: value.x_tick_labels,
+            y_tick_labels: value.y_tick_labels,
             x_limits: value.x_limits.map(|(a, b)| [a, b]),
             y_limits: value.y_limits.map(|(a, b)| [a, b]),
             z_limits: value.z_limits.map(|(a, b)| [a, b]),
@@ -638,6 +644,8 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             x_label: value.x_label,
             y_label: value.y_label,
             z_label: value.z_label,
+            x_tick_labels: value.x_tick_labels,
+            y_tick_labels: value.y_tick_labels,
             x_limits: value.x_limits.map(|[a, b]| (a, b)),
             y_limits: value.y_limits.map(|[a, b]| (a, b)),
             z_limits: value.z_limits.map(|[a, b]| (a, b)),

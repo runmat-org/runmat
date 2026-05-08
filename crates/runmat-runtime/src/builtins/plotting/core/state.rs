@@ -1,4 +1,5 @@
 use once_cell::sync::OnceCell;
+use runmat_builtins::Tensor;
 use runmat_plot::plots::{
     surface::ColorMap, surface::ShadingMode, Figure, LegendStyle, LineStyle, PlotElement, TextStyle,
 };
@@ -235,6 +236,16 @@ pub struct ImageHandleState {
 }
 
 #[derive(Clone, Debug)]
+pub struct HeatmapHandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub plot_index: usize,
+    pub x_labels: Vec<String>,
+    pub y_labels: Vec<String>,
+    pub color_data: Tensor,
+}
+
+#[derive(Clone, Debug)]
 pub struct AreaHandleState {
     pub figure: FigureHandle,
     pub axes_index: usize,
@@ -259,6 +270,7 @@ pub enum PlotChildHandleState {
     Stairs(SimplePlotHandleState),
     Quiver(QuiverHandleState),
     Image(ImageHandleState),
+    Heatmap(HeatmapHandleState),
     Area(AreaHandleState),
     Surface(SimplePlotHandleState),
     Line3(SimplePlotHandleState),
@@ -1219,6 +1231,31 @@ pub fn register_image_handle(figure: FigureHandle, axes_index: usize, plot_index
     })
 }
 
+pub fn register_heatmap_handle(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    x_labels: Vec<String>,
+    y_labels: Vec<String>,
+    color_data: Tensor,
+) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
+        PlotChildHandleState::Heatmap(HeatmapHandleState {
+            figure,
+            axes_index,
+            plot_index,
+            x_labels,
+            y_labels,
+            color_data,
+        }),
+    );
+    id as f64
+}
+
 pub fn register_area_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
     register_simple_plot_handle(figure, axes_index, plot_index, |state| {
         PlotChildHandleState::Area(AreaHandleState {
@@ -1305,6 +1342,61 @@ pub fn plot_child_handle_snapshot(handle: f64) -> Result<PlotChildHandleState, F
         .get(&(handle.round() as u64))
         .cloned()
         .ok_or(FigureError::InvalidPlotObjectHandle)
+}
+
+pub fn set_heatmap_display_labels(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    x_labels: Option<Vec<String>>,
+    y_labels: Option<Vec<String>>,
+) -> Result<(), FigureError> {
+    let figure_clone = {
+        let mut reg = registry();
+        let (current_x_labels, current_y_labels) = {
+            let state = reg.plot_children.values_mut().find(|state| match state {
+                PlotChildHandleState::Heatmap(heatmap) => {
+                    heatmap.figure == figure
+                        && heatmap.axes_index == axes_index
+                        && heatmap.plot_index == plot_index
+                }
+                _ => false,
+            });
+            let PlotChildHandleState::Heatmap(heatmap) =
+                state.ok_or(FigureError::InvalidPlotObjectHandle)?
+            else {
+                return Err(FigureError::InvalidPlotObjectHandle);
+            };
+            if let Some(labels) = x_labels {
+                heatmap.x_labels = labels;
+            }
+            if let Some(labels) = y_labels {
+                heatmap.y_labels = labels;
+            }
+            (heatmap.x_labels.clone(), heatmap.y_labels.clone())
+        };
+
+        let state = get_state_mut(&mut reg, figure);
+        let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+        if axes_index >= total_axes {
+            return Err(FigureError::InvalidSubplotIndex {
+                rows: state.figure.axes_rows.max(1),
+                cols: state.figure.axes_cols.max(1),
+                index: axes_index,
+            });
+        }
+        state.active_axes = axes_index;
+        state.figure.set_active_axes_index(axes_index);
+        state.figure.set_axes_tick_labels(
+            axes_index,
+            Some(current_x_labels),
+            Some(current_y_labels),
+        );
+        state.revision = state.revision.wrapping_add(1);
+        state.figure.clone()
+    };
+    notify_with_figure(figure, &figure_clone, FigureEventKind::Updated);
+    Ok(())
 }
 
 pub fn update_histogram_handle_for_plot(
@@ -1485,6 +1577,7 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         PlotChildHandleState::ErrorBar(err) => err.figure != handle,
         PlotChildHandleState::Quiver(quiver) => quiver.figure != handle,
         PlotChildHandleState::Image(image) => image.figure != handle,
+        PlotChildHandleState::Heatmap(heatmap) => heatmap.figure != handle,
         PlotChildHandleState::Area(area) => area.figure != handle,
         PlotChildHandleState::Text(text) => text.figure != handle,
     });
@@ -1518,6 +1611,9 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         }
         PlotChildHandleState::Image(image) => {
             !(image.figure == handle && image.axes_index == axes_index)
+        }
+        PlotChildHandleState::Heatmap(heatmap) => {
+            !(heatmap.figure == handle && heatmap.axes_index == axes_index)
         }
         PlotChildHandleState::Area(area) => {
             !(area.figure == handle && area.axes_index == axes_index)

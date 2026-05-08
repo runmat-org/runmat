@@ -1208,6 +1208,33 @@ pub trait AccelProvider: Send + Sync {
         self.random_normal(&prototype.shape)
     }
 
+    /// Exponentially-distributed random values with mean `mu`.
+    fn random_exponential(&self, _mu: f64, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!(
+            "random_exponential not supported by provider"
+        ))
+    }
+
+    /// Normal random values with mean `mu` and standard deviation `sigma`.
+    fn random_normrnd(
+        &self,
+        _mu: f64,
+        _sigma: f64,
+        _shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("random_normrnd not supported by provider"))
+    }
+
+    /// Uniform random values on the interval `[a, b)`.
+    fn random_unifrnd(
+        &self,
+        _a: f64,
+        _b: f64,
+        _shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("random_unifrnd not supported by provider"))
+    }
+
     fn stochastic_evolution(
         &self,
         _state: &GpuTensorHandle,

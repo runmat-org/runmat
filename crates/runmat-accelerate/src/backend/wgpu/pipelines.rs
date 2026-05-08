@@ -117,6 +117,18 @@ const WINDOW_SHADER_F64: &str = crate::backend::wgpu::shaders::window::WINDOW_SH
 const WINDOW_SHADER_F32: &str = crate::backend::wgpu::shaders::window::WINDOW_SHADER_F32;
 const RANDOM_INT_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::RANDOM_INT_SHADER_F64;
 const RANDOM_INT_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::RANDOM_INT_SHADER_F32;
+const RANDOM_EXPRND_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_EXPRND_SHADER_F64;
+const RANDOM_EXPRND_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_EXPRND_SHADER_F32;
+const RANDOM_NORMRND_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_NORMRND_SHADER_F64;
+const RANDOM_NORMRND_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_NORMRND_SHADER_F32;
+const RANDOM_UNIFRND_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_UNIFRND_SHADER_F64;
+const RANDOM_UNIFRND_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::creation::RANDOM_UNIFRND_SHADER_F32;
 const RANDOM_UNIFORM_SHADER_F64: &str =
     crate::backend::wgpu::shaders::creation::RANDOM_UNIFORM_SHADER_F64;
 const RANDOM_UNIFORM_SHADER_F32: &str =
@@ -260,6 +272,9 @@ pub struct WgpuPipelines {
     pub random_int: PipelineBundle,
     pub random_uniform: PipelineBundle,
     pub random_normal: PipelineBundle,
+    pub random_exprnd: PipelineBundle,
+    pub random_normrnd: PipelineBundle,
+    pub random_unifrnd: PipelineBundle,
     pub stochastic_evolution: PipelineBundle,
     pub randperm: PipelineBundle,
     pub fspecial: PipelineBundle,
@@ -1117,6 +1132,42 @@ impl WgpuPipelines {
             },
         );
 
+        let random_exprnd = create_pipeline(
+            device,
+            "runmat-random-exprnd-layout",
+            "runmat-random-exprnd-shader",
+            "runmat-random-exprnd-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => RANDOM_EXPRND_SHADER_F64,
+                NumericPrecision::F32 => RANDOM_EXPRND_SHADER_F32,
+            },
+        );
+
+        let random_normrnd = create_pipeline(
+            device,
+            "runmat-random-normrnd-layout",
+            "runmat-random-normrnd-shader",
+            "runmat-random-normrnd-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => RANDOM_NORMRND_SHADER_F64,
+                NumericPrecision::F32 => RANDOM_NORMRND_SHADER_F32,
+            },
+        );
+
+        let random_unifrnd = create_pipeline(
+            device,
+            "runmat-random-unifrnd-layout",
+            "runmat-random-unifrnd-shader",
+            "runmat-random-unifrnd-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => RANDOM_UNIFRND_SHADER_F64,
+                NumericPrecision::F32 => RANDOM_UNIFRND_SHADER_F32,
+            },
+        );
+
         let stochastic_evolution = create_pipeline(
             device,
             "runmat-stochastic-evolution-layout",
@@ -1498,6 +1549,9 @@ impl WgpuPipelines {
             random_int,
             random_uniform,
             random_normal,
+            random_exprnd,
+            random_normrnd,
+            random_unifrnd,
             stochastic_evolution,
             randperm,
             fspecial,

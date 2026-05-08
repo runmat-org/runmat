@@ -1580,6 +1580,76 @@ impl PlotOverlay {
                     &edges,
                 );
             }
+            if let Some(labels) = axes_index.and_then(|idx| {
+                plot_renderer
+                    .overlay_x_tick_labels_for_axes(idx)
+                    .filter(|labels| !labels.is_empty())
+            }) {
+                cat_x = true;
+                let stride = Self::label_stride(&labels, plot_rect.width(), tick_font.size);
+                for (label_idx, label) in labels.iter().enumerate() {
+                    if label_idx != 0 && label_idx != labels.len() - 1 && label_idx % stride != 0 {
+                        continue;
+                    }
+                    let x_val = (label_idx + 1) as f64;
+                    if x_val < x_min || x_val > x_max {
+                        continue;
+                    }
+                    let x_screen =
+                        plot_rect.min.x + ((x_val - x_min) / x_range) as f32 * plot_rect.width();
+                    let x_screen = Self::snap_coord(x_screen, ppp);
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(x_screen, border_bottom),
+                            Pos2::new(x_screen, border_bottom + tick_length),
+                        ],
+                        Stroke::new(1.0, axis_color),
+                    );
+                    let text = truncate_label(label, 14);
+                    ui.painter().text(
+                        Pos2::new(x_screen, border_bottom + label_offset),
+                        Align2::CENTER_CENTER,
+                        text,
+                        tick_font.clone(),
+                        label_color,
+                    );
+                }
+            }
+            if let Some(labels) = axes_index.and_then(|idx| {
+                plot_renderer
+                    .overlay_y_tick_labels_for_axes(idx)
+                    .filter(|labels| !labels.is_empty())
+            }) {
+                cat_y = true;
+                let stride = Self::label_stride(&labels, plot_rect.height(), tick_font.size);
+                for (label_idx, label) in labels.iter().enumerate() {
+                    if label_idx != 0 && label_idx != labels.len() - 1 && label_idx % stride != 0 {
+                        continue;
+                    }
+                    let y_val = (label_idx + 1) as f64;
+                    if y_val < y_min || y_val > y_max {
+                        continue;
+                    }
+                    let y_screen =
+                        plot_rect.max.y - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                    let y_screen = Self::snap_coord(y_screen, ppp);
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(border_left - tick_length, y_screen),
+                            Pos2::new(border_left, y_screen),
+                        ],
+                        Stroke::new(1.0, axis_color),
+                    );
+                    let text = truncate_label(label, 14);
+                    ui.painter().text(
+                        Pos2::new(border_left - label_offset, y_screen),
+                        Align2::CENTER_CENTER,
+                        text,
+                        tick_font.clone(),
+                        label_color,
+                    );
+                }
+            }
             if let Some((is_x, labels)) = axes_index
                 .and_then(|idx| plot_renderer.overlay_categorical_labels_for_axes(idx))
                 .or_else(|| {
@@ -1588,12 +1658,10 @@ impl PlotOverlay {
                         .map(|(is_x, labels)| (is_x, labels.clone()))
                 })
             {
-                if is_x {
+                if (is_x && cat_x) || (!is_x && cat_y) {
+                    // Explicit axes tick labels take precedence over inferred bar labels.
+                } else if is_x {
                     cat_x = true;
-                } else {
-                    cat_y = true;
-                }
-                if is_x {
                     let stride = Self::label_stride(&labels, plot_rect.width(), tick_font.size);
                     // Draw X categorical labels at integer positions (1..n)
                     for (label_idx, label) in labels.iter().enumerate() {
@@ -1629,6 +1697,7 @@ impl PlotOverlay {
                         );
                     }
                 } else {
+                    cat_y = true;
                     let stride = Self::label_stride(&labels, plot_rect.height(), tick_font.size);
                     // Draw Y categorical labels at integer positions (1..n)
                     for (label_idx, label) in labels.iter().enumerate() {
