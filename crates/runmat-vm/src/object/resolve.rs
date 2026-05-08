@@ -84,24 +84,7 @@ pub async fn load_member(
                 Err(format!("Undefined field '{}'", field).into())
             }
         }
-        Value::Cell(ca) => {
-            let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
-            for v in &ca.data {
-                match &**v {
-                    Value::Struct(st) => {
-                        if let Some(fv) = st.fields.get(&field) {
-                            out.push(fv.clone());
-                        } else {
-                            out.push(Value::Num(0.0));
-                        }
-                    }
-                    other => out.push(other.clone()),
-                }
-            }
-            let new_cell = runmat_builtins::CellArray::new(out, ca.rows, ca.cols)
-                .map_err(|e| format!("cell field gather: {e}"))?;
-            Ok(Value::Cell(new_cell))
-        }
+        Value::Cell(ca) => crate::ops::cells::gather_cell_member(&ca, &field),
         Value::MException(mexn) => {
             let value = match field.as_str() {
                 "identifier" => Value::String(mexn.identifier.clone()),

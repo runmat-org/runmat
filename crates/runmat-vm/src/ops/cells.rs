@@ -98,6 +98,19 @@ pub fn cell_value_prefix(ca: &CellArray, count: usize) -> Result<Vec<Value>, Run
         .collect()
 }
 
+pub fn gather_cell_member(ca: &CellArray, field: &str) -> Result<Value, RuntimeError> {
+    let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
+    for value in &ca.data {
+        match &**value {
+            Value::Struct(st) => out.push(st.fields.get(field).cloned().unwrap_or(Value::Num(0.0))),
+            other => out.push(other.clone()),
+        }
+    }
+    let cell =
+        CellArray::new(out, ca.rows, ca.cols).map_err(|e| format!("cell field gather: {e}"))?;
+    Ok(Value::Cell(cell))
+}
+
 pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Value>, RuntimeError> {
     match indices.len() {
         1 => match &indices[0] {
