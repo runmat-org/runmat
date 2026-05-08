@@ -37,6 +37,13 @@ fn numeric_indices_from_values(values: &[Value]) -> Result<Vec<usize>, RuntimeEr
         .collect()
 }
 
+fn object_protocol_index_cell(values: Vec<Value>, context: &str) -> Result<Value, RuntimeError> {
+    let cols = values.len();
+    let cell =
+        runmat_builtins::CellArray::new(values, 1, cols).map_err(|e| format!("{context}: {e}"))?;
+    Ok(Value::Cell(cell))
+}
+
 async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, RuntimeError> {
     let mut out = Vec::with_capacity(values.len());
     for value in values {
@@ -538,14 +545,10 @@ where
             match base {
                 Value::Object(obj) => {
                     let indices = numeric_indices_from_values(&raw_indices)?;
-                    let cell = runmat_runtime::call_builtin_async(
-                        "__make_cell",
-                        &indices
-                            .iter()
-                            .map(|n| Value::Num(*n as f64))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
+                    let cell = object_protocol_index_cell(
+                        indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                        "subsref build error",
+                    )?;
                     let args = vec![
                         Value::Object(obj),
                         Value::String("subsref".to_string()),
@@ -556,14 +559,10 @@ where
                 }
                 Value::HandleObject(handle) => {
                     let indices = numeric_indices_from_values(&raw_indices)?;
-                    let cell = runmat_runtime::call_builtin_async(
-                        "__make_cell",
-                        &indices
-                            .iter()
-                            .map(|n| Value::Num(*n as f64))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
+                    let cell = object_protocol_index_cell(
+                        indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                        "subsref build error",
+                    )?;
                     let args = vec![
                         Value::HandleObject(handle),
                         Value::String("subsref".to_string()),
@@ -618,7 +617,7 @@ where
                     }
                 }
                 Value::Object(obj) => {
-                    let cell = runmat_runtime::call_builtin_async("__make_cell", &indices).await?;
+                    let cell = object_protocol_index_cell(indices.clone(), "subsref build error")?;
                     let args = vec![
                         Value::Object(obj),
                         Value::String("subsref".to_string()),
@@ -632,7 +631,7 @@ where
                     }
                 }
                 Value::HandleObject(handle) => {
-                    let cell = runmat_runtime::call_builtin_async("__make_cell", &indices).await?;
+                    let cell = object_protocol_index_cell(indices.clone(), "subsref build error")?;
                     let args = vec![
                         Value::HandleObject(handle),
                         Value::String("subsref".to_string()),
@@ -751,14 +750,10 @@ where
             clear_value_residency(&base);
             match base {
                 Value::Object(obj) => {
-                    let cell = runmat_runtime::call_builtin_async(
-                        "__make_cell",
-                        &indices
-                            .iter()
-                            .map(|n| Value::Num(*n as f64))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
+                    let cell = object_protocol_index_cell(
+                        indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                        "subsasgn build error",
+                    )?;
                     let args = vec![
                         Value::Object(obj),
                         Value::String("subsasgn".to_string()),
@@ -769,14 +764,10 @@ where
                     stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
                 }
                 Value::HandleObject(handle) => {
-                    let cell = runmat_runtime::call_builtin_async(
-                        "__make_cell",
-                        &indices
-                            .iter()
-                            .map(|n| Value::Num(*n as f64))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
+                    let cell = object_protocol_index_cell(
+                        indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                        "subsasgn build error",
+                    )?;
                     let args = vec![
                         Value::HandleObject(handle),
                         Value::String("subsasgn".to_string()),
