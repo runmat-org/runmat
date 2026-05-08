@@ -81,7 +81,7 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
         let mut data = vec![0.0; total_elements];
         for r in 0..rows {
             for c in 0..cols {
-                data[r + c * rows] = (&row_major[r * cols + c]).try_into()?;
+                data[r + c * rows] = scalar_to_real(&row_major[r * cols + c])?;
             }
         }
         let matrix =
@@ -94,7 +94,14 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
 fn scalar_to_complex(value: &Value) -> Result<(f64, f64), RuntimeError> {
     match value {
         Value::Complex(re, im) => Ok((*re, *im)),
-        _ => Ok((value.try_into()?, 0.0)),
+        _ => Ok((scalar_to_real(value)?, 0.0)),
+    }
+}
+
+fn scalar_to_real(value: &Value) -> Result<f64, RuntimeError> {
+    match value {
+        Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
+        _ => Ok(value.try_into()?),
     }
 }
 
