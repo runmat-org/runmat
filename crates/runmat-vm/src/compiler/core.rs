@@ -412,16 +412,8 @@ impl Compiler {
         blocks.sort_by_key(|block| block.id.0);
 
         let mut block_starts = HashMap::new();
-        let mut terminator_starts = HashMap::new();
         let mut pending_jumps: Vec<(usize, BasicBlockId, bool)> = Vec::new();
         let mut pending_try_entries: Vec<(usize, BasicBlockId, Option<usize>)> = Vec::new();
-        let loop_header_blocks: HashSet<BasicBlockId> = blocks
-            .iter()
-            .filter_map(|block| match block.terminator.kind {
-                MirTerminatorKind::For { .. } => Some(block.id),
-                _ => None,
-            })
-            .collect();
         let try_entry_blocks: HashSet<BasicBlockId> = blocks
             .iter()
             .filter_map(|block| match block.terminator.kind {
@@ -435,7 +427,6 @@ impl Compiler {
             for stmt in &block.statements {
                 self.compile_mir_stmt(stmt)?;
             }
-            terminator_starts.insert(block.id, self.instructions.len());
             let exits_try_scope = try_entry_blocks.contains(&block.id);
             match &block.terminator.kind {
                 MirTerminatorKind::Goto(target) => {
@@ -533,15 +524,9 @@ impl Compiler {
         }
 
         for (pc, target, is_conditional) in pending_jumps {
-            let target_pc = if loop_header_blocks.contains(&target) {
-                *terminator_starts.get(&target).ok_or_else(|| {
-                    CompileError::new(format!("missing MIR loop header block {target:?}"))
-                })?
-            } else {
-                *block_starts.get(&target).ok_or_else(|| {
-                    CompileError::new(format!("missing MIR target block {target:?}"))
-                })?
-            };
+            let target_pc = *block_starts
+                .get(&target)
+                .ok_or_else(|| CompileError::new(format!("missing MIR target block {target:?}")))?;
             if is_conditional {
                 self.patch(pc, Instr::JumpIfFalse(target_pc));
             } else {
