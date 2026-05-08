@@ -211,7 +211,7 @@ pub fn validate_heatmap_property_pairs(
                 parse_colormap_name(&name, builtin)?;
             }
             "xdisplaylabels" => {
-                let labels = string_labels_from_value(&pair[1], builtin)?;
+                let labels = label_strings_from_value(&pair[1], builtin, "labels")?;
                 if labels.len() != x_label_len {
                     return Err(plotting_error(
                         builtin,
@@ -220,7 +220,7 @@ pub fn validate_heatmap_property_pairs(
                 }
             }
             "ydisplaylabels" => {
-                let labels = string_labels_from_value(&pair[1], builtin)?;
+                let labels = label_strings_from_value(&pair[1], builtin, "labels")?;
                 if labels.len() != y_label_len {
                     return Err(plotting_error(
                         builtin,
@@ -2571,7 +2571,7 @@ fn apply_heatmap_property(
             builtin,
         ),
         "xdisplaylabels" => {
-            let labels = string_labels_from_value(value, builtin)?;
+            let labels = label_strings_from_value(value, builtin, "labels")?;
             if labels.len() != heatmap_handle.x_labels.len() {
                 return Err(plotting_error(
                     builtin,
@@ -2588,7 +2588,7 @@ fn apply_heatmap_property(
             .map_err(|err| map_figure_error(builtin, err))
         }
         "ydisplaylabels" => {
-            let labels = string_labels_from_value(value, builtin)?;
+            let labels = label_strings_from_value(value, builtin, "labels")?;
             if labels.len() != heatmap_handle.y_labels.len() {
                 return Err(plotting_error(
                     builtin,
@@ -3207,7 +3207,11 @@ fn string_array_from_vec(data: Vec<String>) -> BuiltinResult<Value> {
     Ok(Value::StringArray(array))
 }
 
-fn string_labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<String>> {
+pub(crate) fn label_strings_from_value(
+    value: &Value,
+    builtin: &'static str,
+    label_context: &str,
+) -> BuiltinResult<Vec<String>> {
     match value {
         Value::StringArray(array) => Ok(array.data.clone()),
         Value::Cell(cell) => cell
@@ -3217,7 +3221,7 @@ fn string_labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResu
                 value_as_text_string(item).ok_or_else(|| {
                     plotting_error(
                         builtin,
-                        format!("{builtin}: labels must contain text values"),
+                        format!("{builtin}: {label_context} must contain text values"),
                     )
                 })
             })
@@ -3225,9 +3229,11 @@ fn string_labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResu
         Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
         Value::String(text) => Ok(vec![text.clone()]),
         Value::Tensor(tensor) => Ok(tensor.data.iter().map(|v| v.to_string()).collect()),
+        Value::Int(i) => Ok(vec![i.to_i64().to_string()]),
+        Value::Num(v) => Ok(vec![v.to_string()]),
         other => Err(plotting_error(
             builtin,
-            format!("{builtin}: unsupported label value {other:?}"),
+            format!("{builtin}: unsupported {label_context} value {other:?}"),
         )),
     }
 }

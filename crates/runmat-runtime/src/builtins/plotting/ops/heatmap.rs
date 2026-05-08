@@ -1,13 +1,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use runmat_builtins::{StringArray, Tensor, Value};
+use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 
 use super::common::{gather_tensor_from_gpu_async, SurfaceDataInput};
 use super::op_common::surface_inputs::AxisSource;
-use super::op_common::value_as_text_string;
 use super::state::{color_limits_snapshot, render_active_plot, PlotRenderOptions};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -218,32 +217,11 @@ fn labels_from_value(
     expected_len: usize,
     axis_name: &str,
 ) -> crate::BuiltinResult<Vec<String>> {
-    let labels = match value {
-        Value::StringArray(StringArray { data, .. }) => data.clone(),
-        Value::Cell(cell) => cell
-            .data
-            .iter()
-            .map(|item| {
-                value_as_text_string(item).ok_or_else(|| {
-                    crate::builtins::plotting::plotting_error(
-                        BUILTIN_NAME,
-                        format!("heatmap: {axis_name} cell values must be text"),
-                    )
-                })
-            })
-            .collect::<crate::BuiltinResult<Vec<_>>>()?,
-        Value::CharArray(chars) if chars.rows == 1 => vec![chars.data.iter().collect()],
-        Value::String(text) => vec![text.clone()],
-        Value::Tensor(tensor) => tensor.data.iter().map(|v| v.to_string()).collect(),
-        Value::Int(i) => vec![i.to_i64().to_string()],
-        Value::Num(v) => vec![v.to_string()],
-        other => {
-            return Err(crate::builtins::plotting::plotting_error(
-                BUILTIN_NAME,
-                format!("heatmap: unsupported {axis_name} value {other:?}"),
-            ))
-        }
-    };
+    let labels = crate::builtins::plotting::properties::label_strings_from_value(
+        value,
+        BUILTIN_NAME,
+        axis_name,
+    )?;
     if labels.len() != expected_len {
         return Err(crate::builtins::plotting::plotting_error(
             BUILTIN_NAME,
