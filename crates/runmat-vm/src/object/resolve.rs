@@ -244,41 +244,7 @@ where
             st.fields.insert(field, rhs);
             Ok(Value::Struct(st))
         }
-        Value::Cell(mut ca) => {
-            let rhs_cell = if let Value::Cell(rc) = &rhs {
-                Some(rc)
-            } else {
-                None
-            };
-            if let Some(rc) = rhs_cell {
-                if rc.rows != ca.rows || rc.cols != ca.cols {
-                    return Err("Field assignment: cell rhs shape mismatch"
-                        .to_string()
-                        .into());
-                }
-            }
-            for i in 0..ca.data.len() {
-                let rv = if let Some(rc) = rhs_cell {
-                    (*rc.data[i]).clone()
-                } else {
-                    rhs.clone()
-                };
-                match &mut *ca.data[i] {
-                    Value::Struct(st) => {
-                        if let Some(oldv) = st.fields.get(&field) {
-                            on_write(oldv, &rv);
-                        }
-                        st.fields.insert(field.clone(), rv);
-                    }
-                    other => {
-                        let mut st = StructValue::new();
-                        st.fields.insert(field.clone(), rv);
-                        *other = Value::Struct(st);
-                    }
-                }
-            }
-            Ok(Value::Cell(ca))
-        }
+        Value::Cell(ca) => crate::ops::cells::assign_cell_member(ca, field, rhs, on_write),
         Value::Num(0.0) if allow_init => {
             let mut st = StructValue::new();
             st.fields.insert(field, rhs);

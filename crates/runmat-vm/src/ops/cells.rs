@@ -1,5 +1,5 @@
 use crate::interpreter::errors::mex;
-use runmat_builtins::{CellArray, Value};
+use runmat_builtins::{CellArray, StructValue, Value};
 use runmat_runtime::RuntimeError;
 
 fn is_empty_tensor(value: &Value) -> bool {
@@ -109,6 +109,47 @@ pub fn gather_cell_member(ca: &CellArray, field: &str) -> Result<Value, RuntimeE
     let cell =
         CellArray::new(out, ca.rows, ca.cols).map_err(|e| format!("cell field gather: {e}"))?;
     Ok(Value::Cell(cell))
+}
+
+pub fn assign_cell_member<OnWrite>(
+    mut ca: CellArray,
+    field: String,
+    rhs: Value,
+    mut on_write: OnWrite,
+) -> Result<Value, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    let rhs_cell = if let Value::Cell(rc) = &rhs {
+        if rc.rows != ca.rows || rc.cols != ca.cols {
+            return Err("Field assignment: cell rhs shape mismatch".into());
+        }
+        Some(rc)
+    } else {
+        None
+    };
+
+    for i in 0..ca.data.len() {
+        let rv = if let Some(rc) = rhs_cell {
+            (*rc.data[i]).clone()
+        } else {
+            rhs.clone()
+        };
+        match &mut *ca.data[i] {
+            Value::Struct(st) => {
+                if let Some(oldv) = st.fields.get(&field) {
+                    on_write(oldv, &rv);
+                }
+                st.fields.insert(field.clone(), rv);
+            }
+            other => {
+                let mut st = StructValue::new();
+                st.fields.insert(field.clone(), rv);
+                *other = Value::Struct(st);
+            }
+        }
+    }
+    Ok(Value::Cell(ca))
 }
 
 pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Value>, RuntimeError> {

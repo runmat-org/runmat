@@ -1545,6 +1545,25 @@ fn cell_member_access_uses_semantic_vm() {
 }
 
 #[test]
+fn cell_member_assignment_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "C = {struct(), struct()}; C.a = 9; y = C{2}.a;";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile cell member assignment");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "cell member assignment should compile through semantic HIR/MIR/VM"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "9"
+    }));
+}
+
+#[test]
 fn indexed_cell_end_offset_member_assignment_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "C = {struct(), struct(), struct()}; C{end-1}.a = 7; y = C{2}.a;";
