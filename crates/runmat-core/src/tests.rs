@@ -252,6 +252,27 @@ fn real_tensor_complex_assignment_uses_semantic_vm() {
 }
 
 #[test]
+fn real_tensor_2d_complex_assignment_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "A = [1, 2; 3, 4]; A(1, 2) = 5+6i; y = A(1, 2);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile real tensor 2d complex assignment");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "real tensor 2d complex assignment should compile through semantic HIR/MIR/VM"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "5+6i");
+}
+
+#[test]
 fn cell_paren_deletion_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "C = {1, 2, 3}; C(2) = []; y = C{2};";

@@ -164,6 +164,9 @@ pub async fn assign_tensor_scalar(
         if i == 0 || i > rows {
             return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
         }
+        if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+            return assign_complex_scalar(tensor_to_complex(t), indices, rhs).await;
+        }
         let val = rhs_to_real_scalar(rhs).await?;
         let idx = (i - 1) + (j - 1) * rows;
         t.data[idx] = val;
