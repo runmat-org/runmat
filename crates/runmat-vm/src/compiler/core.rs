@@ -749,6 +749,10 @@ impl Compiler {
         base: &MirPlace,
     ) -> Result<(), CompileError> {
         match base {
+            MirPlace::Index(parent, indexing) => {
+                self.compile_mir_place_read(parent)?;
+                self.compile_mir_index_after_base(indexing)
+            }
             MirPlace::Member(parent, field) => {
                 self.compile_mir_member_base_for_assignment(parent)?;
                 self.emit(Instr::LoadMemberOrInit(field.0.clone()));
@@ -790,7 +794,94 @@ impl Compiler {
                 self.emit(Instr::StoreMemberDynamicOrInit);
                 self.emit_store_back_mir_member_chain(parent)
             }
-            MirPlace::Index(_, _) => Err(self.compile_error(
+            MirPlace::Index(parent, indexing) => {
+                let tmp = self.alloc_temp();
+                self.emit(Instr::StoreVar(tmp));
+                self.compile_mir_place_read(parent)?;
+                self.compile_mir_store_indexed_value_from_temp(indexing, tmp)?;
+                self.emit_store_back_mir_member_chain(parent)
+            }
+        }
+    }
+
+    fn compile_mir_place_read(&mut self, place: &MirPlace) -> Result<(), CompileError> {
+        match place {
+            MirPlace::Local(_) | MirPlace::Binding(_) => {
+                let slot = self.mir_place_slot(place)?;
+                self.emit(Instr::LoadVar(slot));
+                Ok(())
+            }
+            MirPlace::Member(base, member) => {
+                self.compile_mir_place_read(base)?;
+                self.emit(Instr::LoadMember(member.0.clone()));
+                Ok(())
+            }
+            MirPlace::DynamicMember(base, member) => {
+                self.compile_mir_place_read(base)?;
+                self.compile_mir_operand(member)?;
+                self.emit(Instr::LoadMemberDynamic);
+                Ok(())
+            }
+            MirPlace::Index(base, indexing) => {
+                self.compile_mir_place_read(base)?;
+                self.compile_mir_index_after_base(indexing)
+            }
+        }
+    }
+
+    fn compile_mir_index_after_base(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
+        match indexing.kind {
+            IndexKind::Paren => {
+                if self.mir_indexing_is_simple_expr_indices(indexing) {
+                    self.compile_mir_index_components_any_context(indexing)?;
+                    self.emit(Instr::Index(indexing.components.len()));
+                } else {
+                    self.compile_mir_slice_index(indexing)?;
+                }
+            }
+            IndexKind::Brace => {
+                self.compile_mir_cell_index_components_any_context(indexing)?;
+                self.emit(Instr::IndexCell(indexing.components.len()));
+            }
+            IndexKind::Dot => {
+                return Err(self.compile_error(
+                    "MIR bytecode lowering for dot indexing is not implemented yet",
+                ))
+            }
+        }
+        Ok(())
+    }
+
+    fn mir_indexing_is_simple_expr_indices(&self, indexing: &MirIndexing) -> bool {
+        indexing
+            .components
+            .iter()
+            .all(|component| matches!(component, MirIndexComponent::Expr(_)))
+            && !indexing.components.iter().any(|component| {
+                matches!(component, MirIndexComponent::Expr(MirOperand::Local(local)) if self.mir_local_is_colon(*local))
+                    || matches!(component, MirIndexComponent::Expr(operand) if self.mir_operand_end_expr(operand).is_some())
+            })
+    }
+
+    fn compile_mir_store_indexed_value_from_temp(
+        &mut self,
+        indexing: &MirIndexing,
+        tmp: usize,
+    ) -> Result<(), CompileError> {
+        match indexing.kind {
+            IndexKind::Paren if self.mir_indexing_is_simple_expr_indices(indexing) => {
+                self.compile_mir_index_components_any_context(indexing)?;
+                self.emit(Instr::LoadVar(tmp));
+                self.emit(Instr::StoreIndex(indexing.components.len()));
+                Ok(())
+            }
+            IndexKind::Brace => {
+                self.compile_mir_cell_index_components_any_context(indexing)?;
+                self.emit(Instr::LoadVar(tmp));
+                self.emit(Instr::StoreIndexCell(indexing.components.len()));
+                Ok(())
+            }
+            _ => Err(self.compile_error(
                 "MIR bytecode lowering for indexed member store-back is not implemented yet",
             )),
         }
@@ -1095,6 +1186,21 @@ impl Compiler {
         Ok(())
     }
 
+    fn compile_mir_index_components_any_context(
+        &mut self,
+        indexing: &MirIndexing,
+    ) -> Result<(), CompileError> {
+        for component in &indexing.components {
+            let MirIndexComponent::Expr(operand) = component else {
+                return Err(self.compile_error(
+                    "MIR bytecode lowering for non-expression indices is not implemented yet",
+                ));
+            };
+            self.compile_mir_operand(operand)?;
+        }
+        Ok(())
+    }
+
     fn compile_mir_cell_index_components(
         &mut self,
         indexing: &MirIndexing,
@@ -1105,6 +1211,26 @@ impl Compiler {
                 "MIR bytecode lowering for this indexing form is not implemented yet",
             ));
         }
+        for component in &indexing.components {
+            match component {
+                MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
+                MirIndexComponent::End { offset, .. } if *offset == 0 => {
+                    self.emit(Instr::LoadConst(-0.0));
+                }
+                _ => {
+                    return Err(self.compile_error(
+                        "MIR bytecode lowering for non-expression indices is not implemented yet",
+                    ))
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn compile_mir_cell_index_components_any_context(
+        &mut self,
+        indexing: &MirIndexing,
+    ) -> Result<(), CompileError> {
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
