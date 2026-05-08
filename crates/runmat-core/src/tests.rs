@@ -453,6 +453,27 @@ fn multi_assign_cell_expansion_rhs_uses_semantic_vm() {
 }
 
 #[test]
+fn multi_assign_cell_end_rhs_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "C = {1, 2}; [a] = C{end};";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile multi-assign cell end rhs");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "multi-assign cell end rhs should compile through semantic HIR/MIR/VM"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("a")).expect("read a");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("a should be readable from workspace");
+    assert_eq!(value.to_string(), "2");
+}
+
+#[test]
 fn cell_end_indexing_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "C = {1, 2}; y = C{end};";

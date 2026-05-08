@@ -521,12 +521,11 @@ where
             let mut indices = Vec::with_capacity(*num_indices);
             if *num_indices > 0 {
                 for _ in 0..*num_indices {
-                    let v: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
+                    let v = stack.pop().ok_or(crate::interpreter::errors::mex(
                         "StackUnderflow",
                         "stack underflow",
-                    ))?)
-                        .try_into()?;
-                    indices.push(v as usize);
+                    ))?;
+                    indices.push(v);
                 }
                 indices.reverse();
             }
@@ -536,20 +535,22 @@ where
             ))?;
             match base {
                 Value::Cell(ca) => {
-                    let values = crate::ops::cells::expand_cell_values(&ca, &indices, *out_count)?;
+                    let mut values = if indices.is_empty() {
+                        crate::ops::cells::expand_cell_values(&ca, &[], *out_count)?
+                    } else {
+                        crate::call::shared::expand_cell_indices(&ca, &indices)?
+                    };
+                    if values.len() > *out_count {
+                        values.truncate(*out_count);
+                    } else {
+                        values.resize(*out_count, Value::Num(0.0));
+                    }
                     for v in values {
                         stack.push(v);
                     }
                 }
                 Value::Object(obj) => {
-                    let cell = runmat_runtime::call_builtin_async(
-                        "__make_cell",
-                        &indices
-                            .iter()
-                            .map(|n| Value::Num(*n as f64))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
+                    let cell = runmat_runtime::call_builtin_async("__make_cell", &indices).await?;
                     let args = vec![
                         Value::Object(obj),
                         Value::String("subsref".to_string()),
@@ -563,14 +564,7 @@ where
                     }
                 }
                 Value::HandleObject(handle) => {
-                    let cell = runmat_runtime::call_builtin_async(
-                        "__make_cell",
-                        &indices
-                            .iter()
-                            .map(|n| Value::Num(*n as f64))
-                            .collect::<Vec<_>>(),
-                    )
-                    .await?;
+                    let cell = runmat_runtime::call_builtin_async("__make_cell", &indices).await?;
                     let args = vec![
                         Value::HandleObject(handle),
                         Value::String("subsref".to_string()),

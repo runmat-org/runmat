@@ -557,6 +557,14 @@ impl Compiler {
                     self.compile_mir_operand(operand)?;
                     index_count += 1;
                 }
+                MirIndexComponent::End { offset, .. } if *offset <= 0 => {
+                    self.emit(Instr::LoadConst(if *offset == 0 {
+                        -0.0
+                    } else {
+                        *offset as f64
+                    }));
+                    index_count += 1;
+                }
                 _ => {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this slice index is not implemented yet",
