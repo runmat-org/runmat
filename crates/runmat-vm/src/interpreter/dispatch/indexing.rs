@@ -1069,13 +1069,17 @@ where
                     stack.push(Value::ComplexTensor(ct));
                 }
                 Value::Cell(ca) if *dims == 1 && numeric.len() == 1 && *colon_mask == 0 => {
-                    let selected = indices_from_value_linear(&numeric[0], ca.data.len()).await?;
+                    let selected = indices_from_value_linear(
+                        &numeric[0],
+                        crate::ops::cells::linear_cell_count(&ca),
+                    )
+                    .await?;
                     stack.push(crate::ops::cells::assign_cell_paren_linear_indices(
                         ca, &selected, &rhs,
                     )?);
                 }
                 Value::Cell(ca) if *dims == 1 && (*colon_mask & 1u32) != 0 => {
-                    let selected = (1..=ca.data.len()).collect::<Vec<_>>();
+                    let selected = crate::ops::cells::all_linear_cell_indices(&ca);
                     stack.push(crate::ops::cells::assign_cell_paren_linear_indices(
                         ca, &selected, &rhs,
                     )?);

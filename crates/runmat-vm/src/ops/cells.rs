@@ -84,6 +84,14 @@ pub fn cell_value_count(ca: &CellArray) -> usize {
     ca.data.len()
 }
 
+pub fn linear_cell_count(ca: &CellArray) -> usize {
+    ca.data.len()
+}
+
+pub fn all_linear_cell_indices(ca: &CellArray) -> Vec<usize> {
+    (1..=linear_cell_count(ca)).collect()
+}
+
 pub fn cell_value_prefix(ca: &CellArray, count: usize) -> Result<Vec<Value>, RuntimeError> {
     (1..=count)
         .map(|idx| index_cell_value(ca, &[idx]))
