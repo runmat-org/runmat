@@ -160,6 +160,35 @@ pub fn assign_cell_paren_linear_indices(
     indices: &[usize],
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
+    if is_empty_tensor(rhs) {
+        if !(ca.rows == 1 || ca.cols == 1) {
+            return Err(mex(
+                "UnsupportedCellDeletion",
+                "Linear cell deletion is only supported for vectors",
+            ));
+        }
+        let mut positions = indices
+            .iter()
+            .map(|&idx| row_major_pos_from_linear(&ca, idx))
+            .collect::<Result<Vec<_>, _>>()?;
+        positions.sort_unstable();
+        positions.dedup();
+        for pos in positions.into_iter().rev() {
+            ca.data.remove(pos);
+        }
+        let len = ca.data.len();
+        let shape = if len == 0 {
+            vec![0, 0]
+        } else if ca.rows == 1 {
+            vec![1, len]
+        } else {
+            vec![len, 1]
+        };
+        return Ok(Value::Cell(
+            CellArray::new_handles_with_shape(ca.data, shape)
+                .map_err(|e| format!("Cell deletion error: {e}"))?,
+        ));
+    }
     let Value::Cell(rhs_cell) = rhs else {
         return Err(mex(
             "UnsupportedCellParenAssignment",

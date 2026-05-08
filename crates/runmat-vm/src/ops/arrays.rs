@@ -54,7 +54,11 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
         );
     }
     row_major.reverse();
-    if row_major.iter().all(|v| matches!(v, Value::Bool(_))) {
+    if total_elements == 0 {
+        let matrix = Tensor::new_2d(Vec::new(), rows, cols)
+            .map_err(|e| format!("Matrix creation error: {e}"))?;
+        stack.push(Value::Tensor(matrix));
+    } else if row_major.iter().all(|v| matches!(v, Value::Bool(_))) {
         let mut data = vec![0u8; total_elements];
         for r in 0..rows {
             for c in 0..cols {

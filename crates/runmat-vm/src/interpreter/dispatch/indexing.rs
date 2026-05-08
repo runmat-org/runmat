@@ -1241,6 +1241,12 @@ where
                         .map_err(|e| format!("slice assign: {e}"))?;
                     stack.push(Value::ComplexTensor(ct));
                 }
+                Value::Cell(ca) if *dims == 1 && numeric.len() == 1 && *colon_mask == 0 => {
+                    let selected = indices_from_value_linear(&numeric[0], ca.data.len()).await?;
+                    stack.push(crate::ops::cells::assign_cell_paren_linear_indices(
+                        ca, &selected, &rhs,
+                    )?);
+                }
                 Value::StringArray(mut sa) => {
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
