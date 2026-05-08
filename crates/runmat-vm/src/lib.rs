@@ -36,13 +36,3 @@ pub use layout::{
 pub use runtime::workspace::{
     push_pending_workspace, take_updated_workspace_state, PendingWorkspaceGuard,
 };
-
-use runmat_builtins::Value;
-use runmat_hir::LegacyHirProgram;
-use runmat_runtime::RuntimeError;
-use std::collections::HashMap;
-
-pub async fn execute_legacy(program: &LegacyHirProgram) -> Result<Vec<Value>, RuntimeError> {
-    let bc = compile_legacy(program, &HashMap::new()).map_err(RuntimeError::from)?;
-    interpret(&bc).await
-}
