@@ -1,6 +1,6 @@
 [package]
 name = "runmat-vm"
-version = "0.4.5"
+version = "0.4.6"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
