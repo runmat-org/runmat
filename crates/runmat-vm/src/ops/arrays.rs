@@ -1,5 +1,5 @@
 use crate::interpreter::errors::mex;
-use runmat_builtins::{Tensor, Value};
+use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
@@ -47,23 +47,42 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
     let total_elements = rows * cols;
     let mut row_major = Vec::with_capacity(total_elements);
     for _ in 0..total_elements {
-        let val: f64 = (&stack
-            .pop()
-            .ok_or(mex("StackUnderflow", "stack underflow"))?)
-            .try_into()?;
-        row_major.push(val);
+        row_major.push(
+            stack
+                .pop()
+                .ok_or(mex("StackUnderflow", "stack underflow"))?,
+        );
     }
     row_major.reverse();
-    let mut data = vec![0.0; total_elements];
-    for r in 0..rows {
-        for c in 0..cols {
-            data[r + c * rows] = row_major[r * cols + c];
+    if row_major.iter().any(|v| matches!(v, Value::Complex(_, _))) {
+        let mut data = vec![(0.0, 0.0); total_elements];
+        for r in 0..rows {
+            for c in 0..cols {
+                data[r + c * rows] = scalar_to_complex(&row_major[r * cols + c])?;
+            }
         }
+        let matrix = ComplexTensor::new_2d(data, rows, cols)
+            .map_err(|e| format!("Complex matrix creation error: {e}"))?;
+        stack.push(Value::ComplexTensor(matrix));
+    } else {
+        let mut data = vec![0.0; total_elements];
+        for r in 0..rows {
+            for c in 0..cols {
+                data[r + c * rows] = (&row_major[r * cols + c]).try_into()?;
+            }
+        }
+        let matrix =
+            Tensor::new_2d(data, rows, cols).map_err(|e| format!("Matrix creation error: {e}"))?;
+        stack.push(Value::Tensor(matrix));
     }
-    let matrix =
-        Tensor::new_2d(data, rows, cols).map_err(|e| format!("Matrix creation error: {e}"))?;
-    stack.push(Value::Tensor(matrix));
     Ok(())
+}
+
+fn scalar_to_complex(value: &Value) -> Result<(f64, f64), RuntimeError> {
+    match value {
+        Value::Complex(re, im) => Ok((*re, *im)),
+        _ => Ok((value.try_into()?, 0.0)),
+    }
 }
 
 pub async fn create_matrix_dynamic<F, Fut>(

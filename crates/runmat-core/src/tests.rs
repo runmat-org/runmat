@@ -189,6 +189,27 @@ fn indexed_deletion_uses_semantic_vm() {
 }
 
 #[test]
+fn complex_matrix_literal_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "A = [1+1i, 2+2i, 3+3i]; y = A(2);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile complex matrix literal");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "complex matrix literal should compile through semantic HIR/MIR/VM"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "2+2i");
+}
+
+#[test]
 fn cell_paren_deletion_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "C = {1, 2, 3}; C(2) = []; y = C{2};";
