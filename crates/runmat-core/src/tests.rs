@@ -1222,6 +1222,20 @@ fn dynamic_function_handle_call_uses_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "dynamic function handle call should compile through semantic HIR/MIR/VM"
     );
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::bytecode::Instr::CreateFunctionHandle(name) if name == "sin"
+        )),
+        "function handle literals should lower to typed function-handle bytecode"
+    );
+    assert!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::bytecode::Instr::CallBuiltin(name, 1) if name == "make_handle"
+        )),
+        "function handle literals should not lower through the internal make_handle builtin"
+    );
 
     block_on(session.execute_outcome(source)).expect("exec succeeds");
     let outcome = block_on(session.execute_outcome("y")).expect("read y");

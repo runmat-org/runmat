@@ -618,6 +618,7 @@ async fn run_interpreter_inner(
             | Instr::CallMethod(_, _)
             | Instr::CallMethodOrMemberIndex(_, _)
             | Instr::LoadMethod(_)
+            | Instr::CreateFunctionHandle(_)
             | Instr::CreateClosure(_, _)
             | Instr::CreateSemanticClosure(_, _, _)
             | Instr::LoadStaticProperty(_, _)

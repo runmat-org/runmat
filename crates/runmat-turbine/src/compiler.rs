@@ -640,6 +640,7 @@ impl BytecodeCompiler {
                     | Instr::StoreMemberOrInit(_)
                     | Instr::StoreMemberDynamic
                     | Instr::StoreMemberDynamicOrInit
+                    | Instr::CreateFunctionHandle(_)
                     | Instr::CreateClosure(_, _)
                     | Instr::CreateSemanticClosure(_, _, _)
                     | Instr::CallMethod(_, _)

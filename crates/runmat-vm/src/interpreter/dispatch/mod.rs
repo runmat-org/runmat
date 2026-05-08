@@ -857,6 +857,12 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CreateFunctionHandle(name) => {
+            stack.push(Value::FunctionHandle(name.clone()));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::LoadStaticProperty(class_name, prop) => {
             handle_load_static_property(stack, class_name, prop)?;
             Ok(Some(DispatchHandled::Generic(

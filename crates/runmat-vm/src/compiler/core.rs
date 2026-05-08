@@ -1608,13 +1608,11 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         match target {
             runmat_hir::FunctionHandleTarget::Builtin(builtin) => {
-                self.emit(Instr::LoadString(builtin.0.clone()));
-                self.emit(Instr::CallBuiltin("make_handle".to_string(), 1));
+                self.emit(Instr::CreateFunctionHandle(builtin.0.clone()));
                 Ok(())
             }
             runmat_hir::FunctionHandleTarget::DynamicName(name) => {
-                self.emit(Instr::LoadString(name.0.clone()));
-                self.emit(Instr::CallBuiltin("make_handle".to_string(), 1));
+                self.emit(Instr::CreateFunctionHandle(name.0.clone()));
                 Ok(())
             }
             runmat_hir::FunctionHandleTarget::Anonymous(function)

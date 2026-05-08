@@ -149,6 +149,7 @@ pub enum Instr {
     CallMethodOrMemberIndex(String, usize),
 
     // Closure and static class dispatch.
+    CreateFunctionHandle(String),
     CreateClosure(String, usize),
     CreateSemanticClosure(FunctionId, String, usize),
     LoadStaticProperty(String, String),
@@ -241,6 +242,7 @@ impl Instr {
             | Instr::LoadBool(_)
             | Instr::LoadString(_)
             | Instr::LoadCharRow(_)
+            | Instr::CreateFunctionHandle(_)
             | Instr::LoadVar(_)
             | Instr::LoadLocal(_) => effect(0, 1),
             Instr::StoreVar(_)
