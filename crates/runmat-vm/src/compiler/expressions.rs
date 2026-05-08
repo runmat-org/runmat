@@ -768,8 +768,7 @@ impl Compiler {
             },
             HirExprKind::AnonFunc { params, body } => self.compile_anon_func(params, body)?,
             HirExprKind::FuncHandle(name) => {
-                self.emit(Instr::LoadString(name.clone()));
-                self.emit(Instr::CallBuiltin("make_handle".to_string(), 1));
+                self.emit(Instr::CreateFunctionHandle(name.clone()));
             }
             HirExprKind::MetaClass(name) => {
                 self.emit(Instr::LoadString(name.clone()));
