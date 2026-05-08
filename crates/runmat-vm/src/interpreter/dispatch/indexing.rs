@@ -873,6 +873,20 @@ where
                         let total = t.data.len();
                         let selected =
                             indices_from_value_linear(&raw_contiguous_indices[0], total).await?;
+                        if let Value::Complex(re, im) = rhs {
+                            let mut ct = runmat_builtins::ComplexTensor {
+                                data: t.data.into_iter().map(|re| (re, 0.0)).collect(),
+                                shape: t.shape,
+                                rows: t.rows,
+                                cols: t.cols,
+                            };
+                            for &idx in &selected {
+                                ct.data[idx - 1] = (re, im);
+                            }
+                            stack.remove(base_pos);
+                            stack.push(Value::ComplexTensor(ct));
+                            return Ok(true);
+                        }
                         let rhs_values =
                             idx_write_slice::materialize_rhs_linear_real(&rhs, selected.len())
                                 .await?;
