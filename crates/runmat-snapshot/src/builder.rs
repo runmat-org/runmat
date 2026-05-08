@@ -741,14 +741,7 @@ impl SnapshotBuilder {
         let ast = runmat_parser::parse(source).map_err(|e| anyhow::anyhow!(e))?;
         let lowering =
             runmat_hir::lower(&ast, &LoweringContext::empty()).map_err(|e| anyhow::anyhow!(e))?;
-        if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
-            if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
-                if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
-                    return Ok(bytecode);
-                }
-            }
-        }
-        Ok(runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())?)
+        self.compile_assembly_to_bytecode(&lowering.assembly)
     }
 
     fn compile_assembly_to_bytecode(

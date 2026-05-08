@@ -12,7 +12,7 @@ use runmat_hir::{
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
-use runmat_vm::{compile_legacy, CompileError};
+use runmat_vm::CompileError;
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -122,15 +122,20 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
 }
 
 fn compile_error_for_lowering(lowering: &LoweringResult) -> Option<CompileError> {
-    if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
-        if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
-            if runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id).is_ok() {
-                return None;
-            }
-        }
-    }
-
-    compile_legacy(&lowering.hir, &HashMap::new()).err()
+    let entrypoint = lowering
+        .assembly
+        .entrypoints
+        .first()
+        .ok_or_else(|| CompileError::new("semantic bytecode compile requires an entrypoint"));
+    let entrypoint = match entrypoint {
+        Ok(entrypoint) => entrypoint,
+        Err(err) => return Some(err),
+    };
+    let mir = match runmat_mir::lowering::lower_assembly(&lowering.assembly) {
+        Ok(mir) => mir,
+        Err(err) => return Some(CompileError::from(err)),
+    };
+    runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id).err()
 }
 
 fn hir_compatibility_mode(compat: CompatMode) -> CompatibilityMode {

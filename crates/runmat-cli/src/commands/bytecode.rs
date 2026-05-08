@@ -22,15 +22,13 @@ pub fn emit_bytecode(source: &str, config: &RunMatConfig) -> Result<String> {
 }
 
 fn compile_bytecode(lowering: &runmat_hir::LoweringResult) -> Result<runmat_vm::Bytecode> {
-    if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
-        if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
-            if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
-                return Ok(bytecode);
-            }
-        }
-    }
-
-    let mut bytecode = runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
+    let entrypoint =
+        lowering.assembly.entrypoints.first().ok_or_else(|| {
+            anyhow::anyhow!("Compile error: semantic HIR assembly has no entrypoint")
+        })?;
+    let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)
+        .map_err(|err| anyhow::anyhow!(format!("MIR lowering error: {err:?}")))?;
+    let mut bytecode = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)
         .map_err(|err| anyhow::anyhow!(format!("Compile error: {err:?}")))?;
     bytecode.var_names = lowering
         .var_names
