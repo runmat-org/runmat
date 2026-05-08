@@ -1,5 +1,5 @@
 use crate::interpreter::errors::mex;
-use runmat_builtins::{ComplexTensor, Tensor, Value};
+use runmat_builtins::{ComplexTensor, LogicalArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
@@ -54,7 +54,20 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
         );
     }
     row_major.reverse();
-    if row_major.iter().any(|v| matches!(v, Value::Complex(_, _))) {
+    if row_major.iter().all(|v| matches!(v, Value::Bool(_))) {
+        let mut data = vec![0u8; total_elements];
+        for r in 0..rows {
+            for c in 0..cols {
+                let Value::Bool(value) = row_major[r * cols + c] else {
+                    unreachable!()
+                };
+                data[r + c * rows] = if value { 1 } else { 0 };
+            }
+        }
+        let matrix = LogicalArray::new(data, vec![rows, cols])
+            .map_err(|e| format!("Logical matrix creation error: {e}"))?;
+        stack.push(Value::LogicalArray(matrix));
+    } else if row_major.iter().any(|v| matches!(v, Value::Complex(_, _))) {
         let mut data = vec![(0.0, 0.0); total_elements];
         for r in 0..rows {
             for c in 0..cols {

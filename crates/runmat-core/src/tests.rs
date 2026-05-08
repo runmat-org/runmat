@@ -517,6 +517,27 @@ fn range_complex_assignment_uses_semantic_vm() {
 }
 
 #[test]
+fn logical_indexing_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "A = [10, 20, 30]; B = A([true, false, true]); y = B(2);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile logical indexing");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "logical indexing should compile through semantic HIR/MIR/VM"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "30");
+}
+
+#[test]
 fn workspace_read_across_submissions_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("x = 42;")).expect("seed workspace");
