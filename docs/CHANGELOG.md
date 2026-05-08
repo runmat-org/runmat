@@ -4,6 +4,25 @@ _What's new across the RunMat runtime, cloud, and sandbox. For technical runtime
 
 ---
 
+## [v0.4.6](https://github.com/runmat-org/runmat/compare/v0.4.5...v0.4.6)
+
+_May 8, 2026_
+
+### Runtime
+
+#### Added
+- Add ODE solvers — `ode23`, `ode45`, and `ode15s` now solve scalar, vector, and matrix-valued initial-value problems with adaptive stepping, requested `tspan` output points, and `RelTol`, `AbsTol`, `InitialStep`, and `MaxStep` options
+- Add random distribution builtins — `exprnd`, `normrnd`, and `unifrnd`, including scalar and shaped outputs, deterministic host RNG behavior, parameter validation, and WGPU-backed generation when the active provider supports it
+- Add image color and class conversion builtins — `rgb2gray`, `gray2rgb`, `ind2rgb`, `im2double`, `im2uint8`, `im2uint16`, `rgb2hsv`, `hsv2rgb`, `rgb2lab`, and `lab2rgb`
+- Add `heatmap` plot support with matrix CData input, optional row and column labels, returned graphics handles, colorbar support, and `get`/`set`/dot-property integration
+- Add `clearvars` with explicit variable clearing and `-except` exclusions
+
+#### Changed
+- Split WGPU random distribution execution into dedicated provider code and add parameterized kernels for exponential, normal, and uniform distributions
+- Reuse the shared value-to-string conversion path for graphics labels and property handling
+
+---
+
 ## [v0.4.5](https://github.com/runmat-org/runmat/compare/v0.4.4...v0.4.5)
 
 _May 1, 2026_
