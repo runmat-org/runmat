@@ -75,6 +75,18 @@ pub async fn load_member(
             runmat_runtime::call_builtin_async("call_method", &args).await
         }
         Value::ClassRef(cls) => load_static_member(&cls, &field),
+        base @ (Value::Num(_) | Value::Int(_)) => {
+            if !is_possible_graphics_handle_value(&base) {
+                return Err(mex("LoadMember", "LoadMember on non-object"));
+            }
+            load_graphics_member(base, &field).await.map_err(|err| {
+                if is_invalid_graphics_handle_error(&err) {
+                    mex("LoadMember", "LoadMember on non-object")
+                } else {
+                    err
+                }
+            })
+        }
         Value::Struct(st) => {
             if let Some(v) = st.fields.get(&field) {
                 Ok(v.clone())
@@ -252,6 +264,25 @@ where
             ];
             runmat_runtime::call_builtin_async("call_method", &args).await
         }
+        Value::Num(0.0) if allow_init => {
+            let mut st = StructValue::new();
+            st.fields.insert(field, rhs);
+            Ok(Value::Struct(st))
+        }
+        base @ (Value::Num(_) | Value::Int(_)) => {
+            if !is_possible_graphics_handle_value(&base) {
+                return Err(mex("StoreMember", "StoreMember on non-object"));
+            }
+            store_graphics_member(base, &field, rhs)
+                .await
+                .map_err(|err| {
+                    if is_invalid_graphics_handle_error(&err) {
+                        mex("StoreMember", "StoreMember on non-object")
+                    } else {
+                        err
+                    }
+                })
+        }
         Value::Struct(mut st) => {
             if let Some(oldv) = st.fields.get(&field) {
                 on_write(oldv, &rhs);
@@ -294,11 +325,6 @@ where
             }
             Ok(Value::Cell(ca))
         }
-        Value::Num(0.0) if allow_init => {
-            let mut st = StructValue::new();
-            st.fields.insert(field, rhs);
-            Ok(Value::Struct(st))
-        }
         _ => Err(mex("StoreMember", "StoreMember on non-object")),
     }
 }
@@ -314,4 +340,37 @@ where
     OnWrite: FnMut(&Value, &Value),
 {
     store_member(base, name, rhs, allow_init, on_write).await
+}
+
+async fn load_graphics_member(base: Value, field: &str) -> Result<Value, RuntimeError> {
+    runmat_runtime::call_builtin_async("get", &[base, Value::String(field.to_string())]).await
+}
+
+async fn store_graphics_member(
+    base: Value,
+    field: &str,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    runmat_runtime::call_builtin_async(
+        "set",
+        &[base.clone(), Value::String(field.to_string()), rhs],
+    )
+    .await?;
+    Ok(base)
+}
+
+fn is_invalid_graphics_handle_error(err: &RuntimeError) -> bool {
+    let text = err.to_string().to_ascii_lowercase();
+    text.contains("unsupported or invalid plotting handle")
+        || text.contains("invalid plotting handle")
+        || text.contains("invalid figure handle")
+        || text.contains("invalid axes handle")
+}
+
+fn is_possible_graphics_handle_value(value: &Value) -> bool {
+    match value {
+        Value::Num(v) => v.is_finite() && *v > 0.0,
+        Value::Int(i) => i.to_f64() > 0.0,
+        _ => false,
+    }
 }

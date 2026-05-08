@@ -1,0 +1,77 @@
+{
+  "title": "heatmap",
+  "category": "plotting",
+  "keywords": [
+    "heatmap",
+    "HeatmapChart",
+    "matrix visualization",
+    "colormap",
+    "plotting"
+  ],
+  "summary": "Create heatmap charts from matrix data with optional row and column labels.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`heatmap` is a plotting sink. Inputs are gathered to build labeled chart state, then rendered through the scaled-image surface path."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::heatmap::tests"
+  },
+  "description": "`heatmap` creates a heatmap-style chart from numeric matrix data. RunMat supports `heatmap(CData)` and `heatmap(XValues, YValues, CData)`, returns a heatmap graphics handle, and supports common chart properties such as `Title`, `XLabel`, `YLabel`, `ColorbarVisible`, and `Colormap` through `get`, `set`, and dot-property assignment.",
+  "behaviors": [
+    "`heatmap(CData)` displays matrix values using default row and column labels.",
+    "`heatmap(XValues, YValues, CData)` uses text, string-array, cell-array, or numeric labels for the displayed columns and rows.",
+    "The returned heatmap handle participates in RunMat's plotting property system.",
+    "Color rendering uses the shared scaled-image and colormap path."
+  ],
+  "examples": [
+    {
+      "description": "Create a labeled heatmap chart",
+      "input": "cdata = [45 60 32; 43 54 76; 32 94 68; 23 95 58];\nxvalues = {'Small','Medium','Large'};\nyvalues = {'Green','Red','Blue','Gray'};\nh = heatmap(xvalues,yvalues,cdata);\nh.Title = 'T-Shirt Orders';\nh.XLabel = 'Sizes';\nh.YLabel = 'Colors';"
+    },
+    {
+      "description": "Create a heatmap from matrix data",
+      "input": "A = magic(5);\nh = heatmap(A);\nh.Colormap = 'hot';\nh.ColorbarVisible = true;"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does heatmap support table inputs?",
+      "answer": "Not yet. RunMat currently supports matrix CData inputs with optional row and column labels. Table-based MATLAB signatures will be added once table values are represented in the runtime."
+    }
+  ],
+  "links": [
+    {
+      "label": "imagesc",
+      "url": "./imagesc"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "colorbar",
+      "url": "./colorbar"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/heatmap.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/heatmap.rs"
+  }
+}
