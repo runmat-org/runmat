@@ -1,3 +1,4 @@
+use crate::call::shared::{call_object_index_method, ObjectIndexKind, ObjectIndexOp};
 use crate::indexing::plan::IndexPlan;
 use crate::indexing::selectors::SliceSelector;
 use crate::interpreter::errors::mex;
@@ -17,25 +18,15 @@ pub async fn object_subsasgn_paren(
 ) -> Result<Value, RuntimeError> {
     let cell = build_subsasgn_paren_cell(numeric)?;
     match base {
-        Value::Object(obj) => {
-            let args = vec![
-                Value::Object(obj),
-                Value::String("subsasgn".to_string()),
-                Value::String("()".to_string()),
+        Value::Object(_) | Value::HandleObject(_) => {
+            call_object_index_method(
+                base,
+                ObjectIndexOp::Subsasgn,
+                ObjectIndexKind::Paren,
                 cell,
-                rhs,
-            ];
-            runmat_runtime::call_builtin_async("call_method", &args).await
-        }
-        Value::HandleObject(handle) => {
-            let args = vec![
-                Value::HandleObject(handle),
-                Value::String("subsasgn".to_string()),
-                Value::String("()".to_string()),
-                cell,
-                rhs,
-            ];
-            runmat_runtime::call_builtin_async("call_method", &args).await
+                Some(rhs),
+            )
+            .await
         }
         other => Err(format!("slice subsasgn requires object/handle, got {other:?}").into()),
     }

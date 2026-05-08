@@ -1,3 +1,4 @@
+use crate::call::shared::{call_object_index_method, ObjectIndexKind, ObjectIndexOp};
 use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::selectors::{
     build_slice_selectors, index_scalar_from_value, materialize_index_value, SliceSelector,
@@ -14,23 +15,15 @@ pub fn build_numeric_subsref_cell(numeric: &[Value]) -> Result<Value, RuntimeErr
 pub async fn object_subsref_paren(base: Value, numeric: &[Value]) -> Result<Value, RuntimeError> {
     let cell = build_numeric_subsref_cell(numeric)?;
     match base {
-        Value::Object(obj) => {
-            let args = vec![
-                Value::Object(obj),
-                Value::String("subsref".to_string()),
-                Value::String("()".to_string()),
+        Value::Object(_) | Value::HandleObject(_) => {
+            call_object_index_method(
+                base,
+                ObjectIndexOp::Subsref,
+                ObjectIndexKind::Paren,
                 cell,
-            ];
-            runmat_runtime::call_builtin_async("call_method", &args).await
-        }
-        Value::HandleObject(handle) => {
-            let args = vec![
-                Value::HandleObject(handle),
-                Value::String("subsref".to_string()),
-                Value::String("()".to_string()),
-                cell,
-            ];
-            runmat_runtime::call_builtin_async("call_method", &args).await
+                None,
+            )
+            .await
         }
         other => Err(format!("slice subsref requires object/handle, got {other:?}").into()),
     }
