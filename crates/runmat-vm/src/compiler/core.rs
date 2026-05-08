@@ -999,6 +999,16 @@ impl Compiler {
                 self.emit(Instr::LoadMemberDynamic);
                 Ok(())
             }
+            MirRvalue::MetaClass(name) => {
+                self.emit(Instr::LoadString(
+                    name.0
+                        .iter()
+                        .map(|segment| segment.0.as_str())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                ));
+                Ok(())
+            }
             MirRvalue::Colon => {
                 self.emit(Instr::LoadConst(0.0));
                 Ok(())
