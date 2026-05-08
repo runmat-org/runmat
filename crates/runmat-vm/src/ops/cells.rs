@@ -6,6 +6,19 @@ fn is_empty_tensor(value: &Value) -> bool {
     matches!(value, Value::Tensor(t) if t.data.is_empty() || t.rows == 0 || t.cols == 0)
 }
 
+fn row_major_pos_from_linear(ca: &CellArray, idx: usize) -> Result<usize, RuntimeError> {
+    if idx == 0 || idx > ca.data.len() {
+        return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+    }
+    if ca.rows <= 1 || ca.cols <= 1 {
+        return Ok(idx - 1);
+    }
+    let zero = idx - 1;
+    let row = zero % ca.rows;
+    let col = zero / ca.rows;
+    Ok(row * ca.cols + col)
+}
+
 pub fn create_cell_2d(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, RuntimeError> {
     runmat_runtime::make_cell_with_shape(values, vec![rows, cols])
         .map_err(|e| format!("Cell creation error: {e}").into())
@@ -15,10 +28,7 @@ pub fn index_cell_value(ca: &CellArray, indices: &[usize]) -> Result<Value, Runt
     match indices.len() {
         1 => {
             let i = indices[0];
-            if i == 0 || i > ca.data.len() {
-                return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
-            }
-            Ok((*ca.data[i - 1]).clone())
+            Ok((*ca.data[row_major_pos_from_linear(ca, i)?]).clone())
         }
         2 => {
             let r = indices[0];
@@ -70,13 +80,11 @@ where
     match indices.len() {
         1 => {
             let i = indices[0];
-            if i == 0 || i > ca.data.len() {
-                return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
-            }
-            if let Some(oldv) = ca.data.get(i - 1) {
+            let pos = row_major_pos_from_linear(&ca, i)?;
+            if let Some(oldv) = ca.data.get(pos) {
                 on_write(oldv, &rhs);
             }
-            *ca.data[i - 1] = rhs;
+            *ca.data[pos] = rhs;
             Ok(Value::Cell(ca))
         }
         2 => {
@@ -160,10 +168,7 @@ fn assign_cell_paren_from_cell(
     let lin = match indices.len() {
         1 => {
             let i = indices[0];
-            if i == 0 || i > ca.data.len() {
-                return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
-            }
-            i - 1
+            row_major_pos_from_linear(&ca, i)?
         }
         2 => {
             let i = indices[0];
