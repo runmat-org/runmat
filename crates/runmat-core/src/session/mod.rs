@@ -1,5 +1,5 @@
 use anyhow::Result;
-use runmat_builtins::{self, Type, Value};
+use runmat_builtins::{self, Value};
 use runmat_gc::{gc_configure, gc_stats, GcConfig};
 use tracing::{debug, info, info_span, warn};
 

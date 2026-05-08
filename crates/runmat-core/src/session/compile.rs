@@ -21,10 +21,9 @@ impl RunMatSession {
                 ),
             )?
         };
-        let existing_functions = self.convert_hir_functions_to_user_functions();
         let mut bytecode = {
             let _span = info_span!("runtime.compile.bytecode").entered();
-            self.compile_semantic_or_explicit_legacy_fallback(&lowering, &existing_functions)?
+            self.compile_semantic_bytecode(&lowering)?
         };
         bytecode.source_id = Some(source_id);
         let new_function_names: HashSet<String> = lowering.functions.keys().cloned().collect();
@@ -64,30 +63,17 @@ impl RunMatSession {
         error.context.call_stack = rendered;
     }
 
-    fn compile_semantic_or_explicit_legacy_fallback(
+    fn compile_semantic_bytecode(
         &self,
         lowering: &LoweringResult,
-        existing_functions: &HashMap<String, runmat_vm::UserFunction>,
     ) -> std::result::Result<runmat_vm::Bytecode, RunError> {
-        if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
-            if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
-                if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
-                    return Ok(bytecode);
-                }
-            }
-        }
-        self.compile_with_legacy_hir_fallback(lowering, existing_functions)
-    }
-
-    fn compile_with_legacy_hir_fallback(
-        &self,
-        lowering: &LoweringResult,
-        existing_functions: &HashMap<String, runmat_vm::UserFunction>,
-    ) -> std::result::Result<runmat_vm::Bytecode, RunError> {
-        Ok(runmat_vm::compile_legacy(
-            &lowering.hir,
-            existing_functions,
-        )?)
+        let entrypoint = lowering.assembly.entrypoints.first().ok_or_else(|| {
+            RunError::Compile(runmat_vm::CompileError::new(
+                "semantic bytecode compile requires an entrypoint",
+            ))
+        })?;
+        let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)?;
+        Ok(runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)?)
     }
 
     pub(crate) fn normalize_error_namespace(&self, error: &mut RuntimeError) {
@@ -156,49 +142,5 @@ impl RunMatSession {
 
         // Update our variable array and mapping
         self.variable_array = new_variable_array;
-    }
-
-    /// Convert stored HIR function definitions to UserFunction format for compilation
-    fn convert_hir_functions_to_user_functions(&self) -> HashMap<String, runmat_vm::UserFunction> {
-        let mut user_functions = HashMap::new();
-
-        for (name, hir_stmt) in &self.legacy_function_definitions {
-            if let runmat_hir::LegacyHirStmt::Function {
-                name: func_name,
-                params,
-                outputs,
-                body,
-                has_varargin: _,
-                has_varargout: _,
-                ..
-            } = hir_stmt
-            {
-                // Use the existing HIR utilities to calculate variable count
-                let var_map =
-                    runmat_hir::remapping::create_complete_function_var_map(params, outputs, body);
-                let max_local_var = var_map.len();
-
-                let source_id = self.legacy_function_source_ids.get(name).copied();
-                if let Some(id) = source_id {
-                    if let Some(source) = self.source_pool.get(id) {
-                        let _ = (&source.name, &source.text);
-                    }
-                }
-                let user_func = runmat_vm::UserFunction {
-                    name: func_name.clone(),
-                    params: params.clone(),
-                    outputs: outputs.clone(),
-                    body: body.clone(),
-                    local_var_count: max_local_var,
-                    has_varargin: false,
-                    has_varargout: false,
-                    var_types: vec![Type::Unknown; max_local_var],
-                    source_id,
-                };
-                user_functions.insert(name.clone(), user_func);
-            }
-        }
-
-        user_functions
     }
 }

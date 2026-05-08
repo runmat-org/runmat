@@ -1003,20 +1003,12 @@ impl RunMatSession {
 fn compile_eval_hook_bytecode(
     lowering: &runmat_hir::LoweringResult,
 ) -> Result<runmat_vm::Bytecode, runmat_vm::CompileError> {
-    if let Some(entrypoint) = lowering.assembly.entrypoints.first() {
-        if let Ok(mir) = runmat_mir::lowering::lower_assembly(&lowering.assembly) {
-            if let Ok(bytecode) = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id) {
-                return Ok(bytecode);
-            }
-        }
-    }
-    compile_eval_hook_with_legacy_hir_fallback(lowering)
-}
-
-fn compile_eval_hook_with_legacy_hir_fallback(
-    lowering: &runmat_hir::LoweringResult,
-) -> Result<runmat_vm::Bytecode, runmat_vm::CompileError> {
-    runmat_vm::compile_legacy(&lowering.hir, &HashMap::new())
+    let entrypoint = lowering.assembly.entrypoints.first().ok_or_else(|| {
+        runmat_vm::CompileError::new("semantic eval hook compile requires an entrypoint")
+    })?;
+    let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)
+        .map_err(runmat_vm::CompileError::from)?;
+    runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)
 }
 
 fn execution_workspace_mapping(
