@@ -1341,8 +1341,12 @@ impl Compiler {
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
-                MirIndexComponent::End { offset, .. } if *offset == 0 => {
-                    self.emit(Instr::LoadConst(-0.0));
+                MirIndexComponent::End { offset, .. } if *offset <= 0 => {
+                    self.emit(Instr::LoadConst(if *offset == 0 {
+                        -0.0
+                    } else {
+                        *offset as f64
+                    }));
                 }
                 _ => {
                     return Err(self.compile_error(
@@ -1361,8 +1365,12 @@ impl Compiler {
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
-                MirIndexComponent::End { offset, .. } if *offset == 0 => {
-                    self.emit(Instr::LoadConst(-0.0));
+                MirIndexComponent::End { offset, .. } if *offset <= 0 => {
+                    self.emit(Instr::LoadConst(if *offset == 0 {
+                        -0.0
+                    } else {
+                        *offset as f64
+                    }));
                 }
                 _ => {
                     return Err(self.compile_error(
