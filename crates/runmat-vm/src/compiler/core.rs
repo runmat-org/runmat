@@ -413,7 +413,7 @@ impl Compiler {
 
         let mut block_starts = HashMap::new();
         let mut pending_jumps: Vec<(usize, BasicBlockId, bool)> = Vec::new();
-        let mut pending_try_entries: Vec<(usize, BasicBlockId)> = Vec::new();
+        let mut pending_try_entries: Vec<(usize, BasicBlockId, Option<usize>)> = Vec::new();
         let try_entry_blocks: HashSet<BasicBlockId> = blocks
             .iter()
             .filter_map(|block| match block.terminator.kind {
@@ -476,9 +476,13 @@ impl Compiler {
                 MirTerminatorKind::TryCatch {
                     try_block,
                     catch_block,
+                    catch_binding,
                 } => {
-                    let enter_pc = self.emit(Instr::EnterTry(usize::MAX, None));
-                    pending_try_entries.push((enter_pc, *catch_block));
+                    let catch_var = catch_binding
+                        .map(|local| self.mir_local_slot(local))
+                        .transpose()?;
+                    let enter_pc = self.emit(Instr::EnterTry(usize::MAX, catch_var));
+                    pending_try_entries.push((enter_pc, *catch_block, catch_var));
                     let try_pc = self.emit(Instr::Jump(usize::MAX));
                     pending_jumps.push((try_pc, *try_block, false));
                 }
@@ -509,11 +513,11 @@ impl Compiler {
             }
         }
 
-        for (pc, target) in pending_try_entries {
+        for (pc, target, catch_var) in pending_try_entries {
             let target_pc = *block_starts
                 .get(&target)
                 .ok_or_else(|| CompileError::new(format!("missing MIR catch block {target:?}")))?;
-            self.patch(pc, Instr::EnterTry(target_pc, None));
+            self.patch(pc, Instr::EnterTry(target_pc, catch_var));
         }
 
         Ok(())

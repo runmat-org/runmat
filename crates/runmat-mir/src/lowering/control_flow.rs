@@ -357,6 +357,7 @@ impl ControlFlowBuilder {
             }
             if let HirStmtKind::TryCatch {
                 try_body,
+                catch_binding,
                 catch_body,
                 ..
             } = &stmt.kind
@@ -405,6 +406,9 @@ impl ControlFlowBuilder {
                         kind: MirTerminatorKind::TryCatch {
                             try_block: try_id,
                             catch_block: catch_id,
+                            catch_binding: catch_binding
+                                .map(|binding| ctx.local_for_binding(binding))
+                                .transpose()?,
                         },
                         span: stmt.span,
                     },

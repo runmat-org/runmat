@@ -275,6 +275,7 @@ fn successors(kind: &MirTerminatorKind) -> Vec<BasicBlockId> {
         MirTerminatorKind::TryCatch {
             try_block,
             catch_block,
+            ..
         } => vec![*try_block, *catch_block],
         MirTerminatorKind::Await {
             resume, cleanup, ..

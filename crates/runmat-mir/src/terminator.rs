@@ -31,6 +31,7 @@ pub enum MirTerminatorKind {
     TryCatch {
         try_block: BasicBlockId,
         catch_block: BasicBlockId,
+        catch_binding: Option<MirLocalId>,
     },
     Return(Vec<MirOperand>),
     Await {
