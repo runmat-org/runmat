@@ -729,22 +729,70 @@ impl Compiler {
                 Ok(())
             }
             MirPlace::Member(base, member) => {
-                let base_slot = self.mir_place_slot(base)?;
-                self.emit(Instr::LoadVar(base_slot));
+                self.compile_mir_member_base_for_assignment(base)?;
                 self.compile_mir_rvalue(value)?;
                 self.emit(Instr::StoreMemberOrInit(member.0.clone()));
-                self.emit(Instr::StoreVar(base_slot));
-                Ok(())
+                self.emit_store_back_mir_member_chain(base)
             }
             MirPlace::DynamicMember(base, member) => {
-                let base_slot = self.mir_place_slot(base)?;
-                self.emit(Instr::LoadVar(base_slot));
+                self.compile_mir_member_base_for_assignment(base)?;
                 self.compile_mir_operand(member)?;
                 self.compile_mir_rvalue(value)?;
                 self.emit(Instr::StoreMemberDynamicOrInit);
-                self.emit(Instr::StoreVar(base_slot));
+                self.emit_store_back_mir_member_chain(base)
+            }
+        }
+    }
+
+    fn compile_mir_member_base_for_assignment(
+        &mut self,
+        base: &MirPlace,
+    ) -> Result<(), CompileError> {
+        match base {
+            MirPlace::Member(parent, field) => {
+                self.compile_mir_member_base_for_assignment(parent)?;
+                self.emit(Instr::LoadMemberOrInit(field.0.clone()));
                 Ok(())
             }
+            MirPlace::DynamicMember(parent, name) => {
+                self.compile_mir_member_base_for_assignment(parent)?;
+                self.compile_mir_operand(name)?;
+                self.emit(Instr::LoadMemberDynamicOrInit);
+                Ok(())
+            }
+            _ => {
+                let slot = self.mir_place_slot(base)?;
+                self.emit(Instr::LoadVar(slot));
+                Ok(())
+            }
+        }
+    }
+
+    fn emit_store_back_mir_member_chain(&mut self, base: &MirPlace) -> Result<(), CompileError> {
+        match base {
+            MirPlace::Local(_) | MirPlace::Binding(_) => {
+                let slot = self.mir_place_slot(base)?;
+                self.emit(Instr::StoreVar(slot));
+                Ok(())
+            }
+            MirPlace::Member(parent, field) => {
+                self.compile_mir_member_base_for_assignment(parent)?;
+                self.emit(Instr::Swap);
+                self.emit(Instr::StoreMemberOrInit(field.0.clone()));
+                self.emit_store_back_mir_member_chain(parent)
+            }
+            MirPlace::DynamicMember(parent, name) => {
+                let tmp = self.alloc_temp();
+                self.emit(Instr::StoreVar(tmp));
+                self.compile_mir_member_base_for_assignment(parent)?;
+                self.compile_mir_operand(name)?;
+                self.emit(Instr::LoadVar(tmp));
+                self.emit(Instr::StoreMemberDynamicOrInit);
+                self.emit_store_back_mir_member_chain(parent)
+            }
+            MirPlace::Index(_, _) => Err(self.compile_error(
+                "MIR bytecode lowering for indexed member store-back is not implemented yet",
+            )),
         }
     }
 
