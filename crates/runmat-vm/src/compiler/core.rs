@@ -676,11 +676,7 @@ impl Compiler {
                 self.emit(Instr::LoadVar(base_slot));
                 match indexing.kind {
                     IndexKind::Paren => {
-                        if indexing.components.iter().all(|component| {
-                            matches!(component, MirIndexComponent::Expr(_))
-                                && !matches!(component, MirIndexComponent::Expr(MirOperand::Local(local)) if self.mir_local_is_colon(*local))
-                                && !matches!(component, MirIndexComponent::Expr(operand) if self.mir_operand_end_expr(operand).is_some())
-                        }) {
+                        if self.mir_indexing_is_simple_expr_indices(indexing) {
                             self.compile_mir_index_components(
                                 indexing,
                                 IndexResultContext::AssignmentTarget,
@@ -866,7 +862,26 @@ impl Compiler {
             && !indexing.components.iter().any(|component| {
                 matches!(component, MirIndexComponent::Expr(MirOperand::Local(local)) if self.mir_local_is_colon(*local))
                     || matches!(component, MirIndexComponent::Expr(operand) if self.mir_operand_end_expr(operand).is_some())
+                    || matches!(component, MirIndexComponent::Expr(operand) if self.mir_operand_is_non_scalar_index(operand))
             })
+    }
+
+    fn mir_operand_is_non_scalar_index(&self, operand: &MirOperand) -> bool {
+        match operand {
+            MirOperand::Local(local) => self.mir_local_matches_rvalue(*local, |value| {
+                self.mir_rvalue_is_non_scalar_index(value)
+            }),
+            _ => false,
+        }
+    }
+
+    fn mir_rvalue_is_non_scalar_index(&self, value: &MirRvalue) -> bool {
+        match value {
+            MirRvalue::Range { .. } => true,
+            MirRvalue::Aggregate { rows, cols, .. } => rows.saturating_mul(*cols) != 1,
+            MirRvalue::Use(operand) => self.mir_operand_is_non_scalar_index(operand),
+            _ => false,
+        }
     }
 
     fn compile_mir_store_indexed_value_from_temp(
@@ -1209,15 +1224,7 @@ impl Compiler {
         self.compile_mir_operand(base)?;
         match indexing.kind {
             IndexKind::Paren => {
-                if indexing
-                    .components
-                    .iter()
-                    .all(|component| matches!(component, MirIndexComponent::Expr(_)))
-                    && !indexing.components.iter().any(|component| {
-                        matches!(component, MirIndexComponent::Expr(MirOperand::Local(local)) if self.mir_local_is_colon(*local))
-                            || matches!(component, MirIndexComponent::Expr(operand) if self.mir_operand_end_expr(operand).is_some())
-                    })
-                {
+                if self.mir_indexing_is_simple_expr_indices(indexing) {
                     self.compile_mir_index_components(indexing, IndexResultContext::ReadSingle)?;
                     self.emit(Instr::Index(indexing.components.len()));
                 } else {

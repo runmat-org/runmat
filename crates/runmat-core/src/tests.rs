@@ -443,6 +443,14 @@ fn range_slice_uses_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "range slice should compile through semantic HIR/MIR/VM"
     );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::IndexSlice(..))),
+        "range indexing should lower to slice bytecode"
+    );
 
     block_on(session.execute_outcome(source)).expect("exec succeeds");
     let outcome = block_on(session.execute_outcome("y")).expect("read y");
@@ -463,6 +471,22 @@ fn range_assignment_uses_semantic_vm() {
     assert!(
         prepared.bytecode.layout.is_some(),
         "range assignment should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreSlice(..))),
+        "range assignment should lower to slice store bytecode"
+    );
+    assert!(
+        !prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreIndex(1))),
+        "range assignment should not rely on StoreIndex fallback"
     );
 
     block_on(session.execute_outcome(source)).expect("exec succeeds");
@@ -527,6 +551,14 @@ fn logical_indexing_uses_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "logical indexing should compile through semantic HIR/MIR/VM"
     );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::IndexSlice(..))),
+        "logical indexing should lower to slice bytecode"
+    );
 
     block_on(session.execute_outcome(source)).expect("exec succeeds");
     let outcome = block_on(session.execute_outcome("y")).expect("read y");
@@ -547,6 +579,14 @@ fn logical_assignment_uses_semantic_vm() {
     assert!(
         prepared.bytecode.layout.is_some(),
         "logical assignment should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreSlice(..))),
+        "logical assignment should lower to slice store bytecode"
     );
 
     block_on(session.execute_outcome(source)).expect("exec succeeds");
