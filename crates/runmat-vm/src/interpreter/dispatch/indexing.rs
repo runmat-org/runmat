@@ -597,22 +597,22 @@ where
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let mut indices = Vec::new();
+            let mut raw_indices = Vec::new();
             for _ in 0..*num_indices {
-                let v: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
+                let v = stack.pop().ok_or(crate::interpreter::errors::mex(
                     "StackUnderflow",
                     "stack underflow",
-                ))?)
-                    .try_into()?;
-                indices.push(v as usize);
+                ))?;
+                raw_indices.push(v);
             }
-            indices.reverse();
+            raw_indices.reverse();
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
             match base {
                 Value::Object(obj) => {
+                    let indices = numeric_indices_from_values(&raw_indices)?;
                     let cell = runmat_builtins::CellArray::new(
                         indices.iter().map(|n| Value::Num(*n as f64)).collect(),
                         1,
@@ -629,6 +629,7 @@ where
                     stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
                 }
                 Value::HandleObject(handle) => {
+                    let indices = numeric_indices_from_values(&raw_indices)?;
                     let cell = runmat_builtins::CellArray::new(
                         indices.iter().map(|n| Value::Num(*n as f64)).collect(),
                         1,
@@ -645,6 +646,7 @@ where
                     stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
                 }
                 Value::Cell(ca) => {
+                    let indices = resolve_cell_indices(&raw_indices, ca.rows, ca.cols)?;
                     let updated =
                         crate::ops::cells::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
                             runmat_gc::gc_record_write(oldv, newv);

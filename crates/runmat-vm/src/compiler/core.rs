@@ -704,7 +704,7 @@ impl Compiler {
                         }
                     }
                     IndexKind::Brace => {
-                        self.compile_mir_index_components(
+                        self.compile_mir_cell_index_components(
                             indexing,
                             IndexResultContext::AssignmentTarget,
                         )?;
