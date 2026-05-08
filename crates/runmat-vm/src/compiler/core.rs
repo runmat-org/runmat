@@ -412,8 +412,16 @@ impl Compiler {
         blocks.sort_by_key(|block| block.id.0);
 
         let mut block_starts = HashMap::new();
+        let mut terminator_starts = HashMap::new();
         let mut pending_jumps: Vec<(usize, BasicBlockId, bool)> = Vec::new();
         let mut pending_try_entries: Vec<(usize, BasicBlockId, Option<usize>)> = Vec::new();
+        let loop_header_blocks: HashSet<BasicBlockId> = blocks
+            .iter()
+            .filter_map(|block| match block.terminator.kind {
+                MirTerminatorKind::For { .. } => Some(block.id),
+                _ => None,
+            })
+            .collect();
         let try_entry_blocks: HashSet<BasicBlockId> = blocks
             .iter()
             .filter_map(|block| match block.terminator.kind {
@@ -427,6 +435,7 @@ impl Compiler {
             for stmt in &block.statements {
                 self.compile_mir_stmt(stmt)?;
             }
+            terminator_starts.insert(block.id, self.instructions.len());
             let exits_try_scope = try_entry_blocks.contains(&block.id);
             match &block.terminator.kind {
                 MirTerminatorKind::Goto(target) => {
@@ -486,6 +495,21 @@ impl Compiler {
                     let try_pc = self.emit(Instr::Jump(usize::MAX));
                     pending_jumps.push((try_pc, *try_block, false));
                 }
+                MirTerminatorKind::For {
+                    binding,
+                    iterable,
+                    body_block,
+                    exit_block,
+                    ..
+                } => {
+                    self.compile_mir_for_terminator(
+                        *binding,
+                        iterable,
+                        *body_block,
+                        *exit_block,
+                        &mut pending_jumps,
+                    )?;
+                }
                 MirTerminatorKind::Return(values) => {
                     if exits_try_scope {
                         self.emit(Instr::PopTry);
@@ -509,9 +533,15 @@ impl Compiler {
         }
 
         for (pc, target, is_conditional) in pending_jumps {
-            let target_pc = *block_starts
-                .get(&target)
-                .ok_or_else(|| CompileError::new(format!("missing MIR target block {target:?}")))?;
+            let target_pc = if loop_header_blocks.contains(&target) {
+                *terminator_starts.get(&target).ok_or_else(|| {
+                    CompileError::new(format!("missing MIR loop header block {target:?}"))
+                })?
+            } else {
+                *block_starts.get(&target).ok_or_else(|| {
+                    CompileError::new(format!("missing MIR target block {target:?}"))
+                })?
+            };
             if is_conditional {
                 self.patch(pc, Instr::JumpIfFalse(target_pc));
             } else {
@@ -525,6 +555,91 @@ impl Compiler {
                 .ok_or_else(|| CompileError::new(format!("missing MIR catch block {target:?}")))?;
             self.patch(pc, Instr::EnterTry(target_pc, catch_var));
         }
+
+        Ok(())
+    }
+
+    fn compile_mir_for_terminator(
+        &mut self,
+        binding: runmat_mir::MirLocalId,
+        iterable: &MirRvalue,
+        body_block: BasicBlockId,
+        exit_block: BasicBlockId,
+        pending_jumps: &mut Vec<(usize, BasicBlockId, bool)>,
+    ) -> Result<(), CompileError> {
+        let MirRvalue::Range { start, step, end } = iterable else {
+            return Err(self.compile_error("MIR for-loop lowering currently requires a range"));
+        };
+        let binding_slot = self.mir_local_slot(binding)?;
+        let init_flag = self.alloc_temp();
+        let end_var = self.alloc_temp();
+        let step_var = self.alloc_temp();
+
+        self.emit(Instr::LoadVar(init_flag));
+        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::Equal);
+        let already_initialized = self.emit(Instr::JumpIfFalse(usize::MAX));
+        self.compile_mir_operand(start)?;
+        self.emit(Instr::StoreVar(binding_slot));
+        if let Some(step) = step {
+            self.compile_mir_operand(step)?;
+        } else {
+            self.emit(Instr::LoadConst(1.0));
+        }
+        self.emit(Instr::StoreVar(step_var));
+        self.compile_mir_operand(end)?;
+        self.emit(Instr::StoreVar(end_var));
+        self.emit(Instr::LoadConst(1.0));
+        self.emit(Instr::StoreVar(init_flag));
+        let after_update = self.emit(Instr::Jump(usize::MAX));
+        let increment_pc = self.instructions.len();
+        self.patch(already_initialized, Instr::JumpIfFalse(increment_pc));
+        self.emit(Instr::LoadVar(binding_slot));
+        self.emit(Instr::LoadVar(step_var));
+        self.emit(Instr::Add);
+        self.emit(Instr::StoreVar(binding_slot));
+        let condition_pc = self.instructions.len();
+        self.patch(after_update, Instr::Jump(condition_pc));
+
+        self.emit(Instr::LoadVar(step_var));
+        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::Equal);
+        let nonzero_step = self.emit(Instr::JumpIfFalse(usize::MAX));
+        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::StoreVar(init_flag));
+        let zero_step_exit = self.emit(Instr::Jump(usize::MAX));
+        pending_jumps.push((zero_step_exit, exit_block, false));
+        let after_zero_step = self.instructions.len();
+        self.patch(nonzero_step, Instr::JumpIfFalse(after_zero_step));
+
+        self.emit(Instr::LoadVar(step_var));
+        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::GreaterEqual);
+        let negative_step_branch = self.emit(Instr::JumpIfFalse(usize::MAX));
+        self.emit(Instr::LoadVar(binding_slot));
+        self.emit(Instr::LoadVar(end_var));
+        self.emit(Instr::LessEqual);
+        let positive_step_exit = self.emit(Instr::JumpIfFalse(usize::MAX));
+        let condition_done = self.emit(Instr::Jump(usize::MAX));
+        let negative_branch = self.instructions.len();
+        self.patch(negative_step_branch, Instr::JumpIfFalse(negative_branch));
+        self.emit(Instr::LoadVar(binding_slot));
+        self.emit(Instr::LoadVar(end_var));
+        self.emit(Instr::GreaterEqual);
+        let negative_step_exit = self.emit(Instr::JumpIfFalse(usize::MAX));
+        let body_jump_pc = self.instructions.len();
+        self.patch(condition_done, Instr::Jump(body_jump_pc));
+
+        let body_jump = self.emit(Instr::Jump(usize::MAX));
+        pending_jumps.push((body_jump, body_block, false));
+
+        let exit_pc = self.instructions.len();
+        self.patch(positive_step_exit, Instr::JumpIfFalse(exit_pc));
+        self.patch(negative_step_exit, Instr::JumpIfFalse(exit_pc));
+        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::StoreVar(init_flag));
+        let done = self.emit(Instr::Jump(usize::MAX));
+        pending_jumps.push((done, exit_block, false));
 
         Ok(())
     }

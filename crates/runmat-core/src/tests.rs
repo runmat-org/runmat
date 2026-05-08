@@ -462,6 +462,32 @@ fn range_slice_uses_semantic_vm() {
 }
 
 #[test]
+fn for_range_loop_uses_semantic_vm_without_rerunning_prefix() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(session.execute_outcome("prefix = 0;")).expect("seed prefix");
+    let source = "prefix = prefix + 1; s = 0; for i = 1:3; s = s + i; end";
+    let prepared = session.compile_input(source).expect("compile for loop");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "for range loops should compile through semantic HIR/MIR/VM"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let s_outcome = block_on(session.execute_outcome("s")).expect("read s");
+    let s = s_outcome
+        .flow
+        .durable_workspace_value()
+        .expect("s should be readable from workspace");
+    assert_eq!(s.to_string(), "6");
+    let prefix_outcome = block_on(session.execute_outcome("prefix")).expect("read prefix");
+    let prefix = prefix_outcome
+        .flow
+        .durable_workspace_value()
+        .expect("prefix should be readable from workspace");
+    assert_eq!(prefix.to_string(), "1");
+}
+
+#[test]
 fn range_assignment_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "A = [1, 2, 3, 4]; A(2:3) = 9; y = A(3);";
