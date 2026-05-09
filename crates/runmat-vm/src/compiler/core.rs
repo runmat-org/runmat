@@ -4,7 +4,7 @@ use crate::instr::{ArgSpec, EmitLabel, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
-    BindingId, EntrypointId, FunctionId, HirAssembly, HirCallableRef, IndexKind,
+    BindingId, CallSyntax, EntrypointId, FunctionId, HirAssembly, HirCallableRef, IndexKind,
     IndexResultContext, LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind,
     LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt, OperatorKind, RequestedOutputCount,
 };
@@ -749,6 +749,9 @@ impl Compiler {
             }
         }
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
+        if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
+            return self.compile_mir_method_call(call, has_expansion);
+        }
         match &call.callee {
             MirCallee::Static(HirCallableRef::Function(function)) => {
                 for arg in &call.args {
@@ -1276,6 +1279,9 @@ impl Compiler {
         }
 
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
+        if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
+            return self.compile_mir_method_call(call, has_expansion);
+        }
         match &call.callee {
             MirCallee::Static(HirCallableRef::Function(function)) => {
                 for arg in &call.args {
@@ -1310,6 +1316,40 @@ impl Compiler {
                 }
             }
         }
+        Ok(())
+    }
+
+    fn compile_mir_method_call(
+        &mut self,
+        call: &MirCall,
+        has_expansion: bool,
+    ) -> Result<(), CompileError> {
+        if has_expansion {
+            return Err(self.compile_error(
+                "MIR bytecode lowering for expanded method calls is not implemented yet",
+            ));
+        }
+        let name = match &call.callee {
+            MirCallee::Static(HirCallableRef::Unresolved(name)) if name.0.len() == 1 => {
+                name.0[0].0.clone()
+            }
+            MirCallee::Static(HirCallableRef::Builtin(id)) => id.0.clone(),
+            _ => {
+                return Err(self.compile_error(
+                    "MIR bytecode lowering for this method callee is not implemented yet",
+                ))
+            }
+        };
+        if call.args.is_empty() {
+            return Err(self.compile_error("MIR method calls require a base receiver"));
+        }
+        for arg in &call.args {
+            self.compile_mir_call_arg(arg)?;
+        }
+        self.emit(Instr::CallMethodOrMemberIndex(
+            name,
+            call.args.len().saturating_sub(1),
+        ));
         Ok(())
     }
 
