@@ -23,6 +23,26 @@ fn arithmetic_and_assignment() {
 }
 
 #[test]
+fn legacy_logical_ops_use_typed_bytecode() {
+    let ast = parse("a = ~0; b = 1 & 0; c = 1 | 0;").unwrap();
+    let hir = lower(&ast).unwrap();
+    let bytecode = compile(&hir, &HashMap::new()).expect("compile logical ops");
+
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::LogicalNot)));
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::NotEqual)));
+    assert!(!bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        Instr::CallBuiltin(name, _) if matches!(name.as_str(), "not" | "ne")
+    )));
+}
+
+#[test]
 fn nextpow2_supports_common_fft_zero_padding_pattern() {
     let input = "x = [1 2 3 4 5 6 7 8 9]; N = 2^nextpow2(length(x));";
     let ast = parse(input).unwrap();
