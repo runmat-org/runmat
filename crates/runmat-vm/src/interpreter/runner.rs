@@ -667,6 +667,9 @@ async fn run_interpreter_inner(
             | Instr::GreaterEqual
             | Instr::Equal
             | Instr::NotEqual
+            | Instr::LogicalNot
+            | Instr::LogicalAnd
+            | Instr::LogicalOr
             | Instr::Unpack(_)
             | Instr::CreateMatrix(_, _)
             | Instr::CreateMatrixDynamic(_)

@@ -65,6 +65,9 @@ pub enum Instr {
     GreaterEqual,
     Equal,
     NotEqual,
+    LogicalNot,
+    LogicalAnd,
+    LogicalOr,
 
     // Short-circuit logical control flow.
     AndAnd(usize),
@@ -268,10 +271,13 @@ impl Instr {
             | Instr::Greater
             | Instr::GreaterEqual
             | Instr::Equal
-            | Instr::NotEqual => effect(2, 1),
+            | Instr::NotEqual
+            | Instr::LogicalAnd
+            | Instr::LogicalOr => effect(2, 1),
             Instr::Swap => effect(2, 2),
             Instr::Neg
             | Instr::UPlus
+            | Instr::LogicalNot
             | Instr::Transpose
             | Instr::ConjugateTranspose
             | Instr::LoadMember(_)

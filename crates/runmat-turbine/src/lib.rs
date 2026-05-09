@@ -679,6 +679,9 @@ impl TurbineEngine {
                 Instr::GreaterEqual => "GreaterEqual".hash(&mut hasher),
                 Instr::Equal => "Equal".hash(&mut hasher),
                 Instr::NotEqual => "NotEqual".hash(&mut hasher),
+                Instr::LogicalNot => "LogicalNot".hash(&mut hasher),
+                Instr::LogicalAnd => "LogicalAnd".hash(&mut hasher),
+                Instr::LogicalOr => "LogicalOr".hash(&mut hasher),
                 Instr::JumpIfFalse(target) => {
                     "JumpIfFalse".hash(&mut hasher);
                     target.hash(&mut hasher);

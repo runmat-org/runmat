@@ -421,6 +421,11 @@ impl BytecodeCompiler {
                         let result = Self::call_runtime_ne_static(builder, a, b);
                         local_stack.push(result);
                     }
+                    Instr::LogicalNot | Instr::LogicalAnd | Instr::LogicalOr => {
+                        return Err(execution_error(
+                            "Logical bytecode is not yet supported in Turbine JIT; falling back to interpreter",
+                        ));
+                    }
                     Instr::CallBuiltin(name, arg_count) => {
                         if matches!(name.as_str(), "max" | "min") {
                             return Err(execution_error(format!(

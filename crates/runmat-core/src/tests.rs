@@ -935,13 +935,44 @@ fn multi_assign_deal_uses_semantic_vm() {
 #[test]
 fn elementwise_logical_ops_use_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
-    let source = "a = 1 & 0; b = 1 | 0;";
+    let source = "a = 1 & 0; b = 1 | 0; c = ~0;";
     let prepared = session
         .compile_input(source)
         .expect("compile elementwise logical ops");
     assert!(
         prepared.bytecode.layout.is_some(),
         "elementwise logical ops should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LogicalAnd)),
+        "elementwise and should lower to typed logical bytecode"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LogicalOr)),
+        "elementwise or should lower to typed logical bytecode"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::LogicalNot)),
+        "logical not should lower to typed logical bytecode"
+    );
+    assert!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CallBuiltin(name, _) if matches!(name.as_str(), "and" | "or" | "not")
+        )),
+        "semantic logical ops should not lower through string-keyed builtin calls"
     );
 
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
@@ -951,6 +982,10 @@ fn elementwise_logical_ops_use_semantic_vm() {
     }));
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
+            && upsert.value.to_string() == "1"
+    }));
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "c")
             && upsert.value.to_string() == "1"
     }));
 }

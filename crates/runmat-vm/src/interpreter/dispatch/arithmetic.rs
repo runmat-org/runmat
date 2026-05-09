@@ -351,6 +351,33 @@ pub async fn dispatch_arithmetic(
             .await?;
             Ok(true)
         }
+        crate::bytecode::Instr::LogicalNot => {
+            let value = stack.pop().ok_or_else(|| {
+                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
+            })?;
+            stack.push(runmat_runtime::call_builtin_async("not", &[value]).await?);
+            Ok(true)
+        }
+        crate::bytecode::Instr::LogicalAnd => {
+            let rhs = stack.pop().ok_or_else(|| {
+                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
+            })?;
+            let lhs = stack.pop().ok_or_else(|| {
+                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
+            })?;
+            stack.push(runmat_runtime::call_builtin_async("and", &[lhs, rhs]).await?);
+            Ok(true)
+        }
+        crate::bytecode::Instr::LogicalOr => {
+            let rhs = stack.pop().ok_or_else(|| {
+                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
+            })?;
+            let lhs = stack.pop().ok_or_else(|| {
+                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
+            })?;
+            stack.push(runmat_runtime::call_builtin_async("or", &[lhs, rhs]).await?);
+            Ok(true)
+        }
         _ => Ok(false),
     }
 }
