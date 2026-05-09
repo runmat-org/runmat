@@ -13,12 +13,14 @@ impl RunMatSession {
         };
         let lowering = {
             let _span = info_span!("runtime.lower").entered();
+            let semantic_function_names = self.semantic_function_registry.names.clone();
             runmat_hir::lower(
                 &ast,
                 &LoweringContext::new(
                     &self.legacy_variable_names,
                     &self.legacy_function_definitions,
-                ),
+                )
+                .with_semantic_functions(&semantic_function_names),
             )?
         };
         let mut bytecode = {

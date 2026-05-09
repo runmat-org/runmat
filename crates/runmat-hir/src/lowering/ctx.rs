@@ -51,6 +51,7 @@ struct SemanticCtx {
     top_level_await: Vec<bool>,
     compatibility_mode: Option<crate::CompatibilityMode>,
     function_names: HashMap<String, FunctionId>,
+    external_function_names: HashMap<String, FunctionId>,
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
 }
 
@@ -129,6 +130,7 @@ impl SemanticCtx {
             top_level_await: Vec::new(),
             compatibility_mode: context.compatibility_mode.clone(),
             function_names: HashMap::new(),
+            external_function_names: context.semantic_functions.clone(),
             captures: HashMap::new(),
         };
 
@@ -1317,6 +1319,11 @@ impl SemanticCtx {
         span: Span,
     ) -> HirCall {
         let (callee, kind) = if let Some(function) = self.function_names.get(name) {
+            (
+                HirCallableRef::Function(*function),
+                CallKind::DirectFunction(*function),
+            )
+        } else if let Some(function) = self.external_function_names.get(name) {
             (
                 HirCallableRef::Function(*function),
                 CallKind::DirectFunction(*function),

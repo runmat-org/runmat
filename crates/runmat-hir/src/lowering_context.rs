@@ -1,10 +1,11 @@
-use crate::{CompatibilityMode, LegacyHirStmt as HirStmt};
+use crate::{CompatibilityMode, FunctionId, LegacyHirStmt as HirStmt};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 pub struct LoweringContext<'a> {
     pub variables: &'a HashMap<String, usize>,
     pub functions: &'a HashMap<String, HirStmt>,
+    pub semantic_functions: &'a HashMap<String, FunctionId>,
     pub compatibility_mode: Option<CompatibilityMode>,
 }
 
@@ -16,8 +17,17 @@ impl<'a> LoweringContext<'a> {
         Self {
             variables,
             functions,
+            semantic_functions: empty_semantic_functions(),
             compatibility_mode: None,
         }
+    }
+
+    pub fn with_semantic_functions(
+        mut self,
+        semantic_functions: &'a HashMap<String, FunctionId>,
+    ) -> Self {
+        self.semantic_functions = semantic_functions;
+        self
     }
 
     pub fn with_compatibility_mode(mut self, compatibility_mode: CompatibilityMode) -> Self {
@@ -31,7 +41,13 @@ impl<'a> LoweringContext<'a> {
         Self {
             variables: EMPTY_VARS.get_or_init(HashMap::new),
             functions: EMPTY_FUNCS.get_or_init(HashMap::new),
+            semantic_functions: empty_semantic_functions(),
             compatibility_mode: None,
         }
     }
+}
+
+fn empty_semantic_functions() -> &'static HashMap<String, FunctionId> {
+    static EMPTY_SEMANTIC_FUNCS: OnceLock<HashMap<String, FunctionId>> = OnceLock::new();
+    EMPTY_SEMANTIC_FUNCS.get_or_init(HashMap::new)
 }
