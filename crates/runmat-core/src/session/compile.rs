@@ -112,6 +112,7 @@ impl RunMatSession {
             };
             let mut function = function;
             function.function = new_id;
+            function.source_id = bytecode.source_id;
             for instr in &mut function.instructions {
                 remap_semantic_function_instr(instr, &remap);
             }

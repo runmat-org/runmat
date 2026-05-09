@@ -78,6 +78,7 @@ fn compile_semantic_functions(
             SemanticFunctionBytecode {
                 function: function.id,
                 display_name: function_layout.display_name.clone(),
+                source_id: None,
                 instructions: compiler.instructions,
                 instr_spans: compiler.instr_spans,
                 call_arg_spans: compiler.call_arg_spans,

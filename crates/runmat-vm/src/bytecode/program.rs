@@ -45,6 +45,8 @@ pub struct ExecutionContext {
 pub struct SemanticFunctionBytecode {
     pub function: FunctionId,
     pub display_name: String,
+    #[serde(default)]
+    pub source_id: Option<runmat_hir::SourceId>,
     pub instructions: Vec<Instr>,
     #[serde(default)]
     pub instr_spans: Vec<runmat_hir::Span>,

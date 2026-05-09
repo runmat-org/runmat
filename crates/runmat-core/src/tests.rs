@@ -1746,13 +1746,19 @@ fn cellfun_session_function_uses_semantic_registry() {
     let prepared = session
         .compile_input(source)
         .expect("compile callback using session function");
+    let inc_id = prepared
+        .bytecode
+        .semantic_function_registry
+        .resolve_name("inc")
+        .expect("session callback target should resolve through semantic function registry");
     assert!(
         prepared
             .bytecode
             .semantic_function_registry
-            .resolve_name("inc")
+            .get(inc_id)
+            .and_then(|function| function.source_id)
             .is_some(),
-        "session callback target should resolve through semantic function registry"
+        "session semantic callback target should retain source metadata"
     );
 
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
