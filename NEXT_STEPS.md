@@ -135,6 +135,215 @@ Concrete next target:
 
 This is narrower than object `subsref` / `subsasgn` and should reduce compiler/runtime string coupling without requiring a full object protocol rewrite.
 
+## Semantic Compiler Design Work
+
+The new semantic compiler is now carrying enough source intent that the remaining work should be designed as compiler-product cleanup, not as VM fallback patching. The main theme is to stop treating legacy HIR as the durable intermediate representation and make semantic HIR, MIR, layout, and bytecode the only compiler product the runtime needs.
+
+### 1. Semantic Function Callback ABI
+
+Current state:
+
+- Top-level semantic compilation produces semantic function bytecode and typed call instructions for direct calls, function handles, `feval`, multi-output calls, and expanded arguments.
+- Dynamic user-function callback paths still centralize through `compile_prepared_user_dispatch`, which wraps `compile_legacy` over reconstructed `LegacyHirProgram`.
+- Turbine has an equivalent dynamic user-function callback path that still compiles through legacy HIR.
+
+Target state:
+
+- A runtime user-function callback receives or resolves a stable semantic function identity, not a legacy statement body.
+- The callback invokes already compiled semantic function bytecode from `Bytecode.semantic_functions` or a session-owned semantic function registry.
+- Function invocation accepts one canonical call frame shape:
+  - callee identity: `FunctionId`, function-handle value, or dynamic callable value
+  - captured values: closure capture slots, already ordered by `VmAssemblyLayout`
+  - input values: runtime arguments after expansion
+  - requested outputs: exact/at-least/unknown output policy
+  - source/callsite metadata: span/source IDs for diagnostics
+- The same ABI is used by direct calls, local functions, anonymous closures, `feval`, runtime callbacks, and Turbine callbacks.
+
+Design implication:
+
+- `PreparedUserCall`, `PreparedUserDispatch`, and `UserFunction` should become transitional compatibility structures. Their long-term replacement is a semantic call descriptor keyed by `FunctionId`/`DefPath` plus layout/capture data.
+- `compile_prepared_user_dispatch` should be treated as the final centralized legacy boundary before removal, not a reusable abstraction to extend.
+
+First implementation slice:
+
+- Add a semantic user-function invoker path that can execute a `SemanticFunctionBytecode` by `FunctionId` with captures, args, and requested outputs.
+- Route one dynamic callback site through that path when the callee maps to a semantic function already present in the current bytecode product.
+- Keep the centralized legacy helper only for unresolved/external dynamic functions until the registry is complete.
+
+### 2. Collapse Legacy HIR Compatibility Seams
+
+Observed older-HIR artifacts worth collapsing:
+
+- `LegacyHirProgram`, `LegacyHirStmt`, and `LegacyHirExpr` remain in VM compiler modules and many tests.
+- `compile_legacy` is still exported publicly from `runmat-vm` and used by VM/Turbine tests plus dynamic callback paths.
+- `legacy_variable_names` and `legacy_function_definitions` remain in `RunMatSession` to seed lowering across REPL inputs.
+- `LoweringResult` still carries both `assembly` and legacy `hir`, `variables`, `functions`, `var_types`, and legacy inference placeholders.
+- LSP analysis still consults legacy variable maps and legacy type helpers.
+- `CompatibilityMode::RunMatExtended` is still mapped through parser compatibility as MATLAB mode in some places, which obscures the intended distinction between compatibility policy and parser syntax mode.
+
+Target cleanup direction:
+
+- Keep source compatibility behavior, but represent it through semantic assembly, analysis facts, and workspace ABI records.
+- Replace session `legacy_variable_names` with a semantic workspace binding table keyed by stable names plus semantic binding/session IDs.
+- Replace `legacy_function_definitions` with a semantic function registry keyed by `FunctionId`/`DefPath`/source identity.
+- Move tests that only need compiler behavior from hand-built legacy HIR to semantic source fixtures or semantic MIR fixtures.
+- Stop exporting `compile_legacy` once runtime/Turbine callbacks and remaining tests no longer depend on it.
+
+### 3. Normalize Call Shapes
+
+Current call lowering has converged, but the bytecode still has many sibling instructions:
+
+- direct semantic function calls
+- dynamic `feval` calls
+- builtin calls
+- function expansion calls
+- method/member-index calls
+- multi-output variants
+
+This is acceptable while removing fallbacks, but the semantic model should eventually expose one call descriptor family before bytecode selection.
+
+Target MIR concept:
+
+- `MirCall` should carry callee kind, syntax kind, argument expansion specs, requested output policy, object/member dispatch policy, and effect facts.
+- Bytecode lowering may still emit specialized instructions for performance, but it should not rediscover method-vs-builtin-vs-feval behavior from names.
+
+Old-HIR cleanup opportunity:
+
+- Legacy lowering encoded many call distinctions as string names (`feval`, method names, internal builtins). The new system can keep those distinctions as typed MIR call facts instead.
+
+### 4. Member And Object Protocol ABI
+
+Current state:
+
+- Typed member bytecode now covers member load/store, dynamic member load/store, method/member-index calls, and expanded member-index calls.
+- Object protocol calls still assemble `subsref`/`subsasgn` style data in VM/runtime helper paths.
+
+Target state:
+
+- Object and handle-object indexing should receive a structured index descriptor rather than ad hoc cells and protocol strings assembled at each call site.
+- The descriptor should represent paren, brace, dot/member, colon, range, end, and comma-list expansion directly.
+- `IndexKind::Dot` should be eliminated from MIR indexing if it is not semantically constructed, or explicitly mapped to member MIR if a parser/lowering path can produce it.
+
+Collapse opportunity:
+
+- The old design blurred `obj.name(...)` among function call, method call, member read, and member indexing until late VM dispatch. The semantic design should keep ambiguity only where MATLAB requires runtime dispatch; all statically known member/index shapes should lower to typed MIR/bytecode.
+
+### 5. Indexing And Assignment Normalization
+
+Current state:
+
+- Most common scalar, range, vector, logical, cell, and member store-back cases now lower through semantic bytecode.
+- Some VM dispatch still classifies index/value shapes for compatibility.
+
+Remaining design work:
+
+- Decide whether logical indices remain explicit `MirIndexComponent::Logical` or normalize to ordinary expression operands producing logical arrays before MIR bytecode lowering.
+- Decide whether colon/end in cell/multi-assign contexts should be handled by the same selector plan used for tensor slice operations.
+- Model deletion explicitly in MIR instead of recognizing empty RHS in runtime stores.
+- Collapse duplicate cell selection logic across `IndexCell`, `IndexCellExpand`, call expansion, and `StoreIndexCell` into one selector/plan API.
+
+Target outcome:
+
+- VM instructions execute explicit index plans.
+- Runtime helper paths validate and apply plans.
+- No VM branch needs to infer whether a tensor index means scalar indexing, slice indexing, logical indexing, or deletion.
+
+### 6. Varargout And Multi-Output Semantics
+
+Current state:
+
+- Multi-output direct, dynamic, and expanded calls are typed in bytecode.
+- `MirOutputTarget::VarargoutExpansion` still has a bytecode gap, but it may not be constructed by current semantic lowering.
+
+Design decision needed:
+
+- If varargout target expansion is not representable from current parser/HIR, mark it future design and do not keep a misleading runtime gap.
+- If it is intended soon, define the target-list ABI:
+  - fixed outputs before expansion
+  - varargout capture cell/output-list target
+  - discard targets
+  - requested output count propagation to callee
+
+Collapse opportunity:
+
+- Legacy multi-assign handling mixed output shaping, stack unpacking, and assignment target handling. Semantic MIR should own the output target list and requested output policy before bytecode.
+
+### 7. Async, Future, And Spawn Semantics
+
+Current state:
+
+- MIR contains `Future`, `Spawn`, and `Await` shapes, but bytecode lowering is incomplete.
+- These are RunMat extensions and should not be rushed as VM op patches.
+
+Design needed before implementation:
+
+- Runtime `Future`/task value representation.
+- Suspension/resume ABI for `Await` terminators.
+- Workspace/export behavior for top-level await versus function-local await.
+- Cancellation, diagnostics, and call-stack metadata across suspension.
+- Compatibility policy: MATLAB-strict should reject unsupported async syntax before MIR/VM.
+
+### 8. Struct And Object Aggregate Semantics
+
+Current state:
+
+- Tensor and cell aggregates lower directly.
+- `MirAggregateKind::Struct` and `ObjectArray` are still bytecode gaps.
+
+Design options:
+
+- Lower struct/object aggregate literals into typed construction bytecode.
+- Lower them into empty construction plus member stores if that better matches MATLAB semantics.
+- Route through public builtins only if the source syntax is actually a builtin call, not as compiler-internal construction.
+
+Preferred direction:
+
+- Add typed aggregate construction instructions once semantic HIR has a clear source form for struct/object literals.
+
+### 9. Compatibility Mode Cleanup
+
+Current state:
+
+- Compatibility policy, parser mode, and RunMat extension flags are still partly entangled.
+
+Target state:
+
+- Parser mode answers syntax acceptance questions.
+- Semantic compatibility mode answers behavior policy questions.
+- Runtime/session mode answers host policy questions such as top-level await and workspace export.
+
+Collapse opportunity:
+
+- Replace broad variants such as `RunMatExtended` where they mask multiple independent policy bits.
+
+## Remaining Gap Classification
+
+Treat current MIR bytecode gap markers as follows:
+
+- `control-flow terminator`: design gap for async/await or future terminators, not a small VM patch unless a concrete source reproducer exists.
+- `varargout expansion`: HIR/MIR output-target design gap; first confirm whether it is constructible.
+- `slice index`: likely selector-plan normalization work for logical/range/end/colon in non-tensor and cell contexts.
+- `dot assignment` / `dot indexing`: likely dead or transitional if semantic lowering uses member MIR; verify and remove or map explicitly.
+- `indexed member store-back`: remaining forms after paren/brace store-back; likely object/dot descriptor work.
+- `rvalue` / `operand`: async/future/spawn/temp modeling or unsupported semantic forms; classify by source reproducer before implementing.
+- `{count} call outputs`: call ABI/output-list policy; avoid adding ad hoc bytecode variants until call descriptor design is settled.
+- `call callee`: semantic resolver/DefPath work; do not fall back to string builtin guesses.
+- `aggregate kind`: struct/object aggregate design.
+- `function handle target`: method/DefPath function-handle ABI work.
+- `assignment place`: remaining non-local/non-binding places should become explicit place/update plans.
+
+## Recommended Semantic Design Slice
+
+The next high-leverage slice is semantic callback removal, not another isolated marker.
+
+Concrete plan:
+
+1. Inventory all runtime/Turbine paths that invoke user functions from callbacks.
+2. Add a semantic function registry shape that can answer: given a callable identity, return `SemanticFunctionBytecode`, capture layout, display name, and source metadata.
+3. Route one callback path through `interpret_function_with_counts` using semantic bytecode instead of `compile_legacy`.
+4. Keep `compile_prepared_user_dispatch` as a fallback only for identities not yet in the semantic registry.
+5. Add a ratchet that a callback-triggered local/anonymous function does not call `compile_legacy` when semantic bytecode is available.
+
 ## Validation Cadence
 
 For each coherent slice:
