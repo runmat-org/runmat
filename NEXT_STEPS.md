@@ -144,8 +144,8 @@ The new semantic compiler is now carrying enough source intent that the remainin
 Current state:
 
 - Top-level semantic compilation produces semantic function bytecode and typed call instructions for direct calls, function handles, `feval`, multi-output calls, and expanded arguments.
-- Dynamic user-function callback paths still centralize through `compile_prepared_user_dispatch`, which wraps `compile_legacy` over reconstructed `LegacyHirProgram`.
-- Turbine has an equivalent dynamic user-function callback path that still compiles through legacy HIR.
+- Runtime and Turbine callback paths first invoke `SemanticFunctionBytecode` by semantic function identity/name when the current bytecode product contains the callee.
+- Unresolved/external dynamic user-function callbacks still centralize through `compile_prepared_user_dispatch`, which wraps `compile_legacy` over reconstructed `LegacyHirProgram`.
 
 Target state:
 
@@ -175,7 +175,7 @@ First implementation slice:
 Observed older-HIR artifacts worth collapsing:
 
 - `LegacyHirProgram`, `LegacyHirStmt`, and `LegacyHirExpr` remain in VM compiler modules and many tests.
-- `compile_legacy` is still exported publicly from `runmat-vm` and used by VM/Turbine tests plus dynamic callback paths.
+- `compile_legacy` is still exported publicly from `runmat-vm` and used by VM/Turbine tests plus the centralized dynamic callback fallback.
 - `legacy_variable_names` and `legacy_function_definitions` remain in `RunMatSession` to seed lowering across REPL inputs.
 - `LoweringResult` still carries both `assembly` and legacy `hir`, `variables`, `functions`, `var_types`, and legacy inference placeholders.
 - LSP analysis still consults legacy variable maps and legacy type helpers.
@@ -334,13 +334,13 @@ Treat current MIR bytecode gap markers as follows:
 
 ## Recommended Semantic Design Slice
 
-The next high-leverage slice is semantic callback removal, not another isolated marker.
+The next high-leverage slice is the semantic function registry, not another isolated callback patch.
 
 Concrete plan:
 
-1. Inventory all runtime/Turbine paths that invoke user functions from callbacks.
+1. Inventory the remaining callback identities that cannot currently resolve to `SemanticFunctionBytecode`.
 2. Add a semantic function registry shape that can answer: given a callable identity, return `SemanticFunctionBytecode`, capture layout, display name, and source metadata.
-3. Route one callback path through `interpret_function_with_counts` using semantic bytecode instead of `compile_legacy`.
+3. Route callback resolution through that registry instead of display-name scans over the current bytecode product.
 4. Keep `compile_prepared_user_dispatch` as a fallback only for identities not yet in the semantic registry.
 5. Add a ratchet that a callback-triggered local/anonymous function does not call `compile_legacy` when semantic bytecode is available.
 
