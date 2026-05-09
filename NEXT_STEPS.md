@@ -144,13 +144,13 @@ The new semantic compiler is now carrying enough source intent that the remainin
 Current state:
 
 - Top-level semantic compilation produces semantic function bytecode and typed call instructions for direct calls, function handles, `feval`, multi-output calls, and expanded arguments.
-- Runtime and Turbine callback paths first invoke `SemanticFunctionBytecode` by semantic function identity/name when the current bytecode product contains the callee.
+- Runtime and Turbine callback paths resolve callback names through `SemanticFunctionRegistry` to stable `FunctionId`s, then invoke `SemanticFunctionBytecode` by semantic identity when the current bytecode product contains the callee.
 - Unresolved/external dynamic user-function callbacks still centralize through `compile_prepared_user_dispatch`, which wraps `compile_legacy` over reconstructed `LegacyHirProgram`.
 
 Target state:
 
 - A runtime user-function callback receives or resolves a stable semantic function identity, not a legacy statement body.
-- The callback invokes already compiled semantic function bytecode from `Bytecode.semantic_functions` or a session-owned semantic function registry.
+- The callback invokes already compiled semantic function bytecode from `Bytecode.semantic_function_registry` or a session-owned semantic function registry.
 - Function invocation accepts one canonical call frame shape:
   - callee identity: `FunctionId`, function-handle value, or dynamic callable value
   - captured values: closure capture slots, already ordered by `VmAssemblyLayout`
@@ -334,13 +334,13 @@ Treat current MIR bytecode gap markers as follows:
 
 ## Recommended Semantic Design Slice
 
-The next high-leverage slice is the semantic function registry, not another isolated callback patch.
+The next high-leverage slice is making the semantic function registry session-owned, not another isolated callback patch.
 
 Concrete plan:
 
 1. Inventory the remaining callback identities that cannot currently resolve to `SemanticFunctionBytecode`.
-2. Add a semantic function registry shape that can answer: given a callable identity, return `SemanticFunctionBytecode`, capture layout, display name, and source metadata.
-3. Route callback resolution through that registry instead of display-name scans over the current bytecode product.
+2. Extend the semantic function registry shape so it can answer: given a callable identity, return `SemanticFunctionBytecode`, capture layout, display name, and source metadata across REPL inputs.
+3. Route callback resolution through the session-owned registry instead of only the current bytecode product.
 4. Keep `compile_prepared_user_dispatch` as a fallback only for identities not yet in the semantic registry.
 5. Add a ratchet that a callback-triggered local/anonymous function does not call `compile_legacy` when semantic bytecode is available.
 

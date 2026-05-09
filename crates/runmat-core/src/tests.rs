@@ -1719,9 +1719,9 @@ fn cellfun_named_local_function_uses_semantic_callback() {
     assert!(
         prepared
             .bytecode
-            .semantic_functions
-            .values()
-            .any(|function| function.display_name == "inc"),
+            .semantic_function_registry
+            .resolve_name("inc")
+            .is_some(),
         "local callback target should be available as semantic function bytecode"
     );
     assert!(

@@ -1,6 +1,6 @@
 use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
-use crate::bytecode::{Bytecode, Instr, SemanticFunctionBytecode, UserFunction};
+use crate::bytecode::{Bytecode, Instr, SemanticFunctionRegistry, UserFunction};
 use crate::call::shared as call_shared;
 use crate::call::user as call_user;
 use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
@@ -54,8 +54,8 @@ fn invoke_user_for_end_expr_adapter<'a>(
 ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
     Box::pin(async move {
         let mut local_vars = vars_ref.to_owned();
-        let semantic_functions = HashMap::new();
-        invoke_user_function_value(name, &argv, functions, &semantic_functions, &mut local_vars)
+        let semantic_registry = SemanticFunctionRegistry::default();
+        invoke_user_function_value(name, &argv, functions, &semantic_registry, &mut local_vars)
             .await
     })
 }
@@ -180,14 +180,11 @@ async fn invoke_user_function_value(
     name: &str,
     args: &[Value],
     functions: &HashMap<String, UserFunction>,
-    semantic_functions: &HashMap<runmat_hir::FunctionId, SemanticFunctionBytecode>,
+    semantic_registry: &SemanticFunctionRegistry,
     vars: &mut [Value],
 ) -> Result<Value, RuntimeError> {
-    if let Some((function, _)) = semantic_functions
-        .iter()
-        .find(|(_, function)| function.display_name == name)
-    {
-        return invoke_semantic_function_value(function.0, args, 1, semantic_functions).await;
+    if let Some(function) = semantic_registry.resolve_name(name) {
+        return invoke_semantic_function_value(function.0, args, 1, semantic_registry).await;
     }
 
     let func = call_shared::lookup_user_function(name, functions)?;
@@ -218,10 +215,10 @@ pub async fn invoke_semantic_function_value(
     function: usize,
     args: &[Value],
     requested_outputs: usize,
-    semantic_functions: &HashMap<runmat_hir::FunctionId, SemanticFunctionBytecode>,
+    semantic_registry: &SemanticFunctionRegistry,
 ) -> Result<Value, RuntimeError> {
     let function_id = runmat_hir::FunctionId(function);
-    let func = semantic_functions.get(&function_id).ok_or_else(|| {
+    let func = semantic_registry.get(function_id).ok_or_else(|| {
         let message = format!("Undefined semantic function: {function}");
         mex("UndefinedSemanticFunction", &message)
     })?;
@@ -262,7 +259,8 @@ pub async fn invoke_semantic_function_value(
     let mut bytecode = Bytecode::with_instructions(func.instructions.clone(), func.var_count);
     bytecode.instr_spans = func.instr_spans.clone();
     bytecode.call_arg_spans = func.call_arg_spans.clone();
-    bytecode.semantic_functions = semantic_functions.clone();
+    bytecode.semantic_functions = semantic_registry.functions.clone();
+    bytecode.semantic_function_registry = semantic_registry.clone();
     let result_vars = interpret_function_with_counts(
         &bytecode,
         vars,
@@ -352,15 +350,15 @@ async fn run_interpreter_inner(
         bytecode,
     } = state;
     let functions = Arc::new(context.functions.clone());
-    let semantic_functions = Arc::new(bytecode.semantic_functions.clone());
-    let semantic_functions_for_user_invoker = Arc::clone(&semantic_functions);
+    let semantic_registry = Arc::new(bytecode.semantic_registry());
+    let semantic_registry_for_user_invoker = Arc::clone(&semantic_registry);
     let _user_function_vars_guard = install_user_function_vars(&mut vars);
     let _user_function_guard = user_functions::install_user_function_invoker(Some(Arc::new(
         move |name: &str, args: &[Value]| {
             let name = name.to_string();
             let args = args.to_vec();
             let functions = Arc::clone(&functions);
-            let semantic_functions = Arc::clone(&semantic_functions_for_user_invoker);
+            let semantic_registry = Arc::clone(&semantic_registry_for_user_invoker);
             Box::pin(async move {
                 let vars_ptr = USER_FUNCTION_VARS.with(|slot| *slot.borrow());
                 let Some(vars_ptr) = vars_ptr else {
@@ -370,8 +368,7 @@ async fn run_interpreter_inner(
                     ));
                 };
                 let vars = unsafe { &mut *vars_ptr };
-                invoke_user_function_value(&name, &args, &functions, &semantic_functions, vars)
-                    .await
+                invoke_user_function_value(&name, &args, &functions, &semantic_registry, vars).await
             })
         },
     )));
@@ -379,13 +376,13 @@ async fn run_interpreter_inner(
         user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |function: usize, args: &[Value], requested_outputs: usize| {
                 let args = args.to_vec();
-                let semantic_functions = Arc::clone(&semantic_functions);
+                let semantic_registry = Arc::clone(&semantic_registry);
                 Box::pin(async move {
                     invoke_semantic_function_value(
                         function,
                         &args,
                         requested_outputs,
-                        &semantic_functions,
+                        &semantic_registry,
                     )
                     .await
                 })

@@ -21,7 +21,7 @@ use log::{debug, error, info, warn};
 use runmat_builtins::Value;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_vm::interpreter::state::InterpreterOutcome;
-use runmat_vm::{bytecode::SemanticFunctionBytecode, Bytecode, Instr};
+use runmat_vm::{Bytecode, Instr, SemanticFunctionRegistry};
 use std::cell::Cell;
 use std::env;
 use std::ffi::CStr;
@@ -71,20 +71,17 @@ fn run_immediate<F: Future>(mut future: Pin<Box<F>>) -> Result<F::Output> {
 
 struct RuntimeContext {
     functions: std::collections::HashMap<String, runmat_vm::UserFunction>,
-    semantic_functions: std::collections::HashMap<runmat_hir::FunctionId, SemanticFunctionBytecode>,
+    semantic_registry: SemanticFunctionRegistry,
 }
 
 impl RuntimeContext {
     fn new(
         functions: std::collections::HashMap<String, runmat_vm::UserFunction>,
-        semantic_functions: std::collections::HashMap<
-            runmat_hir::FunctionId,
-            SemanticFunctionBytecode,
-        >,
+        semantic_registry: SemanticFunctionRegistry,
     ) -> Self {
         Self {
             functions,
-            semantic_functions,
+            semantic_registry,
         }
     }
 }
@@ -423,7 +420,7 @@ impl TurbineEngine {
             hash,
             vars,
             functions,
-            &std::collections::HashMap::new(),
+            &SemanticFunctionRegistry::default(),
         )
     }
 
@@ -432,10 +429,7 @@ impl TurbineEngine {
         hash: u64,
         vars: &mut [Value],
         functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
-        semantic_functions: &std::collections::HashMap<
-            runmat_hir::FunctionId,
-            SemanticFunctionBytecode,
-        >,
+        semantic_registry: &SemanticFunctionRegistry,
     ) -> Result<i32> {
         let func = self
             .cache
@@ -460,7 +454,7 @@ impl TurbineEngine {
         }
 
         // Set up runtime context for user function calls
-        let runtime_context = RuntimeContext::new(functions.clone(), semantic_functions.clone());
+        let runtime_context = RuntimeContext::new(functions.clone(), semantic_registry.clone());
         // Note: Using Box::leak to create a 'static reference - this is safe for our use case
         // but in production we'd want a more sophisticated lifetime management
         let static_context = Box::leak(Box::new(runtime_context));
@@ -510,6 +504,7 @@ impl TurbineEngine {
             instrs = bytecode.instructions.len()
         )
         .entered();
+        let semantic_registry = bytecode.semantic_registry();
 
         // If function is compiled, execute it with function definitions
         if self.cache.contains(hash) {
@@ -518,7 +513,7 @@ impl TurbineEngine {
                     hash,
                     vars,
                     &bytecode.functions,
-                    &bytecode.semantic_functions,
+                    &semantic_registry,
                 )
                 .map(|result| (result, true));
         }
@@ -533,7 +528,7 @@ impl TurbineEngine {
                             hash,
                             vars,
                             &bytecode.functions,
-                            &bytecode.semantic_functions,
+                            &semantic_registry,
                         )
                         .map(|result| (result, true));
                 }
@@ -853,17 +848,13 @@ pub extern "C" fn runmat_call_user_function(
 
     let args: Vec<Value> = args_slice.iter().map(|value| Value::Num(*value)).collect();
 
-    let output = if let Some((function_id, _)) = context
-        .semantic_functions
-        .iter()
-        .find(|(_, function)| function.display_name == name)
-    {
+    let output = if let Some(function_id) = context.semantic_registry.resolve_name(&name) {
         run_immediate(Box::pin(
             runmat_vm::interpreter::runner::invoke_semantic_function_value(
                 function_id.0,
                 &args,
                 1,
-                &context.semantic_functions,
+                &context.semantic_registry,
             ),
         ))
         .and_then(|result| result.map_err(TurbineError::ExecutionError))

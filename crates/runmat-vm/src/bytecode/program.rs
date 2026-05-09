@@ -56,6 +56,35 @@ pub struct SemanticFunctionBytecode {
     pub capture_slots: Vec<usize>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SemanticFunctionRegistry {
+    pub functions: HashMap<FunctionId, SemanticFunctionBytecode>,
+    #[serde(default)]
+    pub names: HashMap<String, FunctionId>,
+}
+
+impl SemanticFunctionRegistry {
+    pub fn new(functions: HashMap<FunctionId, SemanticFunctionBytecode>) -> Self {
+        let mut names = HashMap::new();
+        let mut ids: Vec<_> = functions.keys().copied().collect();
+        ids.sort_by_key(|id| id.0);
+        for id in ids {
+            if let Some(function) = functions.get(&id) {
+                names.entry(function.display_name.clone()).or_insert(id);
+            }
+        }
+        Self { functions, names }
+    }
+
+    pub fn get(&self, function: FunctionId) -> Option<&SemanticFunctionBytecode> {
+        self.functions.get(&function)
+    }
+
+    pub fn resolve_name(&self, name: &str) -> Option<FunctionId> {
+        self.names.get(name).copied()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bytecode {
     pub instructions: Vec<Instr>,
@@ -69,6 +98,8 @@ pub struct Bytecode {
     pub functions: HashMap<String, UserFunction>,
     #[serde(default)]
     pub semantic_functions: HashMap<FunctionId, SemanticFunctionBytecode>,
+    #[serde(default)]
+    pub semantic_function_registry: SemanticFunctionRegistry,
     #[serde(default)]
     pub var_types: Vec<Type>,
     #[serde(default)]
@@ -93,6 +124,7 @@ impl Bytecode {
             var_count: 0,
             functions: HashMap::new(),
             semantic_functions: HashMap::new(),
+            semantic_function_registry: SemanticFunctionRegistry::default(),
             var_types: Vec::new(),
             var_names: HashMap::new(),
             layout: None,
@@ -113,5 +145,14 @@ impl Bytecode {
             var_count,
             ..Self::empty()
         }
+    }
+
+    pub fn semantic_registry(&self) -> SemanticFunctionRegistry {
+        if self.semantic_function_registry.functions.is_empty()
+            && !self.semantic_functions.is_empty()
+        {
+            return SemanticFunctionRegistry::new(self.semantic_functions.clone());
+        }
+        self.semantic_function_registry.clone()
     }
 }

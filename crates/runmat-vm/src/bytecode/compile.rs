@@ -2,7 +2,7 @@
 use crate::accel::graph::build_accel_graph;
 #[cfg(feature = "native-accel")]
 use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
-use crate::bytecode::{Bytecode, SemanticFunctionBytecode, UserFunction};
+use crate::bytecode::{Bytecode, SemanticFunctionBytecode, SemanticFunctionRegistry, UserFunction};
 use crate::compiler::{CompileError, Compiler};
 use crate::layout::derive_layout;
 use runmat_hir::{EntrypointId, FunctionId, HirAssembly, LegacyHirProgram as HirProgram};
@@ -20,6 +20,7 @@ pub fn compile(
     c.compile()?;
     let semantic_functions =
         compile_semantic_functions(hir, mir, c.layout.as_ref().unwrap(), entrypoint)?;
+    let semantic_function_registry = SemanticFunctionRegistry::new(semantic_functions.clone());
     let var_names = c
         .layout
         .as_ref()
@@ -41,6 +42,7 @@ pub fn compile(
         var_count: c.var_count,
         functions: HashMap::new(),
         semantic_functions,
+        semantic_function_registry,
         var_types: c.var_types,
         var_names,
         layout: c.layout,
@@ -124,6 +126,7 @@ pub fn compile_legacy(
         var_count: c.var_count,
         functions: c.functions,
         semantic_functions: HashMap::new(),
+        semantic_function_registry: SemanticFunctionRegistry::default(),
         var_types: c.var_types,
         var_names: HashMap::new(),
         layout: None,
