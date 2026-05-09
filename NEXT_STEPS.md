@@ -149,6 +149,7 @@ Current state:
 - Semantic function registry entries retain source IDs so callback diagnostics and replacement logic can stop depending on legacy HIR statements.
 - Redefining a function in the session semantic registry replaces the prior registry entry for that name.
 - Direct calls to functions defined in previous interactive inputs resolve through the session semantic registry and lower to `CallSemanticFunction`.
+- Direct multi-output calls to functions defined in previous interactive inputs resolve through the session semantic registry and lower to `CallSemanticFunctionMulti`.
 - Function-handle calls to functions defined in previous interactive inputs execute through the session semantic registry before legacy fallback.
 - Unresolved/external dynamic user-function callbacks still centralize through `compile_prepared_user_dispatch`, which wraps `compile_legacy` over reconstructed `LegacyHirProgram`.
 

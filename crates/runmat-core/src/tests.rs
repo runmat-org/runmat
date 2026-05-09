@@ -1798,6 +1798,42 @@ fn direct_session_function_call_uses_semantic_registry() {
 }
 
 #[test]
+fn direct_session_function_multi_output_uses_semantic_registry() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(
+        session
+            .execute_outcome("seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend"),
+    )
+    .expect("define session function");
+
+    let prepared = session
+        .compile_input("[a, b] = pair(2);")
+        .expect("compile direct session multi-output function call");
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 1, 2))),
+        "direct multi-output call should lower to semantic function bytecode"
+    );
+    assert!(
+        prepared.bytecode.functions.is_empty(),
+        "direct session semantic multi-output call should not require legacy bytecode functions"
+    );
+
+    let outcome = block_on(session.execute_outcome("[a, b] = pair(2);")).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
+            && upsert.value.to_string() == "2"
+    }));
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
+            && upsert.value.to_string() == "3"
+    }));
+}
+
+#[test]
 fn session_function_handle_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
