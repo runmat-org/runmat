@@ -1546,6 +1546,33 @@ fn try_catch_binding_uses_semantic_vm() {
 }
 
 #[test]
+fn indexed_member_slice_assignment_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "s = struct(); s.a = [1 2 3]; s.a(2:3) = [4 5]; z = s.a; y = z(3);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile indexed member slice assignment");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "indexed member slice assignment should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreSlice(..))),
+        "indexed member slice assignment should lower to typed slice store bytecode"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "5"
+    }));
+}
+
+#[test]
 fn feval_with_cell_expansion_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "f = @(x) x + 1; C = {2}; y = feval(f, C{:});";

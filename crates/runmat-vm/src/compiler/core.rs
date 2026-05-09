@@ -810,63 +810,15 @@ impl Compiler {
                 Ok(())
             }
             MirPlace::Index(base, indexing) => {
-                let base_slot = self.mir_place_slot(base)?;
-                self.emit(Instr::LoadVar(base_slot));
-                match indexing.kind {
-                    IndexKind::Paren => {
-                        if self.mir_indexing_is_simple_expr_indices(indexing) {
-                            self.compile_mir_index_components(
-                                indexing,
-                                IndexResultContext::AssignmentTarget,
-                            )?;
-                            self.compile_mir_rvalue(value)?;
-                            self.emit(Instr::StoreIndex(indexing.components.len()));
-                        } else {
-                            if self.indexing_needs_slice_expr(indexing) {
-                                let (numeric_count, colon_mask, end_mask, end_numeric_exprs) =
-                                    self.compile_mir_slice_expr_components(indexing)?;
-                                self.compile_mir_rvalue(value)?;
-                                self.emit(Instr::StoreSliceExpr {
-                                    dims: indexing.components.len(),
-                                    numeric_count,
-                                    colon_mask,
-                                    end_mask,
-                                    range_dims: Vec::new(),
-                                    range_has_step: Vec::new(),
-                                    range_start_exprs: Vec::new(),
-                                    range_step_exprs: Vec::new(),
-                                    range_end_exprs: Vec::new(),
-                                    end_numeric_exprs,
-                                });
-                            } else {
-                                let (numeric_count, colon_mask, end_mask) =
-                                    self.compile_mir_slice_components(indexing)?;
-                                self.compile_mir_rvalue(value)?;
-                                self.emit(Instr::StoreSlice(
-                                    indexing.components.len(),
-                                    numeric_count,
-                                    colon_mask,
-                                    end_mask,
-                                ));
-                            }
-                        }
-                    }
-                    IndexKind::Brace => {
-                        self.compile_mir_cell_index_components(
-                            indexing,
-                            IndexResultContext::AssignmentTarget,
-                        )?;
-                        self.compile_mir_rvalue(value)?;
-                        self.emit(Instr::StoreIndexCell(indexing.components.len()));
-                    }
-                    IndexKind::Dot => {
-                        return Err(self.compile_error(
-                            "MIR bytecode lowering for dot assignment is not implemented yet",
-                        ))
-                    }
-                };
-                self.emit(Instr::StoreVar(base_slot));
-                Ok(())
+                if let Ok(base_slot) = self.mir_place_slot(base) {
+                    self.emit(Instr::LoadVar(base_slot));
+                    self.compile_mir_index_assignment_after_base(indexing, value)?;
+                    self.emit(Instr::StoreVar(base_slot));
+                    return Ok(());
+                }
+                self.compile_mir_place_read(base)?;
+                self.compile_mir_index_assignment_after_base(indexing, value)?;
+                self.emit_store_back_mir_member_chain(base)
             }
             MirPlace::Member(base, member) => {
                 self.compile_mir_member_base_for_assignment(base)?;
@@ -910,6 +862,65 @@ impl Compiler {
                 Ok(())
             }
         }
+    }
+
+    fn compile_mir_index_assignment_after_base(
+        &mut self,
+        indexing: &MirIndexing,
+        value: &MirRvalue,
+    ) -> Result<(), CompileError> {
+        match indexing.kind {
+            IndexKind::Paren => {
+                if self.mir_indexing_is_simple_expr_indices(indexing) {
+                    self.compile_mir_index_components(
+                        indexing,
+                        IndexResultContext::AssignmentTarget,
+                    )?;
+                    self.compile_mir_rvalue(value)?;
+                    self.emit(Instr::StoreIndex(indexing.components.len()));
+                } else if self.indexing_needs_slice_expr(indexing) {
+                    let (numeric_count, colon_mask, end_mask, end_numeric_exprs) =
+                        self.compile_mir_slice_expr_components(indexing)?;
+                    self.compile_mir_rvalue(value)?;
+                    self.emit(Instr::StoreSliceExpr {
+                        dims: indexing.components.len(),
+                        numeric_count,
+                        colon_mask,
+                        end_mask,
+                        range_dims: Vec::new(),
+                        range_has_step: Vec::new(),
+                        range_start_exprs: Vec::new(),
+                        range_step_exprs: Vec::new(),
+                        range_end_exprs: Vec::new(),
+                        end_numeric_exprs,
+                    });
+                } else {
+                    let (numeric_count, colon_mask, end_mask) =
+                        self.compile_mir_slice_components(indexing)?;
+                    self.compile_mir_rvalue(value)?;
+                    self.emit(Instr::StoreSlice(
+                        indexing.components.len(),
+                        numeric_count,
+                        colon_mask,
+                        end_mask,
+                    ));
+                }
+            }
+            IndexKind::Brace => {
+                self.compile_mir_cell_index_components(
+                    indexing,
+                    IndexResultContext::AssignmentTarget,
+                )?;
+                self.compile_mir_rvalue(value)?;
+                self.emit(Instr::StoreIndexCell(indexing.components.len()));
+            }
+            IndexKind::Dot => {
+                return Err(self.compile_error(
+                    "MIR bytecode lowering for dot assignment is not implemented yet",
+                ))
+            }
+        };
+        Ok(())
     }
 
     fn emit_store_back_mir_member_chain(&mut self, base: &MirPlace) -> Result<(), CompileError> {
@@ -1032,6 +1043,36 @@ impl Compiler {
                 self.compile_mir_index_components_any_context(indexing)?;
                 self.emit(Instr::LoadVar(tmp));
                 self.emit(Instr::StoreIndex(indexing.components.len()));
+                Ok(())
+            }
+            IndexKind::Paren => {
+                if self.indexing_needs_slice_expr(indexing) {
+                    let (numeric_count, colon_mask, end_mask, end_numeric_exprs) =
+                        self.compile_mir_slice_expr_components(indexing)?;
+                    self.emit(Instr::LoadVar(tmp));
+                    self.emit(Instr::StoreSliceExpr {
+                        dims: indexing.components.len(),
+                        numeric_count,
+                        colon_mask,
+                        end_mask,
+                        range_dims: Vec::new(),
+                        range_has_step: Vec::new(),
+                        range_start_exprs: Vec::new(),
+                        range_step_exprs: Vec::new(),
+                        range_end_exprs: Vec::new(),
+                        end_numeric_exprs,
+                    });
+                } else {
+                    let (numeric_count, colon_mask, end_mask) =
+                        self.compile_mir_slice_components(indexing)?;
+                    self.emit(Instr::LoadVar(tmp));
+                    self.emit(Instr::StoreSlice(
+                        indexing.components.len(),
+                        numeric_count,
+                        colon_mask,
+                        end_mask,
+                    ));
+                }
                 Ok(())
             }
             IndexKind::Brace => {
