@@ -18,7 +18,7 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
 use futures::task::noop_waker;
 use log::{debug, error, info, warn};
-use runmat_builtins::{Type, Value};
+use runmat_builtins::Value;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_vm::interpreter::state::InterpreterOutcome;
 use runmat_vm::{bytecode::SemanticFunctionBytecode, Bytecode, Instr};
@@ -132,69 +132,39 @@ fn execute_user_function_isolated(
     args: &[Value],
     all_functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
 ) -> Result<Value> {
-    // Create complete variable remapping that includes all variables referenced in the function body
-    let var_map = runmat_hir::remapping::create_complete_function_var_map(
-        &function_def.params,
-        &function_def.outputs,
-        &function_def.body,
-    );
-    let local_var_count = var_map.len();
-
-    // Remap the function body to use local variable indices
-    let remapped_body = runmat_hir::remapping::remap_function_body(&function_def.body, &var_map);
-
-    // Create function variable space and bind parameters
-    let func_vars_count = local_var_count.max(function_def.params.len());
-    let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-
-    // Bind parameters to function's local variables
-    for (i, _param_id) in function_def.params.iter().enumerate() {
-        if i < args.len() && i < func_vars.len() {
-            func_vars[i] = args[i].clone();
-        }
-    }
-
-    // Execute the function using the VM interpreter
-    let mut func_var_types = function_def.var_types.clone();
-    if func_var_types.len() < local_var_count {
-        func_var_types.resize(local_var_count, Type::Unknown);
-    }
-    let func_program = runmat_hir::LegacyHirProgram {
-        body: remapped_body,
-        var_types: func_var_types,
-    };
-    let func_bytecode = runmat_vm::compile_legacy(&func_program, all_functions)
-        .map_err(|e| execution_error(format!("Failed to compile function: {e}")))?;
+    let mut functions = all_functions.clone();
+    functions.insert(function_def.name.clone(), function_def.clone());
+    let prepared = runmat_vm::interpreter::dispatch::prepare_named_user_dispatch(
+        &function_def.name,
+        &functions,
+        args,
+        &[],
+    )
+    .map_err(TurbineError::ExecutionError)?;
+    let compiled =
+        runmat_vm::interpreter::dispatch::compile_prepared_user_dispatch(prepared, &functions)
+            .map_err(|e| execution_error(format!("Failed to compile function: {e}")))?;
+    let runmat_vm::interpreter::dispatch::CompiledUserDispatch {
+        func,
+        var_map,
+        bytecode: func_bytecode,
+        mut func_vars,
+    } = compiled;
 
     let func_result_vars = match run_immediate(Box::pin(runmat_vm::interpret_with_vars(
         &func_bytecode,
         &mut func_vars,
-        Some(function_def.name.as_str()),
+        Some(func.name.as_str()),
     )))? {
         Ok(InterpreterOutcome::Completed(values)) => Ok(values),
-
         Err(e) => Err(TurbineError::ExecutionError(e)),
     }?;
 
-    // Copy back the modified variables
-    func_vars = func_result_vars;
-
-    // Return the output variable value (first output variable)
-    if let Some(output_var_id) = function_def.outputs.first() {
-        // Use the remapped local index instead of the original VarId
-        let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
-
-        if local_output_index < func_vars.len() {
-            Ok(func_vars[local_output_index].clone())
-        } else {
-            Err(execution_error(format!(
-                "Output variable index {local_output_index} out of bounds"
-            )))
-        }
-    } else {
-        // No explicit output variable, return the last variable or 0
-        Ok(func_vars.last().cloned().unwrap_or(Value::Num(0.0)))
-    }
+    Ok(runmat_vm::call::shared::first_output_value(
+        &func,
+        &var_map,
+        &func_result_vars,
+    ))
 }
 
 /// The main JIT compilation engine
