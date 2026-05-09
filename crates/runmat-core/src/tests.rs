@@ -1705,6 +1705,38 @@ fn local_function_with_cell_expansion_uses_semantic_vm() {
 }
 
 #[test]
+fn cellfun_named_local_function_uses_semantic_callback() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source =
+        "C = {2}; B = cellfun('inc', C); y = B(1);\nfunction z = inc(x)\n  z = x + 1;\nend";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile named local function callback");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "named local callback should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .semantic_functions
+            .values()
+            .any(|function| function.display_name == "inc"),
+        "local callback target should be available as semantic function bytecode"
+    );
+    assert!(
+        prepared.bytecode.functions.is_empty(),
+        "semantic compile should not require legacy user-function bytecode entries"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "3"
+    }));
+}
+
+#[test]
 fn local_function_multi_output_with_cell_expansion_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source =

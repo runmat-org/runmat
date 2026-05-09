@@ -54,7 +54,9 @@ fn invoke_user_for_end_expr_adapter<'a>(
 ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
     Box::pin(async move {
         let mut local_vars = vars_ref.to_owned();
-        invoke_user_function_value(name, &argv, functions, &mut local_vars).await
+        let semantic_functions = HashMap::new();
+        invoke_user_function_value(name, &argv, functions, &semantic_functions, &mut local_vars)
+            .await
     })
 }
 
@@ -178,8 +180,16 @@ async fn invoke_user_function_value(
     name: &str,
     args: &[Value],
     functions: &HashMap<String, UserFunction>,
+    semantic_functions: &HashMap<runmat_hir::FunctionId, SemanticFunctionBytecode>,
     vars: &mut [Value],
 ) -> Result<Value, RuntimeError> {
+    if let Some((function, _)) = semantic_functions
+        .iter()
+        .find(|(_, function)| function.display_name == name)
+    {
+        return invoke_semantic_function_value(function.0, args, 1, semantic_functions).await;
+    }
+
     let func = call_shared::lookup_user_function(name, functions)?;
     let arg_count = args.len();
     call_shared::validate_user_function_arity(name, &func, arg_count)?;
@@ -343,12 +353,14 @@ async fn run_interpreter_inner(
     } = state;
     let functions = Arc::new(context.functions.clone());
     let semantic_functions = Arc::new(bytecode.semantic_functions.clone());
+    let semantic_functions_for_user_invoker = Arc::clone(&semantic_functions);
     let _user_function_vars_guard = install_user_function_vars(&mut vars);
     let _user_function_guard = user_functions::install_user_function_invoker(Some(Arc::new(
         move |name: &str, args: &[Value]| {
             let name = name.to_string();
             let args = args.to_vec();
             let functions = Arc::clone(&functions);
+            let semantic_functions = Arc::clone(&semantic_functions_for_user_invoker);
             Box::pin(async move {
                 let vars_ptr = USER_FUNCTION_VARS.with(|slot| *slot.borrow());
                 let Some(vars_ptr) = vars_ptr else {
@@ -358,7 +370,8 @@ async fn run_interpreter_inner(
                     ));
                 };
                 let vars = unsafe { &mut *vars_ptr };
-                invoke_user_function_value(&name, &args, &functions, vars).await
+                invoke_user_function_value(&name, &args, &functions, &semantic_functions, vars)
+                    .await
             })
         },
     )));
