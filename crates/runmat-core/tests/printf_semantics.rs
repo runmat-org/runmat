@@ -1,12 +1,12 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use futures::executor::block_on;
-use runmat_core::{ExecutionResult, ExecutionStreamKind, RunMatSession};
+use runmat_core::{ExecutionStreamKind, LegacyExecutionResult, RunMatSession};
 use runmat_gc::gc_test_context;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-fn stdout_stream(result: &ExecutionResult) -> String {
+fn stdout_stream(result: &LegacyExecutionResult) -> String {
     result
         .streams
         .iter()
@@ -15,7 +15,7 @@ fn stdout_stream(result: &ExecutionResult) -> String {
         .collect::<String>()
 }
 
-fn stderr_stream(result: &ExecutionResult) -> String {
+fn stderr_stream(result: &LegacyExecutionResult) -> String {
     result
         .streams
         .iter()
