@@ -1798,6 +1798,36 @@ fn direct_session_function_call_uses_semantic_registry() {
 }
 
 #[test]
+fn session_function_handle_uses_semantic_registry() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
+        .expect("define session function");
+
+    let prepared = session
+        .compile_input("f = @inc; y = f(2);")
+        .expect("compile function handle session call");
+    assert!(
+        prepared
+            .bytecode
+            .semantic_function_registry
+            .resolve_name("inc")
+            .is_some(),
+        "function handle target should be present in semantic registry"
+    );
+    assert!(
+        prepared.bytecode.functions.is_empty(),
+        "function handle session semantic call should not require legacy bytecode functions"
+    );
+
+    let outcome = block_on(session.execute_outcome("f = @inc; y = f(2);"))
+        .expect("function handle call succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "3"
+    }));
+}
+
+#[test]
 fn session_semantic_registry_replaces_redefined_function() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
