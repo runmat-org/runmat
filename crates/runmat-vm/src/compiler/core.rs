@@ -1324,11 +1324,6 @@ impl Compiler {
         call: &MirCall,
         has_expansion: bool,
     ) -> Result<(), CompileError> {
-        if has_expansion {
-            return Err(self.compile_error(
-                "MIR bytecode lowering for expanded method calls is not implemented yet",
-            ));
-        }
         let name = match &call.callee {
             MirCallee::Static(HirCallableRef::Unresolved(name)) if name.0.len() == 1 => {
                 name.0[0].0.clone()
@@ -1345,6 +1340,11 @@ impl Compiler {
         }
         for arg in &call.args {
             self.compile_mir_call_arg(arg)?;
+        }
+        if has_expansion {
+            let (specs, _) = self.mir_call_arg_specs(&call.args);
+            self.emit(Instr::CallMethodOrMemberIndexExpandMulti(name, specs));
+            return Ok(());
         }
         self.emit(Instr::CallMethodOrMemberIndex(
             name,

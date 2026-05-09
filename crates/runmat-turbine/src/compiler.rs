@@ -660,6 +660,7 @@ impl BytecodeCompiler {
                     | Instr::CreateSemanticClosure(_, _, _)
                     | Instr::CallMethod(_, _)
                     | Instr::CallMethodOrMemberIndex(_, _)
+                    | Instr::CallMethodOrMemberIndexExpandMulti(_, _)
                     | Instr::IndexCellExpand(_, _)
                     | Instr::StoreIndex(_)
                     | Instr::StoreIndexCell(_)

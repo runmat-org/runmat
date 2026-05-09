@@ -28,11 +28,11 @@ pub use calls::{
     handle_builtin_expand_last_call, handle_builtin_expand_multi_call, handle_builtin_outcome,
     handle_create_closure, handle_create_semantic_closure, handle_feval_dispatch,
     handle_load_method, handle_load_static_property, handle_method_call,
-    handle_method_or_member_index_call, handle_prepared_user_function_call, handle_register_class,
-    handle_static_method_call, handle_user_function_call, output_list_for_user_call,
-    prepare_named_user_dispatch, push_single_result, push_user_call_outputs,
-    unpack_prepared_user_call, BuiltinHandling, CompiledUserDispatch, FevalHandling,
-    MethodHandling, UserCallHandling,
+    handle_method_or_member_index_call, handle_method_or_member_index_expand_multi_call,
+    handle_prepared_user_function_call, handle_register_class, handle_static_method_call,
+    handle_user_function_call, output_list_for_user_call, prepare_named_user_dispatch,
+    push_single_result, push_user_call_outputs, unpack_prepared_user_call, BuiltinHandling,
+    CompiledUserDispatch, FevalHandling, MethodHandling, UserCallHandling,
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
 pub use exceptions::{
@@ -941,6 +941,12 @@ pub async fn dispatch_instruction(
         }
         Instr::CallMethodOrMemberIndex(name, arg_count) => {
             handle_method_or_member_index_call(stack, name.clone(), *arg_count).await?;
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallMethodOrMemberIndexExpandMulti(name, specs) => {
+            handle_method_or_member_index_expand_multi_call(stack, name.clone(), specs).await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

@@ -150,6 +150,7 @@ pub enum Instr {
 
     // Ambiguous `obj.name(...)` shape resolved at runtime as method call or member indexing.
     CallMethodOrMemberIndex(String, usize),
+    CallMethodOrMemberIndexExpandMulti(String, Vec<ArgSpec>),
 
     // Closure and static class dispatch.
     CreateFunctionHandle(String),
@@ -337,7 +338,8 @@ impl Instr {
             | Instr::CallFunctionExpandMulti(_, specs)
             | Instr::CallSemanticFunctionExpandMulti(_, specs)
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
-            | Instr::CallBuiltinExpandMulti(_, specs) => {
+            | Instr::CallBuiltinExpandMulti(_, specs)
+            | Instr::CallMethodOrMemberIndexExpandMulti(_, specs) => {
                 let fixed = specs.iter().filter(|s| !s.is_expand).count();
                 let expanded: usize = specs
                     .iter()

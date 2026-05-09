@@ -791,6 +791,24 @@ pub async fn handle_method_or_member_index_call(
     Ok(MethodHandling::Completed)
 }
 
+pub async fn handle_method_or_member_index_expand_multi_call(
+    stack: &mut Vec<Value>,
+    name: String,
+    specs: &[ArgSpec],
+) -> Result<MethodHandling, RuntimeError> {
+    let mut args = build_user_function_expand_multi_args(stack, specs).await?;
+    if args.is_empty() {
+        return Err(crate::interpreter::errors::mex(
+            "MethodCallMissingReceiver",
+            "method/member-index call requires a base receiver",
+        ));
+    }
+    let base = args.remove(0);
+    let value = call_closures::call_method_or_member_index(base, name, args).await?;
+    stack.push(value);
+    Ok(MethodHandling::Completed)
+}
+
 pub async fn handle_static_method_call(
     stack: &mut Vec<Value>,
     class_name: &str,

@@ -620,6 +620,7 @@ async fn run_interpreter_inner(
             | Instr::StoreSliceExpr { .. }
             | Instr::CallMethod(_, _)
             | Instr::CallMethodOrMemberIndex(_, _)
+            | Instr::CallMethodOrMemberIndexExpandMulti(_, _)
             | Instr::LoadMethod(_)
             | Instr::CreateFunctionHandle(_)
             | Instr::CreateClosure(_, _)
