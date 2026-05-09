@@ -102,8 +102,17 @@ pub fn scatter_complex_with_plan(
         let mut rlin = 0usize;
         match rhs_view {
             ComplexRhsView::Scalar(val) => {
-                let pos = plan.indices[rlin] as usize;
-                t.data[pos] = *val;
+                let lin_pos = {
+                    let mut p = 0usize;
+                    let mut mul = 1usize;
+                    for d in 0..dims {
+                        p += idx[d] * mul;
+                        mul *= selection_lengths[d].max(1);
+                    }
+                    p
+                };
+                let dst = plan.indices[lin_pos] as usize;
+                t.data[dst] = *val;
             }
             ComplexRhsView::Tensor {
                 data,
@@ -302,6 +311,17 @@ pub async fn assign_tensor_with_plan(
 ) -> Result<Value, RuntimeError> {
     if plan.indices.is_empty() {
         return Ok(Value::Tensor(t));
+    }
+    if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+        let mut ct = ComplexTensor {
+            data: t.data.into_iter().map(|re| (re, 0.0)).collect(),
+            shape: t.shape,
+            rows: t.rows,
+            cols: t.cols,
+        };
+        let rhs_view = build_complex_rhs_view(rhs, &plan.selection_lengths)?;
+        scatter_complex_with_plan(&mut ct, plan, &rhs_view)?;
+        return Ok(Value::ComplexTensor(ct));
     }
     let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
     scatter_real_with_plan(&mut t, plan, &rhs_values)?;
