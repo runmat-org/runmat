@@ -214,7 +214,7 @@ async fn invoke_user_function_value(
     ))
 }
 
-async fn invoke_semantic_function_value(
+pub async fn invoke_semantic_function_value(
     function: usize,
     args: &[Value],
     requested_outputs: usize,

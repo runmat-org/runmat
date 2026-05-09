@@ -197,55 +197,6 @@ fn execute_user_function_isolated(
     }
 }
 
-fn execute_semantic_function_isolated(
-    function: &SemanticFunctionBytecode,
-    args: &[Value],
-    semantic_functions: &std::collections::HashMap<
-        runmat_hir::FunctionId,
-        SemanticFunctionBytecode,
-    >,
-) -> Result<Value> {
-    if args.len() != function.input_slots.len() {
-        return Err(execution_error(format!(
-            "Function {} expects {} arguments, got {}",
-            function.display_name,
-            function.input_slots.len(),
-            args.len()
-        )));
-    }
-
-    let mut func_vars = vec![Value::Num(0.0); function.var_count];
-    for (slot, value) in function.input_slots.iter().zip(args.iter()) {
-        if *slot < func_vars.len() {
-            func_vars[*slot] = value.clone();
-        }
-    }
-
-    let mut func_bytecode =
-        Bytecode::with_instructions(function.instructions.clone(), function.var_count);
-    func_bytecode.instr_spans = function.instr_spans.clone();
-    func_bytecode.call_arg_spans = function.call_arg_spans.clone();
-    func_bytecode.semantic_functions = semantic_functions.clone();
-
-    let func_result_vars = match run_immediate(Box::pin(runmat_vm::interpret_with_vars(
-        &func_bytecode,
-        &mut func_vars,
-        Some(function.display_name.as_str()),
-    )))? {
-        Ok(InterpreterOutcome::Completed(values)) => Ok(values),
-        Err(e) => Err(TurbineError::ExecutionError(e)),
-    }?;
-
-    if let Some(output_slot) = function.output_slots.first() {
-        Ok(func_result_vars
-            .get(*output_slot)
-            .cloned()
-            .unwrap_or(Value::Num(0.0)))
-    } else {
-        Ok(Value::Num(0.0))
-    }
-}
-
 /// The main JIT compilation engine
 pub struct TurbineEngine {
     module: JITModule,
@@ -932,12 +883,20 @@ pub extern "C" fn runmat_call_user_function(
 
     let args: Vec<Value> = args_slice.iter().map(|value| Value::Num(*value)).collect();
 
-    let output = if let Some(function) = context
+    let output = if let Some((function_id, _)) = context
         .semantic_functions
-        .values()
-        .find(|function| function.display_name == name)
+        .iter()
+        .find(|(_, function)| function.display_name == name)
     {
-        execute_semantic_function_isolated(function, &args, &context.semantic_functions)
+        run_immediate(Box::pin(
+            runmat_vm::interpreter::runner::invoke_semantic_function_value(
+                function_id.0,
+                &args,
+                1,
+                &context.semantic_functions,
+            ),
+        ))
+        .and_then(|result| result.map_err(TurbineError::ExecutionError))
     } else if let Some(function_def) = context.functions.get(&name) {
         execute_user_function_isolated(function_def, &args, &context.functions)
     } else {
