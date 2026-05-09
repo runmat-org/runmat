@@ -7,34 +7,29 @@ use crate::ops::comparison as comparison_ops;
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
 
+async fn call_operator_method(obj: Value, method: &str, arg: Value) -> Result<Value, RuntimeError> {
+    let args = vec![obj, Value::String(method.to_string()), arg];
+    runmat_runtime::call_builtin_async("call_method", &args).await
+}
+
 pub async fn dispatch_arithmetic(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
 ) -> Result<bool, RuntimeError> {
     match instr {
         crate::bytecode::Instr::Add => {
-            arithmetic_ops::add(
-                stack,
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
-                |a, b| async move {
-                    let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    runmat_runtime::call_builtin_async("plus", &[a_acc, b_acc]).await
-                },
-            )
+            arithmetic_ops::add(stack, call_operator_method, |a, b| async move {
+                let (a_acc, b_acc) =
+                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                runmat_runtime::call_builtin_async("plus", &[a_acc, b_acc]).await
+            })
             .await?;
             Ok(true)
         }
         crate::bytecode::Instr::Sub => {
             arithmetic_ops::sub(
                 stack,
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
+                call_operator_method,
                 |obj, lhs| async move {
                     let class_name = match &obj {
                         Value::Object(o) => o.class_name.clone(),
@@ -53,17 +48,10 @@ pub async fn dispatch_arithmetic(
             Ok(true)
         }
         crate::bytecode::Instr::Mul => {
-            arithmetic_ops::mul(
-                stack,
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
-                |a, b| async move {
-                    let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
-                    runmat_runtime::matrix::value_matmul(&a_acc, &b_acc).await
-                },
-            )
+            arithmetic_ops::mul(stack, call_operator_method, |a, b| async move {
+                let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
+                runmat_runtime::matrix::value_matmul(&a_acc, &b_acc).await
+            })
             .await?;
             Ok(true)
         }
@@ -71,10 +59,7 @@ pub async fn dispatch_arithmetic(
             arithmetic_ops::binary_method(
                 stack,
                 "times",
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
+                call_operator_method,
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
@@ -88,10 +73,7 @@ pub async fn dispatch_arithmetic(
             arithmetic_ops::binary_method(
                 stack,
                 "rdivide",
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
+                call_operator_method,
                 |a, b| async move {
                     let (a_acc, b_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
@@ -120,10 +102,7 @@ pub async fn dispatch_arithmetic(
             arithmetic_ops::binary_method(
                 stack,
                 "ldivide",
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
+                call_operator_method,
                 |a, b| async move {
                     let (b_acc, a_acc) =
                         accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a).await?;
@@ -138,10 +117,7 @@ pub async fn dispatch_arithmetic(
                 arithmetic_ops::execute_right_division(
                     &a,
                     &b,
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        runmat_runtime::call_builtin_async("call_method", &args).await
-                    },
+                    call_operator_method,
                     |lhs, rhs| async move {
                         let (lhs_acc, rhs_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &lhs, &rhs).await?;
@@ -161,10 +137,7 @@ pub async fn dispatch_arithmetic(
                 arithmetic_ops::execute_left_division(
                     &a,
                     &b,
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        runmat_runtime::call_builtin_async("call_method", &args).await
-                    },
+                    call_operator_method,
                     |lhs, rhs| async move {
                         let (rhs_acc, lhs_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &rhs, &lhs).await?;
@@ -208,18 +181,11 @@ pub async fn dispatch_arithmetic(
             Ok(true)
         }
         crate::bytecode::Instr::Pow => {
-            arithmetic_ops::power(
-                stack,
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
-                |a, b| async move {
-                    let (a_acc, b_acc) =
-                        accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                    runmat_runtime::power(&a_acc, &b_acc).map_err(RuntimeError::from)
-                },
-            )
+            arithmetic_ops::power(stack, call_operator_method, |a, b| async move {
+                let (a_acc, b_acc) =
+                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                runmat_runtime::power(&a_acc, &b_acc).map_err(RuntimeError::from)
+            })
             .await?;
             Ok(true)
         }
@@ -265,10 +231,7 @@ pub async fn dispatch_arithmetic(
                     right_inverse_name: "lt",
                     predicate: |aa, bb| aa <= bb,
                 },
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
+                call_operator_method,
                 |name, a, b| async move { runmat_runtime::call_builtin_async(name, &[a, b]).await },
                 |v, label| async move { logical_truth_from_value(&v, &label).await },
             )
@@ -281,10 +244,7 @@ pub async fn dispatch_arithmetic(
                 "lt",
                 "gt",
                 |aa, bb| aa < bb,
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
+                call_operator_method,
                 |name, a, b| async move { runmat_runtime::call_builtin_async(name, &[a, b]).await },
             )
             .await?;
@@ -296,10 +256,7 @@ pub async fn dispatch_arithmetic(
                 "gt",
                 "lt",
                 |aa, bb| aa > bb,
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
+                call_operator_method,
                 |name, a, b| async move { runmat_runtime::call_builtin_async(name, &[a, b]).await },
             )
             .await?;
@@ -315,10 +272,7 @@ pub async fn dispatch_arithmetic(
                     right_inverse_name: "gt",
                     predicate: |aa, bb| aa >= bb,
                 },
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
+                call_operator_method,
                 |name, a, b| async move { runmat_runtime::call_builtin_async(name, &[a, b]).await },
                 |v, label| async move { logical_truth_from_value(&v, &label).await },
             )
@@ -328,10 +282,7 @@ pub async fn dispatch_arithmetic(
         crate::bytecode::Instr::Equal => {
             comparison_ops::equal(
                 stack,
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
+                call_operator_method,
                 |name, a, b| async move { runmat_runtime::call_builtin_async(name, &[a, b]).await },
                 |_v, _label| async move { Ok(false) },
             )
@@ -341,10 +292,7 @@ pub async fn dispatch_arithmetic(
         crate::bytecode::Instr::NotEqual => {
             comparison_ops::not_equal(
                 stack,
-                |obj, method, arg| async move {
-                    let args = vec![obj, Value::String(method.to_string()), arg];
-                    runmat_runtime::call_builtin_async("call_method", &args).await
-                },
+                call_operator_method,
                 |name, a, b| async move { runmat_runtime::call_builtin_async(name, &[a, b]).await },
                 |v, label| async move { logical_truth_from_value(&v, &label).await },
             )
