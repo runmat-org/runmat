@@ -71,6 +71,9 @@ pub struct RunMatSession {
     abi_workspace_handle: crate::abi::WorkspaceHandle,
     /// Legacy user-defined functions context for session state.
     legacy_function_definitions: HashMap<String, runmat_hir::LegacyHirStmt>,
+    /// Semantic function registry persisted across interactive inputs.
+    semantic_function_registry: runmat_vm::SemanticFunctionRegistry,
+    next_semantic_function_id: usize,
     /// Interned source pool for user-defined functions
     source_pool: SourcePool,
     /// Loaded snapshot for standard library preloading
@@ -106,6 +109,8 @@ pub(crate) struct PreparedExecution {
     ast: runmat_parser::Program,
     lowering: LoweringResult,
     pub(crate) bytecode: runmat_vm::Bytecode,
+    semantic_function_registry_after_success: runmat_vm::SemanticFunctionRegistry,
+    next_semantic_function_id_after_success: usize,
 }
 
 #[derive(Debug, Clone)]

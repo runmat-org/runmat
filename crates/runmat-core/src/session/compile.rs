@@ -26,6 +26,8 @@ impl RunMatSession {
             self.compile_semantic_bytecode(&lowering)?
         };
         bytecode.source_id = Some(source_id);
+        let (semantic_function_registry_after_success, next_semantic_function_id_after_success) =
+            self.prepare_session_semantic_function_registry(&mut bytecode);
         let new_function_names: HashSet<String> = lowering.functions.keys().cloned().collect();
         for (name, func) in bytecode.functions.iter_mut() {
             if new_function_names.contains(name) {
@@ -36,6 +38,8 @@ impl RunMatSession {
             ast,
             lowering,
             bytecode,
+            semantic_function_registry_after_success,
+            next_semantic_function_id_after_success,
         })
     }
 
@@ -74,6 +78,52 @@ impl RunMatSession {
         })?;
         let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)?;
         Ok(runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)?)
+    }
+
+    fn prepare_session_semantic_function_registry(
+        &self,
+        bytecode: &mut runmat_vm::Bytecode,
+    ) -> (runmat_vm::SemanticFunctionRegistry, usize) {
+        let mut session_registry = self.semantic_function_registry.clone();
+        let mut next_semantic_function_id = self.next_semantic_function_id;
+        let current_registry = bytecode.semantic_registry();
+        if current_registry.functions.is_empty() {
+            bytecode.semantic_function_registry = session_registry.clone();
+            bytecode.semantic_functions = bytecode.semantic_function_registry.functions.clone();
+            return (session_registry, next_semantic_function_id);
+        }
+
+        let mut remap = HashMap::new();
+        let mut ids: Vec<_> = current_registry.functions.keys().copied().collect();
+        ids.sort_by_key(|id| id.0);
+        for old_id in ids {
+            let new_id = runmat_hir::FunctionId(next_semantic_function_id);
+            next_semantic_function_id += 1;
+            remap.insert(old_id, new_id);
+        }
+
+        for instr in &mut bytecode.instructions {
+            remap_semantic_function_instr(instr, &remap);
+        }
+
+        for (old_id, function) in current_registry.functions {
+            let Some(new_id) = remap.get(&old_id).copied() else {
+                continue;
+            };
+            let mut function = function;
+            function.function = new_id;
+            for instr in &mut function.instructions {
+                remap_semantic_function_instr(instr, &remap);
+            }
+            session_registry
+                .names
+                .insert(function.display_name.clone(), new_id);
+            session_registry.functions.insert(new_id, function);
+        }
+
+        bytecode.semantic_function_registry = session_registry.clone();
+        bytecode.semantic_functions = bytecode.semantic_function_registry.functions.clone();
+        (session_registry, next_semantic_function_id)
     }
 
     pub(crate) fn normalize_error_namespace(&self, error: &mut RuntimeError) {
@@ -142,5 +192,23 @@ impl RunMatSession {
 
         // Update our variable array and mapping
         self.variable_array = new_variable_array;
+    }
+}
+
+fn remap_semantic_function_instr(
+    instr: &mut runmat_vm::Instr,
+    remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
+) {
+    match instr {
+        runmat_vm::Instr::CreateSemanticClosure(function, _, _)
+        | runmat_vm::Instr::CallSemanticFunction(function, _)
+        | runmat_vm::Instr::CallSemanticFunctionMulti(function, _, _)
+        | runmat_vm::Instr::CallSemanticFunctionExpandMulti(function, _)
+        | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(function, _, _) => {
+            if let Some(new_id) = remap.get(function).copied() {
+                *function = new_id;
+            }
+        }
+        _ => {}
     }
 }

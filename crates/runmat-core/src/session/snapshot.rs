@@ -103,6 +103,8 @@ impl RunMatSession {
             workspace_values: HashMap::new(),
             abi_workspace_handle: crate::abi::WorkspaceHandle(Uuid::new_v4()),
             legacy_function_definitions: HashMap::new(),
+            semantic_function_registry: runmat_vm::SemanticFunctionRegistry::default(),
+            next_semantic_function_id: 0,
             source_pool: SourcePool::default(),
             snapshot,
             interrupt_flag: Arc::new(AtomicBool::new(false)),

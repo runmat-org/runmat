@@ -298,6 +298,8 @@ impl RunMatSession {
             ast,
             lowering,
             mut bytecode,
+            semantic_function_registry_after_success,
+            next_semantic_function_id_after_success,
         } = self.compile_input(input)?;
         if self.verbose {
             debug!("AST: {ast:?}");
@@ -733,6 +735,8 @@ impl RunMatSession {
                 }
             }
             self.legacy_function_definitions = updated_functions;
+            self.semantic_function_registry = semantic_function_registry_after_success;
+            self.next_semantic_function_id = next_semantic_function_id_after_success;
             // Apply 'ans' update if applicable (persisting expression result)
             if let Some((var_id, value)) = ans_update {
                 self.legacy_variable_names.insert("ans".to_string(), var_id);

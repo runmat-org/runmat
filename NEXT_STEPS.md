@@ -144,7 +144,8 @@ The new semantic compiler is now carrying enough source intent that the remainin
 Current state:
 
 - Top-level semantic compilation produces semantic function bytecode and typed call instructions for direct calls, function handles, `feval`, multi-output calls, and expanded arguments.
-- Runtime and Turbine callback paths resolve callback names through `SemanticFunctionRegistry` to stable `FunctionId`s, then invoke `SemanticFunctionBytecode` by semantic identity when the current bytecode product contains the callee.
+- Runtime and Turbine callback paths resolve callback names through `SemanticFunctionRegistry` to stable session `FunctionId`s, then invoke `SemanticFunctionBytecode` by semantic identity when the current bytecode/session product contains the callee.
+- `RunMatSession` persists a semantic function registry across successful interactive inputs and remaps per-input function IDs into session-unique IDs before execution.
 - Unresolved/external dynamic user-function callbacks still centralize through `compile_prepared_user_dispatch`, which wraps `compile_legacy` over reconstructed `LegacyHirProgram`.
 
 Target state:
@@ -334,15 +335,15 @@ Treat current MIR bytecode gap markers as follows:
 
 ## Recommended Semantic Design Slice
 
-The next high-leverage slice is making the semantic function registry session-owned, not another isolated callback patch.
+The next high-leverage slice is replacing the remaining legacy function-definition store with the session semantic registry, not another isolated callback patch.
 
 Concrete plan:
 
-1. Inventory the remaining callback identities that cannot currently resolve to `SemanticFunctionBytecode`.
-2. Extend the semantic function registry shape so it can answer: given a callable identity, return `SemanticFunctionBytecode`, capture layout, display name, and source metadata across REPL inputs.
-3. Route callback resolution through the session-owned registry instead of only the current bytecode product.
+1. Inventory remaining users of `legacy_function_definitions` and which ones now have equivalent semantic registry data.
+2. Add source/function metadata to `SemanticFunctionRegistry` so diagnostics and replacement semantics no longer depend on legacy HIR statements.
+3. Route lower/compile context seeding through the session-owned semantic registry where possible.
 4. Keep `compile_prepared_user_dispatch` as a fallback only for identities not yet in the semantic registry.
-5. Add a ratchet that a callback-triggered local/anonymous function does not call `compile_legacy` when semantic bytecode is available.
+5. Add ratchets that callbacks to functions defined in previous REPL inputs do not call `compile_legacy` when semantic bytecode is available.
 
 ## Validation Cadence
 

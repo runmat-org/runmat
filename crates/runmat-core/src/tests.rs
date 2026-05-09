@@ -1737,6 +1737,32 @@ fn cellfun_named_local_function_uses_semantic_callback() {
 }
 
 #[test]
+fn cellfun_session_function_uses_semantic_registry() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
+        .expect("define session function");
+
+    let source = "C = {2}; B = cellfun('inc', C); y = B(1);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile callback using session function");
+    assert!(
+        prepared
+            .bytecode
+            .semantic_function_registry
+            .resolve_name("inc")
+            .is_some(),
+        "session callback target should resolve through semantic function registry"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "3"
+    }));
+}
+
+#[test]
 fn local_function_multi_output_with_cell_expansion_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source =
