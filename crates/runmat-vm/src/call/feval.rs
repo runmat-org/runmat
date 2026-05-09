@@ -19,7 +19,11 @@ pub async fn forward_builtin_feval(
     let mut argv = Vec::with_capacity(1 + args.len());
     argv.push(func_value);
     argv.extend(args);
-    runmat_runtime::call_builtin_async("feval", &argv).await
+    call_runtime_feval(&argv).await
+}
+
+pub async fn call_runtime_feval(args: &[Value]) -> Result<Value, RuntimeError> {
+    runmat_runtime::call_builtin_async("feval", args).await
 }
 
 pub async fn try_closure_builtin_fallback(
