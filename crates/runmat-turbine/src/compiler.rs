@@ -421,10 +421,20 @@ impl BytecodeCompiler {
                         let result = Self::call_runtime_ne_static(builder, a, b);
                         local_stack.push(result);
                     }
-                    Instr::LogicalNot | Instr::LogicalAnd | Instr::LogicalOr => {
-                        return Err(execution_error(
-                            "Logical bytecode is not yet supported in Turbine JIT; falling back to interpreter",
-                        ));
+                    Instr::LogicalNot => {
+                        let value = local_stack.pop()?;
+                        let result = Self::call_runtime_builtin_static(builder, "not", &[value]);
+                        local_stack.push(result);
+                    }
+                    Instr::LogicalAnd => {
+                        let (lhs, rhs) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_builtin_static(builder, "and", &[lhs, rhs]);
+                        local_stack.push(result);
+                    }
+                    Instr::LogicalOr => {
+                        let (lhs, rhs) = local_stack.pop_two()?;
+                        let result = Self::call_runtime_builtin_static(builder, "or", &[lhs, rhs]);
+                        local_stack.push(result);
                     }
                     Instr::CallBuiltin(name, arg_count) => {
                         if matches!(name.as_str(), "max" | "min") {
