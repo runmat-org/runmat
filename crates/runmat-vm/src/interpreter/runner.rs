@@ -184,13 +184,16 @@ async fn invoke_user_function_value(
     let arg_count = args.len();
     call_shared::validate_user_function_arity(name, &func, arg_count)?;
     let prepared = call_shared::prepare_user_call(func, args, vars)?;
-    let crate::call::shared::PreparedUserCall {
+    let compiled = interp_dispatch::compile_prepared_user_dispatch(
+        interp_dispatch::unpack_prepared_user_call(prepared),
+        functions,
+    )?;
+    let interp_dispatch::CompiledUserDispatch {
         func,
         var_map,
-        func_program,
+        bytecode: func_bytecode,
         func_vars,
-    } = prepared;
-    let func_bytecode = crate::compile_legacy(&func_program, functions)?;
+    } = compiled;
     register_dynamic_user_functions(&func_bytecode.functions);
     let func_result_vars =
         interpret_function_with_counts(&func_bytecode, func_vars, name, 1, arg_count).await?;

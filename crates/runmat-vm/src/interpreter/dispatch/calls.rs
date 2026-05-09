@@ -34,6 +34,33 @@ pub struct PreparedUserDispatch {
     pub func_vars: Vec<Value>,
 }
 
+pub struct CompiledUserDispatch {
+    pub func: UserFunction,
+    pub var_map: std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
+    pub bytecode: crate::bytecode::Bytecode,
+    pub func_vars: Vec<Value>,
+}
+
+pub fn compile_prepared_user_dispatch(
+    prepared: PreparedUserDispatch,
+    functions: &std::collections::HashMap<String, UserFunction>,
+) -> Result<CompiledUserDispatch, crate::compiler::CompileError> {
+    let PreparedUserDispatch {
+        func,
+        var_map,
+        func_program,
+        func_vars,
+    } = prepared;
+    let mut bytecode = crate::compile_legacy(&func_program, functions)?;
+    bytecode.source_id = func.source_id;
+    Ok(CompiledUserDispatch {
+        func,
+        var_map,
+        bytecode,
+        func_vars,
+    })
+}
+
 pub enum BuiltinHandling {
     Completed,
     Caught,
@@ -613,15 +640,16 @@ where
         return Ok(UserCallHandling::Completed);
     }
 
-    let prepared = prepare_named_user_dispatch(name, bytecode_functions, &args, vars)?;
-    let PreparedUserDispatch {
+    let compiled = compile_prepared_user_dispatch(
+        prepare_named_user_dispatch(name, bytecode_functions, &args, vars)?,
+        bytecode_functions,
+    )?;
+    let CompiledUserDispatch {
         func,
         var_map,
-        func_program,
+        bytecode: func_bytecode,
         func_vars,
-    } = prepared;
-    let mut func_bytecode = crate::compile_legacy(&func_program, bytecode_functions)?;
-    func_bytecode.source_id = func.source_id;
+    } = compiled;
     for (k, v) in func_bytecode.functions.iter() {
         caller_functions.insert(k.clone(), v.clone());
     }
