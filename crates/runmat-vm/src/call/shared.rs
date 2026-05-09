@@ -326,6 +326,10 @@ pub fn object_protocol_index_cell(
     Ok(Value::Cell(cell))
 }
 
+pub async fn call_runtime_method(args: &[Value]) -> Result<Value, RuntimeError> {
+    runmat_runtime::call_builtin_async("call_method", args).await
+}
+
 pub async fn call_object_index_method(
     base: Value,
     op: ObjectIndexOp,
@@ -342,7 +346,7 @@ pub async fn call_object_index_method(
     if let Some(rhs) = rhs {
         args.push(rhs);
     }
-    runmat_runtime::call_builtin_async("call_method", &args).await
+    call_runtime_method(&args).await
 }
 
 pub async fn call_object_member_method(
@@ -360,7 +364,7 @@ pub async fn call_object_member_method(
     if let Some(rhs) = rhs {
         args.push(rhs);
     }
-    runmat_runtime::call_builtin_async("call_method", &args).await
+    call_runtime_method(&args).await
 }
 
 pub async fn build_expanded_args_from_specs<ExpandObjectAll, ExpandObjectIndices, FutAll, FutIdx>(

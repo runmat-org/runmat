@@ -198,7 +198,7 @@ pub async fn call_method_or_member_index(
             method_args.push(Value::HandleObject(handle.clone()));
             method_args.push(Value::String(name.clone()));
             method_args.extend(args.iter().cloned());
-            if let Ok(v) = runmat_runtime::call_builtin_async("call_method", &method_args).await {
+            if let Ok(v) = crate::call::shared::call_runtime_method(&method_args).await {
                 return Ok(v);
             }
 
