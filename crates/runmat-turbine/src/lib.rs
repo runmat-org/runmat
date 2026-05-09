@@ -21,7 +21,7 @@ use log::{debug, error, info, warn};
 use runmat_builtins::{Type, Value};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_vm::interpreter::state::InterpreterOutcome;
-use runmat_vm::{Bytecode, Instr};
+use runmat_vm::{bytecode::SemanticFunctionBytecode, Bytecode, Instr};
 use std::cell::Cell;
 use std::env;
 use std::ffi::CStr;
@@ -71,11 +71,21 @@ fn run_immediate<F: Future>(mut future: Pin<Box<F>>) -> Result<F::Output> {
 
 struct RuntimeContext {
     functions: std::collections::HashMap<String, runmat_vm::UserFunction>,
+    semantic_functions: std::collections::HashMap<runmat_hir::FunctionId, SemanticFunctionBytecode>,
 }
 
 impl RuntimeContext {
-    fn new(functions: std::collections::HashMap<String, runmat_vm::UserFunction>) -> Self {
-        Self { functions }
+    fn new(
+        functions: std::collections::HashMap<String, runmat_vm::UserFunction>,
+        semantic_functions: std::collections::HashMap<
+            runmat_hir::FunctionId,
+            SemanticFunctionBytecode,
+        >,
+    ) -> Self {
+        Self {
+            functions,
+            semantic_functions,
+        }
     }
 }
 
@@ -184,6 +194,55 @@ fn execute_user_function_isolated(
     } else {
         // No explicit output variable, return the last variable or 0
         Ok(func_vars.last().cloned().unwrap_or(Value::Num(0.0)))
+    }
+}
+
+fn execute_semantic_function_isolated(
+    function: &SemanticFunctionBytecode,
+    args: &[Value],
+    semantic_functions: &std::collections::HashMap<
+        runmat_hir::FunctionId,
+        SemanticFunctionBytecode,
+    >,
+) -> Result<Value> {
+    if args.len() != function.input_slots.len() {
+        return Err(execution_error(format!(
+            "Function {} expects {} arguments, got {}",
+            function.display_name,
+            function.input_slots.len(),
+            args.len()
+        )));
+    }
+
+    let mut func_vars = vec![Value::Num(0.0); function.var_count];
+    for (slot, value) in function.input_slots.iter().zip(args.iter()) {
+        if *slot < func_vars.len() {
+            func_vars[*slot] = value.clone();
+        }
+    }
+
+    let mut func_bytecode =
+        Bytecode::with_instructions(function.instructions.clone(), function.var_count);
+    func_bytecode.instr_spans = function.instr_spans.clone();
+    func_bytecode.call_arg_spans = function.call_arg_spans.clone();
+    func_bytecode.semantic_functions = semantic_functions.clone();
+
+    let func_result_vars = match run_immediate(Box::pin(runmat_vm::interpret_with_vars(
+        &func_bytecode,
+        &mut func_vars,
+        Some(function.display_name.as_str()),
+    )))? {
+        Ok(InterpreterOutcome::Completed(values)) => Ok(values),
+        Err(e) => Err(TurbineError::ExecutionError(e)),
+    }?;
+
+    if let Some(output_slot) = function.output_slots.first() {
+        Ok(func_result_vars
+            .get(*output_slot)
+            .cloned()
+            .unwrap_or(Value::Num(0.0)))
+    } else {
+        Ok(Value::Num(0.0))
     }
 }
 
@@ -439,6 +498,24 @@ impl TurbineEngine {
         vars: &mut [Value],
         functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
     ) -> Result<i32> {
+        self.execute_compiled_with_function_products(
+            hash,
+            vars,
+            functions,
+            &std::collections::HashMap::new(),
+        )
+    }
+
+    fn execute_compiled_with_function_products(
+        &mut self,
+        hash: u64,
+        vars: &mut [Value],
+        functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
+        semantic_functions: &std::collections::HashMap<
+            runmat_hir::FunctionId,
+            SemanticFunctionBytecode,
+        >,
+    ) -> Result<i32> {
         let func = self
             .cache
             .get(hash)
@@ -462,7 +539,7 @@ impl TurbineEngine {
         }
 
         // Set up runtime context for user function calls
-        let runtime_context = RuntimeContext::new(functions.clone());
+        let runtime_context = RuntimeContext::new(functions.clone(), semantic_functions.clone());
         // Note: Using Box::leak to create a 'static reference - this is safe for our use case
         // but in production we'd want a more sophisticated lifetime management
         let static_context = Box::leak(Box::new(runtime_context));
@@ -516,7 +593,12 @@ impl TurbineEngine {
         // If function is compiled, execute it with function definitions
         if self.cache.contains(hash) {
             return self
-                .execute_compiled_with_functions(hash, vars, &bytecode.functions)
+                .execute_compiled_with_function_products(
+                    hash,
+                    vars,
+                    &bytecode.functions,
+                    &bytecode.semantic_functions,
+                )
                 .map(|result| (result, true));
         }
 
@@ -526,7 +608,12 @@ impl TurbineEngine {
                 Ok(_) => {
                     info!("Bytecode compiled successfully, executing JIT version");
                     return self
-                        .execute_compiled_with_functions(hash, vars, &bytecode.functions)
+                        .execute_compiled_with_function_products(
+                            hash,
+                            vars,
+                            &bytecode.functions,
+                            &bytecode.semantic_functions,
+                        )
                         .map(|result| (result, true));
                 }
                 Err(e) => {
@@ -843,16 +930,22 @@ pub extern "C" fn runmat_call_user_function(
         }
     };
 
-    let function_def = match context.functions.get(&name) {
-        Some(def) => def,
-        None => {
-            error!("Unknown user function requested: {name}");
-            return 1;
-        }
+    let args: Vec<Value> = args_slice.iter().map(|value| Value::Num(*value)).collect();
+
+    let output = if let Some(function) = context
+        .semantic_functions
+        .values()
+        .find(|function| function.display_name == name)
+    {
+        execute_semantic_function_isolated(function, &args, &context.semantic_functions)
+    } else if let Some(function_def) = context.functions.get(&name) {
+        execute_user_function_isolated(function_def, &args, &context.functions)
+    } else {
+        error!("Unknown user function requested: {name}");
+        return 1;
     };
 
-    let args: Vec<Value> = args_slice.iter().map(|value| Value::Num(*value)).collect();
-    let output = match execute_user_function_isolated(function_def, &args, &context.functions) {
+    let output = match output {
         Ok(result) => result,
         Err(err) => {
             error!("User function execution failed: {err}");
