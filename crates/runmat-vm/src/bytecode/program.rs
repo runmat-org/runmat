@@ -85,6 +85,16 @@ impl SemanticFunctionRegistry {
     pub fn resolve_name(&self, name: &str) -> Option<FunctionId> {
         self.names.get(name).copied()
     }
+
+    pub fn insert_replacing_name(&mut self, function: SemanticFunctionBytecode) {
+        if let Some(previous) = self
+            .names
+            .insert(function.display_name.clone(), function.function)
+        {
+            self.functions.remove(&previous);
+        }
+        self.functions.insert(function.function, function);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

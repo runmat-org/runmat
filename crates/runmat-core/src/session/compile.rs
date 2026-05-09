@@ -116,10 +116,7 @@ impl RunMatSession {
             for instr in &mut function.instructions {
                 remap_semantic_function_instr(instr, &remap);
             }
-            session_registry
-                .names
-                .insert(function.display_name.clone(), new_id);
-            session_registry.functions.insert(new_id, function);
+            session_registry.insert_replacing_name(function);
         }
 
         bytecode.semantic_function_registry = session_registry.clone();

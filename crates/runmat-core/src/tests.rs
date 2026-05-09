@@ -1769,6 +1769,37 @@ fn cellfun_session_function_uses_semantic_registry() {
 }
 
 #[test]
+fn session_semantic_registry_replaces_redefined_function() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
+        .expect("define first function");
+    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 10;\nend"))
+        .expect("redefine function");
+
+    let source = "C = {2}; B = cellfun('inc', C); y = B(1);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile callback using redefined session function");
+    assert_eq!(
+        prepared
+            .bytecode
+            .semantic_function_registry
+            .functions
+            .values()
+            .filter(|function| function.display_name == "inc")
+            .count(),
+        1,
+        "semantic registry should retire the old definition"
+    );
+
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "12"
+    }));
+}
+
+#[test]
 fn local_function_multi_output_with_cell_expansion_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source =
