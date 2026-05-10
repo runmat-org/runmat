@@ -1188,8 +1188,7 @@ fn broadcasting_roundtrip_property_like() {
 fn logical_mask_write_scalar_and_vector() {
     // Scalar write via linear logical mask
     let program = "A = [1 2 3 4 5 6]; m = [true false true false true false]; A(m) = 9; s1 = sum(A);\nB = [1 2 3 4 5 6]; idx = [1 3 5]; B(idx) = [7 8 9]; s2 = sum(B);";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // After A(m)=9, A becomes [9 2 9 4 9 6] => sum 39
     assert!(vars
         .iter()
@@ -1204,8 +1203,7 @@ fn logical_mask_write_scalar_and_vector() {
 fn gather_scatter_roundtrip_nd() {
     // Gather a slice, scatter it back, tensor must be unchanged
     let program = "A = [1 2 3; 4 5 6; 7 8 9]; S = A(2:3, 1:2); A(2:3, 1:2) = S; t = sum(A(:));";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // Sum remains 45
     assert!(vars
         .iter()
@@ -1216,8 +1214,7 @@ fn gather_scatter_roundtrip_nd() {
 fn shape_broadcasting_laws() {
     // Broadcast column vector over selected columns
     let program = "A = zeros(3,4); v = [1;2;3]; A(:, 2:2:4) = v; x = sum(A(:));\nC = zeros(2,3,2); w = [5;6]; C(:,2,:) = w; y = sum(C(:));";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // A has 2 columns set to v => sum = (1+2+3)*2 = 12
     assert!(vars
         .iter()
@@ -1232,8 +1229,7 @@ fn shape_broadcasting_laws() {
 fn column_major_rhs_mapping() {
     // Verify RHS mapping enumerates first-dimension fastest
     let program = "A = zeros(3,3); R = [10 13 16; 11 14 17; 12 15 18]; A(:, [1 3]) = R(:, [1 3]); s = sum(A(:));";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // Selected columns are 1 and 3, filled from R(:,[1 3]) which in column-major is [10;11;12;16;17;18] => sum 84
     assert!(vars
         .iter()
