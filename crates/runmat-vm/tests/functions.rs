@@ -2,7 +2,6 @@
 mod test_helpers;
 
 use runmat_parser::parse;
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::thread;
 use test_helpers::compile_semantic_source;
@@ -1429,7 +1428,7 @@ fn operator_overloading_full_grid_basic() {
         let ast = runmat_parser::parse(&program).unwrap();
         let hir = lower(&ast).unwrap();
         execute(&hir).unwrap_or_else(|err| {
-            let bc = runmat_vm::bytecode::compile_legacy(&hir, &HashMap::new()).unwrap();
+            let bc = compile_semantic_source(&program).unwrap();
             panic!(
                 "operator overload script failed after stmt #{idx} `{stmt}`: {err}\nbytecode={:?}",
                 bc.instructions
