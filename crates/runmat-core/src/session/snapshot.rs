@@ -99,7 +99,7 @@ impl RunMatSession {
             verbose,
             stats: ExecutionStats::default(),
             variable_array: Vec::new(),
-            legacy_variable_names: HashMap::new(),
+            workspace_bindings: HashMap::new(),
             workspace_values: HashMap::new(),
             abi_workspace_handle: crate::abi::WorkspaceHandle(Uuid::new_v4()),
             semantic_function_registry: runmat_vm::SemanticFunctionRegistry::default(),

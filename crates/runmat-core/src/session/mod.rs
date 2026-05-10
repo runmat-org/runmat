@@ -63,8 +63,8 @@ pub struct RunMatSession {
     stats: ExecutionStats,
     /// Current variable array for bytecode execution
     variable_array: Vec<Value>,
-    /// Legacy mapping from variable names to VarId indices.
-    legacy_variable_names: HashMap<String, usize>,
+    /// Current workspace variable names mapped to VM variable-array slots.
+    workspace_bindings: HashMap<String, usize>,
     /// Persistent workspace values keyed by variable name
     workspace_values: HashMap<String, Value>,
     /// Stable ABI identity for this interactive workspace.

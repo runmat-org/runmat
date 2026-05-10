@@ -3,7 +3,7 @@ use super::*;
 impl RunMatSession {
     pub fn clear_variables(&mut self) {
         self.variable_array.clear();
-        self.legacy_variable_names.clear();
+        self.workspace_bindings.clear();
         self.workspace_values.clear();
         self.workspace_preview_tokens.clear();
     }
@@ -42,7 +42,7 @@ impl RunMatSession {
         self.clear_variables();
 
         for (index, (name, value)) in entries.into_iter().enumerate() {
-            self.legacy_variable_names.insert(name.clone(), index);
+            self.workspace_bindings.insert(name.clone(), index);
             self.variable_array.push(value.clone());
             self.workspace_values.insert(name, value);
         }

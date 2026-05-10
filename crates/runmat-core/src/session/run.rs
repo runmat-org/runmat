@@ -663,7 +663,7 @@ impl RunMatSession {
                         "[repl] mutated names and assigned return values"
                     );
                 }
-                self.legacy_variable_names = mutated_names.clone();
+                self.workspace_bindings = mutated_names.clone();
                 let previous_workspace = self.workspace_values.clone();
                 let current_names: HashSet<String> = assigned
                     .iter()
@@ -738,7 +738,7 @@ impl RunMatSession {
             self.next_semantic_function_id = next_semantic_function_id_after_success;
             // Apply 'ans' update if applicable (persisting expression result)
             if let Some((var_id, value)) = ans_update {
-                self.legacy_variable_names.insert("ans".to_string(), var_id);
+                self.workspace_bindings.insert("ans".to_string(), var_id);
                 self.workspace_values.insert("ans".to_string(), value);
                 if debug_trace {
                     println!("Updated 'ans' to var_id {}", var_id);

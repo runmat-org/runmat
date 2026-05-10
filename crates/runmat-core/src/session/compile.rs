@@ -16,7 +16,7 @@ impl RunMatSession {
             let semantic_function_names = self.semantic_function_registry.names.clone();
             runmat_hir::lower(
                 &ast,
-                &LoweringContext::new(&self.legacy_variable_names, &HashMap::new())
+                &LoweringContext::new(&self.workspace_bindings, &HashMap::new())
                     .with_semantic_functions(&semantic_function_names),
             )?
         };

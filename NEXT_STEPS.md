@@ -191,7 +191,7 @@ Observed older-HIR artifacts worth collapsing:
 
 - `LegacyHirProgram`, `LegacyHirStmt`, and `LegacyHirExpr` remain in VM compiler modules and many tests.
 - `compile_legacy` is still exported publicly from `runmat-vm` and used by VM/Turbine tests plus the centralized dynamic callback fallback.
-- `legacy_variable_names` remains in `RunMatSession` to seed workspace variables across REPL inputs.
+- `RunMatSession` keeps `workspace_bindings` to seed workspace variables across REPL inputs, but those bindings are still plain VM slot indices rather than durable semantic workspace binding IDs.
 - `LoweringResult` still carries both `assembly` and legacy `hir`, `variables`, `functions`, `var_types`, and legacy inference placeholders.
 - LSP analysis still consults legacy variable maps and legacy type helpers.
 - `CompatibilityMode::RunMatExtended` is still mapped through parser compatibility as MATLAB mode in some places, which obscures the intended distinction between compatibility policy and parser syntax mode.
@@ -199,7 +199,7 @@ Observed older-HIR artifacts worth collapsing:
 Target cleanup direction:
 
 - Keep source compatibility behavior, but represent it through semantic assembly, analysis facts, and workspace ABI records.
-- Replace session `legacy_variable_names` with a semantic workspace binding table keyed by stable names plus semantic binding/session IDs.
+- Replace session `workspace_bindings` VM slot mapping with a semantic workspace binding table keyed by stable names plus semantic binding/session IDs.
 - Continue replacing remaining legacy function fallback sites with the semantic registry.
 - Move tests that only need compiler behavior from hand-built legacy HIR to semantic source fixtures or semantic MIR fixtures.
 - Stop exporting `compile_legacy` once runtime/Turbine callbacks and remaining tests no longer depend on it.
