@@ -676,22 +676,73 @@ impl Compiler {
             self.emit(Instr::Unpack(targets.targets.len()));
         }
         for target in targets.targets.iter().rev() {
-            match target {
-                MirOutputTarget::Place(place) => {
-                    let slot = self.mir_place_slot(place)?;
-                    self.emit(Instr::StoreVar(slot));
-                }
-                MirOutputTarget::Discard => {
-                    self.emit(Instr::Pop);
-                }
-                MirOutputTarget::VarargoutExpansion => {
-                    return Err(self.compile_error(
-                        "MIR bytecode lowering for varargout expansion is not implemented yet",
-                    ))
-                }
-            }
+            self.compile_mir_output_target_store(target)?;
         }
         Ok(())
+    }
+
+    fn compile_mir_output_target_store(
+        &mut self,
+        target: &MirOutputTarget,
+    ) -> Result<(), CompileError> {
+        match target {
+            MirOutputTarget::Place(place @ (MirPlace::Local(_) | MirPlace::Binding(_))) => {
+                let slot = self.mir_place_slot(place)?;
+                self.emit(Instr::StoreVar(slot));
+                Ok(())
+            }
+            MirOutputTarget::Place(place) => {
+                let tmp = self.alloc_temp();
+                self.emit(Instr::StoreVar(tmp));
+                self.compile_mir_assign_from_slot(place, tmp)
+            }
+            MirOutputTarget::Discard => {
+                self.emit(Instr::Pop);
+                Ok(())
+            }
+            MirOutputTarget::VarargoutExpansion => Err(self.compile_error(
+                "MIR bytecode lowering for varargout expansion is not implemented yet",
+            )),
+        }
+    }
+
+    fn compile_mir_assign_from_slot(
+        &mut self,
+        place: &MirPlace,
+        value_slot: usize,
+    ) -> Result<(), CompileError> {
+        match place {
+            MirPlace::Local(_) | MirPlace::Binding(_) => {
+                self.emit(Instr::LoadVar(value_slot));
+                let slot = self.mir_place_slot(place)?;
+                self.emit(Instr::StoreVar(slot));
+                Ok(())
+            }
+            MirPlace::Index(base, indexing) => {
+                if let Ok(base_slot) = self.mir_place_slot(base) {
+                    self.emit(Instr::LoadVar(base_slot));
+                    self.compile_mir_store_indexed_value_from_temp(indexing, value_slot)?;
+                    self.emit(Instr::StoreVar(base_slot));
+                    return Ok(());
+                }
+                self.compile_mir_place_read(base)?;
+                self.compile_mir_store_indexed_value_from_temp(indexing, value_slot)?;
+                self.emit_store_back_mir_member_chain(base)
+            }
+            MirPlace::Member(base, member) => {
+                self.compile_mir_member_base_for_assignment(base)?;
+                self.emit(Instr::LoadVar(value_slot));
+                self.emit(Instr::StoreMemberOrInit(member.0.clone()));
+                self.emit_store_back_mir_member_chain(base)
+            }
+            MirPlace::DynamicMember(base, member) => {
+                self.compile_mir_member_base_for_assignment(base)?;
+                self.compile_mir_operand(member)?;
+                self.emit(Instr::LoadVar(value_slot));
+                self.emit(Instr::StoreMemberDynamicOrInit);
+                self.emit_store_back_mir_member_chain(base)
+            }
+        }
     }
 
     fn compile_mir_cell_expand_for_multi_assign(

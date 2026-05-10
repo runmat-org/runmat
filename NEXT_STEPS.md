@@ -345,7 +345,7 @@ Treat current MIR bytecode gap markers as follows:
 - `call callee`: semantic resolver/DefPath work; do not fall back to string builtin guesses.
 - `aggregate kind`: struct/object aggregate design.
 - `function handle target`: builtin and anonymous semantic handle `feval` are ratcheted; remaining method/DefPath targets appear to require resolver/DefPath function-handle ABI work.
-- `assignment place`: remaining non-local/non-binding places should become explicit place/update plans.
+- `assignment place`: multi-assign output storage now reuses MIR place assignment for non-local targets; remaining assignment-place gaps should be explicit source reproducers or object/dynamic descriptor plans, not generic slot-only lowering.
 
 ## Recommended Semantic Design Slice
 
