@@ -80,8 +80,8 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
 ### Known Internal String Hooks
 
 - `make_handle`
-  - Currently used by function-handle lowering.
-  - Prefer a typed `CreateFunctionHandle` / `CreateDynamicFunctionHandle` instruction or runtime ABI call.
+  - No current production references remain in VM/HIR lowering.
+  - Function-handle lowering now emits typed `CreateFunctionHandle` instructions.
 
 - `feval`
   - Semantic lowering and bytecode use typed dynamic-call instructions, and VM runtime forwarding now calls `runmat_runtime::call_feval_async` instead of owning the builtin string.
@@ -142,12 +142,12 @@ This directly addresses the most common band-aid pattern from the recent work.
 
 ## Follow-Up Slice
 
-After indexing assignment classification, target hard-coded function-handle dispatch names.
+After indexing assignment classification, target remaining hard-coded function-handle and dynamic-call dispatch names.
 
 Concrete next target:
 
-- Replace `make_handle` string-call lowering with a typed function-handle instruction.
-- Replace `feval` string special-casing with explicit dynamic-call lowering.
+- Keep `CreateFunctionHandle` as the typed function-handle lowering path and remove remaining legacy string-era assumptions around handle targets.
+- Replace remaining `feval` string-era fallback paths with explicit dynamic-call lowering and resolver facts.
 - Preserve semantic closure behavior and existing function-handle ratchets.
 
 This is narrower than object `subsref` / `subsasgn` and should reduce compiler/runtime string coupling without requiring a full object protocol rewrite.
