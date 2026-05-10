@@ -396,6 +396,7 @@ Current ratchet status:
 - The FFT end-range bytecode assertion in VM basics now uses semantic bytecode instead of `compile_legacy`.
 - Simple VM basics execution tests for arithmetic, zero-output builtin calls, and `nextpow2` now run semantic bytecode.
 - Additional VM basics execution tests for complex literals, leading-dot numeric forms, elementwise division, `chol`, `uint16`, and `atan2` RHS expressions now run semantic bytecode.
+- Several FFT and end-expression success-path execution tests in VM basics now run semantic bytecode; complex range assignment and `end/2` range materialization cases still expose semantic execution gaps and remain legacy-executed.
 - Matrix-division execution tests now run semantic bytecode; only the accel graph assertions keep legacy bytecode for legacy graph shape coverage.
 - Loop execution tests now run semantic bytecode; only the stochastic-evolution instruction assertion keeps legacy bytecode shape coverage.
 - Operator-overload diagnostic bytecode in VM functions tests now uses semantic compilation instead of `compile_legacy`.

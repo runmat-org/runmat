@@ -326,9 +326,7 @@ fn fft_output_supports_scalar_and_range_indexing() {
         ra = real(a);
         ia = imag(a);
     "#;
-    let ast = parse(input).expect("parse fft indexing script");
-    let hir = lower(&ast).expect("lower fft indexing script");
-    let vars = execute(&hir).expect("fft output indexing should execute");
+    let vars = execute_semantic_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, Value::Num(n) if (*n - 4.0).abs() < 1e-12)));
@@ -377,9 +375,7 @@ fn fft2_output_supports_two_dimensional_indexing() {
         col = F(:,1);
         n = numel(col);
     "#;
-    let ast = parse(input).expect("parse fft2 indexing script");
-    let hir = lower(&ast).expect("lower fft2 indexing script");
-    let vars = execute(&hir).expect("fft2 output indexing should execute");
+    let vars = execute_semantic_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, Value::Num(n) if (*n - 2.0).abs() < 1e-12)));
@@ -397,9 +393,7 @@ fn fft_output_accepts_gpu_backed_range_selector() {
         Y = X(1:k);
         ok = (numel(Y) == 513);
     "#;
-    let ast = parse(input).expect("parse fft gpu-backed range script");
-    let hir = lower(&ast).expect("lower fft gpu-backed range script");
-    let vars = execute(&hir).expect("fft gpu-backed range indexing should execute");
+    let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -416,9 +410,7 @@ fn fft_output_supports_scalar_end_div_indexing() {
         a = Y(end/2);
         ok = (abs(real(a) + 4) < 1e-12) && (imag(a) > 1.6) && (imag(a) < 1.7);
     "#;
-    let ast = parse(input).expect("parse fft scalar end-div indexing script");
-    let hir = lower(&ast).expect("lower fft scalar end-div indexing script");
-    let vars = execute(&hir).expect("fft scalar end-div indexing should execute");
+    let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -476,9 +468,7 @@ fn fft_end_arithmetic_supports_general_scalar_and_range_forms() {
         h = Y(2:(end*1 - 1/2));
         ok = (abs(real(a) + 4) < 1e-12) && (numel(h) == 6);
     "#;
-    let ast = parse(input).expect("parse general end arithmetic script");
-    let hir = lower(&ast).expect("lower general end arithmetic script");
-    let vars = execute(&hir).expect("general end arithmetic should execute");
+    let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
