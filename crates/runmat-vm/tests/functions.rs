@@ -267,6 +267,17 @@ fn semantic_sort_unique_find_builtin_multi_assign_execute() {
 }
 
 #[test]
+fn semantic_chol_builtin_multi_assign_execute() {
+    let bytecode =
+        compile_semantic_source("[r,p] = chol([4 0; 0 9]); z = r(1,1) + r(2,2) + p;").unwrap();
+    let vars = interpret(&bytecode).expect("semantic chol multi-assign should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+}
+
+#[test]
 fn fprintf_inline_cast_argument_does_not_stack_underflow() {
     let program = r#"
         x = single(3.14);
