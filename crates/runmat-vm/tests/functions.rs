@@ -5,6 +5,7 @@ use runmat_parser::parse;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::thread;
+use test_helpers::compile_semantic_source;
 use test_helpers::lower;
 use test_helpers::{execute, interpret};
 
@@ -1310,9 +1311,7 @@ fn operator_overloading_left_division_variants() {
 #[test]
 fn bitwise_or_row_vectors() {
     let program = "f = ([1 0 1] | [0 1 1]);";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let bc = runmat_vm::compile_legacy(&hir, &HashMap::new()).unwrap();
-    dbg!(&bc.instructions);
+    let bc = compile_semantic_source(program).unwrap();
     let _ = interpret(&bc).unwrap();
 }
 
