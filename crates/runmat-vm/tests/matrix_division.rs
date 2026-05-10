@@ -6,7 +6,7 @@ use runmat_builtins::Value;
 use runmat_parser::parse;
 use runmat_vm::Instr;
 use std::collections::HashMap;
-use test_helpers::{compile_semantic_source, execute, lower};
+use test_helpers::{compile_semantic_source, interpret, lower};
 
 fn compile_bytecode(source: &str) -> runmat_vm::Bytecode {
     let ast = parse(source).expect("parse");
@@ -15,9 +15,8 @@ fn compile_bytecode(source: &str) -> runmat_vm::Bytecode {
 }
 
 fn execute_program(source: &str) -> Vec<Value> {
-    let ast = parse(source).expect("parse");
-    let hir = lower(&ast).expect("lower");
-    execute(&hir).expect("execute")
+    let bytecode = compile_semantic_source(source).expect("compile semantic source");
+    interpret(&bytecode).expect("execute semantic bytecode")
 }
 
 fn assert_same_real_tensor(lhs: &Value, rhs: &Value) {

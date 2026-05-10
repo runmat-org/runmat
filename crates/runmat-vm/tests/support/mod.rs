@@ -22,6 +22,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 pub fn execute(program: &HirProgram) -> Result<Vec<Value>, RuntimeError> {
     let program = program.clone();
     run_with_stack(move || {
