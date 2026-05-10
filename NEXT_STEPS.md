@@ -392,6 +392,7 @@ Current ratchet status:
 - VM basics, matrix-division, bitwise row-vector, and import-error bytecode tests now use the semantic HIR/MIR `compile` path where they only need source-level or semantic bytecode behavior.
 - The FFT end-range bytecode assertion in VM basics now uses semantic bytecode instead of `compile_legacy`.
 - Matrix-division execution tests now run semantic bytecode; only the accel graph assertions keep legacy bytecode for legacy graph shape coverage.
+- Loop execution tests now run semantic bytecode; only the stochastic-evolution instruction assertion keeps legacy bytecode shape coverage.
 - Remaining test `compile_legacy` references are still tied to legacy execution helpers, native-accel graph construction, legacy multi-output bytecode shape assertions, or Turbine/accelerate legacy suites.
 - Remaining production `compile_legacy` usage is centralized behind `compile_legacy_user_dispatch_fallback`; the remaining transitional API is `runmat_vm::bytecode::compile_legacy` for legacy tests and fallback plumbing.
 
