@@ -177,9 +177,7 @@ fn semantic_scalar_call_result_index_assignment_executes() {
 #[test]
 fn complex_literal_matrix_executes() {
     let input = "A = [1+2i 3-4j];";
-    let ast = parse(input).unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(input);
     match &vars[0] {
         Value::ComplexTensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 2]);
@@ -192,9 +190,7 @@ fn complex_literal_matrix_executes() {
 #[test]
 fn leading_dot_complex_literals_execute() {
     let input = "A = [.1i .5e-2j];";
-    let ast = parse(input).unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(input);
     match &vars[0] {
         Value::ComplexTensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 2]);
@@ -207,9 +203,7 @@ fn leading_dot_complex_literals_execute() {
 #[test]
 fn matrix_literal_with_leading_dot_entries_executes() {
     let input = "A = [1 .2 .3];";
-    let ast = parse(input).unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(input);
     match &vars[0] {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 3]);
@@ -222,9 +216,7 @@ fn matrix_literal_with_leading_dot_entries_executes() {
 #[test]
 fn elementwise_division_accepts_leading_dot_rhs() {
     let input = "A = [1 2 3]; B = A./.5;";
-    let ast = parse(input).unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(input);
     match &vars[1] {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 3]);
@@ -237,9 +229,7 @@ fn elementwise_division_accepts_leading_dot_rhs() {
 #[test]
 fn chol_multiassign_reports_failure() {
     let input = "A = [1 2; 2 1]; [R, p] = chol(A);";
-    let ast = parse(input).unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(input);
     let p: f64 = (&vars[2]).try_into().unwrap();
     assert_eq!(p, 2.0);
     match &vars[1] {
@@ -253,9 +243,7 @@ fn chol_multiassign_reports_failure() {
 #[test]
 fn uint16_cast_is_callable_in_vm() {
     let input = "A = uint16([3.49 -2 70000]);";
-    let ast = parse(input).unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(input);
     match &vars[0] {
         Value::Tensor(tensor) => {
             assert_eq!(tensor.shape, vec![1, 3]);
@@ -273,9 +261,7 @@ fn atan2_with_rhs_expression_executes_without_stack_underflow() {
         Vd_drop = 0.3;
         delta_g0 = atan2(Vq_drop, V_pcc + Vd_drop);
     "#;
-    let ast = parse(input).expect("parse atan2 rhs expression script");
-    let hir = lower(&ast).expect("lower atan2 rhs expression script");
-    let vars = execute(&hir).expect("atan2 rhs expression should execute");
+    let vars = execute_semantic_source(input);
     let delta: f64 = (&vars[3]).try_into().expect("convert delta_g0 to f64");
     assert!((delta - 1.2f64.atan2(2.7)).abs() < 1e-12);
 }
