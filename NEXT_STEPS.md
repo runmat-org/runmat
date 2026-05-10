@@ -100,10 +100,10 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
   - Prefer `ObjectSubsref` / `ObjectSubsasgn` style operations carrying structured index data.
 
 - `nargin` / `nargout`
-  - VM call-count handling now classifies these through a special-counter call category instead of inline string branches.
+  - VM call-count handling now classifies these through a VM intrinsic counter call category instead of inline string branches.
 
 - `rethrow`
-  - VM implicit rethrow handling now classifies this through a special exception call category instead of an inline string branch.
+  - VM implicit rethrow handling now classifies this through a VM intrinsic exception call category instead of an inline string branch.
 
 ### Replacement Strategy
 

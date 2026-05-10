@@ -5,12 +5,12 @@ use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
 
 #[derive(Clone, Copy)]
-enum SpecialCounterBuiltin {
+enum VmIntrinsicCounterBuiltin {
     Nargin,
     Nargout,
 }
 
-impl SpecialCounterBuiltin {
+impl VmIntrinsicCounterBuiltin {
     fn classify(name: &str) -> Option<Self> {
         match name {
             "nargin" => Some(Self::Nargin),
@@ -21,11 +21,11 @@ impl SpecialCounterBuiltin {
 }
 
 #[derive(Clone, Copy)]
-enum SpecialExceptionBuiltin {
+enum VmIntrinsicExceptionBuiltin {
     Rethrow,
 }
 
-impl SpecialExceptionBuiltin {
+impl VmIntrinsicExceptionBuiltin {
     fn classify(name: &str) -> Option<Self> {
         match name {
             "rethrow" => Some(Self::Rethrow),
@@ -58,15 +58,15 @@ pub fn special_counter_builtin(
     arg_count: usize,
     call_counts: &[(usize, usize)],
 ) -> Result<Option<Value>, RuntimeError> {
-    match SpecialCounterBuiltin::classify(name) {
-        Some(SpecialCounterBuiltin::Nargin) => {
+    match VmIntrinsicCounterBuiltin::classify(name) {
+        Some(VmIntrinsicCounterBuiltin::Nargin) => {
             if arg_count != 0 {
                 return Err(mex("TooManyInputs", "nargin takes no arguments"));
             }
             let (nin, _) = call_counts.last().cloned().unwrap_or((0, 0));
             Ok(Some(Value::Num(nin as f64)))
         }
-        Some(SpecialCounterBuiltin::Nargout) => {
+        Some(VmIntrinsicCounterBuiltin::Nargout) => {
             if arg_count != 0 {
                 return Err(mex("TooManyInputs", "nargout takes no arguments"));
             }
@@ -182,8 +182,8 @@ pub fn rethrow_without_explicit_exception(
     last_identifier: Option<&str>,
     last_message: Option<&str>,
 ) -> Option<RuntimeError> {
-    match SpecialExceptionBuiltin::classify(name) {
-        Some(SpecialExceptionBuiltin::Rethrow) if args.is_empty() => {
+    match VmIntrinsicExceptionBuiltin::classify(name) {
+        Some(VmIntrinsicExceptionBuiltin::Rethrow) if args.is_empty() => {
             if let (Some(identifier), Some(message)) = (last_identifier, last_message) {
                 return Some(format!("{}: {}", identifier, message).to_string().into());
             }
