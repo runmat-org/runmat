@@ -307,6 +307,16 @@ pub enum HirCallableRef {
     Unresolved(QualifiedName),
 }
 
+impl HirCallableRef {
+    pub fn is_feval_builtin_like(&self) -> bool {
+        match self {
+            HirCallableRef::Builtin(id) => id.0 == "feval",
+            HirCallableRef::Unresolved(name) if name.0.len() == 1 => name.0[0].0 == "feval",
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum CallSyntax {
     Plain,

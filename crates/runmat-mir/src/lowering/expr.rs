@@ -76,7 +76,7 @@ pub(crate) fn lower_expr_with_replacements(
                     lower_operand_with_replacements(ctx, callee, temps, await_replacements)?,
                     args,
                 )
-            } else if is_feval_call(&call.callee) {
+            } else if call.callee.is_feval_builtin_like() {
                 if args.is_empty() {
                     return Err(SemanticError::new("feval: missing function argument"));
                 }
@@ -319,14 +319,6 @@ fn dynamic_call_rvalue(
         purity: semantics.purity,
         semantic_kind: semantics.semantic_kind,
     })
-}
-
-fn is_feval_call(callee: &HirCallableRef) -> bool {
-    match callee {
-        HirCallableRef::Builtin(id) => id.0 == "feval",
-        HirCallableRef::Unresolved(name) if name.0.len() == 1 => name.0[0].0 == "feval",
-        _ => false,
-    }
 }
 
 fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
