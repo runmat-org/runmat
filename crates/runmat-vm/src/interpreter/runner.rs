@@ -1,7 +1,6 @@
 use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
 use crate::bytecode::{Bytecode, Instr, SemanticFunctionRegistry, UserFunction};
-use crate::call::shared as call_shared;
 use crate::call::user as call_user;
 use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
 use crate::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
@@ -187,14 +186,9 @@ async fn invoke_user_function_value(
         return invoke_semantic_function_value(function.0, args, 1, semantic_registry).await;
     }
 
-    let func = call_shared::lookup_user_function(name, functions)?;
     let arg_count = args.len();
-    call_shared::validate_user_function_arity(name, &func, arg_count)?;
-    let prepared = call_shared::prepare_user_call(func, args, vars)?;
-    let compiled = interp_dispatch::compile_legacy_user_dispatch_fallback(
-        interp_dispatch::unpack_prepared_user_call(prepared),
-        functions,
-    )?;
+    let compiled =
+        interp_dispatch::compile_legacy_named_user_dispatch_fallback(name, functions, args, vars)?;
     let interp_dispatch::CompiledUserDispatch {
         func,
         var_map,
@@ -204,7 +198,7 @@ async fn invoke_user_function_value(
     register_dynamic_user_functions(&func_bytecode.functions);
     let func_result_vars =
         interpret_function_with_counts(&func_bytecode, func_vars, name, 1, arg_count).await?;
-    Ok(call_shared::first_output_value(
+    Ok(crate::call::shared::first_output_value(
         &func,
         &var_map,
         &func_result_vars,

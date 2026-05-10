@@ -24,16 +24,16 @@ pub use arrays::{
 pub use calls::{
     build_builtin_expand_at_args, build_builtin_expand_last_args, build_builtin_expand_multi_args,
     build_feval_expand_multi_args, build_user_function_expand_multi_args,
-    compile_legacy_user_dispatch_fallback, handle_builtin_call, handle_builtin_expand_at_call,
-    handle_builtin_expand_last_call, handle_builtin_expand_multi_call, handle_builtin_outcome,
-    handle_create_closure, handle_create_semantic_closure, handle_feval_dispatch,
-    handle_feval_user_multi_output, handle_load_method, handle_load_static_property,
-    handle_method_call, handle_method_or_member_index_call,
-    handle_method_or_member_index_expand_multi_call, handle_prepared_user_function_call,
-    handle_register_class, handle_static_method_call, handle_user_function_call,
-    output_list_for_user_call, prepare_named_user_dispatch, push_single_result,
-    push_user_call_outputs, unpack_prepared_user_call, BuiltinHandling, CompiledUserDispatch,
-    FevalHandling, MethodHandling, UserCallHandling,
+    compile_legacy_named_user_dispatch_fallback, compile_legacy_user_dispatch_fallback,
+    handle_builtin_call, handle_builtin_expand_at_call, handle_builtin_expand_last_call,
+    handle_builtin_expand_multi_call, handle_builtin_outcome, handle_create_closure,
+    handle_create_semantic_closure, handle_feval_dispatch, handle_feval_user_multi_output,
+    handle_load_method, handle_load_static_property, handle_method_call,
+    handle_method_or_member_index_call, handle_method_or_member_index_expand_multi_call,
+    handle_prepared_user_function_call, handle_register_class, handle_static_method_call,
+    handle_user_function_call, output_list_for_user_call, prepare_named_user_dispatch,
+    push_single_result, push_user_call_outputs, unpack_prepared_user_call, BuiltinHandling,
+    CompiledUserDispatch, FevalHandling, MethodHandling, UserCallHandling,
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
 pub use exceptions::{

@@ -131,17 +131,13 @@ fn execute_user_function_isolated(
 ) -> Result<Value> {
     let mut functions = all_functions.clone();
     functions.insert(function_def.name.clone(), function_def.clone());
-    let prepared = runmat_vm::interpreter::dispatch::prepare_named_user_dispatch(
+    let compiled = runmat_vm::interpreter::dispatch::compile_legacy_named_user_dispatch_fallback(
         &function_def.name,
         &functions,
         args,
         &[],
     )
     .map_err(TurbineError::ExecutionError)?;
-    let compiled = runmat_vm::interpreter::dispatch::compile_legacy_user_dispatch_fallback(
-        prepared, &functions,
-    )
-    .map_err(|e| execution_error(format!("Failed to compile function: {e}")))?;
     let runmat_vm::interpreter::dispatch::CompiledUserDispatch {
         func,
         var_map,

@@ -162,6 +162,7 @@ Current state:
 - `feval` closure dispatch resolves closure names through the semantic registry when an embedded semantic function id is unavailable.
 - Legacy named user-call bytecode dispatch now checks the semantic registry before builtin fallback or `compile_legacy_user_dispatch_fallback`.
 - Multi-output `feval` legacy user fallback is centralized behind one dispatch helper instead of duplicated in direct and expanded `feval` bytecode handlers.
+- Named legacy user fallback preparation and compilation is centralized behind `compile_legacy_named_user_dispatch_fallback` for VM dispatch, callback runner, and Turbine fallback sites.
 - Unresolved/external dynamic user-function callbacks still centralize through `compile_legacy_user_dispatch_fallback`, which wraps `compile_legacy` over reconstructed `LegacyHirProgram`.
 - The centralized unresolved/external fallback is explicitly named `compile_legacy_user_dispatch_fallback` so new semantic call paths do not treat it as normal dispatch infrastructure.
 

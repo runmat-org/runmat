@@ -60,6 +60,16 @@ pub fn compile_legacy_user_dispatch_fallback(
     })
 }
 
+pub fn compile_legacy_named_user_dispatch_fallback(
+    name: &str,
+    functions: &std::collections::HashMap<String, UserFunction>,
+    args: &[Value],
+    vars: &[Value],
+) -> Result<CompiledUserDispatch, RuntimeError> {
+    let prepared = prepare_named_user_dispatch(name, functions, args, vars)?;
+    Ok(compile_legacy_user_dispatch_fallback(prepared, functions)?)
+}
+
 pub enum BuiltinHandling {
     Completed,
     Caught,
@@ -172,10 +182,7 @@ where
     IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
 {
     let arg_count = args.len();
-    let compiled = compile_legacy_user_dispatch_fallback(
-        prepare_named_user_dispatch(&name, &functions, &args, vars)?,
-        &functions,
-    )?;
+    let compiled = compile_legacy_named_user_dispatch_fallback(&name, &functions, &args, vars)?;
     let CompiledUserDispatch {
         func,
         var_map,
@@ -691,10 +698,8 @@ where
         return Ok(UserCallHandling::Completed);
     }
 
-    let compiled = compile_legacy_user_dispatch_fallback(
-        prepare_named_user_dispatch(name, bytecode_functions, &args, vars)?,
-        bytecode_functions,
-    )?;
+    let compiled =
+        compile_legacy_named_user_dispatch_fallback(name, bytecode_functions, &args, vars)?;
     let CompiledUserDispatch {
         func,
         var_map,
