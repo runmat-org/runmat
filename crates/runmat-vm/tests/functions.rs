@@ -242,6 +242,16 @@ fn implicit_struct_creation_for_root_variable_assignment() {
 }
 
 #[test]
+fn semantic_member_read_write_executes() {
+    let bytecode = compile_semantic_source("s.x = 10; s.y = 20; v = s.x + s.y;").unwrap();
+    let vars = interpret(&bytecode).expect("semantic member read/write should succeed");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
+}
+
+#[test]
 fn implicit_struct_creation_for_function_output_variable() {
     let input = r#"
         function r = make_result()

@@ -338,7 +338,7 @@ Treat current MIR bytecode gap markers as follows:
 - `control-flow terminator`: design gap for async/await or future terminators, not a small VM patch unless a concrete source reproducer exists.
 - `varargout expansion`: HIR/MIR output-target design gap; first confirm whether it is constructible.
 - `slice index`: comparison-derived logical tensor masks and call-result index variables now lower through semantic slice bytecode for read/write; remaining gaps are selector-plan normalization for range/end/colon in non-tensor and cell contexts.
-- `dot assignment` / `dot indexing`: likely dead or transitional if semantic lowering uses member MIR; verify and remove or map explicitly.
+- `dot assignment` / `dot indexing`: static member read/write source now ratchets through semantic member MIR; remaining `IndexKind::Dot` branches appear transitional and should be verified for removal or mapped explicitly if a source reproducer reaches them.
 - `indexed member store-back`: remaining forms after paren/brace store-back; likely object/dot descriptor work.
 - `rvalue` / `operand`: async/future/spawn/temp modeling or unsupported semantic forms; classify by source reproducer before implementing.
 - `{count} call outputs`: call ABI/output-list policy; avoid adding ad hoc bytecode variants until call descriptor design is settled.
