@@ -3,22 +3,13 @@ mod test_helpers;
 
 use runmat_accelerate::ShapeInfo;
 use runmat_builtins::Value;
-use runmat_hir::LoweringContext;
-use runmat_mir::lowering::lower_assembly;
 use runmat_parser::parse;
-use runmat_vm::{Bytecode, Instr};
+use runmat_vm::Instr;
 use std::collections::HashMap;
 use std::convert::TryInto;
+use test_helpers::compile_semantic_source;
 use test_helpers::execute;
 use test_helpers::lower;
-
-fn compile_semantic_source(input: &str) -> Bytecode {
-    let ast = parse(input).expect("parse semantic source");
-    let hir = runmat_hir::lower(&ast, &LoweringContext::empty()).expect("lower semantic HIR");
-    let mir = lower_assembly(&hir.assembly).expect("lower semantic MIR");
-    let entrypoint = hir.assembly.entrypoints[0].id;
-    runmat_vm::compile(&hir.assembly, &mir, entrypoint).expect("compile semantic bytecode")
-}
 
 #[test]
 fn arithmetic_and_assignment() {
@@ -34,7 +25,7 @@ fn arithmetic_and_assignment() {
 
 #[test]
 fn semantic_logical_ops_use_typed_bytecode() {
-    let bytecode = compile_semantic_source("a = ~0; b = 1 & 0; c = 1 | 0;");
+    let bytecode = compile_semantic_source("a = ~0; b = 1 & 0; c = 1 | 0;").unwrap();
 
     assert!(bytecode
         .instructions
@@ -118,7 +109,7 @@ fn array_construct_like_and_size_vector_inference() {
 #[test]
 fn semantic_complex_literal_matrix_uses_fixed_size_construction() {
     let input = "A = [1+2i 3-4j];";
-    let bytecode = compile_semantic_source(input);
+    let bytecode = compile_semantic_source(input).unwrap();
     assert!(
         bytecode
             .instructions

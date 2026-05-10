@@ -3,25 +3,15 @@ mod test_helpers;
 
 use runmat_accelerate::graph::{AccelNodeLabel, PrimitiveOp};
 use runmat_builtins::Value;
-use runmat_hir::LoweringContext;
-use runmat_mir::lowering::lower_assembly;
 use runmat_parser::parse;
 use runmat_vm::Instr;
 use std::collections::HashMap;
-use test_helpers::{execute, lower};
+use test_helpers::{compile_semantic_source, execute, lower};
 
 fn compile_bytecode(source: &str) -> runmat_vm::Bytecode {
     let ast = parse(source).expect("parse");
     let hir = lower(&ast).expect("lower");
     runmat_vm::compile_legacy(&hir, &HashMap::new()).expect("compile")
-}
-
-fn compile_semantic_bytecode(source: &str) -> runmat_vm::Bytecode {
-    let ast = parse(source).expect("parse");
-    let hir = runmat_hir::lower(&ast, &LoweringContext::empty()).expect("lower semantic HIR");
-    let mir = lower_assembly(&hir.assembly).expect("lower semantic MIR");
-    let entrypoint = hir.assembly.entrypoints[0].id;
-    runmat_vm::compile(&hir.assembly, &mir, entrypoint).expect("compile semantic bytecode")
 }
 
 fn execute_program(source: &str) -> Vec<Value> {
@@ -76,7 +66,8 @@ fn count_primitives(bytecode: &runmat_vm::Bytecode, op: PrimitiveOp) -> usize {
 
 #[test]
 fn matrix_and_elementwise_division_lower_to_distinct_instructions() {
-    let bytecode = compile_semantic_bytecode("a = 6 / 2; b = 6 \\ 2; c = 6 ./ 2; d = 6 .\\ 2;");
+    let bytecode =
+        compile_semantic_source("a = 6 / 2; b = 6 \\ 2; c = 6 ./ 2; d = 6 .\\ 2;").unwrap();
     assert!(
         bytecode
             .instructions

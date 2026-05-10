@@ -35,6 +35,16 @@ pub fn lower(program: &runmat_parser::Program) -> Result<HirProgram, SemanticErr
     runmat_hir::lower(program, &LoweringContext::empty()).map(|result| result.hir)
 }
 
+pub fn compile_semantic_source(source: &str) -> Result<runmat_vm::Bytecode, RuntimeError> {
+    let ast = runmat_parser::parse(source).map_err(|err| RuntimeError::new(err.to_string()))?;
+    let hir = runmat_hir::lower(&ast, &LoweringContext::empty())
+        .map_err(|err| RuntimeError::new(format!("{err:?}")))?;
+    let mir = runmat_mir::lowering::lower_assembly(&hir.assembly)
+        .map_err(|err| RuntimeError::new(format!("{err:?}")))?;
+    let entrypoint = hir.assembly.entrypoints[0].id;
+    runmat_vm::compile(&hir.assembly, &mir, entrypoint).map_err(RuntimeError::from)
+}
+
 #[allow(dead_code)]
 pub fn interpret(bytecode: &runmat_vm::Bytecode) -> Result<Vec<Value>, RuntimeError> {
     let bytecode = bytecode.clone();
