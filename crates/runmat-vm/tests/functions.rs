@@ -228,6 +228,19 @@ fn semantic_size_builtin_multi_assign_executes() {
 }
 
 #[test]
+fn semantic_min_max_builtin_multi_assign_execute() {
+    let bytecode = compile_semantic_source(
+        "[mx,mi] = max([1 3 2]); [mn,ni] = min([4 1 5]); z = mx + mi + mn + ni;",
+    )
+    .unwrap();
+    let vars = interpret(&bytecode).expect("semantic min/max multi-assign should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 8.0).abs() < 1e-9)));
+}
+
+#[test]
 fn fprintf_inline_cast_argument_does_not_stack_underflow() {
     let program = r#"
         x = single(3.14);
