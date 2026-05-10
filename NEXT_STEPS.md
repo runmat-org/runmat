@@ -99,6 +99,7 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
   - These are MATLAB protocol concepts, but the VM should not manually assemble ad hoc argument lists for them.
   - Member dispatch now routes the `"."` selector through `ObjectIndexKind::Member`, matching paren/brace selector classification.
   - The remaining object `subsasgn` paren fallback now gets the `"()"` selector from `ObjectIndexKind::Paren` instead of assembling the string inline.
+  - Member fallback method checks now get `subsref` / `subsasgn` names from `ObjectIndexOp` instead of inline strings.
   - Prefer `ObjectSubsref` / `ObjectSubsasgn` style operations carrying structured index data.
 
 - `classref`

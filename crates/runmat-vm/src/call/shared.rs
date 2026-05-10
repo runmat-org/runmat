@@ -293,7 +293,7 @@ pub enum ObjectIndexOp {
 }
 
 impl ObjectIndexOp {
-    fn protocol_name(self) -> &'static str {
+    pub(crate) fn protocol_name(self) -> &'static str {
         match self {
             Self::Subsref => "subsref",
             Self::Subsasgn => "subsasgn",

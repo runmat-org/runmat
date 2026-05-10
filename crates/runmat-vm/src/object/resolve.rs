@@ -47,7 +47,10 @@ pub async fn load_member(
                 )
                 .into())
             } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                if cls.methods.contains_key("subsref") {
+                if cls
+                    .methods
+                    .contains_key(ObjectIndexOp::Subsref.protocol_name())
+                {
                     call_object_member_method(
                         Value::Object(obj),
                         ObjectIndexOp::Subsref,
@@ -198,7 +201,10 @@ where
                 obj.properties.insert(field, rhs);
                 Ok(Value::Object(obj))
             } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                if cls.methods.contains_key("subsasgn") {
+                if cls
+                    .methods
+                    .contains_key(ObjectIndexOp::Subsasgn.protocol_name())
+                {
                     call_object_member_method(
                         Value::Object(obj),
                         ObjectIndexOp::Subsasgn,
