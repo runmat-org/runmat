@@ -331,6 +331,19 @@ fn semantic_svd_builtin_multi_assign_execute() {
 }
 
 #[test]
+fn semantic_eig_builtin_multi_assign_execute() {
+    let bytecode = compile_semantic_source(
+        "[v,d] = eig([3 0; 0 2]); z = d(1,1) + d(2,2) + v(1,1) * v(1,1) + v(2,2) * v(2,2);",
+    )
+    .unwrap();
+    let vars = interpret(&bytecode).expect("semantic eig multi-assign should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
+}
+
+#[test]
 fn fprintf_inline_cast_argument_does_not_stack_underflow() {
     let program = r#"
         x = single(3.14);
