@@ -157,6 +157,46 @@ pub fn handle_feval_dispatch(
     }
 }
 
+pub async fn handle_feval_user_multi_output<IF, IFFut>(
+    stack: &mut Vec<Value>,
+    caller_functions: &mut std::collections::HashMap<String, UserFunction>,
+    vars: &[Value],
+    name: String,
+    args: Vec<Value>,
+    functions: std::collections::HashMap<String, UserFunction>,
+    out_count: usize,
+    interpret_counts: IF,
+) -> Result<(), RuntimeError>
+where
+    IF: FnOnce(crate::bytecode::Bytecode, Vec<Value>, String, usize, usize) -> IFFut,
+    IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
+{
+    let arg_count = args.len();
+    let compiled = compile_legacy_user_dispatch_fallback(
+        prepare_named_user_dispatch(&name, &functions, &args, vars)?,
+        &functions,
+    )?;
+    let CompiledUserDispatch {
+        func,
+        var_map,
+        bytecode: func_bytecode,
+        func_vars,
+    } = compiled;
+    for (k, v) in func_bytecode.functions.iter() {
+        caller_functions.insert(k.clone(), v.clone());
+    }
+    let func_result_vars =
+        interpret_counts(func_bytecode, func_vars, name.clone(), out_count, arg_count).await?;
+    stack.push(output_list_for_user_call(
+        &name,
+        &func,
+        &var_map,
+        &func_result_vars,
+        out_count,
+    )?);
+    Ok(())
+}
+
 pub fn unpack_prepared_user_call(prepared: PreparedUserCall) -> PreparedUserDispatch {
     let PreparedUserCall {
         func,

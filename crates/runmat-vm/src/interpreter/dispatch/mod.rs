@@ -27,12 +27,13 @@ pub use calls::{
     compile_legacy_user_dispatch_fallback, handle_builtin_call, handle_builtin_expand_at_call,
     handle_builtin_expand_last_call, handle_builtin_expand_multi_call, handle_builtin_outcome,
     handle_create_closure, handle_create_semantic_closure, handle_feval_dispatch,
-    handle_load_method, handle_load_static_property, handle_method_call,
-    handle_method_or_member_index_call, handle_method_or_member_index_expand_multi_call,
-    handle_prepared_user_function_call, handle_register_class, handle_static_method_call,
-    handle_user_function_call, output_list_for_user_call, prepare_named_user_dispatch,
-    push_single_result, push_user_call_outputs, unpack_prepared_user_call, BuiltinHandling,
-    CompiledUserDispatch, FevalHandling, MethodHandling, UserCallHandling,
+    handle_feval_user_multi_output, handle_load_method, handle_load_static_property,
+    handle_method_call, handle_method_or_member_index_call,
+    handle_method_or_member_index_expand_multi_call, handle_prepared_user_function_call,
+    handle_register_class, handle_static_method_call, handle_user_function_call,
+    output_list_for_user_call, prepare_named_user_dispatch, push_single_result,
+    push_user_call_outputs, unpack_prepared_user_call, BuiltinHandling, CompiledUserDispatch,
+    FevalHandling, MethodHandling, UserCallHandling,
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
 pub use exceptions::{
@@ -547,35 +548,19 @@ pub async fn dispatch_instruction(
                     args,
                     functions,
                 } => {
-                    let arg_count = args.len();
-                    let compiled = compile_legacy_user_dispatch_fallback(
-                        prepare_named_user_dispatch(&name, &functions, &args, vars)?,
-                        &functions,
-                    )?;
-                    let CompiledUserDispatch {
-                        func,
-                        var_map,
-                        bytecode: func_bytecode,
-                        func_vars,
-                    } = compiled;
-                    for (k, v) in func_bytecode.functions.iter() {
-                        context.functions.insert(k.clone(), v.clone());
-                    }
-                    let func_result_vars = interpret_function_counts(
-                        func_bytecode,
-                        func_vars,
-                        name.clone(),
+                    handle_feval_user_multi_output(
+                        stack,
+                        &mut context.functions,
+                        vars,
+                        name,
+                        args,
+                        functions,
                         *out_count,
-                        arg_count,
+                        |bc, vars, name, out_count, in_count| {
+                            interpret_function_counts(bc, vars, name, out_count, in_count)
+                        },
                     )
                     .await?;
-                    stack.push(output_list_for_user_call(
-                        &name,
-                        &func,
-                        &var_map,
-                        &func_result_vars,
-                        *out_count,
-                    )?);
                 }
             }
             Ok(Some(DispatchHandled::Generic(
@@ -632,35 +617,19 @@ pub async fn dispatch_instruction(
                     args,
                     functions,
                 } => {
-                    let arg_count = args.len();
-                    let compiled = compile_legacy_user_dispatch_fallback(
-                        prepare_named_user_dispatch(&name, &functions, &args, vars)?,
-                        &functions,
-                    )?;
-                    let CompiledUserDispatch {
-                        func,
-                        var_map,
-                        bytecode: func_bytecode,
-                        func_vars,
-                    } = compiled;
-                    for (k, v) in func_bytecode.functions.iter() {
-                        context.functions.insert(k.clone(), v.clone());
-                    }
-                    let func_result_vars = interpret_function_counts(
-                        func_bytecode,
-                        func_vars,
-                        name.clone(),
+                    handle_feval_user_multi_output(
+                        stack,
+                        &mut context.functions,
+                        vars,
+                        name,
+                        args,
+                        functions,
                         *out_count,
-                        arg_count,
+                        |bc, vars, name, out_count, in_count| {
+                            interpret_function_counts(bc, vars, name, out_count, in_count)
+                        },
                     )
                     .await?;
-                    stack.push(output_list_for_user_call(
-                        &name,
-                        &func,
-                        &var_map,
-                        &func_result_vars,
-                        *out_count,
-                    )?);
                 }
             }
             Ok(Some(DispatchHandled::Generic(
