@@ -359,6 +359,12 @@ Concrete plan:
 4. Keep `compile_legacy_user_dispatch_fallback` as a fallback only for identities not yet in the semantic registry.
 5. Add ratchets that callbacks to functions defined in previous REPL inputs do not call `compile_legacy` when semantic bytecode is available.
 
+Current ratchet status:
+
+- VM basics, matrix-division, bitwise row-vector, and import-error bytecode tests now use the semantic HIR/MIR `compile` path where they only need source-level or semantic bytecode behavior.
+- Remaining test `compile_legacy` references are still tied to legacy execution helpers, native-accel graph construction, legacy multi-output bytecode shape assertions, or Turbine/accelerate legacy suites.
+- Remaining production `compile_legacy` usage is centralized behind `compile_legacy_user_dispatch_fallback` plus the transitional `compile_legacy` export itself.
+
 ## Validation Cadence
 
 For each coherent slice:
