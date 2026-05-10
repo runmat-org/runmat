@@ -1,5 +1,6 @@
 use crate::bytecode::{ArgSpec, UserFunction};
 use crate::compiler::CompileError;
+use crate::object::PAREN_SELECTOR_NAME;
 use runmat_builtins::{Type, Value};
 use runmat_hir::{remapping, LegacyHirProgram as HirProgram, VarId};
 use runmat_runtime::RuntimeError;
@@ -311,7 +312,7 @@ pub enum ObjectIndexKind {
 impl ObjectIndexKind {
     pub(crate) fn protocol_name(self) -> &'static str {
         match self {
-            Self::Paren => "()",
+            Self::Paren => PAREN_SELECTOR_NAME,
             Self::Brace => "{}",
             Self::Member => ".",
         }

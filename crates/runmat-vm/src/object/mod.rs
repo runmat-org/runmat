@@ -6,3 +6,4 @@ pub mod resolve;
 pub mod static_dispatch;
 
 pub(crate) const CLASS_REF_CONSTRUCTOR_NAME: &str = "classref";
+pub(crate) const PAREN_SELECTOR_NAME: &str = "()";

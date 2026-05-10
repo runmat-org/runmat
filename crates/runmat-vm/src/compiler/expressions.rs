@@ -5,7 +5,7 @@ use crate::compiler::end_expr::{end_numeric_expr, range_dynamic_end_spec};
 use crate::compiler::imports::CallImportResolution;
 use crate::compiler::CompileError;
 use crate::instr::{EndExpr, Instr};
-use crate::object::CLASS_REF_CONSTRUCTOR_NAME;
+use crate::object::{CLASS_REF_CONSTRUCTOR_NAME, PAREN_SELECTOR_NAME};
 use runmat_hir::{LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, FEVAL_BUILTIN_NAME};
 
 impl Compiler {
@@ -726,7 +726,7 @@ impl Compiler {
                 }
                 self.emit(Instr::CallMethodOrMemberIndex(member.clone(), args.len()));
             }
-            HirExprKind::MethodCall(b, m, a) if m == &"()".to_string() && a.len() == 1 => {
+            HirExprKind::MethodCall(b, m, a) if m == PAREN_SELECTOR_NAME && a.len() == 1 => {
                 self.compile_expr(b)?;
                 self.compile_expr(&a[0])?;
                 self.emit(Instr::LoadMemberDynamic);
