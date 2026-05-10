@@ -3,7 +3,7 @@ use crate::error::error_namespace;
 use crate::inference::shared::resolve_context_from_args;
 use crate::{
     LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, LegacyHirLValue as HirLValue,
-    LegacyHirStmt as HirStmt, SemanticError, Type, VarId,
+    LegacyHirStmt as HirStmt, SemanticError, Type, VarId, TEST_CLASS_REGISTRATION_BUILTIN_NAME,
 };
 use runmat_parser::{self as parser, BinOp, Expr as AstExpr};
 use std::collections::HashMap;
@@ -154,7 +154,7 @@ impl Ctx {
             }
             FuncHandle(name, _) => (HirExprKind::FuncHandle(name.clone()), Type::Unknown),
             FuncCall(name, args, _) => {
-                if name == "__register_test_classes" {
+                if name == TEST_CLASS_REGISTRATION_BUILTIN_NAME {
                     self.allow_unqualified_statics = true;
                 }
                 let arg_exprs: Result<Vec<_>, _> =

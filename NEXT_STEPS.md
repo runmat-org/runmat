@@ -113,6 +113,9 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
 - `await` / `spawn`
   - Semantic HIR lowering now uses shared `AWAIT_EXTENSION_NAME` and `SPAWN_EXTENSION_NAME` constants for RunMat extension call classification.
 
+- `__register_test_classes`
+  - Legacy HIR lowering now uses `TEST_CLASS_REGISTRATION_BUILTIN_NAME` for the test-support static-class registration hook.
+
 ### Replacement Strategy
 
 1. Inventory all hard-coded builtin/runtime names in compiler and VM dispatch.
