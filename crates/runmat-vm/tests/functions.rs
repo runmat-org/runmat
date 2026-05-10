@@ -1001,8 +1001,7 @@ fn builtin_call_with_expanded_middle_argument() {
     // Use deal to produce a cell row and index into it to pass as middle arg
     // max(a,b) with b coming from C{1}
     let program = "C = deal(10, 20); r = max(5, C{1});";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // Expect 10 as result appears in vars somewhere
     assert!(vars
         .iter()
@@ -1012,8 +1011,7 @@ fn builtin_call_with_expanded_middle_argument() {
 #[test]
 fn builtin_call_with_two_expanded_args() {
     let program = "C = deal(3, 4); D = deal(5, 6); r = max(C{1}, D{1});";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
@@ -1022,8 +1020,7 @@ fn builtin_call_with_two_expanded_args() {
 #[test]
 fn user_function_with_two_expanded_args() {
     let program = "function y = sum2(a,b); y = a + b; end; C = deal(7,8); D = deal(11,12); r = sum2(C{2}, D{1});";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 19.0).abs() < 1e-9)));
@@ -1032,8 +1029,8 @@ fn user_function_with_two_expanded_args() {
 #[test]
 fn expansion_on_non_cell_errors() {
     let program = "r = max(5, 10{1});";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    assert!(execute(&hir).is_err());
+    let bytecode = compile_semantic_source(program).expect("compile expansion error source");
+    assert!(interpret(&bytecode).is_err());
 }
 
 #[cfg(any(feature = "test-classes", test))]
@@ -1052,8 +1049,7 @@ fn expand_all_elements_in_args() {
     // C{:} expands all elements of C into separate arguments
     // max takes two args; here C has more; we only assert no crash and presence of some expected nums
     let program = "C = deal(1,2); a = max(C{:});";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(_))));
@@ -1062,8 +1058,7 @@ fn expand_all_elements_in_args() {
 #[test]
 fn builtin_vector_index_expansion() {
     let program = "C = deal(9, 2); r = max(C{[1 2]});";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
@@ -1072,8 +1067,7 @@ fn builtin_vector_index_expansion() {
 #[test]
 fn user_function_vector_index_expansion() {
     let program = "function y = sum2(a,b); y = a + b; end; C = deal(3,4); r = sum2(C{[1 2]});";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
@@ -1249,8 +1243,7 @@ fn column_major_rhs_mapping() {
 fn builtin_call_with_function_return_propagation() {
     // g returns two numbers; propagate as args to max
     let program = "function [a,b] = g(); a=9; b=4; end; r = max(g());";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
@@ -1261,8 +1254,7 @@ fn function_call_base_expand_all() {
     let program = r#"
         function y = sum2(a,b); y = a + b; end; r = sum2(deal(5,6){:});
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 11.0).abs() < 1e-9)));
@@ -1272,8 +1264,7 @@ fn function_call_base_expand_all() {
 fn function_return_propagation_in_args() {
     // g returns [a,b]; f takes two inputs; adapt to current semantics by binding outputs, then calling f
     let program = "function [a,b] = g(); a=2; b=3; end; function y = f(x1,x2); y = x1 + x2; end; [u,v] = g(); r = f(u,v);";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
