@@ -400,6 +400,7 @@ Current ratchet status:
 - Remaining VM basics legacy execution ratchets cover legacy accel graph shape assertions, legacy multi-output argument bytecode shape, and object range-end protocol payloads.
 - Matrix-division execution tests now run semantic bytecode; only the accel graph assertions keep legacy bytecode for legacy graph shape coverage.
 - Loop execution tests now run semantic bytecode; only the stochastic-evolution instruction assertion keeps legacy bytecode shape coverage.
+- Several VM functions success-path tests now run semantic bytecode, including nested user-function calls, shared input/output names, inline `fprintf`/`sprintf` cast arguments, root/function-output struct materialization, and nested member assignment.
 - Operator-overload diagnostic bytecode in VM functions tests now uses semantic compilation instead of `compile_legacy`.
 - Remaining test `compile_legacy` references are still tied to legacy execution helpers, native-accel graph construction, legacy multi-output bytecode shape assertions, or Turbine/accelerate legacy suites.
 - Remaining production `compile_legacy` usage is centralized behind `compile_legacy_user_dispatch_fallback`; the remaining transitional API is `runmat_vm::bytecode::compile::compile_legacy` for legacy tests and fallback plumbing.

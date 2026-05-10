@@ -8,6 +8,11 @@ use test_helpers::compile_semantic_source;
 use test_helpers::lower;
 use test_helpers::{execute, interpret};
 
+fn execute_semantic_source(source: &str) -> Vec<runmat_builtins::Value> {
+    let bytecode = compile_semantic_source(source).expect("compile semantic source");
+    interpret(&bytecode).expect("execute semantic bytecode")
+}
+
 #[test]
 fn nargin_nargout_in_user_functions() {
     // Single-output: nargin/nargout should reflect call site
@@ -132,10 +137,10 @@ fn nested_function_calls() {
     let handle = thread::Builder::new()
         .stack_size(8 * 1024 * 1024)
         .spawn(move || {
-            let ast = parse(program).unwrap();
-            let hir = lower(&ast).unwrap();
-            let result = execute(&hir);
-            assert!(result.is_ok());
+            let vars = execute_semantic_source(program);
+            assert!(vars
+                .iter()
+                .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
         })
         .expect("spawn nested_function_calls thread");
     handle.join().expect("nested_function_calls thread failed");
@@ -149,8 +154,7 @@ fn shared_input_output_name_updates_in_place() {
         end
         r = bump(4);
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
@@ -165,8 +169,7 @@ fn shared_input_output_name_multi_output_reads_original_input() {
         end
         [a, b] = bump_and_copy(4);
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
@@ -348,12 +351,7 @@ fn fprintf_inline_cast_argument_does_not_stack_underflow() {
         x = single(3.14);
         fprintf("Value: %.4f\n", double(x));
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let result = execute(&hir);
-    assert!(
-        result.is_ok(),
-        "inline cast in fprintf should execute without stack underflow: {result:?}"
-    );
+    execute_semantic_source(program);
 }
 
 #[test]
@@ -362,8 +360,7 @@ fn sprintf_inline_cast_argument_formats_value() {
         x = single(3.14);
         s = sprintf("Value: %.4f", double(x));
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).expect("sprintf with inline cast should succeed");
+    let vars = execute_semantic_source(program);
     assert!(vars.iter().any(|value| {
         if let runmat_builtins::Value::CharArray(chars) = value {
             let rendered: String = chars.data.iter().collect();
@@ -400,8 +397,7 @@ fn member_get_set_and_method_call_skeleton() {
 #[test]
 fn implicit_struct_creation_for_root_variable_assignment() {
     let input = "s.x = 10; s.y = 20; v = getfield(s, 'x') + getfield(s, 'y');";
-    let hir = lower(&parse(input).unwrap()).unwrap();
-    let vars = execute(&hir).expect("implicit struct creation should succeed");
+    let vars = execute_semantic_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
@@ -448,8 +444,7 @@ fn implicit_struct_creation_for_function_output_variable() {
         x = getfield(s, 'x');
         y = getfield(s, 'y');
     "#;
-    let hir = lower(&parse(input).unwrap()).unwrap();
-    let vars = execute(&hir).expect("function output struct materialization should succeed");
+    let vars = execute_semantic_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
@@ -461,8 +456,7 @@ fn implicit_struct_creation_for_function_output_variable() {
 #[test]
 fn nested_member_assignment_materializes_missing_intermediate_structs() {
     let input = "s = struct(); s.a.b = 1; v = getfield(getfield(s, 'a'), 'b');";
-    let hir = lower(&parse(input).unwrap()).unwrap();
-    let vars = execute(&hir).expect("nested member assignment should succeed");
+    let vars = execute_semantic_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
