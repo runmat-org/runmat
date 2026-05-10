@@ -305,6 +305,19 @@ fn semantic_lu_builtin_multi_assign_execute() {
 }
 
 #[test]
+fn semantic_qr_builtin_multi_assign_execute() {
+    let bytecode = compile_semantic_source(
+        "[q,r,p] = qr([2 0; 0 3]); z = q(1,1) + q(2,2) + r(1,1) + r(2,2) + p(1,1) + p(2,2);",
+    )
+    .unwrap();
+    let vars = interpret(&bytecode).expect("semantic qr multi-assign should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n + 1.0).abs() < 1e-9)));
+}
+
+#[test]
 fn fprintf_inline_cast_argument_does_not_stack_underflow() {
     let program = r#"
         x = single(3.14);
