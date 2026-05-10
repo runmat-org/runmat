@@ -394,6 +394,7 @@ Current ratchet status:
 
 - VM basics, matrix-division, bitwise row-vector, and import-error bytecode tests now use the semantic HIR/MIR `compile` path where they only need source-level or semantic bytecode behavior.
 - The FFT end-range bytecode assertion in VM basics now uses semantic bytecode instead of `compile_legacy`.
+- Simple VM basics execution tests for arithmetic, zero-output builtin calls, and `nextpow2` now run semantic bytecode.
 - Matrix-division execution tests now run semantic bytecode; only the accel graph assertions keep legacy bytecode for legacy graph shape coverage.
 - Loop execution tests now run semantic bytecode; only the stochastic-evolution instruction assertion keeps legacy bytecode shape coverage.
 - Operator-overload diagnostic bytecode in VM functions tests now uses semantic compilation instead of `compile_legacy`.

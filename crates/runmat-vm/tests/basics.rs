@@ -9,14 +9,18 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use test_helpers::compile_semantic_source;
 use test_helpers::execute;
+use test_helpers::interpret;
 use test_helpers::lower;
+
+fn execute_semantic_source(source: &str) -> Vec<Value> {
+    let bytecode = compile_semantic_source(source).expect("compile semantic source");
+    interpret(&bytecode).expect("execute semantic bytecode")
+}
 
 #[test]
 fn arithmetic_and_assignment() {
     let input = "x = 1 + 2; y = x * x";
-    let ast = parse(input).unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(input);
     let x: f64 = (&vars[0]).try_into().unwrap();
     let y: f64 = (&vars[1]).try_into().unwrap();
     assert_eq!(x, 3.0);
@@ -48,9 +52,7 @@ fn semantic_logical_ops_use_typed_bytecode() {
 #[test]
 fn nextpow2_supports_common_fft_zero_padding_pattern() {
     let input = "x = [1 2 3 4 5 6 7 8 9]; N = 2^nextpow2(length(x));";
-    let ast = parse(input).unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(input);
     let n: f64 = (&vars[1]).try_into().unwrap();
     assert_eq!(n, 16.0);
 }
@@ -58,9 +60,7 @@ fn nextpow2_supports_common_fft_zero_padding_pattern() {
 #[test]
 fn call_builtin_multi_output_advances_pc_for_zero_outputs() {
     let input = "disp('hi'); x = 42;";
-    let ast = parse(input).expect("parse disp script");
-    let hir = lower(&ast).expect("lower disp script");
-    let vars = execute(&hir).expect("execute disp script");
+    let vars = execute_semantic_source(input);
     let x: f64 = (&vars[0]).try_into().expect("convert x to f64");
     assert_eq!(x, 42.0);
 }
