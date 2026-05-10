@@ -6,7 +6,7 @@ use crate::compiler::imports::CallImportResolution;
 use crate::compiler::CompileError;
 use crate::instr::{EndExpr, Instr};
 use crate::object::CLASS_REF_CONSTRUCTOR_NAME;
-use runmat_hir::{LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind};
+use runmat_hir::{LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, FEVAL_BUILTIN_NAME};
 
 impl Compiler {
     pub(crate) fn compile_expr_impl(&mut self, expr: &HirExpr) -> Result<(), CompileError> {
@@ -174,7 +174,7 @@ impl Compiler {
             }
             HirExprKind::FuncCall(name, args) => {
                 let call_arg_spans: Vec<runmat_hir::Span> = args.iter().map(|a| a.span).collect();
-                if name == "feval" {
+                if name == FEVAL_BUILTIN_NAME {
                     if args.is_empty() {
                         return Err(self.compile_error("feval: missing function argument"));
                     }

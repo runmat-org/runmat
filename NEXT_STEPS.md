@@ -85,7 +85,7 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
 
 - `feval`
   - Semantic lowering and bytecode use typed dynamic-call instructions, and VM runtime forwarding now calls `runmat_runtime::call_feval_async` instead of owning the builtin string.
-  - MIR lowering now asks `HirCallableRef::is_feval_builtin_like()` instead of owning an ad hoc `name == "feval"` branch; remaining name checks should move into resolver/call-fact classification.
+  - MIR lowering now asks `HirCallableRef::is_feval_builtin_like()` instead of owning an ad hoc `name == "feval"` branch; the remaining legacy VM expression branch uses the shared `FEVAL_BUILTIN_NAME` classifier constant.
 
 - `call_method`
   - VM object plumbing now forwards through `runmat_runtime::call_method_async` instead of owning the builtin string.
