@@ -102,6 +102,9 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
 - `nargin` / `nargout`
   - VM call-count handling now classifies these through a special-counter call category instead of inline string branches.
 
+- `rethrow`
+  - VM implicit rethrow handling now classifies this through a special exception call category instead of an inline string branch.
+
 ### Replacement Strategy
 
 1. Inventory all hard-coded builtin/runtime names in compiler and VM dispatch.

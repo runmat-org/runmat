@@ -20,6 +20,20 @@ impl SpecialCounterBuiltin {
     }
 }
 
+#[derive(Clone, Copy)]
+enum SpecialExceptionBuiltin {
+    Rethrow,
+}
+
+impl SpecialExceptionBuiltin {
+    fn classify(name: &str) -> Option<Self> {
+        match name {
+            "rethrow" => Some(Self::Rethrow),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(feature = "native-accel")]
 pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
     Ok(runmat_accelerate::prepare_builtin_args(name, args)
@@ -168,10 +182,13 @@ pub fn rethrow_without_explicit_exception(
     last_identifier: Option<&str>,
     last_message: Option<&str>,
 ) -> Option<RuntimeError> {
-    if name == "rethrow" && args.is_empty() {
-        if let (Some(identifier), Some(message)) = (last_identifier, last_message) {
-            return Some(format!("{}: {}", identifier, message).to_string().into());
+    match SpecialExceptionBuiltin::classify(name) {
+        Some(SpecialExceptionBuiltin::Rethrow) if args.is_empty() => {
+            if let (Some(identifier), Some(message)) = (last_identifier, last_message) {
+                return Some(format!("{}: {}", identifier, message).to_string().into());
+            }
+            None
         }
+        _ => None,
     }
-    None
 }
