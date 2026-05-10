@@ -501,9 +501,7 @@ fn import_ambiguity_specific_conflict_errors() {
     // Two specifics that map same unqualified name should cause compile-time ambiguity on unqualified call
     // Use classes with same method name as proxies (no actual builtins needed); compile should detect ambiguity
     let program = "import Point.origin; import Circle.area; r = origin();";
-    let ast = runmat_parser::parse(program).unwrap();
-    let hir = lower(&ast).unwrap();
-    let res = runmat_vm::compile_legacy(&hir, &HashMap::new());
+    let res = compile_semantic_source(program);
     assert!(res.is_err());
 }
 #[test]
@@ -549,9 +547,7 @@ fn import_ambiguity_between_specifics_errors() {
         import PkgG.foo;
         y = foo();
     "#;
-    let ast = runmat_parser::parse(program).unwrap();
-    let hir = lower(&ast).unwrap();
-    let res = runmat_vm::compile_legacy(&hir, &HashMap::new());
+    let res = compile_semantic_source(program);
     assert!(res.is_err());
 }
 
@@ -563,9 +559,7 @@ fn import_ambiguity_between_wildcards_errors() {
         import PkgG.*;
         y = foo();
     "#;
-    let ast = runmat_parser::parse(program).unwrap();
-    let hir = lower(&ast).unwrap();
-    let res = runmat_vm::compile_legacy(&hir, &HashMap::new());
+    let res = compile_semantic_source(program);
     assert!(res.is_err());
 }
 
@@ -627,9 +621,7 @@ fn import_wildcard_static_method_ambiguity_errors() {
         import PkgG.*;
         z = foo();   % ambiguous via wildcard imports
     "#;
-    let ast = runmat_parser::parse(program).unwrap();
-    let hir = lower(&ast).unwrap();
-    let res = runmat_vm::compile_legacy(&hir, &HashMap::new());
+    let res = compile_semantic_source(program);
     assert!(res.is_err());
 }
 
@@ -676,9 +668,7 @@ fn unqualified_static_property_without_imports_errors() {
         __register_test_classes();
         v = staticValue;
     "#;
-    let ast = runmat_parser::parse(program).unwrap();
-    let hir = lower(&ast).unwrap();
-    let res = runmat_vm::compile_legacy(&hir, &HashMap::new());
+    let res = compile_semantic_source(program);
     assert!(res.is_err());
 }
 
@@ -1748,9 +1738,7 @@ fn import_wildcard_vs_classstar_ambiguity_for_static_method() {
 		import Point.*;   % duplicate
 		r = origin();
 	"#;
-    let ast = runmat_parser::parse(program).unwrap();
-    let hir = lower(&ast).unwrap();
-    let res = runmat_vm::compile_legacy(&hir, &HashMap::new());
+    let res = compile_semantic_source(program);
     assert!(res.is_err());
 }
 
