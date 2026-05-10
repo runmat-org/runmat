@@ -344,7 +344,7 @@ Treat current MIR bytecode gap markers as follows:
 - `{count} call outputs`: semantic user-function multi-assign is ratcheted through `CallSemanticFunctionMulti`; generic rvalue call outputs remain call ABI/output-list policy, so avoid ad hoc bytecode variants until call descriptor design is settled.
 - `call callee`: semantic resolver/DefPath work; do not fall back to string builtin guesses.
 - `aggregate kind`: struct/object aggregate design.
-- `function handle target`: method/DefPath function-handle ABI work.
+- `function handle target`: builtin and anonymous semantic handle `feval` are ratcheted; remaining method/DefPath targets appear to require resolver/DefPath function-handle ABI work.
 - `assignment place`: remaining non-local/non-binding places should become explicit place/update plans.
 
 ## Recommended Semantic Design Slice

@@ -382,6 +382,26 @@ fn function_handle_anon_round_trip() {
 }
 
 #[test]
+fn semantic_builtin_function_handle_feval_executes() {
+    let bytecode = compile_semantic_source("h = @sin; y = feval(h, 0);").unwrap();
+    let vars = interpret(&bytecode).expect("semantic builtin handle feval should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if n.abs() < 1e-12)));
+}
+
+#[test]
+fn semantic_anonymous_function_handle_feval_executes() {
+    let bytecode = compile_semantic_source("f = @(x) x + 1; y = feval(f, 4);").unwrap();
+    let vars = interpret(&bytecode).expect("semantic anonymous handle feval should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
+}
+
+#[test]
 fn cellfun_upper_function_handle_round_trip() {
     let input =
         "names = {'Ada', 'Linus', 'Katherine'}; upper = cellfun(@upper, names, 'UniformOutput', false);";
