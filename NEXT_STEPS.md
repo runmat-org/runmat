@@ -339,7 +339,7 @@ Treat current MIR bytecode gap markers as follows:
 - `varargout expansion`: HIR/MIR output-target design gap; first confirm whether it is constructible.
 - `slice index`: comparison-derived logical tensor masks and call-result index variables now lower through semantic slice bytecode for read/write; remaining gaps are selector-plan normalization for range/end/colon in non-tensor and cell contexts.
 - `dot assignment` / `dot indexing`: static member read/write source now ratchets through semantic member MIR; remaining `IndexKind::Dot` branches appear transitional and should be verified for removal or mapped explicitly if a source reproducer reaches them.
-- `indexed member store-back`: remaining forms after paren/brace store-back; likely object/dot descriptor work.
+- `indexed member store-back`: struct-field indexed assignment and cell-member store-back are ratcheted through semantic place chains; remaining forms are likely object/dynamic/dot descriptor work.
 - `rvalue` / `operand`: async/future/spawn/temp modeling or unsupported semantic forms; classify by source reproducer before implementing.
 - `{count} call outputs`: semantic user-function multi-assign is ratcheted through `CallSemanticFunctionMulti`; generic rvalue call outputs remain call ABI/output-list policy, so avoid ad hoc bytecode variants until call descriptor design is settled.
 - `call callee`: semantic resolver/DefPath work; do not fall back to string builtin guesses.

@@ -272,6 +272,26 @@ fn semantic_member_read_write_executes() {
 }
 
 #[test]
+fn semantic_indexed_member_store_back_executes() {
+    let bytecode = compile_semantic_source("s.a = [1 2 3]; s.a(2) = 9; y = s.a(2);").unwrap();
+    let vars = interpret(&bytecode).expect("semantic indexed member store-back should succeed");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
+}
+
+#[test]
+fn semantic_cell_member_store_back_executes() {
+    let bytecode = compile_semantic_source("C = {struct()}; C{1}.a = 5; y = C{1}.a;").unwrap();
+    let vars = interpret(&bytecode).expect("semantic cell member store-back should succeed");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+}
+
+#[test]
 fn implicit_struct_creation_for_function_output_variable() {
     let input = r#"
         function r = make_result()
