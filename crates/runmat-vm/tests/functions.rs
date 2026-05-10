@@ -218,6 +218,16 @@ fn semantic_feval_multi_assign_executes() {
 }
 
 #[test]
+fn semantic_size_builtin_multi_assign_executes() {
+    let bytecode = compile_semantic_source("[r,c] = size([1 2; 3 4]); z = r + c;").unwrap();
+    let vars = interpret(&bytecode).expect("semantic size multi-assign should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 4.0).abs() < 1e-9)));
+}
+
+#[test]
 fn fprintf_inline_cast_argument_does_not_stack_underflow() {
     let program = r#"
         x = single(3.14);

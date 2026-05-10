@@ -102,7 +102,12 @@ fn size_type(args: &[Type], _context: &ResolveContext) -> Type {
 async fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let dims = value_dimensions(&value).await?;
     match rest.len() {
-        0 => dimensions_to_value(&dims),
+        0 => {
+            if let Some(out_count) = crate::output_count::current_output_count() {
+                return Ok(Value::OutputList(size_outputs(&dims, out_count)));
+            }
+            dimensions_to_value(&dims)
+        }
         1 => match parse_dim_selection(&rest[0])? {
             DimSelection::Single(dim) => {
                 let extent = dimension_extent(&dims, dim);
@@ -118,6 +123,12 @@ async fn size_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         },
         _ => Err(size_error("size: too many input arguments")),
     }
+}
+
+fn size_outputs(dimensions: &[usize], out_count: usize) -> Vec<Value> {
+    (0..out_count)
+        .map(|idx| Value::Num(dimensions.get(idx).copied().unwrap_or(1) as f64))
+        .collect()
 }
 
 fn dimensions_to_value(dimensions: &[usize]) -> crate::BuiltinResult<Value> {
