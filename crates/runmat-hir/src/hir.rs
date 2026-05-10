@@ -320,6 +320,8 @@ impl HirCallableRef {
 }
 
 pub const FEVAL_BUILTIN_NAME: &str = "feval";
+pub const AWAIT_EXTENSION_NAME: &str = "await";
+pub const SPAWN_EXTENSION_NAME: &str = "spawn";
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum CallSyntax {

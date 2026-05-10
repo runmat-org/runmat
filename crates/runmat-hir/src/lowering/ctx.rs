@@ -13,7 +13,8 @@ use crate::{
     LoopIterationSemantics, LoweringContext, LoweringResult, ModuleId, OperatorKind, PlaceMutation,
     PlaceMutationKind, QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount,
     SemanticError, SemanticIndex, SourceId, SourceUnitKind, Span, StmtId, StringLiteral,
-    SymbolName, Type, VarId, WorkspaceExportPolicy, WorkspaceVisibility,
+    SymbolName, Type, VarId, WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME,
+    SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use std::collections::HashMap;
@@ -1031,7 +1032,7 @@ impl SemanticCtx {
                     .iter()
                     .map(|arg| self.lower_call_argument(arg))
                     .collect::<Result<_, _>>()?;
-                if name == "await" && args.len() == 1 {
+                if name == AWAIT_EXTENSION_NAME && args.len() == 1 {
                     if matches!(
                         self.compatibility_mode,
                         Some(crate::CompatibilityMode::MatlabStrict)
@@ -1048,7 +1049,7 @@ impl SemanticCtx {
                         .with_span(span));
                     }
                     HirExprKind::Await(Box::new(args.into_iter().next().unwrap()))
-                } else if name == "spawn" && args.len() == 1 {
+                } else if name == SPAWN_EXTENSION_NAME && args.len() == 1 {
                     if matches!(
                         self.compatibility_mode,
                         Some(crate::CompatibilityMode::MatlabStrict)

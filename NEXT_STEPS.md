@@ -110,6 +110,9 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
 - `rethrow`
   - VM implicit rethrow handling now classifies this through a VM intrinsic exception call category instead of an inline string branch.
 
+- `await` / `spawn`
+  - Semantic HIR lowering now uses shared `AWAIT_EXTENSION_NAME` and `SPAWN_EXTENSION_NAME` constants for RunMat extension call classification.
+
 ### Replacement Strategy
 
 1. Inventory all hard-coded builtin/runtime names in compiler and VM dispatch.
