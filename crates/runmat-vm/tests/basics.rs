@@ -539,9 +539,7 @@ fn fft_end_arithmetic_supports_pow_round_floor_fix_and_leftdiv() {
         c = Y(fix(2 \ end));
         ok = (abs(real(a) - real(b)) < 1e-12) && (abs(real(c) - real(Y(2))) < 1e-12);
     "#;
-    let ast = parse(input).expect("parse advanced end arithmetic functions script");
-    let hir = lower(&ast).expect("lower advanced end arithmetic functions script");
-    let vars = execute(&hir).expect("advanced end arithmetic functions should execute");
+    let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)

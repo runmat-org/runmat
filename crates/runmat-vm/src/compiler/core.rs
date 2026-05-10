@@ -1959,10 +1959,18 @@ impl Compiler {
                 let expr = match op {
                     OperatorKind::Add => EndExpr::Add(Box::new(left), Box::new(right)),
                     OperatorKind::Subtract => EndExpr::Sub(Box::new(left), Box::new(right)),
-                    OperatorKind::MatrixMultiply => EndExpr::Mul(Box::new(left), Box::new(right)),
-                    OperatorKind::Mrdivide => EndExpr::Div(Box::new(left), Box::new(right)),
-                    OperatorKind::Mldivide => EndExpr::LeftDiv(Box::new(left), Box::new(right)),
-                    OperatorKind::MatrixPower => EndExpr::Pow(Box::new(left), Box::new(right)),
+                    OperatorKind::MatrixMultiply | OperatorKind::ElementwiseMultiply => {
+                        EndExpr::Mul(Box::new(left), Box::new(right))
+                    }
+                    OperatorKind::Mrdivide | OperatorKind::ElementwiseDivide => {
+                        EndExpr::Div(Box::new(left), Box::new(right))
+                    }
+                    OperatorKind::Mldivide | OperatorKind::ElementwiseLeftDivide => {
+                        EndExpr::LeftDiv(Box::new(left), Box::new(right))
+                    }
+                    OperatorKind::MatrixPower | OperatorKind::ElementwisePower => {
+                        EndExpr::Pow(Box::new(left), Box::new(right))
+                    }
                     _ => return None,
                 };
                 Some((expr, has_end))
