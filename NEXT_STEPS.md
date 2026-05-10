@@ -102,6 +102,7 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
   - Member fallback method checks now get `subsref` / `subsasgn` names from `ObjectIndexOp` instead of inline strings.
   - Legacy expression lowering checks dynamic member indexing against `PAREN_SELECTOR_NAME` instead of an inline `"()"` allocation.
   - Paren, brace, and member selectors are centralized as `PAREN_SELECTOR_NAME`, `BRACE_SELECTOR_NAME`, and `MEMBER_SELECTOR_NAME`.
+  - Runtime object protocol handlers now use `OBJECT_INDEX_PAREN`, `OBJECT_INDEX_BRACE`, and `OBJECT_INDEX_MEMBER` for selector matching.
   - Prefer `ObjectSubsref` / `ObjectSubsasgn` style operations carrying structured index data.
 
 - `classref`

@@ -18,7 +18,10 @@ use crate::builtins::common::spec::{
 use crate::builtins::containers::type_resolvers::{
     map_cell_type, map_handle_type, map_is_key_type, map_unknown_type,
 };
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError, OBJECT_INDEX_BRACE,
+    OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN,
+};
 
 const CLASS_NAME: &str = "containers.Map";
 const MISSING_KEY_ERR: &str = "containers.Map: The specified key is not present in this container.";
@@ -476,7 +479,7 @@ async fn containers_map_subsref(
         ));
     }
     match kind.as_str() {
-        "()" => {
+        OBJECT_INDEX_PAREN => {
             let mut args = extract_key_arguments(&payload, BUILTIN_SUBSREF)?;
             if args.is_empty() {
                 return Err(map_error(
@@ -518,7 +521,7 @@ async fn containers_map_subsref(
                 }
             })
         }
-        "." => {
+        OBJECT_INDEX_MEMBER => {
             let field = string_from_value(
                 &payload,
                 "containers.Map: property name must be text",
@@ -538,7 +541,7 @@ async fn containers_map_subsref(
                 }
             })
         }
-        "{}" => Err(map_error(
+        OBJECT_INDEX_BRACE => Err(map_error(
             "containers.Map: curly-brace indexing is not supported.",
             BUILTIN_SUBSREF,
         )),
@@ -567,7 +570,7 @@ async fn containers_map_subsasgn(
         ));
     }
     match kind.as_str() {
-        "()" => {
+        OBJECT_INDEX_PAREN => {
             let mut args = extract_key_arguments(&payload, BUILTIN_SUBSASGN)?;
             if args.is_empty() {
                 return Err(map_error(
@@ -603,11 +606,11 @@ async fn containers_map_subsasgn(
             })?;
             Ok(map)
         }
-        "." => Err(map_error(
+        OBJECT_INDEX_MEMBER => Err(map_error(
             "containers.Map: property assignments are not supported.",
             BUILTIN_SUBSASGN,
         )),
-        "{}" => Err(map_error(
+        OBJECT_INDEX_BRACE => Err(map_error(
             "containers.Map: curly-brace assignment is not supported.",
             BUILTIN_SUBSASGN,
         )),

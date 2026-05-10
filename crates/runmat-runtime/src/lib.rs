@@ -44,6 +44,10 @@ pub mod workspace;
 /// Standard result type for runtime builtins.
 pub type BuiltinResult<T> = Result<T, RuntimeError>;
 
+pub(crate) const OBJECT_INDEX_PAREN: &str = "()";
+pub(crate) const OBJECT_INDEX_BRACE: &str = "{}";
+pub(crate) const OBJECT_INDEX_MEMBER: &str = ".";
+
 pub use runtime_error::{
     build_runtime_error, replay_error, replay_error_with_source, CallFrame, ErrorContext,
     ReplayErrorKind, RuntimeError, RuntimeErrorBuilder,
@@ -785,15 +789,15 @@ async fn pkgg_foo() -> crate::BuiltinResult<Value> {
 async fn overidx_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     // Simple sentinel implementation: return different values for '.' vs '()'
     match (obj, kind.as_str(), payload) {
-        (Value::Object(_), "()", Value::Cell(_)) => Ok(Value::Num(99.0)),
-        (Value::Object(o), "{}", Value::Cell(_)) => {
+        (Value::Object(_), OBJECT_INDEX_PAREN, Value::Cell(_)) => Ok(Value::Num(99.0)),
+        (Value::Object(o), OBJECT_INDEX_BRACE, Value::Cell(_)) => {
             if let Some(v) = o.properties.get("lastCell") {
                 Ok(v.clone())
             } else {
                 Ok(Value::Num(0.0))
             }
         }
-        (Value::Object(o), ".", Value::String(field)) => {
+        (Value::Object(o), OBJECT_INDEX_MEMBER, Value::String(field)) => {
             // If field exists, return it; otherwise sentinel 77
             if let Some(v) = o.properties.get(&field) {
                 Ok(v.clone())
@@ -801,7 +805,7 @@ async fn overidx_subsref(obj: Value, kind: String, payload: Value) -> crate::Bui
                 Ok(Value::Num(77.0))
             }
         }
-        (Value::Object(o), ".", Value::CharArray(ca)) => {
+        (Value::Object(o), OBJECT_INDEX_MEMBER, Value::CharArray(ca)) => {
             let field: String = ca.data.iter().collect();
             if let Some(v) = o.properties.get(&field) {
                 Ok(v.clone())
@@ -821,20 +825,20 @@ async fn overidx_subsasgn(
     rhs: Value,
 ) -> crate::BuiltinResult<Value> {
     match (&mut obj, kind.as_str(), payload) {
-        (Value::Object(o), "()", Value::Cell(_)) => {
+        (Value::Object(o), OBJECT_INDEX_PAREN, Value::Cell(_)) => {
             // Store into 'last' property
             o.properties.insert("last".to_string(), rhs);
             Ok(Value::Object(o.clone()))
         }
-        (Value::Object(o), "{}", Value::Cell(_)) => {
+        (Value::Object(o), OBJECT_INDEX_BRACE, Value::Cell(_)) => {
             o.properties.insert("lastCell".to_string(), rhs);
             Ok(Value::Object(o.clone()))
         }
-        (Value::Object(o), ".", Value::String(field)) => {
+        (Value::Object(o), OBJECT_INDEX_MEMBER, Value::String(field)) => {
             o.properties.insert(field, rhs);
             Ok(Value::Object(o.clone()))
         }
-        (Value::Object(o), ".", Value::CharArray(ca)) => {
+        (Value::Object(o), OBJECT_INDEX_MEMBER, Value::CharArray(ca)) => {
             let field: String = ca.data.iter().collect();
             o.properties.insert(field, rhs);
             Ok(Value::Object(o.clone()))

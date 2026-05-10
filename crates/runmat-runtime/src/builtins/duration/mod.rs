@@ -6,7 +6,10 @@ use runmat_builtins::{
 };
 
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER,
+    OBJECT_INDEX_PAREN,
+};
 
 const BUILTIN_NAME: &str = "duration";
 const DURATION_CLASS: &str = "duration";
@@ -514,8 +517,8 @@ async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 )]
 async fn duration_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     match kind.as_str() {
-        "()" => duration_indexing(obj, payload).await,
-        "." => {
+        OBJECT_INDEX_PAREN => duration_indexing(obj, payload).await,
+        OBJECT_INDEX_MEMBER => {
             let Value::Object(object) = obj else {
                 return Err(duration_error(
                     "duration.subsref: receiver must be a duration object",
@@ -551,7 +554,7 @@ async fn duration_subsasgn(
         ));
     };
     match kind.as_str() {
-        "." => {
+        OBJECT_INDEX_MEMBER => {
             let field = scalar_text(&payload, "field selector")?;
             match field.as_str() {
                 FORMAT_FIELD => {

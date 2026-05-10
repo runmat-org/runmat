@@ -7,7 +7,10 @@ use runmat_builtins::{
 };
 
 use crate::builtins::common::tensor;
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER,
+    OBJECT_INDEX_PAREN,
+};
 
 const BUILTIN_NAME: &str = "datetime";
 const DATETIME_CLASS: &str = "datetime";
@@ -785,8 +788,8 @@ async fn second_builtin(value: Value) -> crate::BuiltinResult<Value> {
 )]
 async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     match kind.as_str() {
-        "()" => datetime_indexing(obj, payload).await,
-        "." => {
+        OBJECT_INDEX_PAREN => datetime_indexing(obj, payload).await,
+        OBJECT_INDEX_MEMBER => {
             let Value::Object(object) = obj else {
                 return Err(datetime_error(
                     "datetime.subsref: receiver must be a datetime object",
@@ -822,7 +825,7 @@ async fn datetime_subsasgn(
         ));
     };
     match kind.as_str() {
-        "." => {
+        OBJECT_INDEX_MEMBER => {
             let field = scalar_text(&payload, "field selector")?;
             match field.as_str() {
                 FORMAT_FIELD => {
