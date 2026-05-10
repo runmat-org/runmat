@@ -307,7 +307,7 @@ impl RunMatSession {
         let display = execution_display_context(&lowering.assembly, bytecode.layout.as_ref());
         let display_context = display.context;
         let display_var_ids = display.display_var_ids;
-        let (hir, updated_functions) = (lowering.hir, lowering.functions);
+        let hir = lowering.hir;
         let execution_vars = execution_workspace_mapping(&bytecode);
         let max_var_id = execution_vars.values().copied().max().unwrap_or(0);
         if debug_trace {
@@ -734,7 +734,6 @@ impl RunMatSession {
                     }
                 }
             }
-            self.legacy_function_definitions = updated_functions;
             self.semantic_function_registry = semantic_function_registry_after_success;
             self.next_semantic_function_id = next_semantic_function_id_after_success;
             // Apply 'ans' update if applicable (persisting expression result)

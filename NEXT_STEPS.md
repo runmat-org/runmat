@@ -146,6 +146,7 @@ Current state:
 - Top-level semantic compilation produces semantic function bytecode and typed call instructions for direct calls, function handles, `feval`, multi-output calls, and expanded arguments.
 - Runtime and Turbine callback paths resolve callback names through `SemanticFunctionRegistry` to stable session `FunctionId`s, then invoke `SemanticFunctionBytecode` by semantic identity when the current bytecode/session product contains the callee.
 - `RunMatSession` persists a semantic function registry across successful interactive inputs and remaps per-input function IDs into session-unique IDs before execution.
+- `RunMatSession` no longer stores or seeds previous-input functions through legacy HIR statements; previous-input function resolution is registry-backed.
 - Semantic function registry entries retain source IDs so callback diagnostics and replacement logic can stop depending on legacy HIR statements.
 - `SemanticFunctionRegistry` indexes functions by defining source so session-owned replacement/removal can operate on semantic metadata rather than legacy HIR statements.
 - Replacing a function from an older source retires the older source's semantic function group from the session registry.
@@ -189,7 +190,7 @@ Observed older-HIR artifacts worth collapsing:
 
 - `LegacyHirProgram`, `LegacyHirStmt`, and `LegacyHirExpr` remain in VM compiler modules and many tests.
 - `compile_legacy` is still exported publicly from `runmat-vm` and used by VM/Turbine tests plus the centralized dynamic callback fallback.
-- `legacy_variable_names` and `legacy_function_definitions` remain in `RunMatSession` to seed lowering across REPL inputs.
+- `legacy_variable_names` remains in `RunMatSession` to seed workspace variables across REPL inputs.
 - `LoweringResult` still carries both `assembly` and legacy `hir`, `variables`, `functions`, `var_types`, and legacy inference placeholders.
 - LSP analysis still consults legacy variable maps and legacy type helpers.
 - `CompatibilityMode::RunMatExtended` is still mapped through parser compatibility as MATLAB mode in some places, which obscures the intended distinction between compatibility policy and parser syntax mode.
@@ -198,7 +199,7 @@ Target cleanup direction:
 
 - Keep source compatibility behavior, but represent it through semantic assembly, analysis facts, and workspace ABI records.
 - Replace session `legacy_variable_names` with a semantic workspace binding table keyed by stable names plus semantic binding/session IDs.
-- Replace `legacy_function_definitions` with a semantic function registry keyed by `FunctionId`/`DefPath`/source identity.
+- Continue replacing remaining legacy function fallback sites with the semantic registry.
 - Move tests that only need compiler behavior from hand-built legacy HIR to semantic source fixtures or semantic MIR fixtures.
 - Stop exporting `compile_legacy` once runtime/Turbine callbacks and remaining tests no longer depend on it.
 
@@ -347,12 +348,12 @@ Treat current MIR bytecode gap markers as follows:
 
 ## Recommended Semantic Design Slice
 
-The next high-leverage slice is replacing the remaining legacy function-definition store with the session semantic registry, not another isolated callback patch.
+The next high-leverage slice is replacing the remaining dynamic callback fallbacks with the session semantic registry, not another isolated callback patch.
 
 Concrete plan:
 
-1. Inventory remaining users of `legacy_function_definitions` and which ones now have equivalent semantic registry data.
-2. Use `SemanticFunctionRegistry` source ownership to replace the remaining legacy function-definition store in session lowering.
+1. Inventory remaining `compile_prepared_user_dispatch` sites and classify which ones are true unresolved/external fallback.
+2. Replace non-external dynamic callback sites with registry lookup or typed semantic lowering.
 3. Extend registry-backed lowering beyond direct calls to remaining callable shapes that still need dynamic-name fallback, where layout/capture information is available.
 4. Keep `compile_prepared_user_dispatch` as a fallback only for identities not yet in the semantic registry.
 5. Add ratchets that callbacks to functions defined in previous REPL inputs do not call `compile_legacy` when semantic bytecode is available.

@@ -69,8 +69,6 @@ pub struct RunMatSession {
     workspace_values: HashMap<String, Value>,
     /// Stable ABI identity for this interactive workspace.
     abi_workspace_handle: crate::abi::WorkspaceHandle,
-    /// Legacy user-defined functions context for session state.
-    legacy_function_definitions: HashMap<String, runmat_hir::LegacyHirStmt>,
     /// Semantic function registry persisted across interactive inputs.
     semantic_function_registry: runmat_vm::SemanticFunctionRegistry,
     next_semantic_function_id: usize,
