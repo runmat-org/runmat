@@ -92,11 +92,12 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
   - Prefer typed object dispatch operations.
 
 - `__make_cell`
-  - Currently used to package indices for object protocol calls.
+  - No current production references remain in VM/runtime/builtins; index packaging now uses direct `CellArray` construction helpers.
   - Prefer structured index descriptors.
 
-- object protocol strings: `"subsref"`, `"subsasgn"`, `"()"`, `"{}"`
+- object protocol strings: `"subsref"`, `"subsasgn"`, `"()"`, `"{}"`, `"."`
   - These are MATLAB protocol concepts, but the VM should not manually assemble ad hoc argument lists for them.
+  - Member dispatch now routes the `"."` selector through `ObjectIndexKind::Member`, matching paren/brace selector classification.
   - Prefer `ObjectSubsref` / `ObjectSubsasgn` style operations carrying structured index data.
 
 - `classref`

@@ -305,6 +305,7 @@ impl ObjectIndexOp {
 pub enum ObjectIndexKind {
     Paren,
     Brace,
+    Member,
 }
 
 impl ObjectIndexKind {
@@ -312,6 +313,7 @@ impl ObjectIndexKind {
         match self {
             Self::Paren => "()",
             Self::Brace => "{}",
+            Self::Member => ".",
         }
     }
 }
@@ -358,7 +360,7 @@ pub async fn call_object_member_method(
     let mut args = vec![
         base,
         Value::String(op.protocol_name().to_string()),
-        Value::String(".".to_string()),
+        Value::String(ObjectIndexKind::Member.protocol_name().to_string()),
         Value::String(field),
     ];
     if let Some(rhs) = rhs {
