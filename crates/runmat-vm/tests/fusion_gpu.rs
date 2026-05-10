@@ -24,7 +24,7 @@ use runmat_parser::parse;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
 use runmat_runtime::{gather_if_needed, gather_if_needed_async, RuntimeError};
-use runmat_vm::bytecode::compile_legacy as compile;
+use runmat_vm::bytecode::compile::compile_legacy as compile;
 use runmat_vm::{
     interpret as interpret_async, interpret_function as interpret_function_async, Instr,
 };

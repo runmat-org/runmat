@@ -11,7 +11,7 @@ use test_helpers::{compile_semantic_source, interpret, lower};
 fn compile_bytecode(source: &str) -> runmat_vm::Bytecode {
     let ast = parse(source).expect("parse");
     let hir = lower(&ast).expect("lower");
-    runmat_vm::bytecode::compile_legacy(&hir, &HashMap::new()).expect("compile")
+    runmat_vm::bytecode::compile::compile_legacy(&hir, &HashMap::new()).expect("compile")
 }
 
 fn execute_program(source: &str) -> Vec<Value> {

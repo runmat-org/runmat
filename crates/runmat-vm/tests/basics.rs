@@ -71,8 +71,8 @@ fn array_construct_like_and_size_vector_inference() {
     let src_like = "A = rand(3,4); B = zeros('like', A);";
     let ast_like = parse(src_like).expect("parse like");
     let hir_like = lower(&ast_like).expect("lower like");
-    let bytecode_like =
-        runmat_vm::bytecode::compile_legacy(&hir_like, &HashMap::new()).expect("compile like");
+    let bytecode_like = runmat_vm::bytecode::compile::compile_legacy(&hir_like, &HashMap::new())
+        .expect("compile like");
     let graph_like = runmat_vm::accel::graph::build_accel_graph(
         &bytecode_like.instructions,
         &hir_like.var_types,
@@ -92,7 +92,7 @@ fn array_construct_like_and_size_vector_inference() {
     let ast_sz = parse(src_sz).expect("parse sz");
     let hir_sz = lower(&ast_sz).expect("lower sz");
     let bytecode_sz =
-        runmat_vm::bytecode::compile_legacy(&hir_sz, &HashMap::new()).expect("compile sz");
+        runmat_vm::bytecode::compile::compile_legacy(&hir_sz, &HashMap::new()).expect("compile sz");
     let graph_sz =
         runmat_vm::accel::graph::build_accel_graph(&bytecode_sz.instructions, &hir_sz.var_types);
     let last_sz = graph_sz.nodes.last().expect("node");
@@ -316,7 +316,7 @@ fn atan2_multi_output_argument_path_unpacks_before_call() {
     let x: f64 = (&vars[2]).try_into().expect("convert x to f64");
     assert!((x - 1.0f64.atan2(2.0)).abs() < 1e-12);
 
-    let bytecode = runmat_vm::bytecode::compile_legacy(&hir, &HashMap::new())
+    let bytecode = runmat_vm::bytecode::compile::compile_legacy(&hir, &HashMap::new())
         .expect("compile atan2 multi-output script");
     let has_unpack_barrier = bytecode.instructions.windows(3).any(|window| {
         matches!(window[0], Instr::CallFunctionMulti(ref name, 0, 2) if name == "g")

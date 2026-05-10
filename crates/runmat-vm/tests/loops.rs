@@ -2,7 +2,7 @@
 mod test_helpers;
 
 use runmat_parser::parse;
-use runmat_vm::bytecode::compile_legacy as compile;
+use runmat_vm::bytecode::compile::compile_legacy as compile;
 use runmat_vm::Instr;
 use std::collections::HashMap;
 use std::convert::TryInto;

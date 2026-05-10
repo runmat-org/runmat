@@ -4,7 +4,7 @@ use runmat_hir::{LegacyHirProgram as HirProgram, LoweringContext, SemanticError}
 use runmat_parser::parse;
 use runmat_time::Instant;
 use runmat_turbine::TurbineEngine;
-use runmat_vm::bytecode::compile_legacy as compile;
+use runmat_vm::bytecode::compile::compile_legacy as compile;
 use std::collections::HashMap;
 use std::time::Duration;
 

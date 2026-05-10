@@ -26,8 +26,11 @@ where
 pub fn execute(program: &HirProgram) -> Result<Vec<Value>, RuntimeError> {
     let program = program.clone();
     run_with_stack(move || {
-        let bc = runmat_vm::bytecode::compile_legacy(&program, &std::collections::HashMap::new())
-            .map_err(RuntimeError::from)?;
+        let bc = runmat_vm::bytecode::compile::compile_legacy(
+            &program,
+            &std::collections::HashMap::new(),
+        )
+        .map_err(RuntimeError::from)?;
         block_on(runmat_vm::interpret(&bc))
     })?
 }
