@@ -64,6 +64,17 @@ pub async fn execute_feval(
                     return Ok(FevalDispatch::Completed(result?));
                 }
             }
+            if let Some(function) = semantic_registry.resolve_name(&name) {
+                if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
+                    function.0,
+                    &call_args,
+                    requested_outputs,
+                )
+                .await
+                {
+                    return Ok(FevalDispatch::Completed(result?));
+                }
+            }
             if let Some(result) = try_closure_builtin_fallback(&name, &call_args).await? {
                 return Ok(FevalDispatch::Completed(result));
             }
