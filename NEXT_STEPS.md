@@ -99,6 +99,10 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
   - These are MATLAB protocol concepts, but the VM should not manually assemble ad hoc argument lists for them.
   - Prefer `ObjectSubsref` / `ObjectSubsasgn` style operations carrying structured index data.
 
+- `classref`
+  - Legacy VM class-reference lowering now uses `CLASS_REF_CONSTRUCTOR_NAME` instead of repeating the sentinel string in compiler pattern matches.
+  - Prefer a typed class-reference HIR/MIR form over source-call pattern matching.
+
 - `nargin` / `nargout`
   - VM call-count handling now classifies these through a VM intrinsic counter call category instead of inline string branches.
 

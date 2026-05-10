@@ -4,3 +4,5 @@ pub mod member_write;
 pub mod method_call;
 pub mod resolve;
 pub mod static_dispatch;
+
+pub(crate) const CLASS_REF_CONSTRUCTOR_NAME: &str = "classref";

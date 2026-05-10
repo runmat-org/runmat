@@ -5,6 +5,7 @@ use crate::compiler::end_expr::{end_numeric_expr, range_dynamic_end_spec};
 use crate::compiler::imports::CallImportResolution;
 use crate::compiler::CompileError;
 use crate::instr::{EndExpr, Instr};
+use crate::object::CLASS_REF_CONSTRUCTOR_NAME;
 use runmat_hir::{LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind};
 
 impl Compiler {
@@ -702,7 +703,9 @@ impl Compiler {
                 HirExprKind::MetaClass(cls_name) => {
                     self.emit(Instr::LoadStaticProperty(cls_name.clone(), field.clone()));
                 }
-                HirExprKind::FuncCall(name, args) if name == "classref" && args.len() == 1 => {
+                HirExprKind::FuncCall(name, args)
+                    if name == CLASS_REF_CONSTRUCTOR_NAME && args.len() == 1 =>
+                {
                     self.compile_expr(base)?;
                     self.emit(Instr::LoadMember(field.clone()));
                 }
@@ -739,7 +742,9 @@ impl Compiler {
                         args.len(),
                     ));
                 }
-                HirExprKind::FuncCall(name, bargs) if name == "classref" && bargs.len() == 1 => {
+                HirExprKind::FuncCall(name, bargs)
+                    if name == CLASS_REF_CONSTRUCTOR_NAME && bargs.len() == 1 =>
+                {
                     if let HirExprKind::String(cls) = &bargs[0].kind {
                         let cls_name = Self::normalize_class_literal_name(cls);
                         for arg in args {
