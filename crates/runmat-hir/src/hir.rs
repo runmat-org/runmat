@@ -323,6 +323,7 @@ pub const FEVAL_BUILTIN_NAME: &str = "feval";
 pub const AWAIT_EXTENSION_NAME: &str = "await";
 pub const SPAWN_EXTENSION_NAME: &str = "spawn";
 pub const TEST_CLASS_REGISTRATION_BUILTIN_NAME: &str = "__register_test_classes";
+pub const DISCARD_OUTPUT_NAME: &str = "~";
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum CallSyntax {

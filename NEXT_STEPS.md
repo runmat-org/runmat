@@ -123,6 +123,9 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
 - `__register_test_classes`
   - Legacy HIR lowering now uses `TEST_CLASS_REGISTRATION_BUILTIN_NAME` for the test-support static-class registration hook.
 
+- `~`
+  - Semantic and legacy HIR multi-assign lowering now use `DISCARD_OUTPUT_NAME` for discard-output classification.
+
 ### Replacement Strategy
 
 1. Inventory all hard-coded builtin/runtime names in compiler and VM dispatch.

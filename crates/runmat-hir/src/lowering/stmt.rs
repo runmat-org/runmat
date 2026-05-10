@@ -1,7 +1,7 @@
 use super::ctx::Ctx;
 use crate::{
     LegacyHirClassMember as HirClassMember, LegacyHirLValue as HirLValue, LegacyHirStmt as HirStmt,
-    SemanticError, VarId,
+    SemanticError, VarId, DISCARD_OUTPUT_NAME,
 };
 use runmat_parser::{self as parser, Stmt as AstStmt};
 
@@ -33,7 +33,7 @@ impl Ctx {
                 let ids: Vec<Option<VarId>> = names
                     .iter()
                     .map(|n| {
-                        if n == "~" {
+                        if n == DISCARD_OUTPUT_NAME {
                             None
                         } else {
                             Some(match self.lookup(n) {

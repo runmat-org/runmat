@@ -14,7 +14,7 @@ use crate::{
     PlaceMutationKind, QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount,
     SemanticError, SemanticIndex, SourceId, SourceUnitKind, Span, StmtId, StringLiteral,
     SymbolName, Type, VarId, WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME,
-    SPAWN_EXTENSION_NAME,
+    DISCARD_OUTPUT_NAME, SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use std::collections::HashMap;
@@ -765,7 +765,7 @@ impl SemanticCtx {
                 let targets = names
                     .iter()
                     .map(|name| {
-                        if name == "~" {
+                        if name == DISCARD_OUTPUT_NAME {
                             crate::OutputTarget::Discard
                         } else {
                             let binding = self.binding_for_write(name, span);
