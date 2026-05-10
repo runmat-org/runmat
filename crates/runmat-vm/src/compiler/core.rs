@@ -1031,6 +1031,7 @@ impl Compiler {
         match value {
             MirRvalue::Range { .. } => true,
             MirRvalue::Aggregate { rows, cols, .. } => rows.saturating_mul(*cols) != 1,
+            MirRvalue::Call(_) => true,
             MirRvalue::Binary(_, op, _) => matches!(
                 op,
                 OperatorKind::Equal

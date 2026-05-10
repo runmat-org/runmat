@@ -145,6 +145,36 @@ fn semantic_logical_slice_read_and_write_execute() {
 }
 
 #[test]
+fn semantic_call_result_slice_index_executes() {
+    let bytecode =
+        compile_semantic_source("A = [1 2 3 4]; idx = find(A > 2); B = A(idx); A(idx) = 9; C = A;")
+            .unwrap();
+    let vars = test_helpers::interpret(&bytecode).unwrap();
+
+    let Value::Tensor(selected) = &vars[2] else {
+        panic!("expected selected tensor, got {:?}", vars[2]);
+    };
+    assert_eq!(selected.data, vec![3.0, 4.0]);
+
+    let Value::Tensor(updated) = &vars[3] else {
+        panic!("expected updated tensor, got {:?}", vars[3]);
+    };
+    assert_eq!(updated.data, vec![1.0, 2.0, 9.0, 9.0]);
+}
+
+#[test]
+fn semantic_scalar_call_result_index_assignment_executes() {
+    let bytecode =
+        compile_semantic_source("A = [1 2 3]; idx = length(A); A(idx) = 9; B = A;").unwrap();
+    let vars = test_helpers::interpret(&bytecode).unwrap();
+
+    let Value::Tensor(updated) = &vars[2] else {
+        panic!("expected updated tensor, got {:?}", vars[2]);
+    };
+    assert_eq!(updated.data, vec![1.0, 2.0, 9.0]);
+}
+
+#[test]
 fn complex_literal_matrix_executes() {
     let input = "A = [1+2i 3-4j];";
     let ast = parse(input).unwrap();
