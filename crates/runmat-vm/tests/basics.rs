@@ -127,6 +127,24 @@ fn semantic_complex_literal_matrix_uses_fixed_size_construction() {
 }
 
 #[test]
+fn semantic_logical_slice_read_and_write_execute() {
+    let bytecode =
+        compile_semantic_source("A = [1 2 3 4]; mask = A > 2; B = A(mask); A(mask) = 9; C = A;")
+            .unwrap();
+    let vars = test_helpers::interpret(&bytecode).unwrap();
+
+    let Value::Tensor(selected) = &vars[2] else {
+        panic!("expected selected tensor, got {:?}", vars[2]);
+    };
+    assert_eq!(selected.data, vec![3.0, 4.0]);
+
+    let Value::Tensor(updated) = &vars[3] else {
+        panic!("expected updated tensor, got {:?}", vars[3]);
+    };
+    assert_eq!(updated.data, vec![1.0, 2.0, 9.0, 9.0]);
+}
+
+#[test]
 fn complex_literal_matrix_executes() {
     let input = "A = [1+2i 3-4j];";
     let ast = parse(input).unwrap();

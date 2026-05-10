@@ -1031,6 +1031,17 @@ impl Compiler {
         match value {
             MirRvalue::Range { .. } => true,
             MirRvalue::Aggregate { rows, cols, .. } => rows.saturating_mul(*cols) != 1,
+            MirRvalue::Binary(_, op, _) => matches!(
+                op,
+                OperatorKind::Equal
+                    | OperatorKind::NotEqual
+                    | OperatorKind::Less
+                    | OperatorKind::LessEqual
+                    | OperatorKind::Greater
+                    | OperatorKind::GreaterEqual
+                    | OperatorKind::ElementwiseAnd
+                    | OperatorKind::ElementwiseOr
+            ),
             MirRvalue::Use(operand) => self.mir_operand_is_non_scalar_index(operand),
             _ => false,
         }
@@ -1624,11 +1635,11 @@ impl Compiler {
                 {
                     end_mask |= 1u32 << dim;
                 }
-                MirIndexComponent::Expr(operand) => {
+                MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
                     self.compile_mir_operand(operand)?;
                     numeric_count += 1;
                 }
-                MirIndexComponent::Logical(_) | MirIndexComponent::End { .. } => {
+                MirIndexComponent::End { .. } => {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this slice index is not implemented yet",
                     ))
@@ -1678,14 +1689,9 @@ impl Compiler {
                     ));
                     numeric_count += 1;
                 }
-                MirIndexComponent::Expr(operand) => {
+                MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
                     self.compile_mir_operand(operand)?;
                     numeric_count += 1;
-                }
-                MirIndexComponent::Logical(_) => {
-                    return Err(self.compile_error(
-                        "MIR bytecode lowering for this slice index is not implemented yet",
-                    ))
                 }
             }
         }
