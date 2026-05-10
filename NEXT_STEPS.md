@@ -155,6 +155,7 @@ Current state:
 - Function-handle calls to functions defined in previous interactive inputs execute through the session semantic registry before legacy fallback.
 - `feval` multi-output calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
 - Expanded `feval` calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
+- Expanded multi-output `feval` calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
 - Unresolved/external dynamic user-function callbacks still centralize through `compile_prepared_user_dispatch`, which wraps `compile_legacy` over reconstructed `LegacyHirProgram`.
 
 Target state:

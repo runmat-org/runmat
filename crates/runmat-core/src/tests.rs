@@ -1996,6 +1996,42 @@ fn session_function_handle_feval_expansion_uses_semantic_registry() {
 }
 
 #[test]
+fn session_function_handle_feval_expansion_multi_output_uses_semantic_registry() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(
+        session
+            .execute_outcome("seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend"),
+    )
+    .expect("define session function");
+
+    let prepared = session
+        .compile_input("f = @pair; C = {2}; [a, b] = feval(f, C{:});")
+        .expect("compile feval expansion multi-output session handle call");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CallFevalExpandMultiOutput(_, 2)
+        )),
+        "function handle feval expansion multi-output call should use typed feval expansion bytecode"
+    );
+    assert!(
+        prepared.bytecode.functions.is_empty(),
+        "function handle feval expansion multi-output session semantic call should not require legacy bytecode functions"
+    );
+
+    let outcome = block_on(session.execute_outcome("f = @pair; C = {2}; [a, b] = feval(f, C{:});"))
+        .expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
+            && upsert.value.to_string() == "2"
+    }));
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
+            && upsert.value.to_string() == "3"
+    }));
+}
+
+#[test]
 fn session_semantic_registry_replaces_redefined_function() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
