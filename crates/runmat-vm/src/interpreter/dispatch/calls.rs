@@ -50,7 +50,7 @@ pub fn compile_legacy_user_dispatch_fallback(
         func_program,
         func_vars,
     } = prepared;
-    let mut bytecode = crate::compile_legacy(&func_program, functions)?;
+    let mut bytecode = crate::bytecode::compile_legacy(&func_program, functions)?;
     bytecode.source_id = func.source_id;
     Ok(CompiledUserDispatch {
         func,

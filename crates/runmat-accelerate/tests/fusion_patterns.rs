@@ -2,7 +2,7 @@ use runmat_accelerate::fusion::{detect_fusion_groups, FusionKind, FusionPlan};
 use runmat_accelerate::graph::{AccelGraph, AccelNodeLabel, PrimitiveOp, ValueOrigin};
 use runmat_hir::{LegacyHirProgram as HirProgram, LoweringContext, SemanticError};
 use runmat_parser::parse;
-use runmat_vm::compile_legacy as compile;
+use runmat_vm::bytecode::compile_legacy as compile;
 use std::collections::HashMap;
 use std::sync::Once;
 

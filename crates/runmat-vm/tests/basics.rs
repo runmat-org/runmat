@@ -316,7 +316,7 @@ fn atan2_multi_output_argument_path_unpacks_before_call() {
     let x: f64 = (&vars[2]).try_into().expect("convert x to f64");
     assert!((x - 1.0f64.atan2(2.0)).abs() < 1e-12);
 
-    let bytecode = runmat_vm::compile_legacy(&hir, &HashMap::new())
+    let bytecode = runmat_vm::bytecode::compile_legacy(&hir, &HashMap::new())
         .expect("compile atan2 multi-output script");
     let has_unpack_barrier = bytecode.instructions.windows(3).any(|window| {
         matches!(window[0], Instr::CallFunctionMulti(ref name, 0, 2) if name == "g")
@@ -364,8 +364,8 @@ fn fft_output_supports_end_arithmetic_range_indexing() {
     "#;
     let ast = parse(input).expect("parse fft end range script");
     let hir = lower(&ast).expect("lower fft end range script");
-    let bytecode =
-        runmat_vm::compile_legacy(&hir, &HashMap::new()).expect("compile fft end range script");
+    let bytecode = runmat_vm::bytecode::compile_legacy(&hir, &HashMap::new())
+        .expect("compile fft end range script");
     assert!(
         bytecode
             .instructions

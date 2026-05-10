@@ -200,7 +200,7 @@ First implementation slice:
 Observed older-HIR artifacts worth collapsing:
 
 - `LegacyHirProgram`, `LegacyHirStmt`, and `LegacyHirExpr` remain in VM compiler modules and many tests.
-- `compile_legacy` is still exported publicly from `runmat-vm` and used by VM/Turbine tests plus the centralized dynamic callback fallback.
+- `compile_legacy` is no longer re-exported from the `runmat-vm` crate root; remaining direct users go through `runmat_vm::bytecode::compile_legacy` or the centralized dynamic callback fallback.
 - `RunMatSession` keeps `workspace_bindings` to seed workspace variables across REPL inputs, but those bindings are still plain VM slot indices rather than durable semantic workspace binding IDs.
 - `LoweringResult` still carries both `assembly` and legacy `hir`, `variables`, `functions`, `var_types`, and legacy inference placeholders.
 - LSP analysis still consults legacy variable maps and legacy type helpers.
@@ -212,7 +212,7 @@ Target cleanup direction:
 - Replace session `workspace_bindings` VM slot mapping with a semantic workspace binding table keyed by stable names plus semantic binding/session IDs.
 - Continue replacing remaining legacy function fallback sites with the semantic registry.
 - Move tests that only need compiler behavior from hand-built legacy HIR to semantic source fixtures or semantic MIR fixtures.
-- Stop exporting `compile_legacy` once runtime/Turbine callbacks and remaining tests no longer depend on it.
+- Stop exposing `bytecode::compile_legacy` once runtime/Turbine callbacks and remaining tests no longer depend on it.
 
 ### 3. Normalize Call Shapes
 
@@ -373,7 +373,7 @@ Current ratchet status:
 
 - VM basics, matrix-division, bitwise row-vector, and import-error bytecode tests now use the semantic HIR/MIR `compile` path where they only need source-level or semantic bytecode behavior.
 - Remaining test `compile_legacy` references are still tied to legacy execution helpers, native-accel graph construction, legacy multi-output bytecode shape assertions, or Turbine/accelerate legacy suites.
-- Remaining production `compile_legacy` usage is centralized behind `compile_legacy_user_dispatch_fallback` plus the transitional `compile_legacy` export itself.
+- Remaining production `compile_legacy` usage is centralized behind `compile_legacy_user_dispatch_fallback`; the remaining transitional API is `runmat_vm::bytecode::compile_legacy` for legacy tests and fallback plumbing.
 
 ## Validation Cadence
 

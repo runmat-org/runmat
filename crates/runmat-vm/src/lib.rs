@@ -19,7 +19,7 @@ pub mod object;
 pub mod ops;
 pub mod runtime;
 
-pub use bytecode::{compile, compile_legacy};
+pub use bytecode::compile;
 pub use bytecode::{
     ArgSpec, Bytecode, CallFrame, EmitLabel, EndExpr, ExecutionContext, Instr,
     SemanticFunctionRegistry, StackEffect, UserFunction,

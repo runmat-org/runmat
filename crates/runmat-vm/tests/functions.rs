@@ -1429,7 +1429,7 @@ fn operator_overloading_full_grid_basic() {
         let ast = runmat_parser::parse(&program).unwrap();
         let hir = lower(&ast).unwrap();
         execute(&hir).unwrap_or_else(|err| {
-            let bc = runmat_vm::compile_legacy(&hir, &HashMap::new()).unwrap();
+            let bc = runmat_vm::bytecode::compile_legacy(&hir, &HashMap::new()).unwrap();
             panic!(
                 "operator overload script failed after stmt #{idx} `{stmt}`: {err}\nbytecode={:?}",
                 bc.instructions
