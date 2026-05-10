@@ -1834,6 +1834,35 @@ fn direct_session_function_multi_output_uses_semantic_registry() {
 }
 
 #[test]
+fn direct_session_function_cell_expansion_uses_semantic_registry() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
+        .expect("define session function");
+
+    let prepared = session
+        .compile_input("C = {2}; y = inc(C{:});")
+        .expect("compile direct session expansion function call");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CallSemanticFunctionExpandMulti(_, _)
+        )),
+        "direct expansion call should lower to semantic function bytecode"
+    );
+    assert!(
+        prepared.bytecode.functions.is_empty(),
+        "direct session semantic expansion call should not require legacy bytecode functions"
+    );
+
+    let outcome =
+        block_on(session.execute_outcome("C = {2}; y = inc(C{:});")).expect("exec succeeds");
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "3"
+    }));
+}
+
+#[test]
 fn session_function_handle_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
