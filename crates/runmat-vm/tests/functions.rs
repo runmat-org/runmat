@@ -318,6 +318,19 @@ fn semantic_qr_builtin_multi_assign_execute() {
 }
 
 #[test]
+fn semantic_svd_builtin_multi_assign_execute() {
+    let bytecode = compile_semantic_source(
+        "[u,s,v] = svd([3 0; 0 2]); z = s(1,1) + s(2,2) + u(1,1) * u(1,1) + v(1,1) * v(1,1);",
+    )
+    .unwrap();
+    let vars = interpret(&bytecode).expect("semantic svd multi-assign should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
+}
+
+#[test]
 fn fprintf_inline_cast_argument_does_not_stack_underflow() {
     let program = r#"
         x = single(3.14);
