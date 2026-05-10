@@ -3,12 +3,22 @@ mod test_helpers;
 
 use runmat_accelerate::ShapeInfo;
 use runmat_builtins::Value;
+use runmat_hir::LoweringContext;
+use runmat_mir::lowering::lower_assembly;
 use runmat_parser::parse;
-use runmat_vm::{compile_legacy as compile, Instr};
+use runmat_vm::{Bytecode, Instr};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use test_helpers::execute;
 use test_helpers::lower;
+
+fn compile_semantic_source(input: &str) -> Bytecode {
+    let ast = parse(input).expect("parse semantic source");
+    let hir = runmat_hir::lower(&ast, &LoweringContext::empty()).expect("lower semantic HIR");
+    let mir = lower_assembly(&hir.assembly).expect("lower semantic MIR");
+    let entrypoint = hir.assembly.entrypoints[0].id;
+    runmat_vm::compile(&hir.assembly, &mir, entrypoint).expect("compile semantic bytecode")
+}
 
 #[test]
 fn arithmetic_and_assignment() {
@@ -23,10 +33,8 @@ fn arithmetic_and_assignment() {
 }
 
 #[test]
-fn legacy_logical_ops_use_typed_bytecode() {
-    let ast = parse("a = ~0; b = 1 & 0; c = 1 | 0;").unwrap();
-    let hir = lower(&ast).unwrap();
-    let bytecode = compile(&hir, &HashMap::new()).expect("compile logical ops");
+fn semantic_logical_ops_use_typed_bytecode() {
+    let bytecode = compile_semantic_source("a = ~0; b = 1 & 0; c = 1 | 0;");
 
     assert!(bytecode
         .instructions
@@ -35,7 +43,11 @@ fn legacy_logical_ops_use_typed_bytecode() {
     assert!(bytecode
         .instructions
         .iter()
-        .any(|instr| matches!(instr, Instr::NotEqual)));
+        .any(|instr| matches!(instr, Instr::LogicalAnd)));
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, Instr::LogicalOr)));
     assert!(!bytecode.instructions.iter().any(|instr| matches!(
         instr,
         Instr::CallBuiltin(name, _) if matches!(name.as_str(), "not" | "ne")
@@ -104,11 +116,9 @@ fn array_construct_like_and_size_vector_inference() {
 }
 
 #[test]
-fn complex_literal_matrix_uses_dynamic_path() {
+fn semantic_complex_literal_matrix_uses_fixed_size_construction() {
     let input = "A = [1+2i 3-4j];";
-    let ast = parse(input).unwrap();
-    let hir = lower(&ast).unwrap();
-    let bytecode = compile(&hir, &HashMap::new()).unwrap();
+    let bytecode = compile_semantic_source(input);
     assert!(
         bytecode
             .instructions
@@ -120,8 +130,8 @@ fn complex_literal_matrix_uses_dynamic_path() {
         bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, Instr::CreateMatrixDynamic(_))),
-        "expected complex literal matrix to use dynamic construction"
+            .any(|instr| matches!(instr, Instr::CreateMatrix(1, 2))),
+        "expected complex literal matrix to use semantic fixed-size construction"
     );
 }
 
@@ -236,7 +246,8 @@ fn atan2_with_rhs_expression_lowers_to_add_then_builtin_call() {
     let input = "Vq_drop = 1; V_pcc = 2; Vd_drop = 3; delta_g0 = atan2(Vq_drop, V_pcc + Vd_drop);";
     let ast = parse(input).expect("parse atan2 lowering script");
     let hir = lower(&ast).expect("lower atan2 lowering script");
-    let bytecode = compile(&hir, &HashMap::new()).expect("compile atan2 lowering script");
+    let bytecode =
+        runmat_vm::compile_legacy(&hir, &HashMap::new()).expect("compile atan2 lowering script");
 
     let has_expected_shape = bytecode.instructions.windows(5).any(|window| {
         matches!(window[0], Instr::LoadVar(_))
@@ -268,7 +279,8 @@ fn atan2_multi_output_argument_path_unpacks_before_call() {
     let x: f64 = (&vars[2]).try_into().expect("convert x to f64");
     assert!((x - 1.0f64.atan2(2.0)).abs() < 1e-12);
 
-    let bytecode = compile(&hir, &HashMap::new()).expect("compile atan2 multi-output script");
+    let bytecode = runmat_vm::compile_legacy(&hir, &HashMap::new())
+        .expect("compile atan2 multi-output script");
     let has_unpack_barrier = bytecode.instructions.windows(3).any(|window| {
         matches!(window[0], Instr::CallFunctionMulti(ref name, 0, 2) if name == "g")
             && matches!(window[1], Instr::Unpack(2))
@@ -315,7 +327,8 @@ fn fft_output_supports_end_arithmetic_range_indexing() {
     "#;
     let ast = parse(input).expect("parse fft end range script");
     let hir = lower(&ast).expect("lower fft end range script");
-    let bytecode = compile(&hir, &HashMap::new()).expect("compile fft end range script");
+    let bytecode =
+        runmat_vm::compile_legacy(&hir, &HashMap::new()).expect("compile fft end range script");
     assert!(
         bytecode
             .instructions
