@@ -346,18 +346,16 @@ fn fft_output_supports_end_arithmetic_range_indexing() {
         h = Y(1:end/2);
         ok = (numel(h) == 4);
     "#;
-    let ast = parse(input).expect("parse fft end range script");
-    let hir = lower(&ast).expect("lower fft end range script");
     let bytecode = compile_semantic_source(input).expect("compile semantic fft end range script");
     assert!(
         bytecode
             .instructions
             .iter()
-            .any(|ins| matches!(ins, Instr::IndexSlice(..))),
-        "expected IndexSlice in semantic bytecode, got {:?}",
+            .any(|ins| matches!(ins, Instr::IndexSliceExpr { .. })),
+        "expected IndexSliceExpr in semantic bytecode, got {:?}",
         bytecode.instructions
     );
-    let vars = execute(&hir).expect("fft end-range indexing should execute");
+    let vars = interpret(&bytecode).expect("fft end-range indexing should execute");
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -429,9 +427,7 @@ fn fft_output_supports_complex_range_assignment_with_end_div() {
         b = Y(4);
         ok = (real(a) == 1) && (imag(a) == 2) && (real(b) == 1) && (imag(b) == 2);
     "#;
-    let ast = parse(input).expect("parse fft complex range assign script");
-    let hir = lower(&ast).expect("lower fft complex range assign script");
-    let vars = execute(&hir).expect("fft complex range assign should execute");
+    let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -448,9 +444,7 @@ fn fft2_output_supports_complex_multidim_end_ranges() {
         S = F(1:end/2, 1:end);
         ok = (numel(S) == 2);
     "#;
-    let ast = parse(input).expect("parse fft2 complex multidim end range script");
-    let hir = lower(&ast).expect("lower fft2 complex multidim end range script");
-    let vars = execute(&hir).expect("fft2 complex multidim end range should execute");
+    let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)

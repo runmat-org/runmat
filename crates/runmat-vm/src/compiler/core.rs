@@ -50,6 +50,31 @@ fn end_expr_with_offset(offset: isize) -> EndExpr {
     }
 }
 
+struct MirSliceExprComponents {
+    numeric_count: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    range_dims: Vec<usize>,
+    range_has_step: Vec<bool>,
+    range_start_exprs: Vec<Option<EndExpr>>,
+    range_step_exprs: Vec<Option<EndExpr>>,
+    range_end_exprs: Vec<EndExpr>,
+    end_numeric_exprs: Vec<(usize, EndExpr)>,
+}
+
+#[derive(Clone, Copy)]
+enum MirRangeParamOrder {
+    BeforeNumeric,
+    AfterNumeric,
+}
+
+struct MirRangeEndSpec {
+    start_expr: Option<EndExpr>,
+    step_expr: Option<EndExpr>,
+    end_expr: EndExpr,
+    has_step: bool,
+}
+
 fn mir_indexing_context_matches(actual: IndexResultContext, expected: IndexResultContext) -> bool {
     actual == expected
         || (expected == IndexResultContext::AssignmentTarget
@@ -933,20 +958,22 @@ impl Compiler {
                     self.compile_mir_rvalue(value)?;
                     self.emit(Instr::StoreIndex(indexing.components.len()));
                 } else if self.indexing_needs_slice_expr(indexing) {
-                    let (numeric_count, colon_mask, end_mask, end_numeric_exprs) =
-                        self.compile_mir_slice_expr_components(indexing)?;
+                    let components = self.compile_mir_slice_expr_components(
+                        indexing,
+                        MirRangeParamOrder::AfterNumeric,
+                    )?;
                     self.compile_mir_rvalue(value)?;
                     self.emit(Instr::StoreSliceExpr {
                         dims: indexing.components.len(),
-                        numeric_count,
-                        colon_mask,
-                        end_mask,
-                        range_dims: Vec::new(),
-                        range_has_step: Vec::new(),
-                        range_start_exprs: Vec::new(),
-                        range_step_exprs: Vec::new(),
-                        range_end_exprs: Vec::new(),
-                        end_numeric_exprs,
+                        numeric_count: components.numeric_count,
+                        colon_mask: components.colon_mask,
+                        end_mask: components.end_mask,
+                        range_dims: components.range_dims,
+                        range_has_step: components.range_has_step,
+                        range_start_exprs: components.range_start_exprs,
+                        range_step_exprs: components.range_step_exprs,
+                        range_end_exprs: components.range_end_exprs,
+                        end_numeric_exprs: components.end_numeric_exprs,
                     });
                 } else {
                     let (numeric_count, colon_mask, end_mask) =
@@ -1113,20 +1140,22 @@ impl Compiler {
             }
             IndexKind::Paren => {
                 if self.indexing_needs_slice_expr(indexing) {
-                    let (numeric_count, colon_mask, end_mask, end_numeric_exprs) =
-                        self.compile_mir_slice_expr_components(indexing)?;
+                    let components = self.compile_mir_slice_expr_components(
+                        indexing,
+                        MirRangeParamOrder::AfterNumeric,
+                    )?;
                     self.emit(Instr::LoadVar(tmp));
                     self.emit(Instr::StoreSliceExpr {
                         dims: indexing.components.len(),
-                        numeric_count,
-                        colon_mask,
-                        end_mask,
-                        range_dims: Vec::new(),
-                        range_has_step: Vec::new(),
-                        range_start_exprs: Vec::new(),
-                        range_step_exprs: Vec::new(),
-                        range_end_exprs: Vec::new(),
-                        end_numeric_exprs,
+                        numeric_count: components.numeric_count,
+                        colon_mask: components.colon_mask,
+                        end_mask: components.end_mask,
+                        range_dims: components.range_dims,
+                        range_has_step: components.range_has_step,
+                        range_start_exprs: components.range_start_exprs,
+                        range_step_exprs: components.range_step_exprs,
+                        range_end_exprs: components.range_end_exprs,
+                        end_numeric_exprs: components.end_numeric_exprs,
                     });
                 } else {
                     let (numeric_count, colon_mask, end_mask) =
@@ -1630,19 +1659,19 @@ impl Compiler {
 
     fn compile_mir_slice_index(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
         if self.indexing_needs_slice_expr(indexing) {
-            let (numeric_count, colon_mask, end_mask, end_numeric_exprs) =
-                self.compile_mir_slice_expr_components(indexing)?;
+            let components = self
+                .compile_mir_slice_expr_components(indexing, MirRangeParamOrder::BeforeNumeric)?;
             self.emit(Instr::IndexSliceExpr {
                 dims: indexing.components.len(),
-                numeric_count,
-                colon_mask,
-                end_mask,
-                range_dims: Vec::new(),
-                range_has_step: Vec::new(),
-                range_start_exprs: Vec::new(),
-                range_step_exprs: Vec::new(),
-                range_end_exprs: Vec::new(),
-                end_numeric_exprs,
+                numeric_count: components.numeric_count,
+                colon_mask: components.colon_mask,
+                end_mask: components.end_mask,
+                range_dims: components.range_dims,
+                range_has_step: components.range_has_step,
+                range_start_exprs: components.range_start_exprs,
+                range_step_exprs: components.range_step_exprs,
+                range_end_exprs: components.range_end_exprs,
+                end_numeric_exprs: components.end_numeric_exprs,
             });
             return Ok(());
         }
@@ -1660,7 +1689,10 @@ impl Compiler {
     fn indexing_needs_slice_expr(&self, indexing: &MirIndexing) -> bool {
         indexing.components.iter().any(|component| match component {
             MirIndexComponent::End { offset, .. } => *offset != 0,
-            MirIndexComponent::Expr(operand) => self.mir_operand_end_expr(operand).is_some(),
+            MirIndexComponent::Expr(operand) => {
+                self.mir_operand_range_end_spec(operand).is_some()
+                    || self.mir_operand_end_expr(operand).is_some()
+            }
             _ => false,
         })
     }
@@ -1705,10 +1737,18 @@ impl Compiler {
     fn compile_mir_slice_expr_components(
         &mut self,
         indexing: &MirIndexing,
-    ) -> Result<(usize, u32, u32, Vec<(usize, EndExpr)>), CompileError> {
+        range_order: MirRangeParamOrder,
+    ) -> Result<MirSliceExprComponents, CompileError> {
         let mut colon_mask = 0u32;
         let end_mask = 0u32;
         let mut numeric_count = 0usize;
+        let mut numeric_operands = Vec::new();
+        let mut range_params = Vec::new();
+        let mut range_dims = Vec::new();
+        let mut range_has_step = Vec::new();
+        let mut range_start_exprs = Vec::new();
+        let mut range_step_exprs = Vec::new();
+        let mut range_end_exprs = Vec::new();
         let mut end_numeric_exprs = Vec::new();
 
         for (dim, component) in indexing.components.iter().enumerate() {
@@ -1730,9 +1770,22 @@ impl Compiler {
                     colon_mask |= 1u32 << dim;
                 }
                 MirIndexComponent::Expr(operand)
+                    if self.mir_operand_range_end_spec(operand).is_some() =>
+                {
+                    let spec = self.mir_operand_range_end_spec(operand).ok_or_else(|| {
+                        self.compile_error("MIR range end expression disappeared during lowering")
+                    })?;
+                    range_dims.push(dim);
+                    range_has_step.push(spec.has_step);
+                    range_start_exprs.push(spec.start_expr.clone());
+                    range_step_exprs.push(spec.step_expr.clone());
+                    range_end_exprs.push(spec.end_expr.clone());
+                    range_params.push((operand.clone(), spec));
+                }
+                MirIndexComponent::Expr(operand)
                     if self.mir_operand_end_expr(operand).is_some() =>
                 {
-                    self.emit(Instr::LoadConst(0.0));
+                    numeric_operands.push(None);
                     end_numeric_exprs.push((
                         numeric_count,
                         self.mir_operand_end_expr(operand).ok_or_else(|| {
@@ -1742,13 +1795,70 @@ impl Compiler {
                     numeric_count += 1;
                 }
                 MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
-                    self.compile_mir_operand(operand)?;
+                    numeric_operands.push(Some(operand.clone()));
                     numeric_count += 1;
                 }
             }
         }
 
-        Ok((numeric_count, colon_mask, end_mask, end_numeric_exprs))
+        if matches!(range_order, MirRangeParamOrder::AfterNumeric) {
+            self.emit_mir_slice_numeric_operands(&numeric_operands)?;
+        }
+        self.emit_mir_slice_range_params(&range_params)?;
+        if matches!(range_order, MirRangeParamOrder::BeforeNumeric) {
+            self.emit_mir_slice_numeric_operands(&numeric_operands)?;
+        }
+
+        Ok(MirSliceExprComponents {
+            numeric_count,
+            colon_mask,
+            end_mask,
+            range_dims,
+            range_has_step,
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            end_numeric_exprs,
+        })
+    }
+
+    fn emit_mir_slice_numeric_operands(
+        &mut self,
+        operands: &[Option<MirOperand>],
+    ) -> Result<(), CompileError> {
+        for operand in operands {
+            if let Some(operand) = operand {
+                self.compile_mir_operand(operand)?;
+            } else {
+                self.emit(Instr::LoadConst(0.0));
+            }
+        }
+        Ok(())
+    }
+
+    fn emit_mir_slice_range_params(
+        &mut self,
+        params: &[(MirOperand, MirRangeEndSpec)],
+    ) -> Result<(), CompileError> {
+        for (operand, spec) in params {
+            let Some(MirRvalue::Range { start, step, .. }) = self.mir_operand_rvalue(operand)
+            else {
+                return Err(self.compile_error("MIR range index disappeared during lowering"));
+            };
+            if spec.start_expr.is_some() {
+                self.emit(Instr::LoadConst(0.0));
+            } else {
+                self.compile_mir_operand(&start)?;
+            }
+            if let Some(step) = step {
+                if spec.step_expr.is_some() {
+                    self.emit(Instr::LoadConst(0.0));
+                } else {
+                    self.compile_mir_operand(&step)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn mir_local_is_colon(&self, local: runmat_mir::MirLocalId) -> bool {
@@ -1779,6 +1889,44 @@ impl Compiler {
         &self,
         local: runmat_mir::MirLocalId,
     ) -> Option<(EndExpr, bool)> {
+        self.mir_local_rvalue(local)
+            .and_then(|value| self.mir_rvalue_end_expr_internal(&value))
+    }
+
+    fn mir_operand_range_end_spec(&self, operand: &MirOperand) -> Option<MirRangeEndSpec> {
+        let MirRvalue::Range { start, step, end } = self.mir_operand_rvalue(operand)? else {
+            return None;
+        };
+        let start_expr = self.mir_operand_end_expr(&start);
+        let step_expr = step
+            .as_ref()
+            .and_then(|step| self.mir_operand_end_expr(step));
+        let end_expr = self.mir_operand_end_expr(&end);
+        if start_expr.is_none() && step_expr.is_none() && end_expr.is_none() {
+            return None;
+        }
+        let end_expr = end_expr.or_else(|| self.mir_operand_any_end_expr(&end))?;
+        Some(MirRangeEndSpec {
+            start_expr,
+            step_expr,
+            end_expr,
+            has_step: step.is_some(),
+        })
+    }
+
+    fn mir_operand_any_end_expr(&self, operand: &MirOperand) -> Option<EndExpr> {
+        self.mir_operand_end_expr_internal(operand)
+            .map(|(expr, _)| expr)
+    }
+
+    fn mir_operand_rvalue(&self, operand: &MirOperand) -> Option<MirRvalue> {
+        match operand {
+            MirOperand::Local(local) => self.mir_local_rvalue(*local),
+            MirOperand::Constant(_) | MirOperand::FunctionHandle(_) | MirOperand::Temp(_) => None,
+        }
+    }
+
+    fn mir_local_rvalue(&self, local: runmat_mir::MirLocalId) -> Option<MirRvalue> {
         let body = self.body.as_ref()?;
         body.blocks
             .iter()
@@ -1787,7 +1935,7 @@ impl Compiler {
                 MirStmtKind::Assign {
                     place: MirPlace::Local(candidate),
                     value,
-                } if *candidate == local => self.mir_rvalue_end_expr_internal(value),
+                } if *candidate == local => Some(value.clone()),
                 _ => None,
             })
     }
