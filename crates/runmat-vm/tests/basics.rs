@@ -596,9 +596,7 @@ fn end_expression_supports_user_function_calls_in_index_context() {
         a = x(pick(end-3));
         ok = (a == 50);
     "#;
-    let ast = parse(input).expect("parse userfunc-in-end-expression script");
-    let hir = lower(&ast).expect("lower userfunc-in-end-expression script");
-    let vars = execute(&hir).expect("userfunc-in-end-expression should execute");
+    let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)

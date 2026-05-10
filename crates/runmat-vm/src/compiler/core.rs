@@ -1967,8 +1967,35 @@ impl Compiler {
                 };
                 Some((expr, has_end))
             }
+            MirRvalue::Call(call) => self.mir_call_end_expr_internal(call),
             _ => None,
         }
+    }
+
+    fn mir_call_end_expr_internal(&self, call: &MirCall) -> Option<(EndExpr, bool)> {
+        let name = match &call.callee {
+            MirCallee::Static(HirCallableRef::Function(function)) => self
+                .layout
+                .as_ref()
+                .and_then(|layout| layout.functions.get(function))
+                .map(|layout| layout.display_name.clone())?,
+            MirCallee::Static(HirCallableRef::Builtin(id)) => id.0.clone(),
+            MirCallee::Static(HirCallableRef::Unresolved(name)) if name.0.len() == 1 => {
+                name.0[0].0.clone()
+            }
+            _ => return None,
+        };
+        let mut args = Vec::with_capacity(call.args.len());
+        let mut has_end = false;
+        for arg in &call.args {
+            let MirCallArg::Single(operand) = arg else {
+                return None;
+            };
+            let (expr, arg_has_end) = self.mir_operand_end_expr_internal(operand)?;
+            args.push(expr);
+            has_end |= arg_has_end;
+        }
+        Some((EndExpr::Call(name, args), has_end))
     }
 
     fn mir_local_matches_rvalue(

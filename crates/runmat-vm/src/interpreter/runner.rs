@@ -53,9 +53,17 @@ fn invoke_user_for_end_expr_adapter<'a>(
 ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
     Box::pin(async move {
         let mut local_vars = vars_ref.to_owned();
-        let semantic_registry = SemanticFunctionRegistry::default();
-        invoke_user_function_value(name, &argv, functions, &semantic_registry, &mut local_vars)
-            .await
+        let registry_ptr = CURRENT_SEMANTIC_REGISTRY.with(|slot| *slot.borrow());
+        if let Some(registry_ptr) = registry_ptr {
+            // The guard installed for the active interpreter frame owns this pointer lifetime.
+            let semantic_registry = unsafe { &*registry_ptr };
+            invoke_user_function_value(name, &argv, functions, semantic_registry, &mut local_vars)
+                .await
+        } else {
+            let semantic_registry = SemanticFunctionRegistry::default();
+            invoke_user_function_value(name, &argv, functions, &semantic_registry, &mut local_vars)
+                .await
+        }
     })
 }
 
@@ -94,6 +102,10 @@ runmat_thread_local! {
 }
 
 runmat_thread_local! {
+    static CURRENT_SEMANTIC_REGISTRY: RefCell<Option<*const SemanticFunctionRegistry>> = const { RefCell::new(None) };
+}
+
+runmat_thread_local! {
     static DYNAMIC_USER_FUNCTIONS: RefCell<HashMap<String, UserFunction>> = RefCell::new(HashMap::new());
 }
 
@@ -118,6 +130,10 @@ struct UserFunctionVarsGuard {
     previous: Option<*mut Vec<Value>>,
 }
 
+struct SemanticRegistryGuard {
+    previous: Option<*const SemanticFunctionRegistry>,
+}
+
 impl Drop for UserFunctionVarsGuard {
     fn drop(&mut self) {
         let previous = self.previous.take();
@@ -127,10 +143,25 @@ impl Drop for UserFunctionVarsGuard {
     }
 }
 
+impl Drop for SemanticRegistryGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        CURRENT_SEMANTIC_REGISTRY.with(|slot| {
+            *slot.borrow_mut() = previous;
+        });
+    }
+}
+
 fn install_user_function_vars(vars: &mut Vec<Value>) -> UserFunctionVarsGuard {
     let vars_ptr = vars as *mut Vec<Value>;
     let previous = USER_FUNCTION_VARS.with(|slot| slot.borrow_mut().replace(vars_ptr));
     UserFunctionVarsGuard { previous }
+}
+
+fn install_semantic_registry(registry: &SemanticFunctionRegistry) -> SemanticRegistryGuard {
+    let registry_ptr = registry as *const SemanticFunctionRegistry;
+    let previous = CURRENT_SEMANTIC_REGISTRY.with(|slot| slot.borrow_mut().replace(registry_ptr));
+    SemanticRegistryGuard { previous }
 }
 
 fn sync_initial_vars(initial: &mut [Value], vars: &[Value]) {
@@ -346,6 +377,7 @@ async fn run_interpreter_inner(
     let functions = Arc::new(context.functions.clone());
     let semantic_registry = Arc::new(bytecode.semantic_registry());
     let semantic_registry_for_user_invoker = Arc::clone(&semantic_registry);
+    let _semantic_registry_guard = install_semantic_registry(&semantic_registry);
     let _user_function_vars_guard = install_user_function_vars(&mut vars);
     let _user_function_guard = user_functions::install_user_function_invoker(Some(Arc::new(
         move |name: &str, args: &[Value]| {

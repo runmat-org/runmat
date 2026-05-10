@@ -66,13 +66,8 @@ pub fn eval_end_expr_value<'a>(
                 }
                 let v = if let Some(v) = call_builtin(name, argv.clone()).await? {
                     v
-                } else if functions.contains_key(name) {
-                    call_user(name, argv, functions, vars).await?
                 } else {
-                    return Err(mex(
-                        "UndefinedFunction",
-                        &format!("Undefined function in end expression: {name}"),
-                    ));
+                    call_user(name, argv, functions, vars).await?
                 };
                 value_to_f64(&v)
                     .map_err(|_| mex("UnsupportedIndexType", "end call must return scalar"))

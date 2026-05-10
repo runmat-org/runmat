@@ -250,15 +250,7 @@ where
                     }
                     let v = match runmat_runtime::call_builtin_async(name, &argv).await {
                         Ok(v) => v,
-                        Err(_) if functions.contains_key(name) => {
-                            call_user(name, argv, functions, vars).await?
-                        }
-                        Err(_) => {
-                            return Err(crate::interpreter::errors::mex(
-                                "UndefinedFunction",
-                                &format!("Undefined function in end expression: {name}"),
-                            ))
-                        }
+                        Err(_) => call_user(name, argv, functions, vars).await?,
                     };
                     idx_end_expr::value_to_f64(&v).map_err(|_| {
                         crate::interpreter::errors::mex(
