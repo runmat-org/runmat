@@ -254,6 +254,19 @@ fn semantic_cummin_cummax_builtin_multi_assign_execute() {
 }
 
 #[test]
+fn semantic_sort_unique_find_builtin_multi_assign_execute() {
+    let bytecode = compile_semantic_source(
+        "[s,si] = sort([3 1 2]); [u,ui] = unique([2 1 2]); [fr,fc] = find([0 1; 2 0]); z = sum(s) + sum(si) + sum(u) + sum(ui) + sum(fr) + sum(fc);",
+    )
+    .unwrap();
+    let vars = interpret(&bytecode).expect("semantic sort/unique/find multi-assign should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 24.0).abs() < 1e-9)));
+}
+
+#[test]
 fn fprintf_inline_cast_argument_does_not_stack_underflow() {
     let program = r#"
         x = single(3.14);
