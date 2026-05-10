@@ -267,6 +267,20 @@ fn semantic_sort_unique_find_builtin_multi_assign_execute() {
 }
 
 #[test]
+fn semantic_union_ismember_sortrows_builtin_multi_assign_execute() {
+    let bytecode = compile_semantic_source(
+        "[u,ia,ib] = union([3 1],[2 1]); [tf,loc] = ismember([3 1 2],[2 3]); [sr,idx] = sortrows([2 2; 1 3]); z = u(1) + u(2) + u(3) + ia(1) + ia(2) + ib + loc(1) + loc(2) + loc(3) + sr(1,1) + sr(1,2) + sr(2,1) + sr(2,2) + idx(1) + idx(2);",
+    )
+    .unwrap();
+    let vars =
+        interpret(&bytecode).expect("semantic union/ismember/sortrows multi-assign should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 24.0).abs() < 1e-9)));
+}
+
+#[test]
 fn semantic_chol_builtin_multi_assign_execute() {
     let bytecode =
         compile_semantic_source("[r,p] = chol([4 0; 0 9]); z = r(1,1) + r(2,2) + p;").unwrap();
