@@ -197,6 +197,27 @@ fn semantic_user_function_multi_assign_executes() {
 }
 
 #[test]
+fn semantic_feval_multi_assign_executes() {
+    let bytecode = compile_semantic_source(
+        r#"
+        function [a,b] = g()
+            a = 6;
+            b = 7;
+        end
+        h = @g;
+        [x,y] = feval(h);
+        z = x + y;
+    "#,
+    )
+    .unwrap();
+    let vars = interpret(&bytecode).expect("semantic feval multi-assign should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 13.0).abs() < 1e-9)));
+}
+
+#[test]
 fn fprintf_inline_cast_argument_does_not_stack_underflow() {
     let program = r#"
         x = single(3.14);
