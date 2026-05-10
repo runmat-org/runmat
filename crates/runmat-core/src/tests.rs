@@ -2077,6 +2077,37 @@ fn session_semantic_registry_replaces_redefined_function() {
 }
 
 #[test]
+fn session_semantic_registry_retires_replaced_source_group() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(session.execute_outcome(
+        "seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend\nfunction z = dec(x)\n  z = x - 1;\nend",
+    ))
+    .expect("define source function group");
+    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 10;\nend"))
+        .expect("replace one function from group");
+
+    let prepared = session
+        .compile_input("y = inc(2);")
+        .expect("compile using replacement function");
+    assert!(
+        prepared
+            .bytecode
+            .semantic_function_registry
+            .resolve_name("inc")
+            .is_some(),
+        "replacement function should remain in semantic registry"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .semantic_function_registry
+            .resolve_name("dec")
+            .is_none(),
+        "other functions from the replaced source should be retired"
+    );
+}
+
+#[test]
 fn local_function_multi_output_with_cell_expansion_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source =

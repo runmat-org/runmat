@@ -129,6 +129,20 @@ impl SemanticFunctionRegistry {
         Some(removed)
     }
 
+    pub fn remove_source(&mut self, source: runmat_hir::SourceId) -> Vec<SemanticFunctionBytecode> {
+        let ids = self.source_functions.remove(&source).unwrap_or_default();
+        let mut removed = Vec::new();
+        for id in ids {
+            if let Some(function) = self.functions.remove(&id) {
+                if self.names.get(&function.display_name) == Some(&id) {
+                    self.names.remove(&function.display_name);
+                }
+                removed.push(function);
+            }
+        }
+        removed
+    }
+
     pub fn functions_for_source(&self, source: runmat_hir::SourceId) -> &[FunctionId] {
         self.source_functions
             .get(&source)

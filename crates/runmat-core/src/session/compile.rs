@@ -108,6 +108,23 @@ impl RunMatSession {
             remap_semantic_function_instr(instr, &remap);
         }
 
+        let mut replaced_sources = Vec::new();
+        for function in current_registry.functions.values() {
+            if let Some(existing_id) = session_registry.resolve_name(&function.display_name) {
+                if let Some(source_id) = session_registry
+                    .get(existing_id)
+                    .and_then(|existing| existing.source_id)
+                {
+                    if !replaced_sources.contains(&source_id) {
+                        replaced_sources.push(source_id);
+                    }
+                }
+            }
+        }
+        for source_id in replaced_sources {
+            session_registry.remove_source(source_id);
+        }
+
         for (old_id, function) in current_registry.functions {
             let Some(new_id) = remap.get(&old_id).copied() else {
                 continue;

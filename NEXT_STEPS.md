@@ -148,6 +148,7 @@ Current state:
 - `RunMatSession` persists a semantic function registry across successful interactive inputs and remaps per-input function IDs into session-unique IDs before execution.
 - Semantic function registry entries retain source IDs so callback diagnostics and replacement logic can stop depending on legacy HIR statements.
 - `SemanticFunctionRegistry` indexes functions by defining source so session-owned replacement/removal can operate on semantic metadata rather than legacy HIR statements.
+- Replacing a function from an older source retires the older source's semantic function group from the session registry.
 - Redefining a function in the session semantic registry replaces the prior registry entry for that name.
 - Direct calls to functions defined in previous interactive inputs resolve through the session semantic registry and lower to `CallSemanticFunction`.
 - Direct multi-output calls to functions defined in previous interactive inputs resolve through the session semantic registry and lower to `CallSemanticFunctionMulti`.
@@ -351,7 +352,7 @@ The next high-leverage slice is replacing the remaining legacy function-definiti
 Concrete plan:
 
 1. Inventory remaining users of `legacy_function_definitions` and which ones now have equivalent semantic registry data.
-2. Use `SemanticFunctionRegistry` source ownership to retire grouped/nested definitions when their owning source is replaced.
+2. Use `SemanticFunctionRegistry` source ownership to replace the remaining legacy function-definition store in session lowering.
 3. Extend registry-backed lowering beyond direct calls to remaining callable shapes that still need dynamic-name fallback, where layout/capture information is available.
 4. Keep `compile_prepared_user_dispatch` as a fallback only for identities not yet in the semantic registry.
 5. Add ratchets that callbacks to functions defined in previous REPL inputs do not call `compile_legacy` when semantic bytecode is available.
