@@ -159,7 +159,8 @@ Current state:
 - `feval` multi-output calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
 - Expanded `feval` calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
 - Expanded multi-output `feval` calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
-- Unresolved/external dynamic user-function callbacks still centralize through `compile_prepared_user_dispatch`, which wraps `compile_legacy` over reconstructed `LegacyHirProgram`.
+- Unresolved/external dynamic user-function callbacks still centralize through `compile_legacy_user_dispatch_fallback`, which wraps `compile_legacy` over reconstructed `LegacyHirProgram`.
+- The centralized unresolved/external fallback is explicitly named `compile_legacy_user_dispatch_fallback` so new semantic call paths do not treat it as normal dispatch infrastructure.
 
 Target state:
 
@@ -176,13 +177,13 @@ Target state:
 Design implication:
 
 - `PreparedUserCall`, `PreparedUserDispatch`, and `UserFunction` should become transitional compatibility structures. Their long-term replacement is a semantic call descriptor keyed by `FunctionId`/`DefPath` plus layout/capture data.
-- `compile_prepared_user_dispatch` should be treated as the final centralized legacy boundary before removal, not a reusable abstraction to extend.
+- `compile_legacy_user_dispatch_fallback` should be treated as the final centralized legacy boundary before removal, not a reusable abstraction to extend.
 
 First implementation slice:
 
 - Add a semantic user-function invoker path that can execute a `SemanticFunctionBytecode` by `FunctionId` with captures, args, and requested outputs.
 - Route one dynamic callback site through that path when the callee maps to a semantic function already present in the current bytecode product.
-- Keep the centralized legacy helper only for unresolved/external dynamic functions until the registry is complete.
+- Keep the centralized legacy fallback only for unresolved/external dynamic functions until the registry is complete.
 
 ### 2. Collapse Legacy HIR Compatibility Seams
 
@@ -352,10 +353,10 @@ The next high-leverage slice is replacing the remaining dynamic callback fallbac
 
 Concrete plan:
 
-1. Inventory remaining `compile_prepared_user_dispatch` sites and classify which ones are true unresolved/external fallback.
+1. Inventory remaining `compile_legacy_user_dispatch_fallback` sites and classify which ones are true unresolved/external fallback.
 2. Replace non-external dynamic callback sites with registry lookup or typed semantic lowering.
 3. Extend registry-backed lowering beyond direct calls to remaining callable shapes that still need dynamic-name fallback, where layout/capture information is available.
-4. Keep `compile_prepared_user_dispatch` as a fallback only for identities not yet in the semantic registry.
+4. Keep `compile_legacy_user_dispatch_fallback` as a fallback only for identities not yet in the semantic registry.
 5. Add ratchets that callbacks to functions defined in previous REPL inputs do not call `compile_legacy` when semantic bytecode is available.
 
 ## Validation Cadence

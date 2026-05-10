@@ -24,7 +24,7 @@ pub use arrays::{
 pub use calls::{
     build_builtin_expand_at_args, build_builtin_expand_last_args, build_builtin_expand_multi_args,
     build_feval_expand_multi_args, build_user_function_expand_multi_args,
-    compile_prepared_user_dispatch, handle_builtin_call, handle_builtin_expand_at_call,
+    compile_legacy_user_dispatch_fallback, handle_builtin_call, handle_builtin_expand_at_call,
     handle_builtin_expand_last_call, handle_builtin_expand_multi_call, handle_builtin_outcome,
     handle_create_closure, handle_create_semantic_closure, handle_feval_dispatch,
     handle_load_method, handle_load_static_property, handle_method_call,
@@ -548,7 +548,7 @@ pub async fn dispatch_instruction(
                     functions,
                 } => {
                     let arg_count = args.len();
-                    let compiled = compile_prepared_user_dispatch(
+                    let compiled = compile_legacy_user_dispatch_fallback(
                         prepare_named_user_dispatch(&name, &functions, &args, vars)?,
                         &functions,
                     )?;
@@ -633,7 +633,7 @@ pub async fn dispatch_instruction(
                     functions,
                 } => {
                     let arg_count = args.len();
-                    let compiled = compile_prepared_user_dispatch(
+                    let compiled = compile_legacy_user_dispatch_fallback(
                         prepare_named_user_dispatch(&name, &functions, &args, vars)?,
                         &functions,
                     )?;

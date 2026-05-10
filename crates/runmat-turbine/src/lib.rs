@@ -138,9 +138,10 @@ fn execute_user_function_isolated(
         &[],
     )
     .map_err(TurbineError::ExecutionError)?;
-    let compiled =
-        runmat_vm::interpreter::dispatch::compile_prepared_user_dispatch(prepared, &functions)
-            .map_err(|e| execution_error(format!("Failed to compile function: {e}")))?;
+    let compiled = runmat_vm::interpreter::dispatch::compile_legacy_user_dispatch_fallback(
+        prepared, &functions,
+    )
+    .map_err(|e| execution_error(format!("Failed to compile function: {e}")))?;
     let runmat_vm::interpreter::dispatch::CompiledUserDispatch {
         func,
         var_map,

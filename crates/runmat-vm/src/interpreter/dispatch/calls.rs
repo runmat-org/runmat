@@ -41,7 +41,7 @@ pub struct CompiledUserDispatch {
     pub func_vars: Vec<Value>,
 }
 
-pub fn compile_prepared_user_dispatch(
+pub fn compile_legacy_user_dispatch_fallback(
     prepared: PreparedUserDispatch,
     functions: &std::collections::HashMap<String, UserFunction>,
 ) -> Result<CompiledUserDispatch, crate::compiler::CompileError> {
@@ -640,7 +640,7 @@ where
         return Ok(UserCallHandling::Completed);
     }
 
-    let compiled = compile_prepared_user_dispatch(
+    let compiled = compile_legacy_user_dispatch_fallback(
         prepare_named_user_dispatch(name, bytecode_functions, &args, vars)?,
         bytecode_functions,
     )?;

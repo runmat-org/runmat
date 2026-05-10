@@ -191,7 +191,7 @@ async fn invoke_user_function_value(
     let arg_count = args.len();
     call_shared::validate_user_function_arity(name, &func, arg_count)?;
     let prepared = call_shared::prepare_user_call(func, args, vars)?;
-    let compiled = interp_dispatch::compile_prepared_user_dispatch(
+    let compiled = interp_dispatch::compile_legacy_user_dispatch_fallback(
         interp_dispatch::unpack_prepared_user_call(prepared),
         functions,
     )?;
