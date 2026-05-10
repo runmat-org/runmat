@@ -77,6 +77,7 @@ pub struct DispatchMeta<'a> {
     pub instr: &'a Instr,
     pub var_names: &'a HashMap<usize, String>,
     pub bytecode_functions: &'a HashMap<String, crate::bytecode::UserFunction>,
+    pub semantic_registry: &'a crate::bytecode::SemanticFunctionRegistry,
     pub source_id: Option<runmat_hir::SourceId>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
     pub call_counts: &'a [(usize, usize)],
@@ -151,6 +152,7 @@ pub async fn dispatch_instruction(
         instr,
         var_names,
         bytecode_functions,
+        semantic_registry,
         source_id,
         call_arg_spans,
         call_counts,
@@ -185,6 +187,7 @@ pub async fn dispatch_instruction(
             stack,
             vars,
             &context.functions,
+            semantic_registry,
             *pc,
             &mut *clear_value_residency,
             &invoke_user_for_end_expr,
@@ -504,6 +507,7 @@ pub async fn dispatch_instruction(
                     1,
                     &context.functions,
                     bytecode_functions,
+                    semantic_registry,
                 )
                 .await,
                 stack,
@@ -531,6 +535,7 @@ pub async fn dispatch_instruction(
                 *out_count,
                 &context.functions,
                 bytecode_functions,
+                semantic_registry,
             )
             .await?
             {
@@ -587,6 +592,7 @@ pub async fn dispatch_instruction(
                     1,
                     &context.functions,
                     bytecode_functions,
+                    semantic_registry,
                 )
                 .await,
                 stack,
@@ -614,6 +620,7 @@ pub async fn dispatch_instruction(
                 *out_count,
                 &context.functions,
                 bytecode_functions,
+                semantic_registry,
             )
             .await?
             {

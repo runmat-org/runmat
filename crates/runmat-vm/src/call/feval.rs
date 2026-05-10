@@ -1,4 +1,4 @@
-use crate::bytecode::UserFunction;
+use crate::bytecode::{SemanticFunctionRegistry, UserFunction};
 use crate::call::user::try_builtin_fallback_single;
 use crate::interpreter::runner::dynamic_user_functions_snapshot;
 use runmat_builtins::{Closure, Value};
@@ -48,6 +48,7 @@ pub async fn execute_feval(
     requested_outputs: usize,
     context_functions: &HashMap<String, UserFunction>,
     bytecode_functions: &HashMap<String, UserFunction>,
+    semantic_registry: &SemanticFunctionRegistry,
 ) -> Result<FevalDispatch, RuntimeError> {
     match func_val {
         Value::Closure(c) => {
@@ -78,6 +79,22 @@ pub async fn execute_feval(
                 args: call_args,
                 functions,
             })
+        }
+        Value::FunctionHandle(name) => {
+            if let Some(function) = semantic_registry.resolve_name(&name) {
+                if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
+                    function.0,
+                    &args,
+                    requested_outputs,
+                )
+                .await
+                {
+                    return Ok(FevalDispatch::Completed(result?));
+                }
+            }
+            Ok(FevalDispatch::Completed(
+                forward_builtin_feval(Value::FunctionHandle(name), args).await?,
+            ))
         }
         other => Ok(FevalDispatch::Completed(
             forward_builtin_feval(other, args).await?,

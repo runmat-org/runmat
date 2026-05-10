@@ -372,11 +372,12 @@ async fn run_interpreter_inner(
             })
         },
     )));
+    let semantic_registry_for_semantic_invoker = Arc::clone(&semantic_registry);
     let _semantic_function_guard =
         user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |function: usize, args: &[Value], requested_outputs: usize| {
                 let args = args.to_vec();
-                let semantic_registry = Arc::clone(&semantic_registry);
+                let semantic_registry = Arc::clone(&semantic_registry_for_semantic_invoker);
                 Box::pin(async move {
                     invoke_semantic_function_value(
                         function,
@@ -510,6 +511,7 @@ async fn run_interpreter_inner(
                 instr: &bytecode.instructions[pc],
                 var_names: &bytecode.var_names,
                 bytecode_functions: &bytecode.functions,
+                semantic_registry: &semantic_registry,
                 source_id: bytecode.source_id,
                 call_arg_spans: bytecode.call_arg_spans.get(pc).cloned().flatten(),
                 call_counts: &call_counts_snapshot,

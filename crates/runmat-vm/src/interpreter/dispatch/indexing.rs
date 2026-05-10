@@ -455,6 +455,7 @@ pub async fn dispatch_indexing<F>(
     stack: &mut Vec<Value>,
     vars: &mut Vec<Value>,
     functions: &HashMap<String, UserFunction>,
+    semantic_registry: &crate::bytecode::SemanticFunctionRegistry,
     pc: usize,
     mut clear_value_residency: impl FnMut(&Value),
     call_user: F,
@@ -500,8 +501,15 @@ where
                 Value::FunctionHandle(_) | Value::Closure(_) => {
                     let numeric = linear_index_values_to_f64(&raw_indices).await?;
                     let args = numeric.into_iter().map(Value::Num).collect::<Vec<_>>();
-                    match crate::call::feval::execute_feval(base, args, 1, functions, functions)
-                        .await?
+                    match crate::call::feval::execute_feval(
+                        base,
+                        args,
+                        1,
+                        functions,
+                        functions,
+                        semantic_registry,
+                    )
+                    .await?
                     {
                         crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),
                         crate::call::feval::FevalDispatch::InvokeUser {
