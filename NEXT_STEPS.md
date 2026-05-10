@@ -341,7 +341,7 @@ Treat current MIR bytecode gap markers as follows:
 - `dot assignment` / `dot indexing`: static member read/write source now ratchets through semantic member MIR; remaining `IndexKind::Dot` branches appear transitional and should be verified for removal or mapped explicitly if a source reproducer reaches them.
 - `indexed member store-back`: remaining forms after paren/brace store-back; likely object/dot descriptor work.
 - `rvalue` / `operand`: async/future/spawn/temp modeling or unsupported semantic forms; classify by source reproducer before implementing.
-- `{count} call outputs`: call ABI/output-list policy; avoid adding ad hoc bytecode variants until call descriptor design is settled.
+- `{count} call outputs`: semantic user-function multi-assign is ratcheted through `CallSemanticFunctionMulti`; generic rvalue call outputs remain call ABI/output-list policy, so avoid ad hoc bytecode variants until call descriptor design is settled.
 - `call callee`: semantic resolver/DefPath work; do not fall back to string builtin guesses.
 - `aggregate kind`: struct/object aggregate design.
 - `function handle target`: method/DefPath function-handle ABI work.
