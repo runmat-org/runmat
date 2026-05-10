@@ -674,6 +674,7 @@ pub async fn dispatch_instruction(
                     name,
                     out_count: 1,
                     bytecode_functions,
+                    semantic_registry,
                     caller_functions: &mut context.functions,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
@@ -743,6 +744,7 @@ pub async fn dispatch_instruction(
                     name,
                     out_count: *out_count,
                     bytecode_functions,
+                    semantic_registry,
                     caller_functions: &mut context.functions,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
@@ -876,6 +878,7 @@ pub async fn dispatch_instruction(
                     name,
                     out_count: 1,
                     bytecode_functions,
+                    semantic_registry,
                     caller_functions: &mut context.functions,
                     exception: calls::ExceptionRouteContext {
                         try_stack,

@@ -1,5 +1,4 @@
-use crate::bytecode::ArgSpec;
-use crate::bytecode::Instr;
+use crate::bytecode::{ArgSpec, Instr, SemanticFunctionRegistry};
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
@@ -101,6 +100,7 @@ pub struct UserCallContext<'a> {
     pub name: &'a str,
     pub out_count: usize,
     pub bytecode_functions: &'a std::collections::HashMap<String, UserFunction>,
+    pub semantic_registry: &'a SemanticFunctionRegistry,
     pub caller_functions: &'a mut std::collections::HashMap<String, UserFunction>,
     pub exception: ExceptionRouteContext<'a>,
 }
@@ -625,6 +625,7 @@ where
         name,
         out_count,
         bytecode_functions,
+        semantic_registry,
         caller_functions,
         exception,
     } = ctx;
@@ -635,6 +636,16 @@ where
         pc,
     } = exception;
     let arg_count = args.len();
+    if let Some(function) = semantic_registry.resolve_name(name) {
+        if let Some(result) =
+            runmat_runtime::user_functions::try_call_semantic_function(function.0, &args, out_count)
+                .await
+        {
+            push_single_result(stack, result?);
+            return Ok(UserCallHandling::Completed);
+        }
+    }
+
     if let Some(result) = builtin_fallback(name.to_string(), args.clone(), out_count).await? {
         stack.push(result);
         return Ok(UserCallHandling::Completed);
