@@ -1024,7 +1024,11 @@ where
                     {
                         Ok(v) => stack.push(v),
                         Err(_e) => {
-                            let qualified = format!("{}.subsasgn", obj.class_name);
+                            let qualified = format!(
+                                "{}.{}",
+                                obj.class_name,
+                                ObjectIndexOp::Subsasgn.protocol_name()
+                            );
                             let cell = idx_write_slice::build_subsasgn_paren_cell(&numeric)?;
                             let args = vec![
                                 Value::Object(obj),
