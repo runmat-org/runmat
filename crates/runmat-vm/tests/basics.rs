@@ -364,14 +364,13 @@ fn fft_output_supports_end_arithmetic_range_indexing() {
     "#;
     let ast = parse(input).expect("parse fft end range script");
     let hir = lower(&ast).expect("lower fft end range script");
-    let bytecode = runmat_vm::bytecode::compile_legacy(&hir, &HashMap::new())
-        .expect("compile fft end range script");
+    let bytecode = compile_semantic_source(input).expect("compile semantic fft end range script");
     assert!(
         bytecode
             .instructions
             .iter()
-            .any(|ins| matches!(ins, Instr::IndexSliceExpr { .. })),
-        "expected IndexSliceExpr in lowered bytecode, got {:?}",
+            .any(|ins| matches!(ins, Instr::IndexSlice(..))),
+        "expected IndexSlice in semantic bytecode, got {:?}",
         bytecode.instructions
     );
     let vars = execute(&hir).expect("fft end-range indexing should execute");
