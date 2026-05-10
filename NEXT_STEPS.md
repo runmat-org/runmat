@@ -98,6 +98,7 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
 - object protocol strings: `"subsref"`, `"subsasgn"`, `"()"`, `"{}"`, `"."`
   - These are MATLAB protocol concepts, but the VM should not manually assemble ad hoc argument lists for them.
   - Member dispatch now routes the `"."` selector through `ObjectIndexKind::Member`, matching paren/brace selector classification.
+  - The remaining object `subsasgn` paren fallback now gets the `"()"` selector from `ObjectIndexKind::Paren` instead of assembling the string inline.
   - Prefer `ObjectSubsref` / `ObjectSubsasgn` style operations carrying structured index data.
 
 - `classref`

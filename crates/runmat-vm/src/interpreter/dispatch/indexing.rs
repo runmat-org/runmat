@@ -1028,7 +1028,7 @@ where
                             let cell = idx_write_slice::build_subsasgn_paren_cell(&numeric)?;
                             let args = vec![
                                 Value::Object(obj),
-                                Value::String("()".to_string()),
+                                Value::String(ObjectIndexKind::Paren.protocol_name().to_string()),
                                 cell,
                                 rhs,
                             ];

@@ -309,7 +309,7 @@ pub enum ObjectIndexKind {
 }
 
 impl ObjectIndexKind {
-    fn protocol_name(self) -> &'static str {
+    pub(crate) fn protocol_name(self) -> &'static str {
         match self {
             Self::Paren => "()",
             Self::Brace => "{}",
