@@ -218,7 +218,7 @@ First implementation slice:
 Observed older-HIR artifacts worth collapsing:
 
 - `LegacyHirProgram`, `LegacyHirStmt`, and `LegacyHirExpr` remain in VM compiler modules and many tests.
-- `compile_legacy` is no longer re-exported from the `runmat-vm` crate root; remaining direct users go through `runmat_vm::bytecode::compile_legacy` or the centralized dynamic callback fallback.
+- `compile_legacy` is no longer re-exported from the `runmat-vm` crate root; direct test users go through `runmat_vm::bytecode::compile_legacy` and production unresolved callbacks go through the centralized dynamic callback fallback.
 - `RunMatSession` keeps `workspace_bindings` to seed workspace variables across REPL inputs, but those bindings are still plain VM slot indices rather than durable semantic workspace binding IDs.
 - `LoweringResult` still carries both `assembly` and legacy `hir`, `variables`, `functions`, `var_types`, and legacy inference placeholders.
 - LSP analysis still consults legacy variable maps and legacy type helpers.
