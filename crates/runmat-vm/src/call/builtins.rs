@@ -4,6 +4,22 @@ use crate::interpreter::stack::pop_args;
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
 
+#[derive(Clone, Copy)]
+enum SpecialCounterBuiltin {
+    Nargin,
+    Nargout,
+}
+
+impl SpecialCounterBuiltin {
+    fn classify(name: &str) -> Option<Self> {
+        match name {
+            "nargin" => Some(Self::Nargin),
+            "nargout" => Some(Self::Nargout),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(feature = "native-accel")]
 pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
     Ok(runmat_accelerate::prepare_builtin_args(name, args)
@@ -28,21 +44,23 @@ pub fn special_counter_builtin(
     arg_count: usize,
     call_counts: &[(usize, usize)],
 ) -> Result<Option<Value>, RuntimeError> {
-    if name == "nargin" {
-        if arg_count != 0 {
-            return Err(mex("TooManyInputs", "nargin takes no arguments"));
+    match SpecialCounterBuiltin::classify(name) {
+        Some(SpecialCounterBuiltin::Nargin) => {
+            if arg_count != 0 {
+                return Err(mex("TooManyInputs", "nargin takes no arguments"));
+            }
+            let (nin, _) = call_counts.last().cloned().unwrap_or((0, 0));
+            Ok(Some(Value::Num(nin as f64)))
         }
-        let (nin, _) = call_counts.last().cloned().unwrap_or((0, 0));
-        return Ok(Some(Value::Num(nin as f64)));
-    }
-    if name == "nargout" {
-        if arg_count != 0 {
-            return Err(mex("TooManyInputs", "nargout takes no arguments"));
+        Some(SpecialCounterBuiltin::Nargout) => {
+            if arg_count != 0 {
+                return Err(mex("TooManyInputs", "nargout takes no arguments"));
+            }
+            let (_, nout) = call_counts.last().cloned().unwrap_or((0, 0));
+            Ok(Some(Value::Num(nout as f64)))
         }
-        let (_, nout) = call_counts.last().cloned().unwrap_or((0, 0));
-        return Ok(Some(Value::Num(nout as f64)));
+        None => Ok(None),
     }
-    Ok(None)
 }
 
 pub fn requested_output_count(instructions: &[Instr], pc: usize) -> Option<usize> {

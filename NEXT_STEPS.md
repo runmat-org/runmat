@@ -99,6 +99,9 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
   - These are MATLAB protocol concepts, but the VM should not manually assemble ad hoc argument lists for them.
   - Prefer `ObjectSubsref` / `ObjectSubsasgn` style operations carrying structured index data.
 
+- `nargin` / `nargout`
+  - VM call-count handling now classifies these through a special-counter call category instead of inline string branches.
+
 ### Replacement Strategy
 
 1. Inventory all hard-coded builtin/runtime names in compiler and VM dispatch.
