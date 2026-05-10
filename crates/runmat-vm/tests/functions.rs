@@ -783,8 +783,7 @@ fn import_specific_conflict_with_user_function_prefers_local() {
         end
         a = foo();         % should call local function => 33
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 33.0).abs()<1e-9)));
@@ -846,8 +845,7 @@ fn local_function_shadows_class_static_method_under_class_star() {
         end
         v = origin();   % should call local (123), not Point.origin
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 123.0).abs()<1e-9)));
@@ -864,8 +862,7 @@ fn multi_segment_import_builtin_vs_user_function_specific_prefers_user_function(
         end
         a = foo();         % should call the user function -> 77
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 77.0).abs()<1e-9)));
@@ -909,8 +906,7 @@ fn import_nested_package_class_static_method_resolution() {
         end
         v = origin();          % local function shadows any static method named origin
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs()<1e-9)));
