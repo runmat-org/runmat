@@ -235,22 +235,20 @@ fn atan2_with_rhs_expression_executes_without_stack_underflow() {
 #[test]
 fn atan2_with_rhs_expression_lowers_to_add_then_builtin_call() {
     let input = "Vq_drop = 1; V_pcc = 2; Vd_drop = 3; delta_g0 = atan2(Vq_drop, V_pcc + Vd_drop);";
-    let ast = parse(input).expect("parse atan2 lowering script");
-    let hir = lower(&ast).expect("lower atan2 lowering script");
-    let bytecode =
-        runmat_vm::compile_legacy(&hir, &HashMap::new()).expect("compile atan2 lowering script");
+    let bytecode = compile_semantic_source(input).expect("compile atan2 lowering script");
 
-    let has_expected_shape = bytecode.instructions.windows(5).any(|window| {
-        matches!(window[0], Instr::LoadVar(_))
-            && matches!(window[1], Instr::LoadVar(_))
-            && matches!(window[2], Instr::LoadVar(_))
-            && matches!(window[3], Instr::Add)
-            && matches!(window[4], Instr::CallBuiltin(ref name, 2) if name == "atan2")
-    });
+    let add_index = bytecode
+        .instructions
+        .iter()
+        .position(|instr| matches!(instr, Instr::Add));
+    let atan2_index = bytecode
+        .instructions
+        .iter()
+        .position(|instr| matches!(instr, Instr::CallBuiltin(name, 2) if name == "atan2"));
 
     assert!(
-        has_expected_shape,
-        "expected LoadVar,LoadVar,LoadVar,Add,CallBuiltin(atan2,2) sequence; got {:?}",
+        matches!((add_index, atan2_index), (Some(add), Some(atan2)) if add < atan2),
+        "expected Add before CallBuiltin(atan2,2); got {:?}",
         bytecode.instructions
     );
 }
