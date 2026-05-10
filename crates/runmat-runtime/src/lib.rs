@@ -64,8 +64,8 @@ extern "C" {}
 extern crate openblas_src;
 
 pub use dispatcher::{
-    call_builtin, call_builtin_async, call_builtin_async_with_outputs, gather_if_needed,
-    gather_if_needed_async, is_gpu_value, value_contains_gpu,
+    call_builtin, call_builtin_async, call_builtin_async_with_outputs, call_feval_async,
+    call_method_async, gather_if_needed, gather_if_needed_async, is_gpu_value, value_contains_gpu,
 };
 
 #[cfg(feature = "plot-core")]

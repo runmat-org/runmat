@@ -84,11 +84,11 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
   - Prefer a typed `CreateFunctionHandle` / `CreateDynamicFunctionHandle` instruction or runtime ABI call.
 
 - `feval`
-  - Currently special-cased by string name in VM lowering.
-  - Prefer MIR/VM representation for dynamic invocation instead of `name == "feval"` checks.
+  - Semantic lowering and bytecode use typed dynamic-call instructions, and VM runtime forwarding now calls `runmat_runtime::call_feval_async` instead of owning the builtin string.
+  - Remaining name checks should move into resolver/call-fact classification rather than `name == "feval"` lowering branches.
 
 - `call_method`
-  - Currently used for object `subsref` / `subsasgn` plumbing.
+  - VM object plumbing now forwards through `runmat_runtime::call_method_async` instead of owning the builtin string.
   - Prefer typed object dispatch operations.
 
 - `__make_cell`

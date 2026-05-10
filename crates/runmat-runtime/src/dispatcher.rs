@@ -278,6 +278,14 @@ pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, Run
     call_builtin_async_impl(name, args, None).await
 }
 
+pub async fn call_feval_async(args: &[Value]) -> Result<Value, RuntimeError> {
+    call_builtin_async_impl("feval", args, None).await
+}
+
+pub async fn call_method_async(args: &[Value]) -> Result<Value, RuntimeError> {
+    call_builtin_async_impl("call_method", args, None).await
+}
+
 pub async fn call_builtin_async_with_outputs(
     name: &str,
     args: &[Value],

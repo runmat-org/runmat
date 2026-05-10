@@ -327,7 +327,7 @@ pub fn object_protocol_index_cell(
 }
 
 pub async fn call_runtime_method(args: &[Value]) -> Result<Value, RuntimeError> {
-    runmat_runtime::call_builtin_async("call_method", args).await
+    runmat_runtime::call_method_async(args).await
 }
 
 pub async fn call_object_index_method(
