@@ -53,7 +53,7 @@ pub fn collect_call_args(
     pop_args(stack, arg_count)
 }
 
-pub fn special_counter_builtin(
+pub fn vm_intrinsic_counter_builtin(
     name: &str,
     arg_count: usize,
     call_counts: &[(usize, usize)],

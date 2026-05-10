@@ -605,7 +605,8 @@ pub async fn handle_builtin_call(
         pc,
     } = &exception;
     debug::trace_call_builtin(**pc, name, arg_count, stack);
-    if let Some(value) = call_builtins::special_counter_builtin(name, arg_count, call_counts)? {
+    if let Some(value) = call_builtins::vm_intrinsic_counter_builtin(name, arg_count, call_counts)?
+    {
         stack.push(value);
         return Ok(BuiltinHandling::Completed);
     }
