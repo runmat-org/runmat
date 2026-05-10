@@ -292,6 +292,19 @@ fn semantic_chol_builtin_multi_assign_execute() {
 }
 
 #[test]
+fn semantic_lu_builtin_multi_assign_execute() {
+    let bytecode = compile_semantic_source(
+        "[l,u,p] = lu([2 0; 0 3]); z = l(1,1) + l(2,2) + u(1,1) + u(2,2) + p(1,1) + p(2,2);",
+    )
+    .unwrap();
+    let vars = interpret(&bytecode).expect("semantic lu multi-assign should execute");
+
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
+}
+
+#[test]
 fn fprintf_inline_cast_argument_does_not_stack_underflow() {
     let program = r#"
         x = single(3.14);
