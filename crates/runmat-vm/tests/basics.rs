@@ -478,9 +478,9 @@ fn fft_end_arithmetic_out_of_bounds_raises_error() {
         Y = fft(x);
         z = Y(end + 1);
     "#;
-    let ast = parse(input).expect("parse end arithmetic oob script");
-    let hir = lower(&ast).expect("lower end arithmetic oob script");
-    let err = execute(&hir).expect_err("end+1 should be out-of-bounds");
+    let bytecode =
+        compile_semantic_source(input).expect("compile semantic end arithmetic oob script");
+    let err = interpret(&bytecode).expect_err("end+1 should be out-of-bounds");
     assert!(
         err.to_string().contains("Index out of bounds")
             || err.to_string().contains("Subscript out of bounds"),
@@ -500,9 +500,7 @@ fn fft_complex_assignment_covers_scalar_slice_and_multidim_broadcast() {
         F(:, 1) = 9 + 10i;
         ok = (real(Y(1)) == 1) && (imag(Y(1)) == 2) && (real(F(2,1)) == 9) && (imag(F(2,1)) == 10);
     "#;
-    let ast = parse(input).expect("parse complex assignment coverage script");
-    let hir = lower(&ast).expect("lower complex assignment coverage script");
-    let vars = execute(&hir).expect("complex assignment coverage should execute");
+    let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -562,9 +560,7 @@ fn fft_end_arithmetic_supports_variable_offsets() {
         h = Y(1:(end - k));
         ok = (abs(real(a) + 4) < 1e-12) && (numel(h) == 6);
     "#;
-    let ast = parse(input).expect("parse variable end arithmetic script");
-    let hir = lower(&ast).expect("lower variable end arithmetic script");
-    let vars = execute(&hir).expect("variable end arithmetic should execute");
+    let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -581,9 +577,7 @@ fn end_expression_supports_builtin_calls_in_index_context() {
         b = x(max(end-6, 2));
         ok = (a == 50) && (b == 20);
     "#;
-    let ast = parse(input).expect("parse builtin-in-end-expression script");
-    let hir = lower(&ast).expect("lower builtin-in-end-expression script");
-    let vars = execute(&hir).expect("builtin-in-end-expression should execute");
+    let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
@@ -622,9 +616,7 @@ fn fftn_and_ifftn_execute_with_size_vector_and_indexing() {
         B = ifftn(F, [2 2 2]);
         ok = (numel(s) == 4) && (round(real(B(1))) == 1);
     "#;
-    let ast = parse(input).expect("parse fftn/ifftn script");
-    let hir = lower(&ast).expect("lower fftn/ifftn script");
-    let vars = execute(&hir).expect("fftn/ifftn script should execute");
+    let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
