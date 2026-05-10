@@ -147,6 +147,7 @@ Current state:
 - Runtime and Turbine callback paths resolve callback names through `SemanticFunctionRegistry` to stable session `FunctionId`s, then invoke `SemanticFunctionBytecode` by semantic identity when the current bytecode/session product contains the callee.
 - `RunMatSession` persists a semantic function registry across successful interactive inputs and remaps per-input function IDs into session-unique IDs before execution.
 - Semantic function registry entries retain source IDs so callback diagnostics and replacement logic can stop depending on legacy HIR statements.
+- `SemanticFunctionRegistry` indexes functions by defining source so session-owned replacement/removal can operate on semantic metadata rather than legacy HIR statements.
 - Redefining a function in the session semantic registry replaces the prior registry entry for that name.
 - Direct calls to functions defined in previous interactive inputs resolve through the session semantic registry and lower to `CallSemanticFunction`.
 - Direct multi-output calls to functions defined in previous interactive inputs resolve through the session semantic registry and lower to `CallSemanticFunctionMulti`.
@@ -350,7 +351,7 @@ The next high-leverage slice is replacing the remaining legacy function-definiti
 Concrete plan:
 
 1. Inventory remaining users of `legacy_function_definitions` and which ones now have equivalent semantic registry data.
-2. Extend `SemanticFunctionRegistry` with ownership metadata so replacing grouped/nested definitions can retire related session entries without depending on legacy HIR statements.
+2. Use `SemanticFunctionRegistry` source ownership to retire grouped/nested definitions when their owning source is replaced.
 3. Extend registry-backed lowering beyond direct calls to remaining callable shapes that still need dynamic-name fallback, where layout/capture information is available.
 4. Keep `compile_prepared_user_dispatch` as a fallback only for identities not yet in the semantic registry.
 5. Add ratchets that callbacks to functions defined in previous REPL inputs do not call `compile_legacy` when semantic bytecode is available.

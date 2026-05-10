@@ -63,19 +63,29 @@ pub struct SemanticFunctionRegistry {
     pub functions: HashMap<FunctionId, SemanticFunctionBytecode>,
     #[serde(default)]
     pub names: HashMap<String, FunctionId>,
+    #[serde(default)]
+    pub source_functions: HashMap<runmat_hir::SourceId, Vec<FunctionId>>,
 }
 
 impl SemanticFunctionRegistry {
     pub fn new(functions: HashMap<FunctionId, SemanticFunctionBytecode>) -> Self {
         let mut names = HashMap::new();
+        let mut source_functions: HashMap<runmat_hir::SourceId, Vec<FunctionId>> = HashMap::new();
         let mut ids: Vec<_> = functions.keys().copied().collect();
         ids.sort_by_key(|id| id.0);
         for id in ids {
             if let Some(function) = functions.get(&id) {
                 names.entry(function.display_name.clone()).or_insert(id);
+                if let Some(source_id) = function.source_id {
+                    source_functions.entry(source_id).or_default().push(id);
+                }
             }
         }
-        Self { functions, names }
+        Self {
+            functions,
+            names,
+            source_functions,
+        }
     }
 
     pub fn get(&self, function: FunctionId) -> Option<&SemanticFunctionBytecode> {
@@ -91,9 +101,39 @@ impl SemanticFunctionRegistry {
             .names
             .insert(function.display_name.clone(), function.function)
         {
-            self.functions.remove(&previous);
+            self.remove(previous);
         }
-        self.functions.insert(function.function, function);
+        let function_id = function.function;
+        if let Some(source_id) = function.source_id {
+            let functions = self.source_functions.entry(source_id).or_default();
+            if !functions.contains(&function_id) {
+                functions.push(function_id);
+            }
+        }
+        self.functions.insert(function_id, function);
+    }
+
+    pub fn remove(&mut self, function: FunctionId) -> Option<SemanticFunctionBytecode> {
+        let removed = self.functions.remove(&function)?;
+        if self.names.get(&removed.display_name) == Some(&function) {
+            self.names.remove(&removed.display_name);
+        }
+        if let Some(source_id) = removed.source_id {
+            if let Some(functions) = self.source_functions.get_mut(&source_id) {
+                functions.retain(|id| *id != function);
+                if functions.is_empty() {
+                    self.source_functions.remove(&source_id);
+                }
+            }
+        }
+        Some(removed)
+    }
+
+    pub fn functions_for_source(&self, source: runmat_hir::SourceId) -> &[FunctionId] {
+        self.source_functions
+            .get(&source)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
     }
 }
 

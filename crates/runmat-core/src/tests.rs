@@ -1760,6 +1760,20 @@ fn cellfun_session_function_uses_semantic_registry() {
             .is_some(),
         "session semantic callback target should retain source metadata"
     );
+    let inc_source = prepared
+        .bytecode
+        .semantic_function_registry
+        .get(inc_id)
+        .and_then(|function| function.source_id)
+        .expect("inc source metadata");
+    assert!(
+        prepared
+            .bytecode
+            .semantic_function_registry
+            .functions_for_source(inc_source)
+            .contains(&inc_id),
+        "session semantic callback target should be indexed by source ownership"
+    );
 
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
