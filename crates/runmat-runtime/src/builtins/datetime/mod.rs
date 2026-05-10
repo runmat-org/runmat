@@ -9,7 +9,7 @@ use runmat_builtins::{
 use crate::builtins::common::tensor;
 use crate::{
     build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError, OBJECT_INDEX_MEMBER,
-    OBJECT_INDEX_PAREN,
+    OBJECT_INDEX_PAREN, OBJECT_SUBSASGN_METHOD, OBJECT_SUBSREF_METHOD,
 };
 
 const BUILTIN_NAME: &str = "datetime";
@@ -46,7 +46,16 @@ fn ensure_datetime_class_registered() {
 
         let mut methods = HashMap::new();
         for name in [
-            "subsref", "subsasgn", "plus", "minus", "eq", "ne", "lt", "le", "gt", "ge",
+            OBJECT_SUBSREF_METHOD,
+            OBJECT_SUBSASGN_METHOD,
+            "plus",
+            "minus",
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
         ] {
             methods.insert(
                 name.to_string(),

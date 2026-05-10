@@ -47,6 +47,8 @@ pub type BuiltinResult<T> = Result<T, RuntimeError>;
 pub(crate) const OBJECT_INDEX_PAREN: &str = "()";
 pub(crate) const OBJECT_INDEX_BRACE: &str = "{}";
 pub(crate) const OBJECT_INDEX_MEMBER: &str = ".";
+pub(crate) const OBJECT_SUBSREF_METHOD: &str = "subsref";
+pub(crate) const OBJECT_SUBSASGN_METHOD: &str = "subsasgn";
 
 pub use runtime_error::{
     build_runtime_error, replay_error, replay_error_with_source, CallFrame, ErrorContext,
@@ -264,7 +266,7 @@ async fn subsasgn_dispatch(
 ) -> crate::BuiltinResult<Value> {
     match &obj {
         Value::Object(o) => {
-            let qualified = format!("{}.subsasgn", o.class_name);
+            let qualified = format!("{}.{}", o.class_name, OBJECT_SUBSASGN_METHOD);
             Ok(
                 crate::call_builtin_async(&qualified, &[obj, Value::String(kind), payload, rhs])
                     .await?,
@@ -276,7 +278,7 @@ async fn subsasgn_dispatch(
                 Value::Object(o) => o.class_name.clone(),
                 _ => h.class_name.clone(),
             };
-            let qualified = format!("{class_name}.subsasgn");
+            let qualified = format!("{class_name}.{OBJECT_SUBSASGN_METHOD}");
             Ok(
                 crate::call_builtin_async(&qualified, &[obj, Value::String(kind), payload, rhs])
                     .await?,
@@ -290,7 +292,7 @@ async fn subsasgn_dispatch(
 async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     match &obj {
         Value::Object(o) => {
-            let qualified = format!("{}.subsref", o.class_name);
+            let qualified = format!("{}.{}", o.class_name, OBJECT_SUBSREF_METHOD);
             Ok(crate::call_builtin_async(&qualified, &[obj, Value::String(kind), payload]).await?)
         }
         Value::HandleObject(h) => {
@@ -299,7 +301,7 @@ async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::Bu
                 Value::Object(o) => o.class_name.clone(),
                 _ => h.class_name.clone(),
             };
-            let qualified = format!("{class_name}.subsref");
+            let qualified = format!("{class_name}.{OBJECT_SUBSREF_METHOD}");
             Ok(crate::call_builtin_async(&qualified, &[obj, Value::String(kind), payload]).await?)
         }
         other => Err((format!("subsref: receiver must be object, got {other:?}")).into()),
@@ -685,21 +687,21 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
     let overidx_props = std::collections::HashMap::new();
     let mut overidx_methods = std::collections::HashMap::new();
     overidx_methods.insert(
-        "subsref".to_string(),
+        OBJECT_SUBSREF_METHOD.to_string(),
         MethodDef {
-            name: "subsref".to_string(),
+            name: OBJECT_SUBSREF_METHOD.to_string(),
             is_static: false,
             access: Access::Public,
-            function_name: "OverIdx.subsref".to_string(),
+            function_name: format!("OverIdx.{OBJECT_SUBSREF_METHOD}"),
         },
     );
     overidx_methods.insert(
-        "subsasgn".to_string(),
+        OBJECT_SUBSASGN_METHOD.to_string(),
         MethodDef {
-            name: "subsasgn".to_string(),
+            name: OBJECT_SUBSASGN_METHOD.to_string(),
             is_static: false,
             access: Access::Public,
-            function_name: "OverIdx.subsasgn".to_string(),
+            function_name: format!("OverIdx.{OBJECT_SUBSASGN_METHOD}"),
         },
     );
     runmat_builtins::register_class(ClassDef {
