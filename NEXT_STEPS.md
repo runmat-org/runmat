@@ -186,6 +186,7 @@ Current state:
 - `feval` multi-output calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
 - Expanded `feval` calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
 - Expanded multi-output `feval` calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
+- Multi-output `feval` fallback dispatch now checks the semantic registry before invoking the centralized legacy named fallback.
 - `feval` closure dispatch resolves closure names through the semantic registry when an embedded semantic function id is unavailable.
 - Legacy named user-call bytecode dispatch now checks the semantic registry before builtin fallback or `compile_legacy_user_dispatch_fallback`.
 - Multi-output `feval` legacy user fallback is centralized behind one dispatch helper instead of duplicated in direct and expanded `feval` bytecode handlers.

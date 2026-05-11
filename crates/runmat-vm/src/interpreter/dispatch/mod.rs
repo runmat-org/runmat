@@ -555,6 +555,7 @@ pub async fn dispatch_instruction(
                         name,
                         args,
                         functions,
+                        semantic_registry,
                         *out_count,
                         |bc, vars, name, out_count, in_count| {
                             interpret_function_counts(bc, vars, name, out_count, in_count)
@@ -624,6 +625,7 @@ pub async fn dispatch_instruction(
                         name,
                         args,
                         functions,
+                        semantic_registry,
                         *out_count,
                         |bc, vars, name, out_count, in_count| {
                             interpret_function_counts(bc, vars, name, out_count, in_count)

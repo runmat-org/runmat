@@ -174,6 +174,7 @@ pub async fn handle_feval_user_multi_output<IF, IFFut>(
     name: String,
     args: Vec<Value>,
     functions: std::collections::HashMap<String, UserFunction>,
+    semantic_registry: &SemanticFunctionRegistry,
     out_count: usize,
     interpret_counts: IF,
 ) -> Result<(), RuntimeError>
@@ -182,6 +183,16 @@ where
     IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
 {
     let arg_count = args.len();
+    if let Some(function) = semantic_registry.resolve_name(&name) {
+        if let Some(result) =
+            runmat_runtime::user_functions::try_call_semantic_function(function.0, &args, out_count)
+                .await
+        {
+            stack.push(result?);
+            return Ok(());
+        }
+    }
+
     let compiled = compile_legacy_named_user_dispatch_fallback(&name, &functions, &args, vars)?;
     let CompiledUserDispatch {
         func,
