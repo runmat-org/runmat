@@ -692,12 +692,78 @@ impl Compiler {
                 self.emit(Instr::Pop);
                 Ok(())
             }
-            MirStmtKind::WorkspaceEffect { .. } | MirStmtKind::EnvironmentEffect(_) => Ok(()),
+            MirStmtKind::WorkspaceEffect { effect, bindings } => {
+                self.compile_mir_workspace_effect(effect, bindings)
+            }
+            MirStmtKind::EnvironmentEffect(_) => Ok(()),
             MirStmtKind::PlaceMutation(_) => Ok(()),
             MirStmtKind::MultiAssign { targets, value } => {
                 self.compile_mir_multi_assign(targets, value)
             }
         }
+    }
+
+    fn compile_mir_workspace_effect(
+        &mut self,
+        effect: &runmat_hir::WorkspaceEffect,
+        bindings: &[runmat_mir::MirLocalId],
+    ) -> Result<(), CompileError> {
+        let (ids, names) = self.mir_workspace_effect_names(bindings)?;
+        match effect {
+            runmat_hir::WorkspaceEffect::MutatesGlobal => {
+                self.emit(Instr::DeclareGlobalNamed(ids, names));
+            }
+            runmat_hir::WorkspaceEffect::MutatesPersistent => {
+                self.emit(Instr::DeclarePersistentNamed(ids, names));
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn mir_workspace_effect_names(
+        &self,
+        bindings: &[runmat_mir::MirLocalId],
+    ) -> Result<(Vec<usize>, Vec<String>), CompileError> {
+        let layout = self
+            .layout
+            .as_ref()
+            .ok_or_else(|| CompileError::new("compiler missing VM layout"))?;
+        let function = self
+            .function
+            .ok_or_else(|| CompileError::new("compiler missing selected function"))?;
+        let function_layout = layout.functions.get(&function).ok_or_else(|| {
+            CompileError::new(format!("missing VM layout for function {function:?}"))
+        })?;
+        let mut ids = Vec::with_capacity(bindings.len());
+        let mut names = Vec::with_capacity(bindings.len());
+        for binding in bindings {
+            let slot = function_layout
+                .mir_local_slots
+                .get(binding)
+                .ok_or_else(|| {
+                    CompileError::new(format!("missing VM slot for MIR local {binding:?}"))
+                })?;
+            let binding_id = function_layout
+                .binding_slots
+                .iter()
+                .find_map(|(binding_id, binding_slot)| {
+                    (*binding_slot == *slot).then_some(*binding_id)
+                })
+                .ok_or_else(|| {
+                    CompileError::new(format!("missing binding for VM slot {:?}", slot))
+                })?;
+            let name = layout
+                .storage_bindings
+                .get(&binding_id)
+                .map(|binding| binding.name.clone())
+                .ok_or_else(|| {
+                    CompileError::new(format!("missing binding name for {binding_id:?}"))
+                })?;
+            ids.push(slot.0);
+            names.push(name);
+        }
+        Ok((ids, names))
     }
 
     fn compile_mir_multi_assign(

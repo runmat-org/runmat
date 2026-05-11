@@ -1513,32 +1513,22 @@ fn nested_try_catch_rethrow_unified_exception_ids() {
 }
 
 #[test]
-#[ignore]
 fn globals_basic_and_shadowing() {
     let prog = "global G; G = 5; function y = f(x); global G; y = G + x; end; a = f(3);";
-    let ast = runmat_parser::parse(prog).unwrap();
-    let hir = lower(&ast).unwrap();
-    let res = execute(&hir);
-    if let Ok(vars) = res {
-        assert!(vars
-            .iter()
-            .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 8.0).abs() < 1e-12)));
-    }
+    let vars = execute_semantic_source(prog);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 8.0).abs() < 1e-12)));
 }
 
 #[test]
-#[ignore]
 fn persistents_init_once_across_calls() {
     let prog = "function y = counter(); persistent C; if C==0; C = 0; end; C = C + 1; y = C; end; a = counter(); b = counter(); c = counter();";
-    let ast = runmat_parser::parse(prog).unwrap();
-    let hir = lower(&ast).unwrap();
-    let res = execute(&hir);
-    if let Ok(vars) = res {
-        // Expect last value 3 somewhere in vars
-        assert!(vars
-            .iter()
-            .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-12)));
-    }
+    let vars = execute_semantic_source(prog);
+    // Expect last value 3 somewhere in vars
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-12)));
 }
 
 #[test]
