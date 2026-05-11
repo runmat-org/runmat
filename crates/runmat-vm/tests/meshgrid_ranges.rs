@@ -2,9 +2,9 @@
 mod test_helpers;
 
 use runmat_builtins::Value;
-use runmat_parser::parse;
+use runmat_vm::Instr;
+use test_helpers::compile_semantic_source;
 use test_helpers::execute_semantic_source;
-use test_helpers::lower;
 
 #[test]
 fn colon_range_produces_row_vector() {
@@ -42,29 +42,13 @@ fn meshgrid_accepts_colon_ranges() {
 
 #[test]
 fn meshgrid_accepts_precomputed_ranges() {
-    let ast = parse("a = -2:0.08:2; b = -2:0.08:2; [X, Y] = meshgrid(a, b);").unwrap();
-    let hir = lower(&ast).unwrap();
-    // Sanity-check the lowering: we should be calling the meshgrid builtin with args [Var(a), Var(b)].
-    match hir.body.last().expect("expected statements") {
-        runmat_hir::LegacyHirStmt::MultiAssign(_vars, expr, _suppressed, _) => match &expr.kind {
-            runmat_hir::LegacyHirExprKind::FuncCall(name, args) => {
-                assert_eq!(name, "meshgrid");
-                assert_eq!(args.len(), 2);
-                assert!(matches!(
-                    args[0].kind,
-                    runmat_hir::LegacyHirExprKind::Var(_)
-                ));
-                assert!(matches!(
-                    args[1].kind,
-                    runmat_hir::LegacyHirExprKind::Var(_)
-                ));
-            }
-            other => panic!("expected FuncCall(meshgrid, ...), got {other:?}"),
-        },
-        other => panic!("expected final stmt to be MultiAssign, got {other:?}"),
-    }
-    let vars =
-        execute_semantic_source("a = -2:0.08:2; b = -2:0.08:2; [X, Y] = meshgrid(a, b);").unwrap();
+    let source = "a = -2:0.08:2; b = -2:0.08:2; [X, Y] = meshgrid(a, b);";
+    let bytecode = compile_semantic_source(source).unwrap();
+    assert!(bytecode.instructions.iter().any(|instr| {
+        matches!(instr, Instr::CallBuiltin(name, 2) if name == "meshgrid")
+            || matches!(instr, Instr::CallBuiltinExpandMulti(name, specs) if name == "meshgrid" && specs.len() == 2)
+    }));
+    let vars = execute_semantic_source(source).unwrap();
     let shapes: Vec<Vec<usize>> = vars
         .iter()
         .filter_map(|v| match v {
