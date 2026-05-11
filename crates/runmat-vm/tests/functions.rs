@@ -1061,22 +1061,18 @@ fn user_function_vector_index_expansion() {
 }
 
 #[test]
-#[ignore]
 fn end_minus_one_1d_slice_collect() {
     let program = "A = [1 2 3]; B = A(1:1:end-1); s = sum(B);";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
 }
 
 #[test]
-#[ignore]
 fn end_minus_one_1d_slice_assign_broadcast() {
     let program = "A = [1 2 3 4]; A(2:1:end-1) = 9; r = sum(A);";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // A becomes [1 9 9 4] => sum 23
     assert!(vars
         .iter()
@@ -1084,39 +1080,33 @@ fn end_minus_one_1d_slice_assign_broadcast() {
 }
 
 #[test]
-#[ignore]
 fn multidim_range_end_assign() {
     // Assign on second dim using range with end-1
-    let program = "A = [1 2 3; 4 5 6]; A(:,2:2:end-1) = 9; s = sum(A);";
+    let program = "A = [1 2 3; 4 5 6]; A(:,2:2:end-1) = 9; s = sum(sum(A));";
     // Original A sum is 21. We set column 2 to 9 across all rows: [1 9 3; 4 9 6] => sum 32
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 32.0).abs() < 1e-9)));
 }
 
 #[test]
-#[ignore]
 fn multidim_range_end_assign_non_scalar_rhs_broadcast() {
     // 2x3; assign the middle column selection with a 2x1 rhs, which should broadcast along the selection length
-    let program = "A = [1 2 3; 4 5 6]; B = [7;8]; A(:,2:2:end-1) = B; s = sum(A);";
+    let program = "A = [1 2 3; 4 5 6]; B = [7;8]; A(:,2:2:end-1) = B; s = sum(sum(A));";
     // Becomes [1 7 3; 4 8 6] => sum 29
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 29.0).abs() < 1e-9)));
 }
 
 #[test]
-#[ignore]
 fn mixed_range_end_assign_vector_broadcast() {
     // 3x4 matrix; select rows 2:end (rows {2,3}) and cols 1:2:end-1 (cols {1,3}); assign 2x1 vector broadcast across selected cols
     let program =
-        "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [100;200]; A(2:end, 1:2:end-1) = B; s = sum(A);";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+        "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [100;200]; A(2:end, 1:2:end-1) = B; s = sum(sum(A));";
+    let vars = execute_semantic_source(program);
     // Expected sum 646 (see analysis)
     assert!(vars
         .iter()
@@ -1124,14 +1114,12 @@ fn mixed_range_end_assign_vector_broadcast() {
 }
 
 #[test]
-#[ignore]
 fn mixed_range_end_assign_matrix_rhs_exact_shape() {
     // Assign 2x2 block with exact-shaped RHS
     let program =
-        "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [1 3; 2 4]; A(2:end, 1:2:end-1) = B; s = sum(A);";
+        "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [1 3; 2 4]; A(2:end, 1:2:end-1) = B; s = sum(sum(A));";
     // Note: [1 3; 2 4] in MATLAB column-major maps to data [1,2,3,4] in our Tensor internal
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // New values: positions (2,1)=1,(3,1)=2,(2,3)=3,(3,3)=4. Change from original 5,9,7,11 -> delta = (1-5)+(2-9)+(3-7)+(4-11) = -22; sum 78-22=56
     assert!(vars
         .iter()
@@ -1139,22 +1127,18 @@ fn mixed_range_end_assign_matrix_rhs_exact_shape() {
 }
 
 #[test]
-#[ignore]
 fn mixed_range_end_assign_shape_mismatch_error() {
     // RHS shape 3x1 does not match rows 2:end (len 2) and cannot broadcast
     let program = "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [1;2;3]; A(2:end, 1:2:end-1) = B;";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let res = execute(&hir);
+    let res = execute_semantic_source_result(program);
     assert!(res.is_err());
 }
 
 #[test]
-#[ignore]
 fn broadcasting_roundtrip_property_like() {
     // After assignment with broadcasted column vector, selected columns equal the vector
     let program = "A = zeros(3,4); v = [7;8;9]; A(:, 1:2:end-1) = v; x = A(:,1); y = A(:,3);";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // Expect 7,8,9 present for x and y
     let mut count = 0;
     for v in vars {
