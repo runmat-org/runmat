@@ -1364,11 +1364,7 @@ impl Compiler {
             | RequestedOutputCount::UnknownDynamic
             | RequestedOutputCount::Exactly(1)
             | RequestedOutputCount::AtLeast(1) => {}
-            RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count) => {
-                return Err(self.compile_error(format!(
-                    "MIR bytecode lowering for {count} call outputs is not implemented yet"
-                )))
-            }
+            RequestedOutputCount::Exactly(_) | RequestedOutputCount::AtLeast(_) => {}
         }
 
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
@@ -1380,8 +1376,30 @@ impl Compiler {
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
+                let requested_outputs = match call.requested_outputs {
+                    RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count)
+                        if count > 1 =>
+                    {
+                        Some(count)
+                    }
+                    _ => None,
+                };
                 if has_expansion {
-                    self.emit(Instr::CallSemanticFunctionExpandMulti(*function, specs));
+                    if let Some(output_count) = requested_outputs {
+                        self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
+                            *function,
+                            specs,
+                            output_count,
+                        ));
+                    } else {
+                        self.emit(Instr::CallSemanticFunctionExpandMulti(*function, specs));
+                    }
+                } else if let Some(output_count) = requested_outputs {
+                    self.emit(Instr::CallSemanticFunctionMulti(
+                        *function,
+                        call.args.len(),
+                        output_count,
+                    ));
                 } else {
                     self.emit(Instr::CallSemanticFunction(*function, call.args.len()));
                 }

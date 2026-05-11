@@ -143,6 +143,21 @@ fn lower_call_arg(
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<MirCallArg, SemanticError> {
+    if let HirExprKind::Call(call) = &arg.kind {
+        let requested_count = match &call.requested_outputs {
+            RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count) => *count,
+            _ => 1,
+        };
+        if requested_count > 1 {
+            let operand = lower_operand_with_replacements(ctx, arg, temps, await_replacements)?;
+            return Ok(MirCallArg::Expansion {
+                base: operand,
+                indices: Vec::new(),
+                expand_all: true,
+            });
+        }
+    }
+
     if matches!(
         &arg.kind,
         HirExprKind::Index(_, indexing)

@@ -400,6 +400,7 @@ where
 
             let expanded = if spec.expand_all {
                 match base {
+                    Value::OutputList(outputs) => outputs,
                     Value::Cell(ca) => expand_all_cell(&ca)?,
                     other @ Value::Object(_) => expand_object_all(other).await?,
                     _ => {

@@ -52,6 +52,7 @@ struct SemanticCtx {
     top_level_await: Vec<bool>,
     compatibility_mode: Option<crate::CompatibilityMode>,
     function_names: HashMap<String, FunctionId>,
+    function_input_signatures: HashMap<String, (usize, bool)>,
     external_function_names: HashMap<String, FunctionId>,
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
 }
@@ -131,6 +132,7 @@ impl SemanticCtx {
             top_level_await: Vec::new(),
             compatibility_mode: context.compatibility_mode.clone(),
             function_names: HashMap::new(),
+            function_input_signatures: HashMap::new(),
             external_function_names: context.semantic_functions.clone(),
             captures: HashMap::new(),
         };
@@ -147,8 +149,9 @@ impl SemanticCtx {
         });
 
         for stmt in &prog.body {
-            if let AstStmt::Function { name, .. } = stmt {
+            if let AstStmt::Function { name, params, .. } = stmt {
                 let id = ctx.reserve_function_name(name);
+                ctx.reserve_function_input_signature(name, params);
                 ctx.assembly.modules[ctx.module.0]
                     .top_level_functions
                     .push(id);
@@ -272,6 +275,13 @@ impl SemanticCtx {
         let id = self.take_function_id();
         self.function_names.insert(name.to_string(), id);
         id
+    }
+
+    fn reserve_function_input_signature(&mut self, name: &str, params: &[String]) {
+        let has_varargin = params.last().is_some_and(|param| param == "varargin");
+        let fixed_count = params.len() - usize::from(has_varargin);
+        self.function_input_signatures
+            .insert(name.to_string(), (fixed_count, has_varargin));
     }
 
     fn take_function_id(&mut self) -> FunctionId {
@@ -491,8 +501,9 @@ impl SemanticCtx {
             false,
             |ctx| {
                 for stmt in body {
-                    if let AstStmt::Function { name, .. } = stmt {
+                    if let AstStmt::Function { name, params, .. } = stmt {
                         ctx.reserve_function_name(name);
+                        ctx.reserve_function_input_signature(name, params);
                     }
                 }
                 let mut param_ids = Vec::new();
@@ -1028,10 +1039,7 @@ impl SemanticCtx {
                     }
                 }),
             AstExpr::FuncCall(name, args, _) => {
-                let args: Vec<HirExpr> = args
-                    .iter()
-                    .map(|arg| self.lower_call_argument(arg))
-                    .collect::<Result<_, _>>()?;
+                let args: Vec<HirExpr> = self.lower_call_arguments_for_name(name, args)?;
                 if name == AWAIT_EXTENSION_NAME && args.len() == 1 {
                     if matches!(
                         self.compatibility_mode,
@@ -1253,7 +1261,7 @@ impl SemanticCtx {
                         }
                         let mut call_args: Vec<HirExpr> = args
                             .iter()
-                            .map(|arg| self.lower_call_argument(arg))
+                            .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
                             .collect::<Result<_, _>>()?;
                         if let Some(class_argument) = method.implicit_class_argument {
                             call_args.push(HirExpr {
@@ -1279,7 +1287,7 @@ impl SemanticCtx {
                 let mut call_args = vec![self.lower_expr_semantic(base)?];
                 call_args.extend(
                     args.iter()
-                        .map(|arg| self.lower_call_argument(arg))
+                        .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
                         .collect::<Result<Vec<_>, _>>()?,
                 );
                 HirExprKind::Call(self.call_for_name(
@@ -1309,7 +1317,42 @@ impl SemanticCtx {
         self.lower_indexing_with_context(indices, kind, IndexResultContext::ReadSingle)
     }
 
-    fn lower_call_argument(&mut self, arg: &AstExpr) -> Result<HirExpr, SemanticError> {
+    fn lower_call_arguments_for_name(
+        &mut self,
+        name: &str,
+        args: &[AstExpr],
+    ) -> Result<Vec<HirExpr>, SemanticError> {
+        let expanded_last_outputs =
+            self.function_input_signatures
+                .get(name)
+                .and_then(|(fixed_inputs, has_varargin)| {
+                    if !has_varargin && *fixed_inputs > args.len() {
+                        Some(*fixed_inputs - args.len() + 1)
+                    } else {
+                        None
+                    }
+                });
+
+        args.iter()
+            .enumerate()
+            .map(|(index, arg)| {
+                let requested_outputs = match (
+                    Some(index) == args.len().checked_sub(1),
+                    expanded_last_outputs,
+                ) {
+                    (true, Some(count)) => RequestedOutputCount::Exactly(count),
+                    _ => RequestedOutputCount::One,
+                };
+                self.lower_call_argument(arg, requested_outputs)
+            })
+            .collect()
+    }
+
+    fn lower_call_argument(
+        &mut self,
+        arg: &AstExpr,
+        requested_outputs: RequestedOutputCount,
+    ) -> Result<HirExpr, SemanticError> {
         if let AstExpr::IndexCell(base, indices, _) = arg {
             return Ok(HirExpr {
                 id: self.alloc_expr_id(),
@@ -1324,7 +1367,7 @@ impl SemanticCtx {
                 span: arg.span(),
             });
         }
-        self.lower_expr_semantic(arg)
+        self.lower_expr_semantic_requested(arg, requested_outputs)
     }
 
     fn lower_indexing_with_context(

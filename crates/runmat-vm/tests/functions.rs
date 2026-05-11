@@ -1464,12 +1464,10 @@ fn bitwise_or_row_vectors() {
 }
 
 #[test]
-#[ignore]
 fn function_return_propagation_partial_fill() {
     // g returns [1,2,3]; h takes 2 inputs; ensure leftmost two feed h
     let program = "function [a,b,c] = g(); a=1; b=2; c=3; end; function y = h(x1,x2); y = x1*10 + x2; end; r = h(g());";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // 1*10 + 2 = 12
     assert!(vars
         .iter()
@@ -1477,12 +1475,10 @@ fn function_return_propagation_partial_fill() {
 }
 
 #[test]
-#[ignore]
 fn nested_function_return_propagation_mixed_with_fixed() {
     // g()->[4,5]; f(x,p,z)=x+p+z; call f(1, g()) => 1+4+5=10
     let program = "function [a,b] = g(); a=4; b=5; end; function y = f(x,p,z); y = x + p + z; end; r = f(1, g());";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
