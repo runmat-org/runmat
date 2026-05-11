@@ -699,7 +699,6 @@ fn import_specific_resolution_for_builtin() {
 }
 
 #[test]
-#[ignore]
 fn import_ambiguity_specific_conflict_errors() {
     // Two specifics that map same unqualified name should cause compile-time ambiguity on unqualified call
     // Use classes with same method name as proxies (no actual builtins needed); compile should detect ambiguity

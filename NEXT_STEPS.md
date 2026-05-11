@@ -406,7 +406,7 @@ Current ratchet status:
 - VM functions tensor indexing/write ratchets for logical mask assignment, gather/scatter roundtrip, shape broadcasting, column-major RHS mapping, and range/`end` read/write cases now run semantic bytecode; `functions.rs` ignored count is down to 11.
 - VM functions struct `isfield`/`fieldnames` and computed integer column-slice read/write ratchets now run semantic bytecode; string aggregate concatenation and `containers.Map` package calls remain legacy-executed.
 - VM functions type-class static `zeros` calls for `double.zeros` and `logical.zeros` now resolve through primitive class metadata and run through semantic bytecode.
-- VM functions nested try/catch `rethrow` exception propagation now runs semantic bytecode; `functions.rs` ignored count is down to 10.
+- VM functions nested try/catch `rethrow` exception propagation now runs semantic bytecode; the specific-import ambiguity compile-time guard is enabled, and `functions.rs` ignored count is down to 9.
 - Operator-overload diagnostic bytecode in VM functions tests now uses semantic compilation instead of `compile_legacy`.
 - Remaining test `compile_legacy` references are still tied to legacy execution helpers, native-accel graph construction, legacy multi-output bytecode shape assertions, or Turbine/accelerate legacy suites.
 - Remaining production `compile_legacy` usage is centralized behind `compile_legacy_user_dispatch_fallback`; the remaining transitional API is `runmat_vm::bytecode::compile::compile_legacy` for legacy tests and fallback plumbing.
