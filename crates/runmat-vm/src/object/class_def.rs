@@ -50,6 +50,7 @@ pub fn register_class(
                 is_static,
                 access,
                 function_name: fname,
+                implicit_class_argument: None,
             },
         );
     }

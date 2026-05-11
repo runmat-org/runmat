@@ -1244,20 +1244,29 @@ impl SemanticCtx {
             AstExpr::DottedInvoke(base, name, args, _)
             | AstExpr::MethodCall(base, name, args, _) => {
                 if let AstExpr::Ident(class_name, _) = &**base {
-                    if name == "zeros" && is_static_method_class_name(class_name) {
+                    if let Some((method, _)) = runmat_builtins::lookup_method(class_name, name) {
+                        if !method.is_static || method.access != runmat_builtins::Access::Public {
+                            return Err(SemanticError::new(format!(
+                                "method {class_name}.{name} is not accessible as a public static method"
+                            ))
+                            .with_span(span));
+                        }
                         let mut call_args: Vec<HirExpr> = args
                             .iter()
                             .map(|arg| self.lower_call_argument(arg))
                             .collect::<Result<_, _>>()?;
-                        call_args.push(HirExpr {
-                            id: self.alloc_expr_id(),
-                            kind: HirExprKind::String(StringLiteral(class_name.clone())),
-                            span: base.span(),
-                        });
+                        if let Some(class_argument) = method.implicit_class_argument {
+                            call_args.push(HirExpr {
+                                id: self.alloc_expr_id(),
+                                kind: HirExprKind::String(StringLiteral(class_argument)),
+                                span: base.span(),
+                            });
+                        }
+                        let function_name = method.function_name;
                         return Ok(HirExpr {
                             id: self.alloc_expr_id(),
                             kind: HirExprKind::Call(self.call_for_name(
-                                name,
+                                &function_name,
                                 call_args,
                                 CallSyntax::Plain,
                                 RequestedOutputCount::One,

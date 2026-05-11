@@ -2223,6 +2223,7 @@ pub struct MethodDef {
     pub is_static: bool,
     pub access: Access,
     pub function_name: String, // bound runtime builtin/user func name
+    pub implicit_class_argument: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -2239,7 +2240,35 @@ static CLASS_REGISTRY: OnceLock<Mutex<HashMap<String, ClassDef>>> = OnceLock::ne
 static STATIC_VALUES: OnceLock<Mutex<HashMap<(String, String), Value>>> = OnceLock::new();
 
 fn registry() -> &'static Mutex<HashMap<String, ClassDef>> {
-    CLASS_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+    CLASS_REGISTRY.get_or_init(|| Mutex::new(primitive_class_registry()))
+}
+
+fn primitive_class_registry() -> HashMap<String, ClassDef> {
+    ["double", "single", "logical"]
+        .into_iter()
+        .map(|class_name| {
+            let mut methods = HashMap::new();
+            methods.insert(
+                "zeros".to_string(),
+                MethodDef {
+                    name: "zeros".to_string(),
+                    is_static: true,
+                    access: Access::Public,
+                    function_name: "zeros".to_string(),
+                    implicit_class_argument: Some(class_name.to_string()),
+                },
+            );
+            (
+                class_name.to_string(),
+                ClassDef {
+                    name: class_name.to_string(),
+                    parent: None,
+                    properties: HashMap::new(),
+                    methods,
+                },
+            )
+        })
+        .collect()
 }
 
 pub fn register_class(def: ClassDef) {

@@ -566,6 +566,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
             is_static: false,
             access: Access::Public,
             function_name: "Point.move".to_string(),
+            implicit_class_argument: None,
         },
     );
     methods.insert(
@@ -575,6 +576,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
             is_static: true,
             access: Access::Public,
             function_name: "Point.origin".to_string(),
+            implicit_class_argument: None,
         },
     );
     runmat_builtins::register_class(ClassDef {
@@ -626,6 +628,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
             is_static: false,
             access: Access::Public,
             function_name: "Shape.area".to_string(),
+            implicit_class_argument: None,
         },
     );
     runmat_builtins::register_class(ClassDef {
@@ -655,6 +658,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
             is_static: false,
             access: Access::Public,
             function_name: "Circle.area".to_string(),
+            implicit_class_argument: None,
         },
     );
     runmat_builtins::register_class(ClassDef {
@@ -674,6 +678,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
             is_static: true,
             access: Access::Public,
             function_name: "Ctor.Ctor".to_string(),
+            implicit_class_argument: None,
         },
     );
     runmat_builtins::register_class(ClassDef {
@@ -693,6 +698,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
             is_static: false,
             access: Access::Public,
             function_name: format!("OverIdx.{OBJECT_SUBSREF_METHOD}"),
+            implicit_class_argument: None,
         },
     );
     overidx_methods.insert(
@@ -702,6 +708,7 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
             is_static: false,
             access: Access::Public,
             function_name: format!("OverIdx.{OBJECT_SUBSASGN_METHOD}"),
+            implicit_class_argument: None,
         },
     );
     runmat_builtins::register_class(ClassDef {

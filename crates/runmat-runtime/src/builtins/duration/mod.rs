@@ -61,6 +61,7 @@ fn ensure_duration_class_registered() {
                     is_static: false,
                     access: Access::Public,
                     function_name: format!("{DURATION_CLASS}.{name}"),
+                    implicit_class_argument: None,
                 },
             );
         }

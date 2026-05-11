@@ -64,6 +64,7 @@ fn ensure_datetime_class_registered() {
                     is_static: false,
                     access: Access::Public,
                     function_name: format!("{DATETIME_CLASS}.{name}"),
+                    implicit_class_argument: None,
                 },
             );
         }
