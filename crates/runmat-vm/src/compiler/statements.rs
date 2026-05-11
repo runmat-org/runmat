@@ -1,7 +1,6 @@
 //! Statement lowering.
 
 use crate::compiler::core::{Compiler, LoopLabels};
-use crate::compiler::idioms;
 use crate::compiler::CompileError;
 use crate::instr::{EmitLabel, Instr};
 use runmat_hir::{
@@ -25,9 +24,6 @@ fn label_for_expr(expr: &HirExpr) -> EmitLabel {
 
 impl Compiler {
     pub(crate) fn compile_stmt_impl(&mut self, stmt: &HirStmt) -> Result<(), CompileError> {
-        if idioms::try_lower_stmt_idiom(self, stmt)? {
-            return Ok(());
-        }
         match stmt {
             HirStmt::ExprStmt(expr, suppressed, _) => {
                 self.compile_expr(expr)?;

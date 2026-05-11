@@ -3,20 +3,6 @@
 use crate::instr::EndExpr;
 use runmat_hir::{LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind};
 
-pub(crate) fn expr_is_one(expr: &HirExpr) -> bool {
-    parse_number(expr)
-        .map(|v| (v - 1.0).abs() < 1e-9)
-        .unwrap_or(false)
-}
-
-fn parse_number(expr: &HirExpr) -> Option<f64> {
-    if let HirExprKind::Number(raw) = &expr.kind {
-        raw.parse::<f64>().ok()
-    } else {
-        None
-    }
-}
-
 pub(crate) fn end_numeric_expr(expr: &HirExpr) -> Option<EndExpr> {
     end_numeric_expr_from_expr(&expr.kind)
 }

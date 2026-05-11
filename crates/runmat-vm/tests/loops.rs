@@ -1,14 +1,10 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_parser::parse;
-use runmat_vm::bytecode::compile::compile_legacy as compile;
 use runmat_vm::Instr;
-use std::collections::HashMap;
 use std::convert::TryInto;
 use test_helpers::compile_semantic_source;
 use test_helpers::interpret;
-use test_helpers::lower;
 
 fn execute_program(source: &str) -> Vec<runmat_builtins::Value> {
     let bytecode = compile_semantic_source(source).expect("compile semantic source");
@@ -85,9 +81,7 @@ fn stochastic_evolution_loop_emits_instruction() {
         S = S .* exp(drift + scale .* Z);
     end
     ";
-    let ast = parse(source).unwrap();
-    let hir = lower(&ast).unwrap();
-    let bytecode = compile(&hir, &HashMap::new()).unwrap();
+    let bytecode = compile_semantic_source(source).unwrap();
     assert!(bytecode
         .instructions
         .iter()

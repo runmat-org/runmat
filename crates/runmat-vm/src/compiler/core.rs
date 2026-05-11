@@ -84,6 +84,135 @@ struct MirRangeEndSpec {
     has_step: bool,
 }
 
+struct MirStochasticEvolutionPlan {
+    state: runmat_mir::MirLocalId,
+    drift: MirOperand,
+    scale: MirOperand,
+    steps: MirOperand,
+}
+
+fn stochastic_evolution_disabled() -> bool {
+    std::env::var("RUNMAT_DISABLE_STOCHASTIC_EVOLUTION")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn mir_range_starts_at_one(iterable: &MirRvalue) -> bool {
+    let MirRvalue::Range { start, step, .. } = iterable else {
+        return false;
+    };
+    mir_operand_is_one(start) && step.as_ref().is_none_or(mir_operand_is_one)
+}
+
+fn mir_operand_is_one(operand: &MirOperand) -> bool {
+    matches!(operand, MirOperand::Constant(MirConstant::Number(value)) if value == "1" || value == "1.0")
+}
+
+fn call_name(call: &MirCall) -> Option<&str> {
+    match &call.callee {
+        MirCallee::Static(HirCallableRef::Builtin(id)) => Some(id.0.as_str()),
+        MirCallee::Static(HirCallableRef::Unresolved(name)) if name.0.len() == 1 => {
+            Some(name.0[0].0.as_str())
+        }
+        _ => None,
+    }
+}
+
+fn randn_assignment(stmt: &MirStmt) -> Option<(runmat_mir::MirLocalId, &MirCall)> {
+    let MirStmtKind::Assign {
+        place: MirPlace::Local(local),
+        value: MirRvalue::Call(call),
+    } = &stmt.kind
+    else {
+        return None;
+    };
+    call_name(call)
+        .is_some_and(|name| name.eq_ignore_ascii_case("randn"))
+        .then_some((*local, call))
+}
+
+fn assigned_rvalue(statements: &[MirStmt], local: runmat_mir::MirLocalId) -> Option<&MirRvalue> {
+    statements.iter().find_map(|stmt| {
+        let MirStmtKind::Assign {
+            place: MirPlace::Local(candidate),
+            value,
+        } = &stmt.kind
+        else {
+            return None;
+        };
+        (*candidate == local).then_some(value)
+    })
+}
+
+fn local_operand(operand: &MirOperand) -> Option<runmat_mir::MirLocalId> {
+    match operand {
+        MirOperand::Local(local) => Some(*local),
+        _ => None,
+    }
+}
+
+fn exp_call_arg(statements: &[MirStmt], exp_local: runmat_mir::MirLocalId) -> Option<&MirOperand> {
+    let MirRvalue::Call(call) = assigned_rvalue(statements, exp_local)? else {
+        return None;
+    };
+    if !call_name(call).is_some_and(|name| name.eq_ignore_ascii_case("exp")) || call.args.len() != 1
+    {
+        return None;
+    }
+    match &call.args[0] {
+        MirCallArg::Single(arg) => Some(arg),
+        _ => None,
+    }
+}
+
+fn add_with_scale_term(
+    statements: &[MirStmt],
+    arg_local: runmat_mir::MirLocalId,
+    z_local: runmat_mir::MirLocalId,
+) -> Option<(&MirOperand, &MirOperand)> {
+    let MirRvalue::Binary(left, OperatorKind::Add, right) = assigned_rvalue(statements, arg_local)?
+    else {
+        return None;
+    };
+    if local_operand(left)
+        .and_then(|local| scale_term(statements, local, z_local))
+        .is_some()
+    {
+        Some((right, left))
+    } else if local_operand(right)
+        .and_then(|local| scale_term(statements, local, z_local))
+        .is_some()
+    {
+        Some((left, right))
+    } else {
+        None
+    }
+}
+
+fn scale_term(
+    statements: &[MirStmt],
+    scale_mul_local: runmat_mir::MirLocalId,
+    z_local: runmat_mir::MirLocalId,
+) -> Option<&MirOperand> {
+    let MirRvalue::Binary(left, OperatorKind::ElementwiseMultiply, right) =
+        assigned_rvalue(statements, scale_mul_local)?
+    else {
+        return None;
+    };
+    if matches!(left, MirOperand::Local(local) if *local == z_local) {
+        Some(right)
+    } else if matches!(right, MirOperand::Local(local) if *local == z_local) {
+        Some(left)
+    } else {
+        None
+    }
+}
+
 fn mir_indexing_context_matches(actual: IndexResultContext, expected: IndexResultContext) -> bool {
     actual == expected
         || (expected == IndexResultContext::AssignmentTarget
@@ -632,6 +761,14 @@ impl Compiler {
                     exit_block,
                     ..
                 } => {
+                    if self.try_compile_mir_stochastic_evolution(
+                        iterable,
+                        *body_block,
+                        *exit_block,
+                        &mut pending_jumps,
+                    )? {
+                        continue;
+                    }
                     self.compile_mir_for_terminator(
                         *binding,
                         iterable,
@@ -681,6 +818,72 @@ impl Compiler {
         }
 
         Ok(())
+    }
+
+    fn try_compile_mir_stochastic_evolution(
+        &mut self,
+        iterable: &MirRvalue,
+        body_block: BasicBlockId,
+        exit_block: BasicBlockId,
+        pending_jumps: &mut Vec<(usize, BasicBlockId, bool)>,
+    ) -> Result<bool, CompileError> {
+        if stochastic_evolution_disabled() || !mir_range_starts_at_one(iterable) {
+            return Ok(false);
+        }
+        let Some(plan) = self.detect_mir_stochastic_evolution(body_block, iterable) else {
+            return Ok(false);
+        };
+        let state_slot = self.mir_local_slot(plan.state)?;
+        self.emit(Instr::LoadVar(state_slot));
+        self.compile_mir_operand(&plan.drift)?;
+        self.compile_mir_operand(&plan.scale)?;
+        self.compile_mir_operand(&plan.steps)?;
+        self.emit(Instr::StochasticEvolution);
+        self.emit(Instr::StoreVar(state_slot));
+        let done = self.emit(Instr::Jump(usize::MAX));
+        pending_jumps.push((done, exit_block, false));
+        Ok(true)
+    }
+
+    fn detect_mir_stochastic_evolution(
+        &self,
+        body_block: BasicBlockId,
+        iterable: &MirRvalue,
+    ) -> Option<MirStochasticEvolutionPlan> {
+        let body = self.body.as_ref()?;
+        let block = body.blocks.iter().find(|block| block.id == body_block)?;
+        let statements = block.statements.as_slice();
+        let (z_local, _) = statements.iter().find_map(randn_assignment)?;
+        let (state, exp_operand) = statements.iter().rev().find_map(|stmt| {
+            let MirStmtKind::Assign {
+                place: MirPlace::Local(state),
+                value: MirRvalue::Binary(left, OperatorKind::ElementwiseMultiply, right),
+            } = &stmt.kind
+            else {
+                return None;
+            };
+            if matches!(left, MirOperand::Local(local) if local == state) {
+                Some((*state, right))
+            } else if matches!(right, MirOperand::Local(local) if local == state) {
+                Some((*state, left))
+            } else {
+                None
+            }
+        })?;
+        let exp_local = local_operand(exp_operand)?;
+        let exp_arg = exp_call_arg(statements, exp_local)?;
+        let arg_local = local_operand(exp_arg)?;
+        let (drift, scale_mul_operand) = add_with_scale_term(statements, arg_local, z_local)?;
+        let scale = scale_term(statements, local_operand(scale_mul_operand)?, z_local)?;
+        let MirRvalue::Range { end, .. } = iterable else {
+            return None;
+        };
+        Some(MirStochasticEvolutionPlan {
+            state,
+            drift: drift.clone(),
+            scale: scale.clone(),
+            steps: end.clone(),
+        })
     }
 
     fn compile_mir_for_terminator(
