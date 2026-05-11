@@ -1,9 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use test_helpers::execute;
 use test_helpers::execute_semantic_source;
-use test_helpers::lower;
 
 fn find_last_tensor(vars: &[runmat_builtins::Value]) -> runmat_builtins::Tensor {
     vars.iter()
@@ -442,8 +440,7 @@ fn oop_negative_missing_subsref_mex() {
             err = e;
         end
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let out = execute(&hir);
+    let out = execute_semantic_source(program);
     if let Err(err) = out {
         assert!(
             err.identifier() == Some("RunMat:MissingSubsref") || err.message().contains("subsref")
@@ -462,8 +459,7 @@ fn oop_negative_missing_subsasgn_mex() {
             err = e;
         end
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let out = execute(&hir);
+    let out = execute_semantic_source(program);
     if let Err(err) = out {
         assert!(
             err.identifier() == Some("RunMat:MissingSubsasgn")
