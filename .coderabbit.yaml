@@ -5,3 +5,4 @@ reviews:
     base_branches:
       - "main"
       - "dev"
+      - "rm-.*"
