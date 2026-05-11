@@ -146,6 +146,7 @@ async fn tf_builtin(
 struct TfOptions {
     variable: String,
     sample_time: f64,
+    variable_explicit: bool,
 }
 
 impl TfOptions {
@@ -153,13 +154,16 @@ impl TfOptions {
         let mut options = Self {
             variable: DEFAULT_VARIABLE.to_string(),
             sample_time: 0.0,
+            variable_explicit: false,
         };
 
         match rest {
             [] => {}
             [sample_time] => {
                 options.sample_time = parse_sample_time(sample_time)?;
-                options.variable = "z".to_string();
+                if options.sample_time > 0.0 {
+                    options.variable = "z".to_string();
+                }
             }
             _ => {
                 if !rest.len().is_multiple_of(2) {
@@ -173,7 +177,10 @@ impl TfOptions {
                     let lowered = name.trim().to_ascii_lowercase();
                     let value = &rest[idx + 1];
                     match lowered.as_str() {
-                        "variable" => options.variable = parse_variable(value)?,
+                        "variable" => {
+                            options.variable = parse_variable(value)?;
+                            options.variable_explicit = true;
+                        }
                         "ts" | "sampletime" => options.sample_time = parse_sample_time(value)?,
                         _ => {
                             return Err(tf_error(format!("tf: unsupported option '{name}'")));
@@ -181,7 +188,7 @@ impl TfOptions {
                     }
                     idx += 2;
                 }
-                if options.sample_time > 0.0 && options.variable == DEFAULT_VARIABLE {
+                if options.sample_time > 0.0 && !options.variable_explicit {
                     options.variable = "z".to_string();
                 }
             }
@@ -421,6 +428,22 @@ mod tests {
     }
 
     #[test]
+    fn tf_positional_zero_sample_time_remains_continuous() {
+        let sys = run_tf(
+            Value::Int(IntValue::I32(1)),
+            Value::Tensor(Tensor::new(vec![1.0, 5.0], vec![1, 2]).unwrap()),
+            vec![Value::Num(0.0)],
+        )
+        .expect("tf");
+
+        assert_eq!(
+            property(&sys, "Variable"),
+            &Value::CharArray(CharArray::new_row("s"))
+        );
+        assert_eq!(property(&sys, "Ts"), &Value::Num(0.0));
+    }
+
+    #[test]
     fn tf_accepts_variable_name_value_option() {
         let sys = run_tf(
             Value::Num(1.0),
@@ -433,6 +456,27 @@ mod tests {
             property(&sys, "Variable"),
             &Value::CharArray(CharArray::new_row("p"))
         );
+    }
+
+    #[test]
+    fn tf_explicit_continuous_variable_survives_positive_sample_time() {
+        let sys = run_tf(
+            Value::Num(1.0),
+            Value::Tensor(Tensor::new(vec![1.0, 1.0], vec![1, 2]).unwrap()),
+            vec![
+                Value::from("Variable"),
+                Value::from("s"),
+                Value::from("Ts"),
+                Value::Num(0.5),
+            ],
+        )
+        .expect("tf");
+
+        assert_eq!(
+            property(&sys, "Variable"),
+            &Value::CharArray(CharArray::new_row("s"))
+        );
+        assert_eq!(property(&sys, "Ts"), &Value::Num(0.5));
     }
 
     #[test]
