@@ -936,12 +936,10 @@ fn class_method_attribute_conflicts_error() {
 }
 
 #[test]
-#[ignore]
 fn metaclass_context_with_imports() {
     // Ensure ?pkg.Class parses and coexists with imports; no runtime error expected
     let program = "import pkg.*; ?pkg.Class; x=1;";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // Either ok=1 was set or we have an MException present
     let ok_or_exc = vars
         .iter()
@@ -963,14 +961,12 @@ fn metaclass_postfix_member_and_method() {
 }
 
 #[test]
-#[ignore]
 fn import_ambiguity_wildcard_conflict_errors() {
     // Two wildcard packages both providing same builtin name should error at runtime resolution
     // We simulate by trying resolution; since no actual builtins exist under these, it will fall through
     // but our VM path collects multiple matches and would error if present. This serves as a guard.
     let program = "import PkgA.*; import PkgB.*; x = 1;";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(!vars.is_empty());
 }
 
@@ -1582,13 +1578,11 @@ fn persistents_init_once_across_calls() {
 }
 
 #[test]
-#[ignore]
 fn import_precedence_and_shadowing() {
     // Define user function f; specific import for Point.origin; wildcard import Pkg.* (nonexistent)
     // Local variable named origin should shadow imports; then function should shadow imports.
     let program = "function y = f(); y = 123; end; __register_test_classes(); import Point.origin; import Pkg.*; origin = 7; a = origin; b = f();";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // Expect 7 and 123 present
     assert!(vars
         .iter()
