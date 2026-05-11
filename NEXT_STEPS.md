@@ -414,6 +414,7 @@ Current ratchet status:
 - Operator-overload diagnostic bytecode in VM functions tests now uses semantic compilation instead of `compile_legacy`.
 - Additional VM functions object/class/operator/OOP ratchets now run semantic bytecode, including object member get/set and method dispatch, class registration/static/inheritance paths, static classref calls, object cell expansion, operator overload variants, and negative OOP try/catch paths.
 - VM range, meshgrid-range, global/persistent, and logical-operator tests now run semantic bytecode.
+- VM indexing, matrix-slicing, and lvalue-assignment tests now run semantic bytecode.
 - Remaining `functions.rs` legacy execution sites cover semantic gaps for varargout mismatch diagnostics, struct-field vector/range indexing through member reads, test-class constructor resolution, metaclass postfix member/method lowering, dependent property backing behavior, `containers.Map` package calls, and string aggregate concatenation.
 - Remaining test `compile_legacy` references are still tied to legacy execution helpers, native-accel graph construction, legacy multi-output bytecode shape assertions, or Turbine/accelerate legacy suites.
 - Remaining production `compile_legacy` usage is centralized behind `compile_legacy_user_dispatch_fallback`; the remaining transitional API is `runmat_vm::bytecode::compile::compile_legacy` for legacy tests and fallback plumbing.
