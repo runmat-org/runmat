@@ -1,10 +1,8 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_parser::parse;
 use test_helpers::compile_semantic_source;
 use test_helpers::execute_semantic_source;
-use test_helpers::lower;
 
 fn has_num(vars: &[runmat_builtins::Value], expected: f64) -> bool {
     vars.iter()
@@ -91,7 +89,7 @@ fn try_catch_executes_try_body_when_no_error() {
 #[test]
 fn try_catch_catches_error_and_binds_identifier() {
     // Unknown builtin should raise; catch should bind 'e' and execute catch body
-    let ast = parse(
+    let vars = execute_semantic_source(
         r#"
             x=0;
             try;
@@ -103,8 +101,6 @@ fn try_catch_catches_error_and_binds_identifier() {
         "#,
     )
     .unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = test_helpers::execute(&hir).unwrap();
     assert!(has_num(&vars, 2.0));
 }
 

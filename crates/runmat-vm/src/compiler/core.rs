@@ -1075,10 +1075,31 @@ impl Compiler {
                 }
             }
             MirCallee::Static(_) => {
+                let name = match self.mir_builtin_call_name(call) {
+                    Ok(name) => name,
+                    Err(err)
+                        if !call.args.is_empty()
+                            && err.message.starts_with("unknown builtin function ") =>
+                    {
+                        let Some(candidate) = self.mir_unresolved_single_call_name(call) else {
+                            return Err(err);
+                        };
+                        self.emit(Instr::CreateFunctionHandle(candidate));
+                        for arg in &call.args {
+                            self.compile_mir_call_arg(arg)?;
+                        }
+                        if has_expansion {
+                            self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
+                        } else {
+                            self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                        }
+                        return Ok(());
+                    }
+                    Err(err) => return Err(err),
+                };
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
-                let name = self.mir_builtin_call_name(call)?;
                 if has_expansion {
                     self.emit(Instr::CallBuiltinExpandMulti(name, specs));
                 } else {
@@ -1631,10 +1652,31 @@ impl Compiler {
                 }
             }
             MirCallee::Static(_) => {
+                let name = match self.mir_builtin_call_name(call) {
+                    Ok(name) => name,
+                    Err(err)
+                        if !call.args.is_empty()
+                            && err.message.starts_with("unknown builtin function ") =>
+                    {
+                        let Some(candidate) = self.mir_unresolved_single_call_name(call) else {
+                            return Err(err);
+                        };
+                        self.emit(Instr::CreateFunctionHandle(candidate));
+                        for arg in &call.args {
+                            self.compile_mir_call_arg(arg)?;
+                        }
+                        if has_expansion {
+                            self.emit(Instr::CallFevalExpandMulti(specs));
+                        } else {
+                            self.emit(Instr::CallFeval(call.args.len()));
+                        }
+                        return Ok(());
+                    }
+                    Err(err) => return Err(err),
+                };
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
-                let name = self.mir_builtin_call_name(call)?;
                 if has_expansion {
                     self.emit(Instr::CallBuiltinExpandMulti(name, specs));
                 } else {
@@ -1643,6 +1685,15 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    fn mir_unresolved_single_call_name(&self, call: &MirCall) -> Option<String> {
+        match &call.callee {
+            MirCallee::Static(HirCallableRef::Unresolved(name)) if name.0.len() == 1 => {
+                Some(name.0[0].0.clone())
+            }
+            _ => None,
+        }
     }
 
     fn compile_mir_method_call(
