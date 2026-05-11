@@ -5,7 +5,6 @@ use runmat_accelerate::ShapeInfo;
 use runmat_builtins::Value;
 use runmat_parser::parse;
 use runmat_vm::Instr;
-use std::collections::HashMap;
 use std::convert::TryInto;
 use test_helpers::compile_semantic_source;
 use test_helpers::execute;
@@ -69,14 +68,8 @@ fn call_builtin_multi_output_advances_pc_for_zero_outputs() {
 fn array_construct_like_and_size_vector_inference() {
     // zeros('like', A)
     let src_like = "A = rand(3,4); B = zeros('like', A);";
-    let ast_like = parse(src_like).expect("parse like");
-    let hir_like = lower(&ast_like).expect("lower like");
-    let bytecode_like = runmat_vm::bytecode::compile::compile_legacy(&hir_like, &HashMap::new())
-        .expect("compile like");
-    let graph_like = runmat_vm::accel::graph::build_accel_graph(
-        &bytecode_like.instructions,
-        &hir_like.var_types,
-    );
+    let bytecode_like = compile_semantic_source(src_like).expect("compile semantic like");
+    let graph_like = bytecode_like.accel_graph.as_ref().expect("accel graph");
     let last_like = graph_like.nodes.last().expect("node");
     let out_id = *last_like.outputs.first().unwrap();
     let out_info = graph_like.value(out_id).expect("out value");
@@ -89,12 +82,8 @@ fn array_construct_like_and_size_vector_inference() {
 
     // zeros([5,6]) via size vector
     let src_sz = "sz = [5,6]; B = zeros(sz);";
-    let ast_sz = parse(src_sz).expect("parse sz");
-    let hir_sz = lower(&ast_sz).expect("lower sz");
-    let bytecode_sz =
-        runmat_vm::bytecode::compile::compile_legacy(&hir_sz, &HashMap::new()).expect("compile sz");
-    let graph_sz =
-        runmat_vm::accel::graph::build_accel_graph(&bytecode_sz.instructions, &hir_sz.var_types);
+    let bytecode_sz = compile_semantic_source(src_sz).expect("compile semantic sz");
+    let graph_sz = bytecode_sz.accel_graph.as_ref().expect("accel graph");
     let last_sz = graph_sz.nodes.last().expect("node");
     let out_id_sz = *last_sz.outputs.first().unwrap();
     let out_info_sz = graph_sz.value(out_id_sz).expect("out value");
