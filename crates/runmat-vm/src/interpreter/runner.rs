@@ -273,6 +273,15 @@ pub async fn invoke_semantic_function_value(
         );
         return Err(mex("TooManyInputs", &message));
     }
+    if requested_outputs > func.output_slots.len() {
+        let message = format!(
+            "semantic function {} expected {} outputs, got {}",
+            func.display_name,
+            func.output_slots.len(),
+            requested_outputs
+        );
+        return Err(mex("TooManyOutputs", &message));
+    }
 
     let mut vars = vec![Value::Num(0.0); func.var_count];
     for (slot, value) in func.capture_slots.iter().zip(args.iter()) {

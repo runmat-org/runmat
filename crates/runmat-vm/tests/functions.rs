@@ -83,8 +83,7 @@ fn inputs_with_varargin_minimum_only() {
         end
         r = f(1);
     "#;
-    let hir_e = lower(&parse(program_err).unwrap()).unwrap();
-    let err = execute(&hir_e).err().unwrap();
+    let err = execute_semantic_source_result(program_err).err().unwrap();
     assert_eq!(err.identifier(), Some("RunMat:NotEnoughInputs"));
 
     let program_ok = r#"
@@ -111,8 +110,7 @@ fn too_many_outputs_and_varargout_mismatch() {
         end
         [x1,x2] = f(3);
     "#;
-    let hir_tmo = lower(&parse(program_tmo).unwrap()).unwrap();
-    let err_tmo = execute(&hir_tmo).err().unwrap();
+    let err_tmo = execute_semantic_source_result(program_tmo).err().unwrap();
     assert_eq!(err_tmo.identifier(), Some("RunMat:TooManyOutputs"));
 
     // Varargout requested more than provided
