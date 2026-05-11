@@ -1330,6 +1330,22 @@ impl SemanticCtx {
                             span,
                         });
                     }
+                    let qualified_name = format!("{class_name}.{name}");
+                    if is_builtin(&qualified_name) {
+                        let call_args =
+                            self.lower_call_arguments_for_name(&qualified_name, args)?;
+                        return Ok(HirExpr {
+                            id: self.alloc_expr_id(),
+                            kind: HirExprKind::Call(self.call_for_name(
+                                &qualified_name,
+                                call_args,
+                                CallSyntax::Plain,
+                                RequestedOutputCount::One,
+                                span,
+                            )),
+                            span,
+                        });
+                    }
                 }
                 let mut call_args = vec![self.lower_expr_semantic(base)?];
                 call_args.extend(

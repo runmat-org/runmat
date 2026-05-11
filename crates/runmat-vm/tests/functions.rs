@@ -1620,8 +1620,7 @@ fn containers_map_parenthesis_indexing() {
         fruit = containers.Map({'apple'}, {99});
         energy = fruit('apple');
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
@@ -1635,8 +1634,7 @@ fn containers_map_dot_properties() {
         value_type = m.ValueType;
         count = m.Count;
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
 
     assert!(vars.iter().any(|v| match v {
         runmat_builtins::Value::CharArray(ca) => ca.data.iter().collect::<String>() == "char",

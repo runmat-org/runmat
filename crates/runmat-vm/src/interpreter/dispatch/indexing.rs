@@ -477,8 +477,8 @@ where
             ))?;
             match &base {
                 Value::Object(_) | Value::HandleObject(_) => {
-                    let numeric = linear_index_values_to_f64(&raw_indices).await?;
-                    let cell = idx_read_linear::build_object_subsref_cell(&numeric)?;
+                    let cell =
+                        object_protocol_index_cell(raw_indices.clone(), "subsref build error")?;
                     stack.push(
                         call_object_index_method(
                             base,
