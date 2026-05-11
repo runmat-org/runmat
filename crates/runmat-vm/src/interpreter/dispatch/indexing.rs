@@ -660,6 +660,68 @@ where
             }
             Ok(true)
         }
+        crate::bytecode::Instr::IndexCellList(num_indices) => {
+            let mut indices = Vec::with_capacity(*num_indices);
+            if *num_indices > 0 {
+                for _ in 0..*num_indices {
+                    let v = stack.pop().ok_or(crate::interpreter::errors::mex(
+                        "StackUnderflow",
+                        "stack underflow",
+                    ))?;
+                    indices.push(v);
+                }
+                indices.reverse();
+            }
+            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
+            match base {
+                Value::Cell(ca) => {
+                    let values = if indices.is_empty() {
+                        crate::ops::cells::expand_all_cell_values(&ca)?
+                    } else {
+                        crate::call::shared::expand_cell_indices(&ca, &indices)?
+                    };
+                    if values.len() == 1 {
+                        stack.push(values.into_iter().next().unwrap_or(Value::Num(0.0)));
+                    } else {
+                        stack.push(Value::OutputList(values));
+                    }
+                }
+                Value::Object(obj) => {
+                    let cell = object_protocol_index_cell(indices.clone(), "subsref build error")?;
+                    let value = call_object_index_method(
+                        Value::Object(obj),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Brace,
+                        cell,
+                        None,
+                    )
+                    .await?;
+                    stack.push(Value::OutputList(vec![value]));
+                }
+                Value::HandleObject(handle) => {
+                    let cell = object_protocol_index_cell(indices.clone(), "subsref build error")?;
+                    let value = call_object_index_method(
+                        Value::HandleObject(handle),
+                        ObjectIndexOp::Subsref,
+                        ObjectIndexKind::Brace,
+                        cell,
+                        None,
+                    )
+                    .await?;
+                    stack.push(Value::OutputList(vec![value]));
+                }
+                _ => {
+                    return Err(crate::interpreter::errors::mex(
+                        "CellExpansionOnNonCell",
+                        "Cell expansion on non-cell",
+                    ))
+                }
+            }
+            Ok(true)
+        }
         crate::bytecode::Instr::StoreIndexCell(num_indices) => {
             let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",

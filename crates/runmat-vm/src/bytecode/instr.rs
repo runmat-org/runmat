@@ -129,6 +129,9 @@ pub enum Instr {
     // Expands cell contents into a comma-separated list with fixed output arity.
     IndexCellExpand(usize, usize),
 
+    // Expands cell contents into a first-class comma-separated list value.
+    IndexCellList(usize),
+
     // Indexed assignment updates the base value and pushes the updated base.
     StoreIndex(usize),
     StoreIndexCell(usize),
@@ -301,7 +304,7 @@ impl Instr {
             Instr::CreateMatrixDynamic(rows) => effect(*rows, 1),
             Instr::CreateRange(has_step) => effect(if *has_step { 3 } else { 2 }, 1),
             Instr::Unpack(n) => effect(1, *n),
-            Instr::Index(n) | Instr::IndexCell(n) => effect(n + 1, 1),
+            Instr::Index(n) | Instr::IndexCell(n) | Instr::IndexCellList(n) => effect(n + 1, 1),
             Instr::IndexCellExpand(n, out_count) => effect(n + 1, *out_count),
             Instr::StoreIndex(n) | Instr::StoreIndexCell(n) => effect(n + 2, 1),
             Instr::IndexSlice(dims, numeric_count, _, _)

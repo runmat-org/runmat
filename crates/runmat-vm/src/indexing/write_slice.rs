@@ -433,6 +433,7 @@ pub async fn materialize_rhs_linear_real(
                 Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
             }
         }
+        Value::OutputList(values) => materialize_output_list_real(&values, count),
         other => Err(mex(
             "InvalidSliceAssignmentRhs",
             &format!("slice assign: unsupported RHS type {:?}", other),
@@ -535,6 +536,27 @@ pub async fn materialize_rhs_nd_real(
                 strides,
             }
         }
+        Value::OutputList(values) => {
+            let count = selection_lengths
+                .iter()
+                .copied()
+                .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)));
+            let data = materialize_output_list_real(&values, count)?;
+            let shape = if selection_lengths.is_empty() {
+                vec![1]
+            } else {
+                selection_lengths.to_vec()
+            };
+            let mut strides = vec![1usize; shape.len()];
+            for d in 1..shape.len() {
+                strides[d] = strides[d - 1] * shape[d - 1].max(1);
+            }
+            RhsView::Tensor {
+                data,
+                shape,
+                strides,
+            }
+        }
         other => {
             return Err(mex(
                 "InvalidSliceAssignmentRhs",
@@ -583,6 +605,27 @@ pub async fn materialize_rhs_nd_real(
         }
     }
     Ok(out)
+}
+
+fn materialize_output_list_real(values: &[Value], count: usize) -> Result<Vec<f64>, RuntimeError> {
+    if values.len() == count {
+        values.iter().map(value_to_real_scalar).collect()
+    } else if values.len() == 1 {
+        let value = value_to_real_scalar(&values[0])?;
+        Ok(vec![value; count])
+    } else {
+        Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
+    }
+}
+
+fn value_to_real_scalar(value: &Value) -> Result<f64, RuntimeError> {
+    match value {
+        Value::Num(n) => Ok(*n),
+        Value::Int(int_val) => Ok(int_val.to_f64()),
+        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        _ => f64::try_from(value).map_err(Into::into),
+    }
 }
 
 pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {

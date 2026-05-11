@@ -934,7 +934,14 @@ impl SemanticCtx {
                     creation_policy,
                     AssignmentShapePolicy::MatlabCompatible,
                 );
-                HirStmtKind::Assign(place, self.lower_expr_semantic(expr)?, *suppressed)
+                HirStmtKind::Assign(
+                    place,
+                    self.lower_expr_semantic_requested(
+                        expr,
+                        requested_outputs_for_lvalue_assignment(lvalue, expr),
+                    )?,
+                    *suppressed,
+                )
             }
         };
         Ok(Some(SemanticHirStmt {
@@ -1345,16 +1352,7 @@ impl SemanticCtx {
         name: &str,
         args: &[AstExpr],
     ) -> Result<Vec<HirExpr>, SemanticError> {
-        let expanded_last_outputs =
-            self.function_input_signatures
-                .get(name)
-                .and_then(|(fixed_inputs, has_varargin)| {
-                    if !has_varargin && *fixed_inputs > args.len() {
-                        Some(*fixed_inputs - args.len() + 1)
-                    } else {
-                        None
-                    }
-                });
+        let expanded_last_outputs = self.expanded_last_output_count_for_call(name, args);
 
         args.iter()
             .enumerate()
@@ -1383,6 +1381,41 @@ impl SemanticCtx {
                 .function_output_signatures
                 .get(name)
                 .is_some_and(|(_, has_varargout)| *has_varargout),
+            _ => false,
+        }
+    }
+
+    fn expanded_last_output_count_for_call(&self, name: &str, args: &[AstExpr]) -> Option<usize> {
+        let arg_count = args.len();
+        if let Some((fixed_inputs, has_varargin)) = self.function_input_signatures.get(name) {
+            if !has_varargin && *fixed_inputs > arg_count {
+                return Some(*fixed_inputs - arg_count + 1);
+            }
+            return None;
+        }
+
+        if self.lookup_binding(name).is_some() {
+            return None;
+        }
+
+        let builtin = runmat_builtins::builtin_function_by_name(name)?;
+        if builtin_has_variadic_tail(builtin) {
+            return None;
+        }
+        let fixed_inputs = builtin.param_types.len();
+        if fixed_inputs <= arg_count {
+            return None;
+        }
+        let requested = fixed_inputs - arg_count + 1;
+        self.call_argument_can_supply_outputs(args.last()?, requested)
+            .then_some(requested)
+    }
+
+    fn call_argument_can_supply_outputs(&self, arg: &AstExpr, requested: usize) -> bool {
+        match arg {
+            AstExpr::FuncCall(name, _, _) => self.function_output_signatures.get(name).is_some_and(
+                |(fixed_outputs, has_varargout)| *has_varargout || *fixed_outputs >= requested,
+            ),
             _ => false,
         }
     }
@@ -1512,6 +1545,69 @@ fn is_empty_array_expr(expr: &AstExpr) -> bool {
     matches!(expr, AstExpr::Tensor(rows, _) if rows.is_empty() || rows.iter().all(Vec::is_empty))
 }
 
+fn requested_outputs_for_lvalue_assignment(
+    lvalue: &runmat_parser::LValue,
+    expr: &AstExpr,
+) -> RequestedOutputCount {
+    if !matches!(expr, AstExpr::FuncCall(_, _, _) | AstExpr::Ident(_, _)) {
+        return RequestedOutputCount::One;
+    }
+    static_lvalue_assignment_count(lvalue)
+        .filter(|count| *count > 1)
+        .map(RequestedOutputCount::Exactly)
+        .unwrap_or(RequestedOutputCount::One)
+}
+
+fn static_lvalue_assignment_count(lvalue: &runmat_parser::LValue) -> Option<usize> {
+    use runmat_parser::LValue;
+    match lvalue {
+        LValue::Index(_, indices) => indices.iter().try_fold(1usize, |acc, index| {
+            static_index_component_count(index).map(|count| acc.saturating_mul(count))
+        }),
+        _ => None,
+    }
+}
+
+fn static_index_component_count(expr: &AstExpr) -> Option<usize> {
+    match expr {
+        AstExpr::Number(_, _) | AstExpr::Ident(_, _) | AstExpr::EndKeyword(_) => Some(1),
+        AstExpr::Tensor(rows, _) => Some(rows.iter().map(Vec::len).sum()),
+        AstExpr::Range(start, step, end, _) => {
+            let start = static_numeric_literal(start)?;
+            let step = step
+                .as_deref()
+                .and_then(static_numeric_literal)
+                .unwrap_or_else(|| {
+                    if start <= static_numeric_literal(end).unwrap_or(start) {
+                        1.0
+                    } else {
+                        -1.0
+                    }
+                });
+            let end = static_numeric_literal(end)?;
+            static_range_count(start, step, end)
+        }
+        _ => None,
+    }
+}
+
+fn static_numeric_literal(expr: &AstExpr) -> Option<f64> {
+    match expr {
+        AstExpr::Number(value, _) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn static_range_count(start: f64, step: f64, end: f64) -> Option<usize> {
+    if step == 0.0 || !start.is_finite() || !step.is_finite() || !end.is_finite() {
+        return None;
+    }
+    if (step > 0.0 && start > end) || (step < 0.0 && start < end) {
+        return Some(0);
+    }
+    Some(((end - start) / step).floor().max(0.0) as usize + 1)
+}
+
 fn assignment_index_context(deletion: bool) -> IndexResultContext {
     if deletion {
         IndexResultContext::DeletionTarget
@@ -1615,6 +1711,13 @@ fn is_builtin(name: &str) -> bool {
         .iter()
         .any(|builtin| builtin.name == name)
         || runmat_builtins::builtin_semantics_for_name(name).is_some()
+}
+
+fn builtin_has_variadic_tail(builtin: &runmat_builtins::BuiltinFunction) -> bool {
+    matches!(
+        builtin.param_types.last(),
+        Some(runmat_builtins::Type::Cell { length: None, .. })
+    )
 }
 
 fn unary_op(op: UnOp) -> OperatorKind {

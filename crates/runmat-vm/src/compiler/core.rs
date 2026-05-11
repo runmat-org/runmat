@@ -984,6 +984,44 @@ impl Compiler {
         Ok(())
     }
 
+    fn compile_mir_cell_list(
+        &mut self,
+        base: &MirOperand,
+        indexing: &MirIndexing,
+    ) -> Result<(), CompileError> {
+        self.compile_mir_operand(base)?;
+        let mut index_count = 0usize;
+        let mut expand_all = false;
+        for component in &indexing.components {
+            match component {
+                MirIndexComponent::Colon => expand_all = true,
+                MirIndexComponent::Expr(operand) => {
+                    self.compile_mir_operand(operand)?;
+                    index_count += 1;
+                }
+                MirIndexComponent::End { offset, .. } if *offset <= 0 => {
+                    self.emit(Instr::LoadConst(if *offset == 0 {
+                        -0.0
+                    } else {
+                        *offset as f64
+                    }));
+                    index_count += 1;
+                }
+                _ => {
+                    return Err(self.compile_error(
+                        "MIR bytecode lowering for this slice index is not implemented yet",
+                    ))
+                }
+            }
+        }
+        self.emit(Instr::IndexCellList(if expand_all {
+            0
+        } else {
+            index_count
+        }));
+        Ok(())
+    }
+
     fn compile_mir_call_for_multi_assign(
         &mut self,
         call: &MirCall,
@@ -1260,6 +1298,9 @@ impl Compiler {
     }
 
     fn mir_indexing_is_simple_expr_indices(&self, indexing: &MirIndexing) -> bool {
+        if indexing.components.len() > 2 {
+            return false;
+        }
         indexing
             .components
             .iter()
@@ -1755,12 +1796,28 @@ impl Compiler {
             );
         }
 
-        for element in elements {
-            self.compile_mir_operand(element)?;
-        }
         match kind {
-            MirAggregateKind::Tensor => self.emit(Instr::CreateMatrix(rows, cols)),
-            MirAggregateKind::Cell => self.emit(Instr::CreateCell2D(rows, cols)),
+            MirAggregateKind::Tensor if self.mir_aggregate_needs_dynamic_concat(elements) => {
+                for element in elements {
+                    self.compile_mir_operand(element)?;
+                }
+                for _ in 0..rows {
+                    self.emit(Instr::LoadConst(cols as f64));
+                }
+                self.emit(Instr::CreateMatrixDynamic(rows));
+            }
+            MirAggregateKind::Tensor => {
+                for element in elements {
+                    self.compile_mir_operand(element)?;
+                }
+                self.emit(Instr::CreateMatrix(rows, cols));
+            }
+            MirAggregateKind::Cell => {
+                for element in elements {
+                    self.compile_mir_operand(element)?;
+                }
+                self.emit(Instr::CreateCell2D(rows, cols));
+            }
             MirAggregateKind::Struct | MirAggregateKind::ObjectArray(_) => {
                 return Err(self.compile_error(
                     "MIR bytecode lowering for this aggregate kind is not implemented yet",
@@ -1768,6 +1825,34 @@ impl Compiler {
             }
         };
         Ok(())
+    }
+
+    fn mir_aggregate_needs_dynamic_concat(&self, elements: &[MirOperand]) -> bool {
+        elements
+            .iter()
+            .any(|element| self.mir_operand_needs_dynamic_concat(element))
+    }
+
+    fn mir_operand_needs_dynamic_concat(&self, operand: &MirOperand) -> bool {
+        match operand {
+            MirOperand::Constant(MirConstant::String(_)) => true,
+            MirOperand::Local(local) => self
+                .mir_local_rvalue(*local)
+                .is_some_and(|value| self.mir_rvalue_needs_dynamic_concat(&value)),
+            _ => false,
+        }
+    }
+
+    fn mir_rvalue_needs_dynamic_concat(&self, value: &MirRvalue) -> bool {
+        matches!(
+            value,
+            MirRvalue::Range { .. }
+                | MirRvalue::Call(_)
+                | MirRvalue::Aggregate { .. }
+                | MirRvalue::Index { .. }
+                | MirRvalue::Member { .. }
+                | MirRvalue::DynamicMember { .. }
+        )
     }
 
     fn compile_mir_index(
@@ -1782,6 +1867,12 @@ impl Compiler {
             return Err(self.compile_error(
                 "MIR bytecode lowering for this indexing form is not implemented yet",
             ));
+        }
+
+        if indexing.kind == IndexKind::Brace
+            && matches!(indexing.result_context, IndexResultContext::ReadCommaList)
+        {
+            return self.compile_mir_cell_list(base, indexing);
         }
 
         self.compile_mir_operand(base)?;

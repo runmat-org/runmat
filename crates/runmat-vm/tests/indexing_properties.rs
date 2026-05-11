@@ -1,7 +1,6 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_parser::parse;
 use test_helpers::execute;
 use test_helpers::execute_semantic_source;
 use test_helpers::lower;
@@ -133,9 +132,11 @@ fn negative_step_linear_index() {
 #[test]
 fn negative_step_2d_subscript_index() {
     let src = "A = reshape([1 2 3 4 5 6 7 8 9 10 11 12],3,4); B = A(3:-1:1, 4:-2:2);";
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
-    let b = find_last_tensor(&vars);
+    let vars = execute_semantic_source(src).unwrap();
+    let b = match &vars[1] {
+        runmat_builtins::Value::Tensor(t) => t.clone(),
+        other => panic!("expected B tensor, got {other:?}"),
+    };
     assert_eq!(b.shape, vec![3, 2]);
     // Column-major order preserves index order: rows [3,2,1] for cols [4,2]
     assert_eq!(b.data, vec![12.0, 11.0, 10.0, 6.0, 5.0, 4.0]);
@@ -144,9 +145,11 @@ fn negative_step_2d_subscript_index() {
 #[test]
 fn empty_row_selection() {
     let src = "A = reshape([1 2 3 4 5 6],3,2); B = A([], :);";
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
-    let b = find_last_tensor(&vars);
+    let vars = execute_semantic_source(src).unwrap();
+    let b = match &vars[1] {
+        runmat_builtins::Value::Tensor(t) => t.clone(),
+        other => panic!("expected B tensor, got {other:?}"),
+    };
     assert_eq!(b.shape, vec![0, 2]);
     assert_eq!(b.data.len(), 0);
 }
@@ -154,9 +157,11 @@ fn empty_row_selection() {
 #[test]
 fn empty_col_selection() {
     let src = "A = reshape([1 2 3 4 5 6],3,2); B = A(:, []);";
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
-    let b = find_last_tensor(&vars);
+    let vars = execute_semantic_source(src).unwrap();
+    let b = match &vars[1] {
+        runmat_builtins::Value::Tensor(t) => t.clone(),
+        other => panic!("expected B tensor, got {other:?}"),
+    };
     assert_eq!(b.shape, vec![3, 0]);
     assert_eq!(b.data.len(), 0);
 }
@@ -173,9 +178,11 @@ fn empty_both_selection() {
 #[test]
 fn mixed_selectors_rows_vector_and_col_range() {
     let src = "A = reshape([1 2 3 4 5 6 7 8 9 10 11 12],3,4); B = A([1 3], 2:3);";
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
-    let b = find_last_tensor(&vars);
+    let vars = execute_semantic_source(src).unwrap();
+    let b = match &vars[1] {
+        runmat_builtins::Value::Tensor(t) => t.clone(),
+        other => panic!("expected B tensor, got {other:?}"),
+    };
     assert_eq!(b.shape, vec![2, 2]);
     assert_eq!(b.data, vec![4.0, 6.0, 7.0, 9.0]);
 }
@@ -213,8 +220,7 @@ fn multidim_empty_mixes() {
 		B3 = A(:, :, []);
 		B4 = A([], 2:3, []);
 	"#;
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(src).unwrap();
     let mut saw_b1 = false;
     let mut saw_b2 = false;
     let mut saw_b3 = false;
@@ -247,10 +253,12 @@ fn mixed_logical_mask_and_range_across_3d() {
 		cols = 2:3;     % columns 2 and 3
 		planes = [false true]; % pick plane 2 only
 		S = A(rows, cols, planes);
-	"#;
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
-    let s = find_last_tensor(&vars);
+    "#;
+    let vars = execute_semantic_source(src).unwrap();
+    let s = match &vars[4] {
+        runmat_builtins::Value::Tensor(t) => t.clone(),
+        other => panic!("expected S tensor, got {other:?}"),
+    };
     assert_eq!(s.shape, vec![2, 2, 1]);
     // Expected from plane 2: col2 [16,17,18], col3 [19,20,21] selecting rows 1 & 3 => [16,18,19,21]
     assert_eq!(s.data, vec![16.0, 18.0, 19.0, 21.0]);
@@ -264,8 +272,7 @@ fn scatter_broadcasts_negative_steps_and_degenerate_dims() {
 		A(3:-1:1, 3, 2) = 99;   % set col 3 in plane 2, all rows via negative step
 		A(1:2:3, 2:2:2, 1) = [70;80]; % degenerate single column; two rows via step, explicit 2x1 rhs
 	"#;
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(src).unwrap();
     let a = vars
         .iter()
         .filter_map(|v| {
@@ -296,8 +303,7 @@ fn fastpath_gather_multi_columns_and_rows() {
 		C = A(:, [2 4]);
 		R = A([1 3], :);
 	"#;
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(src).unwrap();
     // C is columns 2 and 4 -> data [4 5 6 10 11 12]
     assert!(vars.iter().any(|v| matches!(v, runmat_builtins::Value::Tensor(t) if t.shape==vec![3,2] && t.data==vec![4.0,5.0,6.0,10.0,11.0,12.0])));
     // R is rows [1 3] across all columns -> shape [2,4]; data per col-major: [1,3,4,6,7,9,10,12]
@@ -313,8 +319,7 @@ fn fastpath_scatter_multi_columns_and_rows() {
 		A([1 3], :) = 9; % broadcast row scalar over selected rows
 		C = A;
 	"#;
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(src).unwrap();
     // After column scatter, B should have col2=[30 31 32] and col4=[40 41 42]
     assert!(vars
         .iter()
@@ -342,8 +347,7 @@ fn func_returns_into_row_col_linear_slices() {
 		E([1 9]) = g();   % linear slice
 		F = E;
 	"#;
-    let hir = lower(&runmat_parser::parse(src).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(src).unwrap();
     // B should have row1 col2..3 set to 7,8
     assert!(vars
         .iter()
@@ -377,8 +381,7 @@ fn cell_expansion_into_row_col_linear_slices() {
 		G([1 9]) = H{:};   % linear slice two positions
 		I = G;
 	"#;
-    let hir = lower(&runmat_parser::parse(src).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(src).unwrap();
     // B row1 col2..3 set to 7,8
     assert!(vars
         .iter()

@@ -662,6 +662,7 @@ impl BytecodeCompiler {
                     | Instr::CallMethodOrMemberIndex(_, _)
                     | Instr::CallMethodOrMemberIndexExpandMulti(_, _)
                     | Instr::IndexCellExpand(_, _)
+                    | Instr::IndexCellList(_)
                     | Instr::StoreIndex(_)
                     | Instr::StoreIndexCell(_)
                     | Instr::LoadMethod(_)

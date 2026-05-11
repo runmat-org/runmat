@@ -296,22 +296,18 @@ fn atan2_multi_output_argument_path_unpacks_before_call() {
         end
         x = atan2(g());
     "#;
-    let ast = parse(input).expect("parse atan2 multi-output script");
-    let hir = lower(&ast).expect("lower atan2 multi-output script");
-    let vars = execute(&hir).expect("atan2 multi-output script should execute");
-    let x: f64 = (&vars[2]).try_into().expect("convert x to f64");
+    let vars = execute_semantic_source(input);
+    let x: f64 = (&vars[0]).try_into().expect("convert x to f64");
     assert!((x - 1.0f64.atan2(2.0)).abs() < 1e-12);
 
-    let bytecode = runmat_vm::bytecode::compile::compile_legacy(&hir, &HashMap::new())
-        .expect("compile atan2 multi-output script");
-    let has_unpack_barrier = bytecode.instructions.windows(3).any(|window| {
-        matches!(window[0], Instr::CallFunctionMulti(ref name, 0, 2) if name == "g")
-            && matches!(window[1], Instr::Unpack(2))
-            && matches!(window[2], Instr::CallBuiltin(ref name, 2) if name == "atan2")
+    let bytecode = compile_semantic_source(input).expect("compile atan2 multi-output script");
+    let has_output_list_expansion = bytecode.instructions.iter().any(|instr| {
+        matches!(instr, Instr::CallBuiltinExpandMulti(name, specs)
+            if name == "atan2" && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all)
     });
     assert!(
-        has_unpack_barrier,
-        "expected CallFunctionMulti(g,0,2) -> Unpack(2) -> CallBuiltin(atan2,2) in bytecode"
+        has_output_list_expansion,
+        "expected semantic CallBuiltinExpandMulti(atan2) expansion in bytecode"
     );
 }
 

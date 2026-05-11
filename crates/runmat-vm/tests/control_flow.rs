@@ -242,8 +242,7 @@ fn varargout_mismatch_mex() {
         end
         [a,b,c] = g();
     "#;
-    let hir = lower(&parse(src).unwrap()).unwrap();
-    let err = test_helpers::execute(&hir).err().unwrap();
+    let err = execute_semantic_error(src);
     assert_eq!(err.identifier(), Some("RunMat:VarargoutMismatch"));
 }
 

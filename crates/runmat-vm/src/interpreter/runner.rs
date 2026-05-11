@@ -345,13 +345,27 @@ fn collect_semantic_outputs(
     }
     if values.len() < requested_outputs {
         if let Some(slot) = func.varargout_slot {
-            if let Some(Value::Cell(cell)) = result_vars.get(slot) {
-                for value in crate::call::shared::expand_all_cell(cell)? {
-                    if values.len() >= requested_outputs {
-                        break;
+            let available = match result_vars.get(slot) {
+                Some(Value::Cell(cell)) => {
+                    let expanded = crate::call::shared::expand_all_cell(cell)?;
+                    let available = expanded.len();
+                    for value in expanded {
+                        if values.len() >= requested_outputs {
+                            break;
+                        }
+                        values.push(value);
                     }
-                    values.push(value);
+                    available
                 }
+                _ => 0,
+            };
+            if values.len() < requested_outputs {
+                let need = requested_outputs - func.output_slots.len();
+                let message = format!(
+                    "Function '{}' returned {available} varargout values, {need} requested",
+                    func.display_name
+                );
+                return Err(mex("VarargoutMismatch", &message));
             }
         }
     }
@@ -716,6 +730,7 @@ async fn run_interpreter_inner(
             | Instr::IndexSliceExpr { .. }
             | Instr::IndexCell(_)
             | Instr::IndexCellExpand(_, _)
+            | Instr::IndexCellList(_)
             | Instr::StoreIndex(_)
             | Instr::StoreIndexCell(_)
             | Instr::StoreSlice(_, _, _, _)

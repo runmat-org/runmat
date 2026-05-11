@@ -1,17 +1,15 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_parser::parse;
-use test_helpers::execute;
 use test_helpers::execute_semantic_source;
-use test_helpers::lower;
 
 #[test]
 fn reshape_and_index_3d_element() {
     // Build a 2x3x2 tensor of values 1..12 and test a specific element
-    let ast = parse("A = reshape([1 2 3 4 5 6 7 8 9 10 11 12], 2, 3, 2); x = A(1,2,2);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(
+        "A = reshape([1 2 3 4 5 6 7 8 9 10 11 12], 2, 3, 2); x = A(1,2,2);",
+    )
+    .unwrap();
     // A(1,2,2) with column-major reshape(2,3,2) is 9 in MATLAB semantics
     assert!(vars
         .iter()
@@ -21,95 +19,65 @@ fn reshape_and_index_3d_element() {
 /// MATLAB only drops *trailing* singleton dimensions. A(:, 2, :) on 3×4×5 → [3, 1, 5].
 #[test]
 fn slice_3d_non_trailing_singleton_shape() {
-    let ast = parse("A = reshape(1:60, 3, 4, 5); S = A(:, 2, :);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
-    let s = vars
-        .iter()
-        .rev()
-        .find(|v| matches!(v, runmat_builtins::Value::Tensor(_)))
-        .unwrap();
-    if let runmat_builtins::Value::Tensor(t) = s {
-        assert_eq!(
-            t.shape,
-            vec![3, 1, 5],
-            "A(:,2,:) on 3x4x5 should be [3, 1, 5]"
-        );
-    }
+    let vars = execute_semantic_source("A = reshape(1:60, 3, 4, 5); S = A(:, 2, :);").unwrap();
+    let runmat_builtins::Value::Tensor(t) = &vars[1] else {
+        panic!("expected S tensor, got {:?}", vars[1]);
+    };
+    assert_eq!(
+        t.shape,
+        vec![3, 1, 5],
+        "A(:,2,:) on 3x4x5 should be [3, 1, 5]"
+    );
 }
 
 /// A(1, 1, :) on 3×4×5 → [1, 1, 5], not [5, 1].
 #[test]
 fn slice_3d_leading_scalars_shape() {
-    let ast = parse("A = reshape(1:60, 3, 4, 5); S = A(1, 1, :);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
-    let s = vars
-        .iter()
-        .rev()
-        .find(|v| matches!(v, runmat_builtins::Value::Tensor(_)))
-        .unwrap();
-    if let runmat_builtins::Value::Tensor(t) = s {
-        assert_eq!(
-            t.shape,
-            vec![1, 1, 5],
-            "A(1,1,:) on 3x4x5 should be [1, 1, 5]"
-        );
-    }
+    let vars = execute_semantic_source("A = reshape(1:60, 3, 4, 5); S = A(1, 1, :);").unwrap();
+    let runmat_builtins::Value::Tensor(t) = &vars[1] else {
+        panic!("expected S tensor, got {:?}", vars[1]);
+    };
+    assert_eq!(
+        t.shape,
+        vec![1, 1, 5],
+        "A(1,1,:) on 3x4x5 should be [1, 1, 5]"
+    );
 }
 
 #[test]
 fn slice_3d_trailing_singleton_dropped_for_vector_index() {
-    let ast = parse("A = reshape(1:24, 3, 4, 2); S = A(:, :, [2]);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
-    let s = vars
-        .iter()
-        .rev()
-        .find(|v| matches!(v, runmat_builtins::Value::Tensor(_)))
-        .unwrap();
-    if let runmat_builtins::Value::Tensor(t) = s {
-        assert_eq!(
-            t.shape,
-            vec![3, 4],
-            "A(:,:,[2]) should drop trailing singleton"
-        );
-    }
+    let vars = execute_semantic_source("A = reshape(1:24, 3, 4, 2); S = A(:, :, [2]);").unwrap();
+    let runmat_builtins::Value::Tensor(t) = &vars[1] else {
+        panic!("expected S tensor, got {:?}", vars[1]);
+    };
+    assert_eq!(
+        t.shape,
+        vec![3, 4],
+        "A(:,:,[2]) should drop trailing singleton"
+    );
 }
 
 #[test]
 fn slice_3d_trailing_singleton_dropped_for_scalar_index() {
-    let ast = parse("A = reshape(1:24, 3, 4, 2); S = A(:, :, 2);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
-    let s = vars
-        .iter()
-        .rev()
-        .find(|v| matches!(v, runmat_builtins::Value::Tensor(_)))
-        .unwrap();
-    if let runmat_builtins::Value::Tensor(t) = s {
-        assert_eq!(
-            t.shape,
-            vec![3, 4],
-            "A(:,:,2) should drop trailing singleton"
-        );
-    }
+    let vars = execute_semantic_source("A = reshape(1:24, 3, 4, 2); S = A(:, :, 2);").unwrap();
+    let runmat_builtins::Value::Tensor(t) = &vars[1] else {
+        panic!("expected S tensor, got {:?}", vars[1]);
+    };
+    assert_eq!(
+        t.shape,
+        vec![3, 4],
+        "A(:,:,2) should drop trailing singleton"
+    );
 }
 
 #[test]
 fn mixed_selectors_basic_2d_range() {
-    let ast = parse("A=[1 2 3; 4 5 6; 7 8 9]; sub = A(1:2, 2);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source("A=[1 2 3; 4 5 6; 7 8 9]; sub = A(1:2, 2);").unwrap();
     // Should select first two rows of column 2: [2;5]
-    let sub = vars
-        .iter()
-        .rev()
-        .find(|v| matches!(v, runmat_builtins::Value::Tensor(_)))
-        .unwrap();
-    if let runmat_builtins::Value::Tensor(t) = sub {
-        assert_eq!(t.data, vec![2.0, 5.0]);
-    }
+    let runmat_builtins::Value::Tensor(t) = &vars[1] else {
+        panic!("expected sub tensor, got {:?}", vars[1]);
+    };
+    assert_eq!(t.data, vec![2.0, 5.0]);
 }
 
 #[test]
@@ -175,10 +143,10 @@ fn slice_assignment_3d_entire_slice() {
 #[test]
 fn gpu_slice_assignment_and_range_indexing() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let ast = parse("A = gpuArray([1 2 3; 4 5 6]); A(:,2) = [8; 9]; B = gather(A(1:2, 2));")
-        .expect("parse");
-    let hir = lower(&ast).expect("lower");
-    let vars = execute(&hir).expect("execute");
+    let vars = execute_semantic_source(
+        "A = gpuArray([1 2 3; 4 5 6]); A(:,2) = [8; 9]; B = gather(A(1:2, 2));",
+    )
+    .expect("execute");
     let b_tensor = vars
         .into_iter()
         .filter_map(|value| match value {
@@ -194,10 +162,9 @@ fn gpu_slice_assignment_and_range_indexing() {
 #[test]
 fn gpu_range_end_indexing() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let ast =
-        parse("A = gpuArray([1 2 3; 4 5 6; 7 8 9]); B = gather(A(1:end-1, 2));").expect("parse");
-    let hir = lower(&ast).expect("lower");
-    let vars = execute(&hir).expect("execute");
+    let vars =
+        execute_semantic_source("A = gpuArray([1 2 3; 4 5 6; 7 8 9]); B = gather(A(1:end-1, 2));")
+            .expect("execute");
 
     let b_tensor = vars
         .into_iter()
@@ -214,9 +181,8 @@ fn gpu_range_end_indexing() {
 #[test]
 fn gpu_range_end_assignment() {
     runmat_accelerate::simple_provider::register_inprocess_provider();
-    let ast = parse("A = gpuArray([1 2 3 4]); A(1:end-1) = 9; B = gather(A);").expect("parse");
-    let hir = lower(&ast).expect("lower");
-    let vars = execute(&hir).expect("execute");
+    let vars = execute_semantic_source("A = gpuArray([1 2 3 4]); A(1:end-1) = 9; B = gather(A);")
+        .expect("execute");
 
     let b_tensor = vars
         .into_iter()

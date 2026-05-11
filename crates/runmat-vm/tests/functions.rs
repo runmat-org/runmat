@@ -118,8 +118,7 @@ fn too_many_outputs_and_varargout_mismatch() {
         end
         [x1,x2,x3] = h(5);
     "#;
-    let hir_mis = lower(&runmat_parser::parse(program_mis).unwrap()).unwrap();
-    let err_mis = execute(&hir_mis).err().unwrap();
+    let err_mis = execute_semantic_source_result(program_mis).err().unwrap();
     assert_eq!(err_mis.identifier(), Some("RunMat:VarargoutMismatch"));
 }
 #[allow(dead_code)]
@@ -1672,8 +1671,7 @@ fn string_array_literal_concat_index_and_compare() {
         e1 = (A == "a");                % logical mask 2x2
         e2 = (A ~= "bb");               % logical mask 2x2
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     let mut saw_a = false;
     let mut saw_x = false;
     let mut saw_b = false;
@@ -1728,8 +1726,7 @@ fn string_literal_and_num2str_horzcat_promotes_and_runs() {
         wn = 6;
         label = ["wn = ", num2str(wn), " rad/s"];
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     let mut saw_label = false;
     for value in vars {
         if let runmat_builtins::Value::StringArray(sa) = value {
