@@ -882,9 +882,7 @@ fn class_property_attribute_conflicts_error() {
             end
         end
     "#;
-    let ast = runmat_parser::parse(program).unwrap();
-    let res = lower(&ast);
-    assert!(res.is_err());
+    assert!(compile_semantic_source(program).is_err());
 }
 
 #[test]
@@ -899,9 +897,7 @@ fn class_method_attribute_conflicts_error() {
             end
         end
     "#;
-    let ast = runmat_parser::parse(program).unwrap();
-    let res = lower(&ast);
-    assert!(res.is_err());
+    assert!(compile_semantic_source(program).is_err());
 }
 
 #[test]
