@@ -144,8 +144,13 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
                 .properties
                 .iter()
                 .map(|property| {
+                    let name = if property.attributes.is_dependent {
+                        format!("@dep:{}", property.name.0)
+                    } else {
+                        property.name.0.clone()
+                    };
                     (
-                        property.name.0.clone(),
+                        name,
                         property.attributes.is_static,
                         member_access_name(property.attributes.get_access.clone()).to_string(),
                         member_access_name(property.attributes.set_access.clone()).to_string(),

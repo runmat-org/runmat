@@ -4,8 +4,7 @@ mod test_helpers;
 use std::convert::TryFrom;
 use std::thread;
 use test_helpers::compile_semantic_source;
-use test_helpers::lower;
-use test_helpers::{execute, interpret};
+use test_helpers::interpret;
 
 fn execute_semantic_source(source: &str) -> Vec<runmat_builtins::Value> {
     let bytecode = compile_semantic_source(source).expect("compile semantic source");
@@ -1517,8 +1516,7 @@ fn class_dependent_property_get_set() {
         % get.p should return p_backing
         v = getfield(d, 'p');
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-7.0).abs()<1e-9)));
