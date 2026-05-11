@@ -622,14 +622,9 @@ fn static_method_via_classref_uses_namespaced_builtin_without_class_registry() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn classes_constructor_and_overloaded_indexing() {
-    // Register classes (includes Ctor and OverIdx definitions)
-    let hir = lower(&runmat_parser::parse("__register_test_classes();").unwrap()).unwrap();
-    assert!(execute(&hir).is_ok());
-
     // Call Ctor constructor; exercise OverIdx subsref/subsasgn
     let program = "__register_test_classes(); c = Ctor(7); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); t = call_method(o,'subsref','.', 'k');";
-    let hir2 = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir2).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
