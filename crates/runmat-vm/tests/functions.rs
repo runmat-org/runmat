@@ -500,8 +500,7 @@ fn dotted_invoke_runtime_struct_dispatch_when_base_type_unknown() {
         s.arr = [10 20 30];
         z = pick(s);
     "#;
-    let hir = lower(&parse(input).unwrap()).unwrap();
-    let vars = execute(&hir).expect("runtime dotted invoke struct dispatch should succeed");
+    let vars = execute_semantic_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
@@ -793,8 +792,7 @@ fn import_static_property_shadowed_by_local_variable() {
         staticValue = 7;   % shadows classref('Point').staticValue (42)
         v = staticValue;
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs()<1e-9)));
@@ -883,8 +881,7 @@ fn unqualified_static_property_shadowed_by_local_variable() {
         staticValue = 9;
         v = staticValue;  % picks local, not class static 42
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs()<1e-9)));
@@ -1421,8 +1418,7 @@ fn import_precedence_and_class_static_shadowing() {
         a = origin;          % uses local variable, not static
         b = f();             % user function resolves before imports
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-7.0).abs()<1e-9)));
