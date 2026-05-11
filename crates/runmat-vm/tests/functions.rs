@@ -1490,7 +1490,6 @@ fn nested_function_return_propagation_mixed_with_fixed() {
 }
 
 #[test]
-#[ignore]
 fn nested_try_catch_rethrow_unified_exception_ids() {
     // inner throws, caught and rethrown, outer catches; identifiers/messages preserved
     let program = r#"
@@ -1513,8 +1512,7 @@ fn nested_try_catch_rethrow_unified_exception_ids() {
             out_id = id; out_msg = msg; out_exc = e;
         end
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // Look for the exception object with identifier/message
     let has_exc = vars.iter().any(|v| match v {
         runmat_builtins::Value::MException(me) => {
