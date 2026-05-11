@@ -116,6 +116,7 @@ struct IndexSelector {
 #[derive(Clone)]
 enum IndexComponent {
     Scalar(usize),
+    Vector(Vec<usize>, Vec<usize>),
     End,
 }
 
@@ -187,6 +188,14 @@ fn parse_index_component(value: &Value) -> BuiltinResult<IndexComponent> {
         }
         Value::String(s) => parse_index_text(s.trim()),
         Value::StringArray(sa) if sa.data.len() == 1 => parse_index_text(sa.data[0].trim()),
+        Value::Tensor(tensor) if tensor.data.len() > 1 => {
+            let indices = tensor
+                .data
+                .iter()
+                .map(|&value| parse_positive_integer(value))
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            Ok(IndexComponent::Vector(indices, tensor.shape.clone()))
+        }
         _ => {
             let idx = parse_positive_scalar(value).map_err(|err| {
                 getfield_flow(format!(
@@ -236,6 +245,10 @@ fn parse_positive_scalar(value: &Value) -> BuiltinResult<usize> {
         }
     };
 
+    parse_positive_integer(number)
+}
+
+fn parse_positive_integer(number: f64) -> BuiltinResult<usize> {
     if !number.is_finite() {
         return Err(getfield_flow("index must be a finite number"));
     }
@@ -292,6 +305,10 @@ async fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<
         other => other,
     };
 
+    if let Some(indexed) = apply_vector_index(&value, selector)? {
+        return Ok(indexed);
+    }
+
     let resolved = resolve_indices(&value, selector)?;
     let resolved_f64: Vec<f64> = resolved.iter().map(|&idx| idx as f64).collect();
 
@@ -340,12 +357,38 @@ async fn apply_indices(value: Value, selector: &IndexSelector) -> BuiltinResult<
     }
 }
 
+fn apply_vector_index(value: &Value, selector: &IndexSelector) -> BuiltinResult<Option<Value>> {
+    let [IndexComponent::Vector(indices, shape)] = selector.components.as_slice() else {
+        return Ok(None);
+    };
+    match value {
+        Value::Tensor(tensor) => {
+            let mut data = Vec::with_capacity(indices.len());
+            for &index in indices {
+                if index < 1 || index > tensor.data.len() {
+                    return Err(getfield_flow("Index exceeds the number of array elements."));
+                }
+                data.push(tensor.data[index - 1]);
+            }
+            let tensor = Tensor::new(data, shape.clone())
+                .map_err(|e| getfield_flow(format!("getfield: {e}")))?;
+            Ok(Some(Value::Tensor(tensor)))
+        }
+        _ => Ok(None),
+    }
+}
+
 fn resolve_indices(value: &Value, selector: &IndexSelector) -> BuiltinResult<Vec<usize>> {
     let dims = selector.components.len();
     let mut resolved = Vec::with_capacity(dims);
     for (dim_idx, component) in selector.components.iter().enumerate() {
         let index = match component {
             IndexComponent::Scalar(idx) => *idx,
+            IndexComponent::Vector(_, _) => {
+                return Err(getfield_flow(
+                    "getfield: vector indices are only supported for one-dimensional indexing",
+                ))
+            }
             IndexComponent::End => dimension_length(value, dims, dim_idx)?,
         };
         resolved.push(index);

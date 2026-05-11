@@ -458,8 +458,7 @@ fn nested_member_assignment_materializes_missing_intermediate_structs() {
 fn struct_field_indexing_read_path_uses_member_then_index_semantics() {
     let input =
         "s = struct(); s.arr = [10 20 30]; x = s.arr(2); y = s.arr(1:2); y1 = y(1); y2 = y(2);";
-    let hir = lower(&runmat_parser::parse(input).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
