@@ -1288,16 +1288,39 @@ impl SemanticCtx {
             ),
             AstExpr::Colon(_) => HirExprKind::Colon,
             AstExpr::EndKeyword(_) => HirExprKind::End,
-            AstExpr::Member(base, name, _) => HirExprKind::Member(
-                Box::new(self.lower_expr_semantic(base)?),
-                crate::MemberName(name.clone()),
-            ),
+            AstExpr::Member(base, name, _) => {
+                let lowered_base = if let AstExpr::MetaClass(class_name, _) = &**base {
+                    self.classref_expr(class_name, base.span())
+                } else {
+                    self.lower_expr_semantic(base)?
+                };
+                HirExprKind::Member(Box::new(lowered_base), crate::MemberName(name.clone()))
+            }
             AstExpr::MemberDynamic(base, name, _) => HirExprKind::MemberDynamic(
                 Box::new(self.lower_expr_semantic(base)?),
                 Box::new(self.lower_expr_semantic(name)?),
             ),
             AstExpr::DottedInvoke(base, name, args, _)
             | AstExpr::MethodCall(base, name, args, _) => {
+                if let AstExpr::MetaClass(class_name, _) = &**base {
+                    let mut call_args = vec![self.classref_expr(class_name, base.span())];
+                    call_args.extend(
+                        args.iter()
+                            .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    );
+                    return Ok(HirExpr {
+                        id: self.alloc_expr_id(),
+                        kind: HirExprKind::Call(self.call_for_name(
+                            name,
+                            call_args,
+                            CallSyntax::Method,
+                            RequestedOutputCount::One,
+                            span,
+                        )),
+                        span,
+                    });
+                }
                 if let AstExpr::Ident(class_name, _) = &**base {
                     if let Some((method, _)) = runmat_builtins::lookup_method(class_name, name) {
                         if !method.is_static || method.access != runmat_builtins::Access::Public {
@@ -1498,6 +1521,25 @@ impl SemanticCtx {
                 .collect::<Result<_, SemanticError>>()?,
             result_context,
         })
+    }
+
+    fn classref_expr(&mut self, class_name: &str, span: Span) -> HirExpr {
+        let arg = HirExpr {
+            id: self.alloc_expr_id(),
+            kind: HirExprKind::String(StringLiteral(class_name.to_string())),
+            span,
+        };
+        HirExpr {
+            id: self.alloc_expr_id(),
+            kind: HirExprKind::Call(self.call_for_name(
+                "classref",
+                vec![arg],
+                CallSyntax::Plain,
+                RequestedOutputCount::One,
+                span,
+            )),
+            span,
+        }
     }
 
     fn call_for_name(

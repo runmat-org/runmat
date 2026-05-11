@@ -912,8 +912,7 @@ fn metaclass_context_with_imports() {
 #[test]
 fn metaclass_postfix_member_and_method() {
     let program = "__register_test_classes(); v = ?Point.staticValue; o = ?Point.origin();";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
