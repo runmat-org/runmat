@@ -255,14 +255,23 @@ pub async fn invoke_semantic_function_value(
         return Err(mex("SemanticFunctionArity", &message));
     }
     let runtime_arg_count = args.len() - func.capture_slots.len();
-    if runtime_arg_count != func.input_slots.len() {
+    if runtime_arg_count < func.input_slots.len() {
         let message = format!(
             "semantic function {} expected {} inputs, got {}",
             func.display_name,
             func.input_slots.len(),
             runtime_arg_count
         );
-        return Err(mex("SemanticFunctionArity", &message));
+        return Err(mex("NotEnoughInputs", &message));
+    }
+    if runtime_arg_count > func.input_slots.len() {
+        let message = format!(
+            "semantic function {} expected {} inputs, got {}",
+            func.display_name,
+            func.input_slots.len(),
+            runtime_arg_count
+        );
+        return Err(mex("TooManyInputs", &message));
     }
 
     let mut vars = vec![Value::Num(0.0); func.var_count];

@@ -1,3 +1,4 @@
+use crate::call::builtins::is_vm_intrinsic_counter_builtin;
 use crate::compiler::CompileError;
 use crate::functions::UserFunction;
 use crate::instr::{ArgSpec, EmitLabel, EndExpr, Instr};
@@ -1497,6 +1498,9 @@ impl Compiler {
                 ))
             }
         };
+        if is_vm_intrinsic_counter_builtin(&candidate) {
+            return Ok(candidate);
+        }
         runmat_builtins::builtin_function_by_name(&candidate)
             .map(|builtin| builtin.name.to_string())
             .ok_or_else(|| CompileError::new(format!("unknown builtin function {candidate}")))

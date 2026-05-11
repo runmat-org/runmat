@@ -13,11 +13,15 @@ enum VmIntrinsicCounterBuiltin {
 impl VmIntrinsicCounterBuiltin {
     fn classify(name: &str) -> Option<Self> {
         match name {
-            "nargin" => Some(Self::Nargin),
-            "nargout" => Some(Self::Nargout),
+            runmat_hir::NARGIN_BUILTIN_NAME => Some(Self::Nargin),
+            runmat_hir::NARGOUT_BUILTIN_NAME => Some(Self::Nargout),
             _ => None,
         }
     }
+}
+
+pub fn is_vm_intrinsic_counter_builtin(name: &str) -> bool {
+    VmIntrinsicCounterBuiltin::classify(name).is_some()
 }
 
 #[derive(Clone, Copy)]

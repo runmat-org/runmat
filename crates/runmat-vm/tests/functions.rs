@@ -13,6 +13,13 @@ fn execute_semantic_source(source: &str) -> Vec<runmat_builtins::Value> {
     interpret(&bytecode).expect("execute semantic bytecode")
 }
 
+fn execute_semantic_source_result(
+    source: &str,
+) -> Result<Vec<runmat_builtins::Value>, runmat_runtime::RuntimeError> {
+    let bytecode = compile_semantic_source(source).expect("compile semantic source");
+    interpret(&bytecode)
+}
+
 #[test]
 fn nargin_nargout_in_user_functions() {
     // Single-output: nargin/nargout should reflect call site
@@ -22,8 +29,7 @@ fn nargin_nargout_in_user_functions() {
         end
         r = f(10, 20);
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-3.0).abs()<1e-9)));
@@ -36,8 +42,7 @@ fn nargin_nargout_in_user_functions() {
         end
         [u,v] = g(7);
     "#;
-    let hir2 = lower(&parse(program2).unwrap()).unwrap();
-    let vars2 = execute(&hir2).unwrap();
+    let vars2 = execute_semantic_source(program2);
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9)));
@@ -55,8 +60,7 @@ fn not_enough_and_too_many_inputs_fixed_arity() {
         end
         r = f(1);
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let err = execute(&hir).err().unwrap();
+    let err = execute_semantic_source_result(program).err().unwrap();
     assert_eq!(err.identifier(), Some("RunMat:NotEnoughInputs"));
 
     // too many inputs
@@ -66,8 +70,7 @@ fn not_enough_and_too_many_inputs_fixed_arity() {
         end
         r = f(1,2,3);
     "#;
-    let hir2 = lower(&parse(program2).unwrap()).unwrap();
-    let err2 = execute(&hir2).err().unwrap();
+    let err2 = execute_semantic_source_result(program2).err().unwrap();
     assert_eq!(err2.identifier(), Some("RunMat:TooManyInputs"));
 }
 

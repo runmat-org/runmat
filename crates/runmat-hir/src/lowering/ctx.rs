@@ -14,7 +14,7 @@ use crate::{
     PlaceMutationKind, QualifiedName, ReferenceKind, ReferenceResolution, RequestedOutputCount,
     SemanticError, SemanticIndex, SourceId, SourceUnitKind, Span, StmtId, StringLiteral,
     SymbolName, Type, VarId, WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME,
-    DISCARD_OUTPUT_NAME, SPAWN_EXTENSION_NAME,
+    DISCARD_OUTPUT_NAME, NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use std::collections::HashMap;
@@ -1067,6 +1067,14 @@ impl SemanticCtx {
                         .with_span(span));
                     }
                     HirExprKind::Spawn(Box::new(arg))
+                } else if matches!(name.as_str(), NARGIN_BUILTIN_NAME | NARGOUT_BUILTIN_NAME) {
+                    HirExprKind::Call(self.call_for_name(
+                        name,
+                        args,
+                        CallSyntax::Plain,
+                        requested_outputs,
+                        span,
+                    ))
                 } else if let Some(binding) = self.binding_for_read(name, span) {
                     let base = HirExpr {
                         id: self.alloc_expr_id(),

@@ -320,6 +320,8 @@ impl HirCallableRef {
 }
 
 pub const FEVAL_BUILTIN_NAME: &str = "feval";
+pub const NARGIN_BUILTIN_NAME: &str = "nargin";
+pub const NARGOUT_BUILTIN_NAME: &str = "nargout";
 pub const AWAIT_EXTENSION_NAME: &str = "await";
 pub const SPAWN_EXTENSION_NAME: &str = "spawn";
 pub const TEST_CLASS_REGISTRATION_BUILTIN_NAME: &str = "__register_test_classes";
