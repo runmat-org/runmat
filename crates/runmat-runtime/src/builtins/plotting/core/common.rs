@@ -52,6 +52,22 @@ pub fn numeric_triplet(
     Ok((x_vec, y_vec, z_vec))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_pair_accepts_matching_numel_vectors_with_different_shapes() {
+        let row = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap();
+        let column = Tensor::new(vec![10.0, 20.0, 30.0, 40.0], vec![4, 1]).unwrap();
+
+        let (x, y) = numeric_pair(row, column, "plot").expect("matching numel vectors");
+
+        assert_eq!(x, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(y, vec![10.0, 20.0, 30.0, 40.0]);
+    }
+}
+
 pub fn value_as_f64(value: &Value) -> Option<f64> {
     match value {
         Value::Num(v) => Some(*v),

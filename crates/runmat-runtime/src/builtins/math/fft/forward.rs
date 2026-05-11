@@ -236,6 +236,28 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn fft_row_vector_default_dimension_preserves_orientation() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap();
+        let result = fft_host(Value::Tensor(tensor), None, None).expect("fft");
+        match result {
+            Value::ComplexTensor(ct) => {
+                assert_eq!(ct.shape, vec![1, 4]);
+                let expected = [(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)];
+                for (idx, val) in ct.data.iter().enumerate() {
+                    assert!(
+                        approx_eq(*val, expected[idx], 1e-12),
+                        "idx {idx} {:?} ~= {:?}",
+                        val,
+                        expected[idx]
+                    );
+                }
+            }
+            other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn fft_matrix_default_dimension() {
         let tensor = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let result = fft_host(Value::Tensor(tensor), None, None).expect("fft");
