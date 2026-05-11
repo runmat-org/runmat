@@ -3,15 +3,11 @@ mod test_helpers;
 
 use runmat_accelerate::graph::{AccelNodeLabel, PrimitiveOp};
 use runmat_builtins::Value;
-use runmat_parser::parse;
 use runmat_vm::Instr;
-use std::collections::HashMap;
-use test_helpers::{compile_semantic_source, interpret, lower};
+use test_helpers::{compile_semantic_source, interpret};
 
 fn compile_bytecode(source: &str) -> runmat_vm::Bytecode {
-    let ast = parse(source).expect("parse");
-    let hir = lower(&ast).expect("lower");
-    runmat_vm::bytecode::compile::compile_legacy(&hir, &HashMap::new()).expect("compile")
+    compile_semantic_source(source).expect("compile semantic source")
 }
 
 fn execute_program(source: &str) -> Vec<Value> {

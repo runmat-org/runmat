@@ -33,6 +33,12 @@ pub fn compile(
                 .collect()
         })
         .unwrap_or_default();
+    #[cfg(feature = "native-accel")]
+    let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
+    #[cfg(feature = "native-accel")]
+    let mut fusion_groups = accel_graph.detect_fusion_groups();
+    #[cfg(feature = "native-accel")]
+    annotate_fusion_groups_with_stack_layout(&c.instructions, &accel_graph, &mut fusion_groups);
 
     Ok(Bytecode {
         instructions: c.instructions,
@@ -47,9 +53,9 @@ pub fn compile(
         var_names,
         layout: c.layout,
         #[cfg(feature = "native-accel")]
-        accel_graph: None,
+        accel_graph: Some(accel_graph),
         #[cfg(feature = "native-accel")]
-        fusion_groups: Vec::new(),
+        fusion_groups,
     })
 }
 
