@@ -3,13 +3,10 @@ mod test_helpers;
 
 use runmat_accelerate::ShapeInfo;
 use runmat_builtins::Value;
-use runmat_parser::parse;
 use runmat_vm::Instr;
 use std::convert::TryInto;
 use test_helpers::compile_semantic_source;
-use test_helpers::execute;
 use test_helpers::interpret;
-use test_helpers::lower;
 
 fn execute_semantic_source(source: &str) -> Vec<Value> {
     let bytecode = compile_semantic_source(source).expect("compile semantic source");
@@ -503,9 +500,7 @@ fn object_range_end_assignment_accepts_rich_end_expression_payload() {
         r = o(1);
         ok = (r == 99);
     "#;
-    let ast = parse(input).expect("parse object range-end payload script");
-    let hir = lower(&ast).expect("lower object range-end payload script");
-    let vars = execute(&hir).expect("object range-end payload script should execute");
+    let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
             matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
