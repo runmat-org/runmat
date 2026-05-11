@@ -531,9 +531,7 @@ fn mixed_member_cell_and_index_read_chain() {
 #[test]
 fn function_handle_anon_round_trip() {
     let input = "h = @sin; g = make_anon('x', 'x+1');";
-    let ast = parse(input).unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::FunctionHandle(_))));
@@ -566,9 +564,7 @@ fn semantic_anonymous_function_handle_feval_executes() {
 fn cellfun_upper_function_handle_round_trip() {
     let input =
         "names = {'Ada', 'Linus', 'Katherine'}; upper = cellfun(@upper, names, 'UniformOutput', false);";
-    let ast = parse(input).unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(input);
 
     let mut found = false;
     for value in vars {
