@@ -1,9 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_parser::parse;
-use test_helpers::execute;
-use test_helpers::lower;
+use test_helpers::execute_semantic_source;
 
 #[test]
 fn global_across_functions() {
@@ -20,8 +18,7 @@ fn global_across_functions() {
         setg(42);
         r = getg();
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program).unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
@@ -38,8 +35,7 @@ fn persistent_across_calls() {
         a = counter();
         b = counter();
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program).unwrap();
     // Expect to see both 1 and 2 somewhere in the variable array
     assert!(vars
         .iter()

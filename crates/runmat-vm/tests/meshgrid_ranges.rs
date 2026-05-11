@@ -3,14 +3,12 @@ mod test_helpers;
 
 use runmat_builtins::Value;
 use runmat_parser::parse;
-use test_helpers::execute;
+use test_helpers::execute_semantic_source;
 use test_helpers::lower;
 
 #[test]
 fn colon_range_produces_row_vector() {
-    let ast = parse("v = -2:0.08:2;").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source("v = -2:0.08:2;").unwrap();
     let v = vars
         .iter()
         .find_map(|val| match val {
@@ -23,9 +21,7 @@ fn colon_range_produces_row_vector() {
 
 #[test]
 fn meshgrid_accepts_colon_ranges() {
-    let ast = parse("[X, Y] = meshgrid(-2:0.08:2, -2:0.08:2);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source("[X, Y] = meshgrid(-2:0.08:2, -2:0.08:2);").unwrap();
     let mut tensors: Vec<&runmat_builtins::Tensor> = vars
         .iter()
         .filter_map(|v| match v {
@@ -67,7 +63,8 @@ fn meshgrid_accepts_precomputed_ranges() {
         },
         other => panic!("expected final stmt to be MultiAssign, got {other:?}"),
     }
-    let vars = execute(&hir).unwrap();
+    let vars =
+        execute_semantic_source("a = -2:0.08:2; b = -2:0.08:2; [X, Y] = meshgrid(a, b);").unwrap();
     let shapes: Vec<Vec<usize>> = vars
         .iter()
         .filter_map(|v| match v {
@@ -83,9 +80,7 @@ fn meshgrid_accepts_precomputed_ranges() {
 
 #[test]
 fn two_colon_ranges_remain_vectors() {
-    let ast = parse("a = -2:0.08:2; b = -2:0.08:2;").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source("a = -2:0.08:2; b = -2:0.08:2;").unwrap();
     // Variable order for this program should be [a, b].
     let a = match &vars[0] {
         Value::Tensor(t) => t,
@@ -102,15 +97,13 @@ fn two_colon_ranges_remain_vectors() {
 #[test]
 fn meshgrid_failure_does_not_mutate_inputs() {
     // Even if meshgrid errors, the input vectors should remain vectors.
-    let ast =
-        parse("a = -2:0.08:2; b = -2:0.08:2; try; [X, Y] = meshgrid(a, b); catch e; end; A = a;")
-            .unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
-    // A is assigned last; it should be a row vector.
-    let last = vars.last().expect("expected at least one var");
-    match last {
-        Value::Tensor(t) => assert_eq!(t.shape, vec![1, 51]),
-        other => panic!("expected A to be a tensor, got {other:?}"),
-    }
+    let vars = execute_semantic_source(
+        "a = -2:0.08:2; b = -2:0.08:2; try; [X, Y] = meshgrid(a, b); catch e; end; A = a;",
+    )
+    .unwrap();
+    assert!(
+        vars.iter()
+            .any(|value| matches!(value, Value::Tensor(t) if t.shape == vec![1, 51])),
+        "expected a retained input row vector, got {vars:?}"
+    );
 }

@@ -35,6 +35,7 @@ pub fn execute(program: &HirProgram) -> Result<Vec<Value>, RuntimeError> {
     })?
 }
 
+#[allow(dead_code)]
 pub fn lower(program: &runmat_parser::Program) -> Result<HirProgram, SemanticError> {
     runmat_hir::lower(program, &LoweringContext::empty()).map(|result| result.hir)
 }
@@ -47,6 +48,12 @@ pub fn compile_semantic_source(source: &str) -> Result<runmat_vm::Bytecode, Runt
         .map_err(|err| RuntimeError::new(format!("{err:?}")))?;
     let entrypoint = hir.assembly.entrypoints[0].id;
     runmat_vm::compile(&hir.assembly, &mir, entrypoint).map_err(RuntimeError::from)
+}
+
+#[allow(dead_code)]
+pub fn execute_semantic_source(source: &str) -> Result<Vec<Value>, RuntimeError> {
+    let bc = compile_semantic_source(source)?;
+    interpret(&bc)
 }
 
 #[allow(dead_code)]
