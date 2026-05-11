@@ -2439,7 +2439,8 @@ impl Compiler {
                     })
                     .map(|layout| (layout.captures.clone(), layout.display_name.clone()))?;
                 for capture in &captures {
-                    self.emit(Instr::LoadVar(capture.slot.0));
+                    let slot = self.binding_slot(capture.binding)?;
+                    self.emit(Instr::LoadVar(slot));
                 }
                 self.emit(Instr::CreateSemanticClosure(
                     *function,

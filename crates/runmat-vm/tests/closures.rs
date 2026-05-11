@@ -16,9 +16,7 @@ fn closure_simple_no_capture() {
 
 #[test]
 fn closure_captures_free_variables() {
-    let ast = parse("a=1; b=2; f=@(x) x + a + b; y = feval(f, 3);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source("a=1; b=2; f=@(x) x + a + b; y = feval(f, 3);").unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < 1e-9)));
