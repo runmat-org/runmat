@@ -1,10 +1,7 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_parser::parse;
-use test_helpers::execute;
 use test_helpers::execute_semantic_source;
-use test_helpers::lower;
 
 #[test]
 fn closure_simple_no_capture() {
@@ -24,9 +21,9 @@ fn closure_captures_free_variables() {
 
 #[test]
 fn nested_closures_capture_outer() {
-    let ast = parse("a=10; f=@(x) @(y) (x + y + a); g = feval(f, 2); r = feval(g, 3);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars =
+        execute_semantic_source("a=10; f=@(x) @(y) (x + y + a); g = feval(f, 2); r = feval(g, 3);")
+            .unwrap();
     // Expect 2 + 3 + 10 = 15
     assert!(vars
         .iter()

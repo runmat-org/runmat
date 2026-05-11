@@ -465,17 +465,34 @@ impl SemanticCtx {
             });
         if let Some(owner) = owner {
             if owner != current {
-                let captures = self.captures.entry(current).or_default();
-                if !captures
-                    .iter()
-                    .any(|capture| capture.binding == binding && capture.from_function == owner)
+                if let Some(owner_index) = self.scopes.iter().position(|scope| scope.owner == owner)
                 {
-                    captures.push(CapturedBinding {
-                        binding,
-                        from_function: owner,
-                    });
+                    let functions = self
+                        .scopes
+                        .iter()
+                        .skip(owner_index + 1)
+                        .map(|scope| scope.owner)
+                        .collect::<Vec<_>>();
+                    for function in functions {
+                        self.record_capture(function, binding, owner);
+                    }
+                } else {
+                    self.record_capture(current, binding, owner);
                 }
             }
+        }
+    }
+
+    fn record_capture(&mut self, function: FunctionId, binding: BindingId, owner: FunctionId) {
+        let captures = self.captures.entry(function).or_default();
+        if !captures
+            .iter()
+            .any(|capture| capture.binding == binding && capture.from_function == owner)
+        {
+            captures.push(CapturedBinding {
+                binding,
+                from_function: owner,
+            });
         }
     }
 
