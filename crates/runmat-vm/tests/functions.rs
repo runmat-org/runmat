@@ -1,7 +1,6 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_parser::parse;
 use std::convert::TryFrom;
 use std::thread;
 use test_helpers::compile_semantic_source;
@@ -119,15 +118,13 @@ fn too_many_outputs_and_varargout_mismatch() {
         end
         [x1,x2,x3] = h(5);
     "#;
-    let hir_mis = lower(&parse(program_mis).unwrap()).unwrap();
+    let hir_mis = lower(&runmat_parser::parse(program_mis).unwrap()).unwrap();
     let err_mis = execute(&hir_mis).err().unwrap();
     assert_eq!(err_mis.identifier(), Some("RunMat:VarargoutMismatch"));
 }
 #[allow(dead_code)]
 fn function_definition_and_calls() {
-    let ast = parse("function y = f(x); y = x + 1; end; a = f(2);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let result = execute(&hir);
+    let result = execute_semantic_source_result("function y = f(x); y = x + 1; end; a = f(2);");
     assert!(result.is_ok());
 }
 
@@ -374,18 +371,14 @@ fn sprintf_inline_cast_argument_formats_value() {
 #[test]
 fn member_get_set_and_method_call_skeleton() {
     let input = "obj = new_object('Point'); obj = setfield(obj, 'x', 3); ax = getfield(obj, 'x');";
-    let ast = parse(input).unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < f64::EPSILON)));
 
     // call Point.move which exists as example method: dx=1,dy=2
     let input2 = "obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = call_method(obj, 'move', 1, 2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
-    let ast2 = parse(input2).unwrap();
-    let hir2 = lower(&ast2).unwrap();
-    let vars2 = execute(&hir2).unwrap();
+    let vars2 = execute_semantic_source(input2);
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < f64::EPSILON)));
@@ -466,8 +459,8 @@ fn nested_member_assignment_materializes_missing_intermediate_structs() {
 fn struct_field_indexing_read_path_uses_member_then_index_semantics() {
     let input =
         "s = struct(); s.arr = [10 20 30]; x = s.arr(2); y = s.arr(1:2); y1 = y(1); y2 = y(2);";
-    let hir = lower(&parse(input).unwrap()).unwrap();
-    let vars = execute(&hir).expect("struct field indexing reads should succeed");
+    let hir = lower(&runmat_parser::parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
@@ -479,8 +472,7 @@ fn struct_field_indexing_read_path_uses_member_then_index_semantics() {
 #[test]
 fn dotted_invoke_preserves_object_method_dispatch() {
     let input = "obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = obj.move(1,2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
-    let hir = lower(&parse(input).unwrap()).unwrap();
-    let vars = execute(&hir).expect("object method dispatch should succeed");
+    let vars = execute_semantic_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < 1e-9)));
@@ -587,14 +579,10 @@ fn cellfun_upper_function_handle_round_trip() {
 #[test]
 fn classes_static_and_inheritance() {
     // Register classes
-    let ast = parse("__register_test_classes();").unwrap();
-    let hir = lower(&ast).unwrap();
-    assert!(execute(&hir).is_ok());
+    assert!(execute_semantic_source_result("__register_test_classes();").is_ok());
 
     // Default init and namespaced
-    let ast2 = parse("__register_test_classes(); p = new_object('Point'); ax = getfield(p,'x'); ns = new_object('pkg.PointNS'); nsx = getfield(ns,'x');").unwrap();
-    let hir2 = lower(&ast2).unwrap();
-    let vars2 = execute(&hir2).unwrap();
+    let vars2 = execute_semantic_source("__register_test_classes(); p = new_object('Point'); ax = getfield(p,'x'); ns = new_object('pkg.PointNS'); nsx = getfield(ns,'x');");
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.0).abs()<f64::EPSILON)));
@@ -603,9 +591,7 @@ fn classes_static_and_inheritance() {
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs()<f64::EPSILON)));
 
     // Static method and property
-    let ast3 = parse("__register_test_classes(); o = classref('Point').origin(); sv = classref('Point').staticValue;").unwrap();
-    let hir3 = lower(&ast3).unwrap();
-    let vars3 = execute(&hir3).unwrap();
+    let vars3 = execute_semantic_source("__register_test_classes(); o = classref('Point').origin(); sv = classref('Point').staticValue;");
     assert!(vars3
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -614,24 +600,19 @@ fn classes_static_and_inheritance() {
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs()<f64::EPSILON)));
 
     // Inheritance override: use feval(getmethod(...))()
-    let ast4 = parse("__register_test_classes(); c = new_object('Circle'); c = setfield(c,'r', 2); a = feval(getmethod(c,'area'));").unwrap();
-    let hir4 = lower(&ast4).unwrap();
-    let vars4 = execute(&hir4).unwrap();
+    let vars4 = execute_semantic_source("__register_test_classes(); c = new_object('Circle'); c = setfield(c,'r', 2); a = feval(getmethod(c,'area'));");
     assert!(vars4.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI*4.0).abs() < 1e-9)));
 
     // Access control violations
-    let ast5 =
-        parse("__register_test_classes(); p = new_object('Point'); s = getfield(p,'secret');")
-            .unwrap();
-    let hir5 = lower(&ast5).unwrap();
-    assert!(execute(&hir5).is_err());
+    assert!(execute_semantic_source_result(
+        "__register_test_classes(); p = new_object('Point'); s = getfield(p,'secret');"
+    )
+    .is_err());
 }
 
 #[test]
 fn static_method_via_classref_uses_namespaced_builtin_without_class_registry() {
-    let ast = parse("P = classref(\"Point\").origin(); point_class = class(P);").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source("P = classref(\"Point\").origin(); point_class = class(P);");
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -644,13 +625,12 @@ fn static_method_via_classref_uses_namespaced_builtin_without_class_registry() {
 #[test]
 fn classes_constructor_and_overloaded_indexing() {
     // Register classes (includes Ctor and OverIdx definitions)
-    let ast = parse("__register_test_classes();").unwrap();
-    let hir = lower(&ast).unwrap();
+    let hir = lower(&runmat_parser::parse("__register_test_classes();").unwrap()).unwrap();
     assert!(execute(&hir).is_ok());
 
     // Call Ctor constructor; exercise OverIdx subsref/subsasgn
     let program = "__register_test_classes(); c = Ctor(7); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); t = call_method(o,'subsref','.', 'k');";
-    let hir2 = lower(&parse(program).unwrap()).unwrap();
+    let hir2 = lower(&runmat_parser::parse(program).unwrap()).unwrap();
     let vars = execute(&hir2).unwrap();
     assert!(vars
         .iter()
@@ -664,13 +644,12 @@ fn classes_constructor_and_overloaded_indexing() {
 #[test]
 fn classes_property_access_attributes() {
     // Register classes
-    let _ = execute(&lower(&parse("__register_test_classes();").unwrap()).unwrap());
+    let _ = execute_semantic_source("__register_test_classes();");
     // Private get already covered by existing test; ensure private set is also rejected
-    let ast =
-        parse("__register_test_classes(); p = new_object('Point'); p = setfield(p,'secret', 7);")
-            .unwrap();
-    let hir = lower(&ast).unwrap();
-    assert!(execute(&hir).is_err());
+    assert!(execute_semantic_source_result(
+        "__register_test_classes(); p = new_object('Point'); p = setfield(p,'secret', 7);"
+    )
+    .is_err());
 }
 
 #[test]
@@ -1012,8 +991,7 @@ fn expansion_on_non_cell_errors() {
 #[test]
 fn object_cell_expansion_via_subsref() {
     let program = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','{}', {1}, 42); r = max(o{1}, 5);";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
@@ -1306,8 +1284,7 @@ fn operator_overloading_plus_times_lt_eq() {
     let program = format!(
         "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); r1 = o + 3;"
     );
-    let hir = lower(&runmat_parser::parse(&program).unwrap()).unwrap();
-    let _ = execute(&hir).unwrap();
+    let _ = execute_semantic_source(&program);
 }
 
 #[test]
@@ -1316,8 +1293,7 @@ fn operator_overloading_elementwise_vs_mtimes_and_mixed() {
     // Exercise times and mtimes overload paths (will fallback if not implemented)
     let program =
         format!("{setup} o = new_object('OverIdx'); a = o .* 2; b = o * 2; c = 2 .* o; d = 2 * o;");
-    let hir = lower(&runmat_parser::parse(&program).unwrap()).unwrap();
-    let _ = execute(&hir).unwrap();
+    let _ = execute_semantic_source(&program);
 }
 
 #[test]
@@ -1327,8 +1303,7 @@ fn operator_overloading_relational_lt_eq() {
     let program = format!(
         "{setup} o = new_object('OverIdx'); t1 = (o < 10); t2 = (10 < o); t3 = (o == 0); t4 = (0 == o);"
     );
-    let hir = lower(&runmat_parser::parse(&program).unwrap()).unwrap();
-    let _ = execute(&hir).unwrap();
+    let _ = execute_semantic_source(&program);
 }
 
 #[test]
@@ -1354,9 +1329,7 @@ fn operator_overloading_full_grid_basic() {
     for (idx, stmt) in statements.iter().enumerate() {
         program.push_str(stmt);
         program.push('\n');
-        let ast = runmat_parser::parse(&program).unwrap();
-        let hir = lower(&ast).unwrap();
-        execute(&hir).unwrap_or_else(|err| {
+        execute_semantic_source_result(&program).unwrap_or_else(|err| {
             let bc = compile_semantic_source(&program).unwrap();
             panic!(
                 "operator overload script failed after stmt #{idx} `{stmt}`: {err}\nbytecode={:?}",
@@ -1402,8 +1375,7 @@ fn static_method_resolution_under_wildcard_import() {
 fn operator_overloading_numeric_results_and_bitwise_arrays() {
     // Verify explicit numeric outcomes for OverIdx overloads
     let program = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); r1 = o + 3; r2 = o .* 2; r3 = o * 4; a = (o < 10); b = (o == 5);";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 8.0).abs() < 1e-9))); // r1 = 5+3
@@ -1436,8 +1408,7 @@ fn operator_overloading_numeric_results_and_bitwise_arrays() {
 fn operator_overloading_left_division_variants() {
     let setup = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5);";
     let program = format!("{setup} a = (o .\\ 2); b = (2 .\\ o); c = (o ./ 2); d = (2 ./ o);",);
-    let hir = lower(&runmat_parser::parse(&program).unwrap()).unwrap();
-    let _ = execute(&hir).unwrap();
+    let _ = execute_semantic_source(&program);
 }
 
 #[test]
@@ -1625,8 +1596,7 @@ fn oop_negative_undefined_property_and_missing_subsref() {
             ok = 1;
         end
     "#;
-    let hir = lower(&runmat_parser::parse(prog).unwrap()).unwrap();
-    let res = execute(&hir);
+    let res = execute_semantic_source_result(prog);
     if let Ok(vars) = res {
         assert!(vars
             .iter()
@@ -1647,8 +1617,7 @@ fn oop_negative_undefined_property_and_missing_subsref() {
             ok=2;
         end
     "#;
-    let hir2 = lower(&runmat_parser::parse(prog2).unwrap()).unwrap();
-    let res2 = execute(&hir2);
+    let res2 = execute_semantic_source_result(prog2);
     if let Ok(vars2) = res2 {
         assert!(vars2
             .iter()
