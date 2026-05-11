@@ -1640,8 +1640,7 @@ fn struct_isfield_multi_and_fieldnames() {
         s = struct(); s = setfield(s, 'a', 1); s = setfield(s, 'b', 2);
         c = {'a','x';'b','a'}; r = isfield(s, c); f = fieldnames(s);
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // Expect r to be 2x2 logical matrix [[1,0];[1,1]] in column-major data [1,1,0,1]
     let mut found_r_ok = false;
     let mut found_f_ok = false;
@@ -1673,9 +1672,7 @@ fn struct_isfield_string_array_placeholder() {
         % For now, ensure isfield(s, 'a') works and returns true.
         r = isfield(s, 'a');
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
-    println!("vars: {vars:?}");
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Bool(true))));
@@ -1855,8 +1852,7 @@ fn computed_integer_indices_work_for_column_slice_read_and_assign() {
         B(:, j) = [7; 9];
         d = B(:, j);
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
 
     let mut saw_read = false;
     let mut saw_assign = false;
