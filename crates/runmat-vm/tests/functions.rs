@@ -511,8 +511,7 @@ fn dotted_invoke_runtime_struct_dispatch_when_base_type_unknown() {
 fn nested_dynamic_member_assignment_materializes_and_writes_back() {
     let input =
         "s = struct(); f1 = 'a'; f2 = 'b'; s.(f1).(f2) = 3; v = getfield(getfield(s, 'a'), 'b');";
-    let hir = lower(&parse(input).unwrap()).unwrap();
-    let vars = execute(&hir).expect("nested dynamic member assignment should succeed");
+    let vars = execute_semantic_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
@@ -521,8 +520,7 @@ fn nested_dynamic_member_assignment_materializes_and_writes_back() {
 #[test]
 fn mixed_member_cell_and_index_read_chain() {
     let input = "s = struct(); s.arr = {[10 20], [30 40]}; v = s.arr{2}(1);";
-    let hir = lower(&parse(input).unwrap()).unwrap();
-    let vars = execute(&hir).expect("mixed member/cell/index chain should succeed");
+    let vars = execute_semantic_source(input);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
@@ -1470,8 +1468,7 @@ fn operator_overloading_numeric_results_and_bitwise_arrays() {
 
     // Bitwise and/or on arrays: verify element-wise behavior
     let program2 = "A = [1 0 1; 0 1 0]; B = [1 1 0; 0 0 1]; C = A & B; D = A | B; Sc = sum(C(:)); Sd = sum(D(:));";
-    let hir2 = lower(&runmat_parser::parse(program2).unwrap()).unwrap();
-    let vars2 = execute(&hir2).unwrap();
+    let vars2 = execute_semantic_source(program2);
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9)));
