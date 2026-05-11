@@ -2830,9 +2830,7 @@ fn assert_real_sequence_matches(actual: &[f64], expected: &[f64]) {
 }
 
 fn compile_and_interpret_value(source: &str) -> (runmat_vm::Bytecode, Value) {
-    // Known semantic gap: scalar mod fused through GPU tensor conversion can currently
-    // surface a GpuTensor-to-f64 conversion error in the parity matrix.
-    let bytecode = compile_legacy_source(source);
+    let bytecode = compile_semantic(source);
     let vars = interpret(&bytecode).expect("interpret");
     let y_index = bytecode
         .instructions

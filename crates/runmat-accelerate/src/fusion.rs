@@ -113,7 +113,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
             continue;
         }
         let mut current_shape = node_output_shape(graph, node);
-        if matches!(current_shape, ShapeInfo::Unknown) {
+        if matches!(current_shape, ShapeInfo::Unknown | ShapeInfo::Scalar) {
             continue;
         }
         let mut chain: Vec<NodeId> = Vec::new();
