@@ -49,6 +49,7 @@ tempfile = "3.12"
 runmat-vm = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
+runmat-mir = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { workspace = true, default-features = false, features = ["macros", "rt"] }
