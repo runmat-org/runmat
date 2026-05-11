@@ -16,6 +16,13 @@ use runmat_mir::{
 };
 use std::collections::{HashMap, HashSet};
 
+type ClassRegistration = (
+    String,
+    Option<String>,
+    Vec<(String, bool, String, String)>,
+    Vec<(String, String, bool, String)>,
+);
+
 pub struct LoopLabels {
     pub break_jumps: Vec<usize>,
     pub continue_jumps: Vec<usize>,
@@ -34,6 +41,7 @@ pub struct Compiler {
     pub entrypoint: Option<EntrypointId>,
     pub function: Option<FunctionId>,
     pub body: Option<MirBody>,
+    pub class_registrations: Vec<ClassRegistration>,
     current_span: Option<runmat_hir::Span>,
 }
 
@@ -105,6 +113,67 @@ fn hir_function_imports(hir: &HirAssembly, function: FunctionId) -> Vec<(Vec<Str
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
+    hir.classes
+        .iter()
+        .map(|class| {
+            let name = class
+                .name
+                .0
+                .iter()
+                .map(|part| part.0.clone())
+                .collect::<Vec<_>>()
+                .join(".");
+            let super_class = class.super_class.and_then(|class_id| {
+                hir.classes
+                    .iter()
+                    .find(|candidate| candidate.id == class_id)
+                    .map(|super_class| {
+                        super_class
+                            .name
+                            .0
+                            .iter()
+                            .map(|part| part.0.clone())
+                            .collect::<Vec<_>>()
+                            .join(".")
+                    })
+            });
+            let properties = class
+                .properties
+                .iter()
+                .map(|property| {
+                    (
+                        property.name.0.clone(),
+                        property.attributes.is_static,
+                        member_access_name(property.attributes.get_access.clone()).to_string(),
+                        member_access_name(property.attributes.set_access.clone()).to_string(),
+                    )
+                })
+                .collect();
+            let methods = class
+                .methods
+                .iter()
+                .map(|method| {
+                    (
+                        method.name.0.clone(),
+                        method.name.0.clone(),
+                        method.is_static,
+                        member_access_name(method.attributes.access.clone()).to_string(),
+                    )
+                })
+                .collect();
+            (name, super_class, properties, methods)
+        })
+        .collect()
+}
+
+fn member_access_name(access: runmat_hir::MemberAccess) -> &'static str {
+    match access {
+        runmat_hir::MemberAccess::Private => "private",
+        _ => "public",
+    }
 }
 
 impl SpanGuard {
@@ -207,6 +276,7 @@ impl Compiler {
             entrypoint: Some(entrypoint),
             function: Some(function),
             body: Some(body),
+            class_registrations: hir_class_registrations(hir),
             current_span: None,
         })
     }
@@ -250,6 +320,7 @@ impl Compiler {
             entrypoint: None,
             function: Some(function),
             body: Some(body),
+            class_registrations: hir_class_registrations(hir),
             current_span: None,
         })
     }
@@ -429,6 +500,7 @@ impl Compiler {
             entrypoint: None,
             function: None,
             body: None,
+            class_registrations: Vec::new(),
             current_span: None,
         }
     }
@@ -454,6 +526,14 @@ impl Compiler {
             .clone()
             .ok_or_else(|| CompileError::new("compiler missing MIR body"))?;
 
+        for (name, super_class, properties, methods) in self.class_registrations.clone() {
+            self.emit(Instr::RegisterClass {
+                name,
+                super_class,
+                properties,
+                methods,
+            });
+        }
         for (path, wildcard) in self.imports.clone() {
             self.emit(Instr::RegisterImport { path, wildcard });
         }

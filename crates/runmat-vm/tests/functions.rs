@@ -962,13 +962,10 @@ fn import_ambiguity_wildcard_conflict_errors() {
 }
 
 #[test]
-#[ignore]
 fn classdef_with_attributes_enforced() {
     // Define class A with private get and public set on property p, then enforce via getfield/setfield
     let src = "classdef A\n  properties(GetAccess=private, SetAccess=public)\n    p\n  end\nend\n a = new_object('A'); a = setfield(a,'p',5); try; v = getfield(a,'p'); catch e; ok=1; end";
-    let ast = runmat_parser::parse(src).unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(src);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
