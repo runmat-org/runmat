@@ -82,6 +82,31 @@ fn mir_indexing_context_matches(actual: IndexResultContext, expected: IndexResul
             && actual == IndexResultContext::DeletionTarget)
 }
 
+fn hir_function_imports(hir: &HirAssembly, function: FunctionId) -> Vec<(Vec<String>, bool)> {
+    let Some(hir_function) = hir
+        .functions
+        .iter()
+        .find(|candidate| candidate.id == function)
+    else {
+        return Vec::new();
+    };
+    hir.modules
+        .get(hir_function.module.0)
+        .map(|module| {
+            module
+                .imports
+                .iter()
+                .map(|import| {
+                    (
+                        import.path.0.iter().map(|part| part.0.clone()).collect(),
+                        import.wildcard,
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 impl SpanGuard {
     fn new(compiler: &mut Compiler, span: runmat_hir::Span) -> Self {
         let prev = compiler.current_span;
@@ -176,7 +201,7 @@ impl Compiler {
             var_count,
             loop_stack: Vec::new(),
             functions: HashMap::new(),
-            imports: Vec::new(),
+            imports: hir_function_imports(hir, function),
             var_types,
             layout: Some(layout),
             entrypoint: Some(entrypoint),
@@ -219,7 +244,7 @@ impl Compiler {
             var_count,
             loop_stack: Vec::new(),
             functions: HashMap::new(),
-            imports: Vec::new(),
+            imports: hir_function_imports(hir, function),
             var_types,
             layout: Some(layout),
             entrypoint: None,
@@ -429,6 +454,9 @@ impl Compiler {
             .clone()
             .ok_or_else(|| CompileError::new("compiler missing MIR body"))?;
 
+        for (path, wildcard) in self.imports.clone() {
+            self.emit(Instr::RegisterImport { path, wildcard });
+        }
         self.compile_mir_body(&body)?;
         Ok(())
     }
@@ -1519,9 +1547,53 @@ impl Compiler {
         if is_vm_intrinsic_counter_builtin(&candidate) {
             return Ok(candidate);
         }
-        runmat_builtins::builtin_function_by_name(&candidate)
-            .map(|builtin| builtin.name.to_string())
-            .ok_or_else(|| CompileError::new(format!("unknown builtin function {candidate}")))
+        if let Some(builtin) = runmat_builtins::builtin_function_by_name(&candidate) {
+            return Ok(builtin.name.to_string());
+        }
+        let specific_matches = self
+            .imports
+            .iter()
+            .filter(|(path, wildcard)| {
+                !*wildcard && path.last().map(|part| part.as_str()) == Some(candidate.as_str())
+            })
+            .filter(|(path, _)| {
+                runmat_builtins::builtin_function_by_name(&path.join(".")).is_some()
+            })
+            .count();
+        if specific_matches > 1 {
+            return Err(CompileError::new(format!(
+                "ambiguous builtin '{candidate}' via imports"
+            )));
+        }
+        if specific_matches == 1 {
+            return Ok(candidate);
+        }
+
+        let wildcard_matches = self
+            .imports
+            .iter()
+            .filter(|(_, wildcard)| *wildcard)
+            .filter(|(path, _)| {
+                !path.is_empty()
+                    && runmat_builtins::builtin_function_by_name(&format!(
+                        "{}.{}",
+                        path.join("."),
+                        candidate
+                    ))
+                    .is_some()
+            })
+            .count();
+        if wildcard_matches > 1 {
+            return Err(CompileError::new(format!(
+                "ambiguous builtin '{candidate}' via wildcard imports"
+            )));
+        }
+        if wildcard_matches == 1 {
+            return Ok(candidate);
+        }
+        Err(CompileError::new(format!(
+            "unknown builtin function {candidate}"
+        )))
     }
 
     fn compile_mir_aggregate(

@@ -674,25 +674,21 @@ fn classes_property_access_attributes() {
 }
 
 #[test]
-#[ignore]
 fn import_builtin_resolution_for_static_method() {
     // Register classes and import Point.* so we can call origin() unqualified
     let program = "__register_test_classes(); import Point.*; o = origin();";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
 }
 
 #[test]
-#[ignore]
 fn import_specific_resolution_for_builtin() {
     // Use specific import to bring a qualified builtin into scope
     let program =
         "import pkg.missing.*; import Point.origin; __register_test_classes(); o = origin();";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -700,9 +696,8 @@ fn import_specific_resolution_for_builtin() {
 
 #[test]
 fn import_ambiguity_specific_conflict_errors() {
-    // Two specifics that map same unqualified name should cause compile-time ambiguity on unqualified call
-    // Use classes with same method name as proxies (no actual builtins needed); compile should detect ambiguity
-    let program = "import Point.origin; import Circle.area; r = origin();";
+    // Two specifics that map the same unqualified name should cause compile-time ambiguity.
+    let program = "import PkgF.foo; import PkgG.foo; r = foo();";
     let res = compile_semantic_source(program);
     assert!(res.is_err());
 }
@@ -710,8 +705,7 @@ fn import_ambiguity_specific_conflict_errors() {
 fn import_static_method_via_specific_class_import() {
     // import ClassName.* to allow unqualified static methods and properties
     let program = "__register_test_classes(); import Point.*; p = origin(); v = classref('Point').staticValue;";
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
@@ -731,8 +725,7 @@ fn import_precedence_specific_over_wildcard_and_locals() {
         foo = @() 42;            % local function handle shadowing imports
         b = feval(foo);          % should be 42 (local shadow)
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs()<1e-9)));
@@ -804,8 +797,7 @@ fn import_specific_beats_wildcard_for_function_resolution() {
         import PkgG.*;     % wildcard that also provides foo
         y = foo();         % should resolve to PkgF.foo => 10
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs()<1e-9)));
@@ -1410,8 +1402,7 @@ fn static_method_resolution_under_wildcard_import() {
         import Point.*;
         r = origin(); % static method
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let _ = execute(&hir).unwrap();
+    execute_semantic_source(program);
 }
 
 #[test]
@@ -1840,8 +1831,7 @@ fn import_deep_multiseg_package_specific_vs_wildcard() {
 		import pkg.PointNS.*; % wildcard unrelated (should not affect foo)
 		a = foo();            % resolves to PkgF.foo => 10
 	"#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
@@ -1861,8 +1851,7 @@ fn import_shadowing_matrix_locals_user_specific_wildcard_classstar() {
 		b = bar();            % 33 (user function)
 		c = origin();         % static method via Class.* (no shadowing by foo)
 	"#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-77.0).abs()<1e-9)));
@@ -1895,8 +1884,7 @@ fn import_specific_vs_wildcard_same_name_prefers_specific_under_nesting() {
 		import PkgG.*;     % wildcard also has foo
 		y = foo();         % should call specific -> 10
 	"#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
