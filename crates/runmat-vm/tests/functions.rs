@@ -1942,8 +1942,7 @@ fn type_class_static_method_zeros() {
         A = double.zeros(2, 3);
         s = size(A);
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // The result should be a 2x3 matrix of zeros
     assert!(vars.iter().any(|v| {
         if let runmat_builtins::Value::Tensor(t) = v {
@@ -1960,8 +1959,7 @@ fn type_class_static_method_logical_zeros() {
     let program = r#"
         A = logical.zeros(2, 2);
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // The result should be a 2x2 logical array of zeros
     assert!(vars.iter().any(|v| {
         if let runmat_builtins::Value::LogicalArray(l) = v {

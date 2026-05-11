@@ -1243,6 +1243,30 @@ impl SemanticCtx {
             ),
             AstExpr::DottedInvoke(base, name, args, _)
             | AstExpr::MethodCall(base, name, args, _) => {
+                if let AstExpr::Ident(class_name, _) = &**base {
+                    if name == "zeros" && is_static_method_class_name(class_name) {
+                        let mut call_args: Vec<HirExpr> = args
+                            .iter()
+                            .map(|arg| self.lower_call_argument(arg))
+                            .collect::<Result<_, _>>()?;
+                        call_args.push(HirExpr {
+                            id: self.alloc_expr_id(),
+                            kind: HirExprKind::String(StringLiteral(class_name.clone())),
+                            span: base.span(),
+                        });
+                        return Ok(HirExpr {
+                            id: self.alloc_expr_id(),
+                            kind: HirExprKind::Call(self.call_for_name(
+                                name,
+                                call_args,
+                                CallSyntax::Plain,
+                                RequestedOutputCount::One,
+                                span,
+                            )),
+                            span,
+                        });
+                    }
+                }
                 let mut call_args = vec![self.lower_expr_semantic(base)?];
                 call_args.extend(
                     args.iter()
@@ -1611,23 +1635,27 @@ impl Ctx {
     }
 
     pub(crate) fn is_static_method_class(&self, name: &str) -> bool {
-        matches!(
-            name,
-            "logical"
-                | "double"
-                | "single"
-                | "int8"
-                | "int16"
-                | "int32"
-                | "int64"
-                | "uint8"
-                | "uint16"
-                | "uint32"
-                | "uint64"
-                | "char"
-                | "string"
-                | "cell"
-                | "struct"
-        )
+        is_static_method_class_name(name)
     }
+}
+
+fn is_static_method_class_name(name: &str) -> bool {
+    matches!(
+        name,
+        "logical"
+            | "double"
+            | "single"
+            | "int8"
+            | "int16"
+            | "int32"
+            | "int64"
+            | "uint8"
+            | "uint16"
+            | "uint32"
+            | "uint64"
+            | "char"
+            | "string"
+            | "cell"
+            | "struct"
+    )
 }
