@@ -32,6 +32,7 @@ runmat-time = { workspace = true }
 [dev-dependencies]
 env_logger = { workspace = true }
 runmat-parser = { workspace = true }
+runmat-mir = { workspace = true }
 
 [features]
 default = ["native-accel"]
