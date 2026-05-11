@@ -2,6 +2,7 @@
 mod test_helpers;
 
 use runmat_parser::parse;
+use test_helpers::compile_semantic_source;
 use test_helpers::execute_semantic_source;
 use test_helpers::lower;
 
@@ -132,10 +133,8 @@ fn nested_break_and_continue_scopes() {
 
 #[test]
 fn undefined_variable_raises_mex() {
-    let ast = parse("y = x + 1;").unwrap();
-    let hir = lower(&ast);
-    let err = hir.err().unwrap();
-    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
+    let err = compile_semantic_source("y = x + 1;").err().unwrap();
+    assert!(err.message().contains("RunMat:UndefinedVariable"));
 }
 
 #[test]
