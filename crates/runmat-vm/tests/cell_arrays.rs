@@ -2,15 +2,11 @@
 mod test_helpers;
 
 use runmat_builtins::Value;
-use runmat_parser::parse;
-use test_helpers::execute;
-use test_helpers::lower;
+use test_helpers::execute_semantic_source;
 
 #[test]
 fn create_and_index_cell_2d() {
-    let ast = parse("C = {1, 2; 3, 4}; a = C{1,2}; b = C{2,1};").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source("C = {1, 2; 3, 4}; a = C{1,2}; b = C{2,1};").unwrap();
     if let Value::Num(a) = &vars[1] {
         assert_eq!(*a, 2.0);
     } else {
@@ -25,9 +21,7 @@ fn create_and_index_cell_2d() {
 
 #[test]
 fn linear_cell_index() {
-    let ast = parse("C = {10, 20, 30}; v = C{3};").unwrap();
-    let hir = lower(&ast).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source("C = {10, 20, 30}; v = C{3};").unwrap();
     if let Value::Num(v) = &vars[1] {
         assert_eq!(*v, 30.0);
     } else {
