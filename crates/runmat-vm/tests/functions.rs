@@ -1268,7 +1268,6 @@ fn feval_expand_multi_forwards_expanded_cell_args() {
 }
 
 #[test]
-#[ignore]
 fn varargout_expand_into_outer_call() {
     // h returns varargout with three numbers; max(h()) should consume two (max takes two args)
     let program = r#"
@@ -1277,8 +1276,7 @@ fn varargout_expand_into_outer_call() {
         end
         r = max(h(10));
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // max(11,12) = 12
     assert!(vars
         .iter()
@@ -1286,7 +1284,6 @@ fn varargout_expand_into_outer_call() {
 }
 
 #[test]
-#[ignore]
 fn user_function_consumes_varargout_exact_needed() {
     // f takes three args; g returns varargout [1,2,3]; call f(g())
     let program = r#"
@@ -1298,8 +1295,7 @@ fn user_function_consumes_varargout_exact_needed() {
         end
         r = f(g());
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     // 1 + 20 + 300 = 321
     assert!(vars
         .iter()

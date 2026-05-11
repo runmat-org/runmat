@@ -273,7 +273,7 @@ pub async fn invoke_semantic_function_value(
         );
         return Err(mex("TooManyInputs", &message));
     }
-    if requested_outputs > func.output_slots.len() {
+    if requested_outputs > func.output_slots.len() && func.varargout_slot.is_none() {
         let message = format!(
             "semantic function {} expected {} outputs, got {}",
             func.display_name,
@@ -322,23 +322,55 @@ pub async fn invoke_semantic_function_value(
         &bytecode,
         vars,
         &func.display_name,
-        func.output_slots.len().max(1),
+        requested_outputs.max(1),
         runtime_arg_count,
     )
     .await?;
+    let output_values = collect_semantic_outputs(func, &result_vars, requested_outputs)?;
     if requested_outputs > 1 {
-        let values = func
-            .output_slots
-            .iter()
-            .take(requested_outputs)
-            .map(|slot| result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
-            .collect();
+        let values = output_values.into_iter().take(requested_outputs).collect();
         return Ok(Value::OutputList(values));
     }
-    let Some(slot) = func.output_slots.first() else {
-        return Ok(Value::Num(0.0));
-    };
-    Ok(result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
+    Ok(output_values.into_iter().next().unwrap_or(Value::Num(0.0)))
+}
+
+fn collect_semantic_outputs(
+    func: &crate::bytecode::SemanticFunctionBytecode,
+    result_vars: &[Value],
+    requested_outputs: usize,
+) -> Result<Vec<Value>, RuntimeError> {
+    let mut values = Vec::with_capacity(requested_outputs.max(1));
+    for slot in func.output_slots.iter().take(requested_outputs) {
+        values.push(result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
+    }
+    if values.len() < requested_outputs {
+        if let Some(slot) = func.varargout_slot {
+            if let Some(Value::Cell(cell)) = result_vars.get(slot) {
+                for value in crate::call::shared::expand_all_cell(cell)? {
+                    if values.len() >= requested_outputs {
+                        break;
+                    }
+                    values.push(value);
+                }
+            }
+        }
+    }
+    while values.len() < requested_outputs {
+        values.push(Value::Num(0.0));
+    }
+    if values.is_empty() && requested_outputs <= 1 {
+        if let Some(slot) = func.varargout_slot {
+            if let Some(Value::Cell(cell)) = result_vars.get(slot) {
+                if let Some(value) = crate::call::shared::expand_all_cell(cell)?
+                    .into_iter()
+                    .next()
+                {
+                    values.push(value);
+                }
+            }
+        }
+    }
+    Ok(values)
 }
 
 pub async fn interpret_with_vars(

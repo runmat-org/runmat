@@ -53,6 +53,7 @@ struct SemanticCtx {
     compatibility_mode: Option<crate::CompatibilityMode>,
     function_names: HashMap<String, FunctionId>,
     function_input_signatures: HashMap<String, (usize, bool)>,
+    function_output_signatures: HashMap<String, (usize, bool)>,
     external_function_names: HashMap<String, FunctionId>,
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
 }
@@ -133,6 +134,7 @@ impl SemanticCtx {
             compatibility_mode: context.compatibility_mode.clone(),
             function_names: HashMap::new(),
             function_input_signatures: HashMap::new(),
+            function_output_signatures: HashMap::new(),
             external_function_names: context.semantic_functions.clone(),
             captures: HashMap::new(),
         };
@@ -149,9 +151,16 @@ impl SemanticCtx {
         });
 
         for stmt in &prog.body {
-            if let AstStmt::Function { name, params, .. } = stmt {
+            if let AstStmt::Function {
+                name,
+                params,
+                outputs,
+                ..
+            } = stmt
+            {
                 let id = ctx.reserve_function_name(name);
                 ctx.reserve_function_input_signature(name, params);
+                ctx.reserve_function_output_signature(name, outputs);
                 ctx.assembly.modules[ctx.module.0]
                     .top_level_functions
                     .push(id);
@@ -282,6 +291,13 @@ impl SemanticCtx {
         let fixed_count = params.len() - usize::from(has_varargin);
         self.function_input_signatures
             .insert(name.to_string(), (fixed_count, has_varargin));
+    }
+
+    fn reserve_function_output_signature(&mut self, name: &str, outputs: &[String]) {
+        let has_varargout = outputs.last().is_some_and(|output| output == "varargout");
+        let fixed_count = outputs.len() - usize::from(has_varargout);
+        self.function_output_signatures
+            .insert(name.to_string(), (fixed_count, has_varargout));
     }
 
     fn take_function_id(&mut self) -> FunctionId {
@@ -501,9 +517,16 @@ impl SemanticCtx {
             false,
             |ctx| {
                 for stmt in body {
-                    if let AstStmt::Function { name, params, .. } = stmt {
+                    if let AstStmt::Function {
+                        name,
+                        params,
+                        outputs,
+                        ..
+                    } = stmt
+                    {
                         ctx.reserve_function_name(name);
                         ctx.reserve_function_input_signature(name, params);
+                        ctx.reserve_function_output_signature(name, outputs);
                     }
                 }
                 let mut param_ids = Vec::new();
@@ -1336,16 +1359,32 @@ impl SemanticCtx {
         args.iter()
             .enumerate()
             .map(|(index, arg)| {
-                let requested_outputs = match (
+                let mut requested_outputs = match (
                     Some(index) == args.len().checked_sub(1),
                     expanded_last_outputs,
                 ) {
                     (true, Some(count)) => RequestedOutputCount::Exactly(count),
                     _ => RequestedOutputCount::One,
                 };
+                if matches!(name, "max" | "min")
+                    && args.len() == 1
+                    && self.call_argument_has_varargout(arg)
+                {
+                    requested_outputs = RequestedOutputCount::Exactly(2);
+                }
                 self.lower_call_argument(arg, requested_outputs)
             })
             .collect()
+    }
+
+    fn call_argument_has_varargout(&self, arg: &AstExpr) -> bool {
+        match arg {
+            AstExpr::FuncCall(name, _, _) => self
+                .function_output_signatures
+                .get(name)
+                .is_some_and(|(_, has_varargout)| *has_varargout),
+            _ => false,
+        }
     }
 
     fn lower_call_argument(

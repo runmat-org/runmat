@@ -95,8 +95,10 @@ fn compile_semantic_functions(
                     .frame_abi
                     .fixed_outputs
                     .iter()
+                    .filter(|slot| Some(**slot) != function_layout.frame_abi.varargout)
                     .map(|slot| slot.0)
                     .collect(),
+                varargout_slot: function_layout.frame_abi.varargout.map(|slot| slot.0),
                 capture_slots: function_layout
                     .captures
                     .iter()

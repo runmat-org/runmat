@@ -57,6 +57,8 @@ pub struct SemanticFunctionBytecode {
     #[serde(default)]
     pub varargin_slot: Option<usize>,
     pub output_slots: Vec<usize>,
+    #[serde(default)]
+    pub varargout_slot: Option<usize>,
     pub capture_slots: Vec<usize>,
 }
 
