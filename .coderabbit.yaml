@@ -1,0 +1,16 @@
+# .coderabbit.yaml
+reviews:
+  auto_review:
+    enabled: true
+    base_branches:
+      - "main"
+      - "dev"
+  profile: assertive
+  high_level_summary: true
+  review_status: true
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        Prefix every actionable finding with one of:
+        [critical], [high], [medium], [low], [nit].
+        Only use [medium], [high], or [critical] for issues that should block CI.
