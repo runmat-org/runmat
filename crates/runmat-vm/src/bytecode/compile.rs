@@ -87,8 +87,10 @@ fn compile_semantic_functions(
                     .frame_abi
                     .fixed_inputs
                     .iter()
+                    .filter(|slot| Some(**slot) != function_layout.frame_abi.varargin)
                     .map(|slot| slot.0)
                     .collect(),
+                varargin_slot: function_layout.frame_abi.varargin.map(|slot| slot.0),
                 output_slots: function_layout
                     .frame_abi
                     .fixed_outputs

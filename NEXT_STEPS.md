@@ -402,7 +402,7 @@ Current ratchet status:
 - Loop execution tests now run semantic bytecode; only the stochastic-evolution instruction assertion keeps legacy bytecode shape coverage.
 - Several VM functions success-path and arity tests now run semantic bytecode, including nested user-function calls, function-handle/cellfun round-trips, `nargin`/`nargout`, fixed-arity/minimum-varargin input errors, fixed-output arity errors, shared input/output names, inline `fprintf`/`sprintf` cast arguments, root/function-output struct materialization, nested/dynamic member assignment, mixed member/cell/index reads, and numeric bitwise array operations.
 - VM functions import-shadowing tests where local variables/user functions override specific/class-star imports now run semantic bytecode; static import execution cases remain legacy-executed.
-- VM functions direct cell-expansion and explicit function-return propagation tests now run semantic bytecode; `feval` expansion through `varargin` remains a semantic arity/varargin gap.
+- VM functions direct cell-expansion, explicit function-return propagation, semantic `varargin` packing, and `feval(@f, varargin{:})` forwarding now run semantic bytecode.
 - VM functions tensor indexing/write ratchets for logical mask assignment, gather/scatter roundtrip, shape broadcasting, and column-major RHS mapping now run semantic bytecode.
 - VM functions struct `isfield`/`fieldnames` and computed integer column-slice read/write ratchets now run semantic bytecode; string aggregate concatenation and `containers.Map` package calls remain legacy-executed.
 - VM functions type-class static `zeros` calls for `double.zeros` and `logical.zeros` now resolve through primitive class metadata and run through semantic bytecode.

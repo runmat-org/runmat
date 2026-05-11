@@ -13,7 +13,7 @@ use crate::runtime::workspace::{
     refresh_workspace_state, workspace_assign, workspace_clear, workspace_lookup, workspace_remove,
     workspace_snapshot,
 };
-use runmat_builtins::Value;
+use runmat_builtins::{CellArray, Value};
 use runmat_runtime::{
     user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
@@ -264,7 +264,7 @@ pub async fn invoke_semantic_function_value(
         );
         return Err(mex("NotEnoughInputs", &message));
     }
-    if runtime_arg_count > func.input_slots.len() {
+    if runtime_arg_count > func.input_slots.len() && func.varargin_slot.is_none() {
         let message = format!(
             "semantic function {} expected {} inputs, got {}",
             func.display_name,
@@ -296,6 +296,20 @@ pub async fn invoke_semantic_function_value(
     {
         if *slot < vars.len() {
             vars[*slot] = value.clone();
+        }
+    }
+    if let Some(slot) = func.varargin_slot {
+        let fixed_count = func.input_slots.len();
+        let rest = if runtime_arg_count > fixed_count {
+            args[func.capture_slots.len() + fixed_count..].to_vec()
+        } else {
+            Vec::new()
+        };
+        let cols = rest.len();
+        let cell = CellArray::new(rest, 1, cols)
+            .map_err(|err| mex("VararginPack", &format!("varargin: {err}")))?;
+        if slot < vars.len() {
+            vars[slot] = Value::Cell(cell);
         }
     }
 

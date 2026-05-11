@@ -54,6 +54,8 @@ pub struct SemanticFunctionBytecode {
     pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
     pub var_count: usize,
     pub input_slots: Vec<usize>,
+    #[serde(default)]
+    pub varargin_slot: Option<usize>,
     pub output_slots: Vec<usize>,
     pub capture_slots: Vec<usize>,
 }

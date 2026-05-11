@@ -93,8 +93,7 @@ fn inputs_with_varargin_minimum_only() {
         end
         r = f(1,2,3,4);
     "#;
-    let hir_ok = lower(&parse(program_ok).unwrap()).unwrap();
-    let vars_ok = execute(&hir_ok).unwrap();
+    let vars_ok = execute_semantic_source(program_ok);
     assert!(vars_ok
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-10.0).abs()<1e-9)));
@@ -1259,7 +1258,6 @@ fn function_return_propagation_in_args() {
 }
 
 #[test]
-#[ignore]
 fn varargin_pack_and_forward() {
     // f sums all inputs using varargin; g forwards varargin into f via feval(@f, varargin{:})
     let program = r#"
@@ -1272,8 +1270,7 @@ fn varargin_pack_and_forward() {
         r1 = f(1,2,3);
         r2 = g(4,5,6,7);
     "#;
-    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-6.0).abs()<1e-9)));
@@ -1293,8 +1290,7 @@ fn feval_expand_multi_forwards_expanded_cell_args() {
         end
         r = g(4,5,6,7);
     "#;
-    let hir = lower(&parse(program).unwrap()).unwrap();
-    let vars = execute(&hir).unwrap();
+    let vars = execute_semantic_source(program);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-22.0).abs()<1e-9)));
