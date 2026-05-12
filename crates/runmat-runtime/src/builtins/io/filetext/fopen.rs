@@ -456,7 +456,7 @@ async fn handle_open(path_value: &Value, rest: &[Value]) -> BuiltinResult<FopenE
 
     match options.open_async(&path).await {
         Ok(file) => {
-            let handle = Arc::new(StdMutex::new(file));
+            let handle = Arc::new(StdMutex::new(Some(file)));
             let registered = RegisteredFile {
                 path: path.clone(),
                 permission: permission.canonical.clone(),

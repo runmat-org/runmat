@@ -22,10 +22,10 @@ pub(super) struct JsFileState {
 impl JsFileState {
     fn write_back(&mut self) -> io::Result<()> {
         if self.can_write && self.dirty {
-            self.dirty = false;
             let data = self.buffer.clone();
             let path = self.path.clone();
             self.funcs.write_file(&path, &data)?;
+            self.dirty = false;
         }
         Ok(())
     }
@@ -47,7 +47,15 @@ impl JsFileState {
             return Ok(());
         };
 
-        funcs.write_file_async(&path, &data).await
+        match funcs.write_file_async(&path, &data).await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                if let Ok(mut state) = inner.lock() {
+                    state.dirty = true;
+                }
+                Err(err)
+            }
+        }
     }
 }
 
