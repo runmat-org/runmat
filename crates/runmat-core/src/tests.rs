@@ -2,12 +2,12 @@ use crate::*;
 use futures::executor::block_on;
 
 fn reset_legacy_user_dispatch_fallback_count() {
-    runmat_vm::interpreter::dispatch::reset_legacy_user_dispatch_fallback_count();
+    runmat_vm::reset_legacy_user_dispatch_fallback_count();
 }
 
 fn assert_no_legacy_user_dispatch_fallback() {
     assert_eq!(
-        runmat_vm::interpreter::dispatch::legacy_user_dispatch_fallback_count(),
+        runmat_vm::legacy_user_dispatch_fallback_count(),
         0,
         "semantic session call should not use legacy user dispatch fallback"
     );

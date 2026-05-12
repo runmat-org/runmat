@@ -1,5 +1,3 @@
-use crate::bytecode::program::Bytecode;
-use crate::interpreter::errors::{attach_span_at, ensure_runtime_error_identifier};
 use crate::runtime::call_stack::error_namespace;
 use runmat_builtins::{MException, Value};
 use runmat_runtime::RuntimeError;
@@ -60,13 +58,4 @@ pub fn redirect_exception_to_catch(
     } else {
         ExceptionHandling::Uncaught(Box::new(err))
     }
-}
-
-pub fn prepare_vm_error(
-    bytecode: &Bytecode,
-    pc: usize,
-    err: impl Into<RuntimeError>,
-) -> RuntimeError {
-    let err: RuntimeError = ensure_runtime_error_identifier(err.into());
-    attach_span_at(bytecode, pc, err)
 }

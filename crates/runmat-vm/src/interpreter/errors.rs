@@ -45,11 +45,3 @@ pub fn mex(id: &str, msg: &str) -> RuntimeError {
         .with_identifier(ident)
         .build()
 }
-
-#[inline]
-pub fn ensure_runtime_error_identifier(mut err: RuntimeError) -> RuntimeError {
-    if err.identifier.is_none() {
-        err.identifier = Some(format!("{}:RuntimeError", error_namespace()));
-    }
-    err
-}

@@ -807,23 +807,19 @@ pub extern "C" fn runmat_call_user_function(
     let args: Vec<Value> = args_slice.iter().map(|value| Value::Num(*value)).collect();
 
     let output = if let Some(function_id) = context.semantic_registry.resolve_name(&name) {
-        run_immediate(Box::pin(
-            runmat_vm::interpreter::runner::invoke_semantic_function_value(
-                function_id.0,
-                &args,
-                1,
-                &context.semantic_registry,
-            ),
-        ))
+        run_immediate(Box::pin(runmat_vm::invoke_semantic_function_value(
+            function_id.0,
+            &args,
+            1,
+            &context.semantic_registry,
+        )))
         .and_then(|result| result.map_err(TurbineError::ExecutionError))
     } else if let Some(function_def) = context.functions.get(&name) {
-        run_immediate(Box::pin(
-            runmat_vm::interpreter::runner::execute_legacy_user_function_isolated(
-                function_def,
-                &args,
-                &context.functions,
-            ),
-        ))
+        run_immediate(Box::pin(runmat_vm::execute_legacy_user_function_isolated(
+            function_def,
+            &args,
+            &context.functions,
+        )))
         .and_then(|result| result.map_err(TurbineError::ExecutionError))
     } else {
         error!("Unknown user function requested: {name}");

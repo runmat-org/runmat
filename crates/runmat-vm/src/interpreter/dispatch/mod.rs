@@ -22,23 +22,19 @@ pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
 };
 pub use calls::{
-    build_builtin_expand_at_args, build_builtin_expand_last_args, build_builtin_expand_multi_args,
-    build_feval_expand_multi_args, build_user_function_expand_multi_args, handle_builtin_call,
-    handle_builtin_expand_at_call, handle_builtin_expand_last_call,
-    handle_builtin_expand_multi_call, handle_builtin_outcome, handle_create_closure,
+    build_builtin_expand_at_args, build_feval_expand_multi_args,
+    build_user_function_expand_multi_args, handle_builtin_call, handle_builtin_expand_at_call,
+    handle_builtin_expand_last_call, handle_builtin_expand_multi_call, handle_create_closure,
     handle_create_semantic_closure, handle_feval_dispatch, handle_feval_user_multi_output,
     handle_load_method, handle_load_static_property, handle_method_call,
     handle_method_or_member_index_call, handle_method_or_member_index_expand_multi_call,
     handle_prepared_user_function_call, handle_register_class, handle_static_method_call,
     handle_user_function_call, legacy_user_dispatch_fallback_count,
-    reset_legacy_user_dispatch_fallback_count, BuiltinHandling, FevalHandling, MethodHandling,
-    UserCallHandling,
+    reset_legacy_user_dispatch_fallback_count, BuiltinHandling, FevalHandling, UserCallHandling,
 };
 pub(crate) use calls::{compile_legacy_named_user_dispatch_fallback, CompiledLegacyUserDispatch};
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
-pub use exceptions::{
-    parse_exception, prepare_vm_error, redirect_exception_to_catch, ExceptionHandling,
-};
+pub use exceptions::{redirect_exception_to_catch, ExceptionHandling};
 pub use stack::{
     emit_stack_top, emit_var, load_bool, load_char_row, load_complex, load_const, load_local,
     load_string, load_var, store_local, store_var,

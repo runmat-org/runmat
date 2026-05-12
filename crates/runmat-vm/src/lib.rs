@@ -8,7 +8,7 @@ pub mod indexing;
 pub mod instr {
     pub use crate::bytecode::instr::{ArgSpec, EmitLabel, EndExpr, Instr, StackEffect};
 }
-pub mod interpreter;
+pub(crate) mod interpreter;
 pub mod layout;
 pub mod object;
 pub mod ops;
@@ -23,8 +23,12 @@ pub use compiler::CompileError;
 pub use interpreter::api::{
     set_call_stack_limit, set_error_namespace, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
+pub use interpreter::dispatch::{
+    legacy_user_dispatch_fallback_count, reset_legacy_user_dispatch_fallback_count,
+};
 pub use interpreter::runner::{
-    interpret, interpret_function, interpret_function_with_counts, interpret_with_vars,
+    execute_legacy_user_function_isolated, interpret, interpret_function,
+    interpret_function_with_counts, interpret_with_vars, invoke_semantic_function_value,
 };
 pub use interpreter::state::{InterpreterOutcome, InterpreterState};
 pub use layout::{
