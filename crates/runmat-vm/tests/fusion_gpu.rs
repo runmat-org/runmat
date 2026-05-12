@@ -20,7 +20,6 @@ use runmat_accelerate_api::{
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;
-use runmat_hir::{lower as lower_hir, LoweringContext};
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
 use runmat_runtime::{gather_if_needed, gather_if_needed_async, RuntimeError};
@@ -47,14 +46,6 @@ type BufferStore = HashMap<u64, (Vec<f64>, Vec<usize>)>;
 
 fn compile_semantic(source: &str) -> runmat_vm::Bytecode {
     test_helpers::compile_semantic_source(source).expect("compile semantic source")
-}
-
-fn compile_legacy_source(source: &str) -> runmat_vm::Bytecode {
-    let ast = runmat_parser::parse(source).expect("parse");
-    let hir = lower_hir(&ast, &LoweringContext::empty())
-        .map(|result| result.hir)
-        .expect("lower");
-    runmat_vm::bytecode::compile::compile_legacy(&hir, &HashMap::new()).expect("compile")
 }
 
 struct TestProvider {
@@ -1417,9 +1408,7 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
         "#
         );
 
-        // Known semantic gap: semantic dim-2 omitnan reduction currently stores a scalar
-        // where this parity test expects row-vector tensors from both CPU and GPU paths.
-        let bytecode = compile_legacy_source(&source);
+        let bytecode = compile_semantic(&source);
         if let Some(graph) = &bytecode.accel_graph {
             let groups = graph.detect_fusion_groups();
             let reduction_count = groups
@@ -1452,18 +1441,15 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
         let cpu = run_with(false);
         let gpu = run_with(true);
 
-        // Collect SI and SO by last two stores
-        let mut stores: Vec<usize> = bytecode
-            .instructions
-            .iter()
-            .filter_map(|instr| match instr {
-                Instr::StoreVar(idx) => Some(*idx),
-                _ => None,
-            })
-            .collect();
-        assert!(stores.len() >= 2);
-        let so_idx = stores.pop().unwrap();
-        let si_idx = stores.pop().unwrap();
+        let var_index = |name: &str| {
+            bytecode
+                .var_names
+                .iter()
+                .find_map(|(idx, candidate)| (candidate == name).then_some(*idx))
+                .unwrap_or_else(|| panic!("missing variable {name}"))
+        };
+        let si_idx = var_index("SI");
+        let so_idx = var_index("SO");
 
         let gather_numvec = |value: &Value| -> Vec<f64> {
             match value {
@@ -1475,7 +1461,7 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
                     }
                 }
                 Value::Tensor(t) => t.data.clone(),
-                _ => panic!("expected tensor"),
+                other => panic!("expected tensor, got {other:?}"),
             }
         };
 
