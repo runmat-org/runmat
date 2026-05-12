@@ -2689,8 +2689,7 @@ impl Compiler {
                 self.emit(Instr::CreateFunctionHandle(name.0.clone()));
                 Ok(())
             }
-            runmat_hir::FunctionHandleTarget::Anonymous(function)
-            | runmat_hir::FunctionHandleTarget::Function(function) => {
+            runmat_hir::FunctionHandleTarget::Anonymous(function) => {
                 let (captures, display_name) = self
                     .layout
                     .as_ref()
@@ -2701,6 +2700,32 @@ impl Compiler {
                         ))
                     })
                     .map(|layout| (layout.captures.clone(), layout.display_name.clone()))?;
+                for capture in &captures {
+                    let slot = self.binding_slot(capture.binding)?;
+                    self.emit(Instr::LoadVar(slot));
+                }
+                self.emit(Instr::CreateSemanticClosure(
+                    *function,
+                    display_name,
+                    captures.len(),
+                ));
+                Ok(())
+            }
+            runmat_hir::FunctionHandleTarget::Function(function) => {
+                let (captures, display_name) = self
+                    .layout
+                    .as_ref()
+                    .and_then(|layout| layout.functions.get(function))
+                    .ok_or_else(|| {
+                        self.compile_error(format!(
+                            "missing VM layout for function handle target {function:?}"
+                        ))
+                    })
+                    .map(|layout| (layout.captures.clone(), layout.display_name.clone()))?;
+                if captures.is_empty() {
+                    self.emit(Instr::CreateSemanticFunctionHandle(*function, display_name));
+                    return Ok(());
+                }
                 for capture in &captures {
                     let slot = self.binding_slot(capture.binding)?;
                     self.emit(Instr::LoadVar(slot));

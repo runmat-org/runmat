@@ -1463,6 +1463,37 @@ fn dynamic_function_handle_call_uses_semantic_vm() {
 }
 
 #[test]
+fn local_function_handle_uses_semantic_handle() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "f = @inc; y = f(2);\nfunction z = inc(x)\n  z = x + 1;\nend";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile local function handle call");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+        )),
+        "local function handles should lower to semantic function handles"
+    );
+    assert!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+        )),
+        "zero-capture local function handles should not lower as closures"
+    );
+
+    reset_legacy_user_dispatch_fallback_count();
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "3"
+    }));
+}
+
+#[test]
 fn dynamic_anonymous_handle_call_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "f = @(x) x + 1; y = f(2);";

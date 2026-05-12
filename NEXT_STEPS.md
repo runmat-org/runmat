@@ -183,6 +183,7 @@ Current state:
 - Direct cell-expansion calls to functions defined in previous interactive inputs resolve through the session semantic registry and lower to `CallSemanticFunctionExpandMulti`.
 - Direct cell-expansion multi-output calls to functions defined in previous interactive inputs resolve through the session semantic registry and lower to `CallSemanticFunctionExpandMultiOutput`.
 - Function-handle calls to functions defined in previous interactive inputs execute through `Value::SemanticFunctionHandle` identities before legacy fallback.
+- Local zero-capture named function handles now lower directly to `CreateSemanticFunctionHandle`; anonymous and captured function handles remain closures because they need capture/layout metadata.
 - Function-handle literals for functions defined in previous interactive inputs now bind to `CreateSemanticFunctionHandle` after session registry attachment, so `@f` carries semantic identity instead of a name-only `FunctionHandle` when the target is known.
 - `feval` multi-output calls through previous-input semantic function handles invoke semantic identities before runtime/legacy fallback.
 - Expanded `feval` calls through previous-input semantic function handles invoke semantic identities before runtime/legacy fallback.
