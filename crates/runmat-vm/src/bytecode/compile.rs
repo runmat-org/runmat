@@ -116,7 +116,7 @@ fn compile_semantic_functions(
     Ok(functions)
 }
 
-pub fn compile_legacy(
+pub(crate) fn compile_legacy(
     prog: &HirProgram,
     existing_functions: &HashMap<String, UserFunction>,
 ) -> Result<Bytecode, CompileError> {
