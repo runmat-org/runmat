@@ -2217,6 +2217,52 @@ fn session_function_handle_feval_multi_output_uses_semantic_registry() {
 }
 
 #[test]
+fn session_feval_string_multi_output_uses_semantic_registry() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(
+        session
+            .execute_outcome("seed = 0;\nfunction [x, y] = pair(n)\n  x = n;\n  y = n + 1;\nend"),
+    )
+    .expect("define session function");
+
+    let prepared = session
+        .compile_input("[a, b] = feval('pair', 2);")
+        .expect("compile feval string multi-output session call");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "pair"
+        )),
+        "session feval string callee should carry semantic identity"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(_, 2))),
+        "session feval string multi-output call should use typed feval bytecode"
+    );
+    assert!(
+        prepared.bytecode.functions.is_empty(),
+        "session feval string semantic call should not require legacy bytecode functions"
+    );
+
+    reset_legacy_user_dispatch_fallback_count();
+    let outcome =
+        block_on(session.execute_outcome("[a, b] = feval('pair', 2);")).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
+            && upsert.value.to_string() == "2"
+    }));
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
+            && upsert.value.to_string() == "3"
+    }));
+}
+
+#[test]
 fn session_function_handle_feval_expansion_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("seed = 0;\nfunction z = add2(a, b)\n  z = a + b;\nend"))
