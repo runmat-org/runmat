@@ -211,6 +211,22 @@ Design implication:
 - `PreparedLegacyUserCall`, `PreparedLegacyUserDispatch`, `CompiledLegacyUserDispatch`, and `LegacyUserFunction` are transitional compatibility structures. The prepared/compiled dispatch records are crate-private; their long-term replacement is a semantic call descriptor keyed by `FunctionId`/`DefPath` plus layout/capture data.
 - The private raw legacy fallback should be treated as the final centralized legacy boundary before removal, not a reusable abstraction to extend.
 
+Current legacy fallback caller inventory:
+
+- Raw fallback compiler boundary: `compile_legacy_user_dispatch_fallback` is private in VM dispatch and is only reached through crate-private `compile_legacy_named_user_dispatch_fallback`.
+- Multi-output `feval` fallback: `handle_feval_user_multi_output` first asks `SemanticFunctionRegistry` / `runmat_runtime::user_functions::try_call_semantic_function`; it falls back only when `FevalDispatch::InvokeUser` carries a name that did not resolve semantically.
+- Named/expanded user-call fallback: `handle_prepared_user_function_call` first checks the semantic registry, then builtin dispatch, then legacy named fallback. Remaining work is to remove cases where semantic lowering still emits generic `CallFunction*` for functions that should have stable semantic identity.
+- End-expression callback fallback: `invoke_user_function_value` resolves the semantic registry before legacy fallback. Remaining work is to pass stable semantic function identity into callback/end-expression call sites instead of recovering by name.
+- Turbine external callback fallback: `runmat_call_user_function` invokes semantic functions when the Turbine runtime context registry resolves the name; otherwise it uses `execute_legacy_user_function_isolated` for legacy-shaped callback definitions. This is the concrete external compatibility boundary until Turbine carries semantic function bytecode/identity for every exported callback.
+- Dynamic closure/`feval` unresolved fallback: `call::feval::execute_feval` resolves embedded closure semantic IDs and registry names before returning `FevalDispatch::InvokeUser`; unresolved closure names still gather legacy function maps from bytecode, runtime context, and dynamic legacy snapshots.
+
+Classification:
+
+- Semantic-first, replaceable next: named/expanded user calls that still arrive as generic `CallFunction*`, and end-expression callback paths that can carry `FunctionId` or a semantic callable descriptor.
+- Semantic-first, blocked by callable identity shape: dynamic closure/`feval` unresolved names where the runtime value lacks stable semantic identity or complete capture/layout metadata.
+- External compatibility boundary: Turbine callbacks whose host context still owns only `LegacyUserFunction` records for some exported functions.
+- Dead/duplicate raw fallback call sites: none found; the remaining four VM raw fallback calls all sit behind semantic-first checks or the Turbine external boundary.
+
 First implementation slice:
 
 - Add a semantic user-function invoker path that can execute a `SemanticFunctionBytecode` by `FunctionId` with captures, args, and requested outputs.
@@ -386,9 +402,9 @@ The next high-leverage slice is replacing the remaining dynamic callback fallbac
 
 Concrete plan:
 
-1. Inventory remaining `compile_legacy_user_dispatch_fallback` sites and classify which ones are true unresolved/external fallback.
-2. Replace non-external dynamic callback sites with registry lookup or typed semantic lowering.
-3. Extend registry-backed lowering beyond direct calls to remaining callable shapes that still need dynamic-name fallback, where layout/capture information is available.
+1. Replace non-external dynamic callback sites with registry lookup or typed semantic lowering.
+2. Extend registry-backed lowering beyond direct calls to remaining callable shapes that still need dynamic-name fallback, where layout/capture information is available.
+3. Pass semantic callable identity through end-expression callback paths instead of rediscovering names at runtime.
 4. Keep `compile_legacy_user_dispatch_fallback` as a fallback only for identities not yet in the semantic registry.
 5. Add ratchets that callbacks to functions defined in previous REPL inputs do not call `compile_legacy` when semantic bytecode is available.
 
