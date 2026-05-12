@@ -89,6 +89,7 @@ impl RunMatSession {
         if current_registry.functions.is_empty() {
             bytecode.semantic_function_registry = session_registry.clone();
             bytecode.semantic_functions = bytecode.semantic_function_registry.functions.clone();
+            bind_semantic_function_end_expr_calls(bytecode);
             return (session_registry, next_semantic_function_id);
         }
 
@@ -137,6 +138,7 @@ impl RunMatSession {
 
         bytecode.semantic_function_registry = session_registry.clone();
         bytecode.semantic_functions = bytecode.semantic_function_registry.functions.clone();
+        bind_semantic_function_end_expr_calls(bytecode);
         (session_registry, next_semantic_function_id)
     }
 
@@ -223,6 +225,158 @@ fn remap_semantic_function_instr(
                 *function = new_id;
             }
         }
+        runmat_vm::Instr::IndexSliceExpr {
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            end_numeric_exprs,
+            ..
+        }
+        | runmat_vm::Instr::StoreSliceExpr {
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            end_numeric_exprs,
+            ..
+        } => {
+            remap_optional_end_exprs(range_start_exprs, remap);
+            remap_optional_end_exprs(range_step_exprs, remap);
+            for expr in range_end_exprs {
+                remap_semantic_function_end_expr(expr, remap);
+            }
+            for (_, expr) in end_numeric_exprs {
+                remap_semantic_function_end_expr(expr, remap);
+            }
+        }
         _ => {}
+    }
+}
+
+fn bind_semantic_function_end_expr_calls(bytecode: &mut runmat_vm::Bytecode) {
+    let registry = bytecode.semantic_function_registry.clone();
+    for instr in &mut bytecode.instructions {
+        match instr {
+            runmat_vm::Instr::IndexSliceExpr {
+                range_start_exprs,
+                range_step_exprs,
+                range_end_exprs,
+                end_numeric_exprs,
+                ..
+            }
+            | runmat_vm::Instr::StoreSliceExpr {
+                range_start_exprs,
+                range_step_exprs,
+                range_end_exprs,
+                end_numeric_exprs,
+                ..
+            } => {
+                bind_optional_end_exprs(range_start_exprs, &registry);
+                bind_optional_end_exprs(range_step_exprs, &registry);
+                for expr in range_end_exprs {
+                    bind_semantic_function_end_expr(expr, &registry);
+                }
+                for (_, expr) in end_numeric_exprs {
+                    bind_semantic_function_end_expr(expr, &registry);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn bind_optional_end_exprs(
+    exprs: &mut [Option<runmat_vm::EndExpr>],
+    registry: &runmat_vm::SemanticFunctionRegistry,
+) {
+    for expr in exprs.iter_mut().flatten() {
+        bind_semantic_function_end_expr(expr, registry);
+    }
+}
+
+fn bind_semantic_function_end_expr(
+    expr: &mut runmat_vm::EndExpr,
+    registry: &runmat_vm::SemanticFunctionRegistry,
+) {
+    match expr {
+        runmat_vm::EndExpr::Call(name, args) => {
+            for arg in args.iter_mut() {
+                bind_semantic_function_end_expr(arg, registry);
+            }
+            if let Some(function) = registry.resolve_name(name) {
+                let name = name.clone();
+                let args = std::mem::take(args);
+                *expr = runmat_vm::EndExpr::SemanticCall(function, name, args);
+            }
+        }
+        runmat_vm::EndExpr::SemanticCall(function, name, args) => {
+            if let Some(function) = registry.get(*function) {
+                *name = function.display_name.clone();
+            }
+            for arg in args {
+                bind_semantic_function_end_expr(arg, registry);
+            }
+        }
+        runmat_vm::EndExpr::Add(lhs, rhs)
+        | runmat_vm::EndExpr::Sub(lhs, rhs)
+        | runmat_vm::EndExpr::Mul(lhs, rhs)
+        | runmat_vm::EndExpr::Div(lhs, rhs)
+        | runmat_vm::EndExpr::LeftDiv(lhs, rhs)
+        | runmat_vm::EndExpr::Pow(lhs, rhs) => {
+            bind_semantic_function_end_expr(lhs, registry);
+            bind_semantic_function_end_expr(rhs, registry);
+        }
+        runmat_vm::EndExpr::Neg(inner)
+        | runmat_vm::EndExpr::Pos(inner)
+        | runmat_vm::EndExpr::Floor(inner)
+        | runmat_vm::EndExpr::Ceil(inner)
+        | runmat_vm::EndExpr::Round(inner)
+        | runmat_vm::EndExpr::Fix(inner) => bind_semantic_function_end_expr(inner, registry),
+        runmat_vm::EndExpr::End | runmat_vm::EndExpr::Const(_) | runmat_vm::EndExpr::Var(_) => {}
+    }
+}
+
+fn remap_optional_end_exprs(
+    exprs: &mut [Option<runmat_vm::EndExpr>],
+    remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
+) {
+    for expr in exprs.iter_mut().flatten() {
+        remap_semantic_function_end_expr(expr, remap);
+    }
+}
+
+fn remap_semantic_function_end_expr(
+    expr: &mut runmat_vm::EndExpr,
+    remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
+) {
+    match expr {
+        runmat_vm::EndExpr::SemanticCall(function, _, args) => {
+            if let Some(new_id) = remap.get(function).copied() {
+                *function = new_id;
+            }
+            for arg in args {
+                remap_semantic_function_end_expr(arg, remap);
+            }
+        }
+        runmat_vm::EndExpr::Call(_, args) => {
+            for arg in args {
+                remap_semantic_function_end_expr(arg, remap);
+            }
+        }
+        runmat_vm::EndExpr::Add(lhs, rhs)
+        | runmat_vm::EndExpr::Sub(lhs, rhs)
+        | runmat_vm::EndExpr::Mul(lhs, rhs)
+        | runmat_vm::EndExpr::Div(lhs, rhs)
+        | runmat_vm::EndExpr::LeftDiv(lhs, rhs)
+        | runmat_vm::EndExpr::Pow(lhs, rhs) => {
+            remap_semantic_function_end_expr(lhs, remap);
+            remap_semantic_function_end_expr(rhs, remap);
+        }
+        runmat_vm::EndExpr::Neg(inner)
+        | runmat_vm::EndExpr::Pos(inner)
+        | runmat_vm::EndExpr::Floor(inner)
+        | runmat_vm::EndExpr::Ceil(inner)
+        | runmat_vm::EndExpr::Round(inner)
+        | runmat_vm::EndExpr::Fix(inner) => remap_semantic_function_end_expr(inner, remap),
+        runmat_vm::EndExpr::End | runmat_vm::EndExpr::Const(_) | runmat_vm::EndExpr::Var(_) => {}
     }
 }
