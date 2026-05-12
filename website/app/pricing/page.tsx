@@ -121,7 +121,7 @@ export default function PricingPage() {
             <Card className="flex h-full flex-col border border-border/60">
               <CardHeader className="space-y-3 pb-4">
                 <Badge className="w-fit bg-green-500/20 text-green-800 border-green-600/50 dark:text-green-200 dark:border-green-400/40 hover:bg-green-500/20">
-                  Open Source Runtime
+                  OSS
                 </Badge>
                 <CardTitle className="text-lg font-semibold text-foreground">RunMat</CardTitle>
                 <p className="text-[0.938rem] text-foreground">Open-source, GPU-accelerated math runtime. MATLAB syntax, no account required.</p>
@@ -151,7 +151,7 @@ export default function PricingPage() {
                     asChild
                     className="w-full rounded-none border-0 bg-[hsl(var(--brand))] text-white transition-opacity shadow-none hover:bg-[hsl(var(--brand))]/90"
                   >
-                    <Link href="/sandbox">Open Sandbox</Link>
+                    <Link href="/sandbox">Open Browser Sandbox</Link>
                   </Button>
                 </div>
               </CardContent>
@@ -165,7 +165,7 @@ export default function PricingPage() {
                   Enterprise
                 </Badge>
                 <CardTitle className="text-lg font-semibold text-foreground">RunMat Enterprise</CardTitle>
-                <p className="text-[0.938rem] text-foreground">Everything in RunMat Cloud, plus on-prem deployment and compliance.</p>
+                <p className="text-[0.938rem] text-foreground">On-prem deployment and compliance.</p>
                 <p className="text-3xl font-bold text-foreground">Custom</p>
                 <p className="text-sm text-muted-foreground">Self-hosted deployment for secure, air-gapped environments.</p>
               </CardHeader>
