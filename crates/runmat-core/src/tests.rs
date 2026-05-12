@@ -1103,7 +1103,9 @@ fn local_function_call_uses_semantic_vm() {
         "local function call should compile through semantic HIR/MIR/VM"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -1711,7 +1713,9 @@ fn local_function_with_cell_expansion_uses_semantic_vm() {
         "local function with cell expansion should compile through semantic HIR/MIR/VM"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -1743,7 +1747,9 @@ fn cellfun_named_local_function_uses_semantic_callback() {
         "semantic compile should not require legacy user-function bytecode entries"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -1789,7 +1795,9 @@ fn cellfun_session_function_uses_semantic_registry() {
         "session semantic callback target should be indexed by source ownership"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
