@@ -98,7 +98,7 @@ fn compile_legacy_fallback_bytecode(
     })
 }
 
-pub fn compile_legacy_user_dispatch_fallback(
+fn compile_legacy_user_dispatch_fallback(
     prepared: PreparedUserDispatch,
     functions: &std::collections::HashMap<String, UserFunction>,
 ) -> Result<CompiledUserDispatch, crate::compiler::CompileError> {

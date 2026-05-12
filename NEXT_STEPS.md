@@ -188,11 +188,11 @@ Current state:
 - Expanded multi-output `feval` calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
 - Multi-output `feval` fallback dispatch now checks the semantic registry before invoking the centralized legacy named fallback.
 - `feval` closure dispatch resolves closure names through the semantic registry when an embedded semantic function id is unavailable.
-- Legacy named user-call bytecode dispatch now checks the semantic registry before builtin fallback or `compile_legacy_user_dispatch_fallback`.
+- Legacy named user-call bytecode dispatch now checks the semantic registry before builtin fallback or the centralized named legacy fallback.
 - Multi-output `feval` legacy user fallback is centralized behind one dispatch helper instead of duplicated in direct and expanded `feval` bytecode handlers.
 - Named legacy user fallback preparation and compilation is centralized behind `compile_legacy_named_user_dispatch_fallback` for VM dispatch, callback runner, and Turbine fallback sites.
-- Unresolved/external dynamic user-function callbacks still centralize through `compile_legacy_user_dispatch_fallback`, which wraps `compile_legacy` over reconstructed `LegacyHirProgram`.
-- The centralized unresolved/external fallback is explicitly named `compile_legacy_user_dispatch_fallback` so new semantic call paths do not treat it as normal dispatch infrastructure.
+- Unresolved/external dynamic user-function callbacks still centralize through `compile_legacy_named_user_dispatch_fallback`, which wraps a private `compile_legacy_user_dispatch_fallback` over reconstructed `LegacyHirProgram`.
+- The raw unresolved/external fallback is private inside VM dispatch so new semantic call paths cannot treat it as normal dispatch infrastructure.
 
 Target state:
 
@@ -209,7 +209,7 @@ Target state:
 Design implication:
 
 - `PreparedUserCall`, `PreparedUserDispatch`, and `UserFunction` should become transitional compatibility structures. Their long-term replacement is a semantic call descriptor keyed by `FunctionId`/`DefPath` plus layout/capture data.
-- `compile_legacy_user_dispatch_fallback` should be treated as the final centralized legacy boundary before removal, not a reusable abstraction to extend.
+- The private raw legacy fallback should be treated as the final centralized legacy boundary before removal, not a reusable abstraction to extend.
 
 First implementation slice:
 
