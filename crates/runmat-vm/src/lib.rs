@@ -4,11 +4,6 @@ pub mod accel;
 pub mod bytecode;
 pub(crate) mod call;
 pub mod compiler;
-pub mod functions {
-    pub use crate::bytecode::program::{
-        Bytecode, CallFrame, ExecutionContext, LegacyUserFunction, SemanticFunctionRegistry,
-    };
-}
 pub mod indexing;
 pub mod instr {
     pub use crate::bytecode::instr::{ArgSpec, EmitLabel, EndExpr, Instr, StackEffect};

@@ -1,8 +1,8 @@
 //! Function, nested-function, and closure lowering.
 
+use crate::bytecode::LegacyUserFunction;
 use crate::compiler::core::Compiler;
 use crate::compiler::CompileError;
-use crate::functions::LegacyUserFunction;
 use crate::instr::Instr;
 use runmat_builtins::Type;
 use runmat_hir::{

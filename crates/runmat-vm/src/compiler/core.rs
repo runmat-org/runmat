@@ -1,6 +1,6 @@
+use crate::bytecode::LegacyUserFunction;
 use crate::call::builtins::is_vm_intrinsic_counter_builtin;
 use crate::compiler::CompileError;
-use crate::functions::LegacyUserFunction;
 use crate::instr::{ArgSpec, EmitLabel, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
