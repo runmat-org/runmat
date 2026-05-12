@@ -49,7 +49,7 @@ pub enum FevalHandling {
     },
 }
 
-pub struct PreparedLegacyUserDispatch {
+struct PreparedLegacyUserDispatch {
     pub func: LegacyUserFunction,
     pub var_map: std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
     pub func_program: runmat_hir::LegacyHirProgram,
