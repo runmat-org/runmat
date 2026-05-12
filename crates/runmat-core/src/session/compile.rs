@@ -312,6 +312,30 @@ fn bind_semantic_callback_literals(
                     }
                 }
             }
+            runmat_vm::Instr::CallFeval(argc) | runmat_vm::Instr::CallFevalMulti(argc, _) => {
+                let pops = *argc + 1;
+                if stack.len() >= pops {
+                    let producer = stack[stack.len() - pops];
+                    if let Some((function, display_name)) =
+                        semantic_callback_literal(bytecode.instructions.get(producer), registry)
+                    {
+                        replacements.push((producer, function, display_name));
+                    }
+                }
+            }
+            runmat_vm::Instr::CallFevalExpandMulti(_)
+            | runmat_vm::Instr::CallFevalExpandMultiOutput(_, _) => {
+                if let Some(effect) = instr.stack_effect() {
+                    if stack.len() >= effect.pops {
+                        let producer = stack[stack.len() - effect.pops];
+                        if let Some((function, display_name)) =
+                            semantic_callback_literal(bytecode.instructions.get(producer), registry)
+                        {
+                            replacements.push((producer, function, display_name));
+                        }
+                    }
+                }
+            }
             _ => {}
         }
 

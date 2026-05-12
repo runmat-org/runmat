@@ -192,6 +192,7 @@ Current state:
 - `feval` closure dispatch resolves closure names through the semantic registry when an embedded semantic function id is unavailable.
 - Runtime `feval` now invokes embedded `Closure.semantic_function` and `Value::SemanticFunctionHandle` identities directly before name fallback.
 - Local and previous-input user-function calls inside `end` expressions now carry `EndExpr::SemanticCall` identities instead of relying on name recovery.
+- Compiler-produced `feval('name', ...)` callees for local/session semantic functions now bind to `CreateSemanticFunctionHandle` before reaching runtime `feval`.
 - `cellfun` and `arrayfun` string callback literals for local/session semantic functions now bind to `CreateSemanticFunctionHandle` bytecode before reaching runtime builtins.
 - Legacy named user-call bytecode dispatch now checks the semantic registry before builtin fallback or the centralized named legacy fallback.
 - Multi-output `feval` legacy user fallback is centralized behind one dispatch helper instead of duplicated in direct and expanded `feval` bytecode handlers.
@@ -223,7 +224,7 @@ Current legacy fallback caller inventory:
 - Named/expanded user-call fallback: `handle_prepared_user_function_call` first checks the semantic registry, then builtin dispatch, then legacy named fallback. Remaining work is to remove cases where semantic lowering still emits generic `CallFunction*` for functions that should have stable semantic identity.
 - End-expression callback fallback: local/session user-function calls now carry `EndExpr::SemanticCall`; remaining fallback is for unresolved names or values without semantic identity.
 - Turbine external callback fallback: `runmat_call_user_function` invokes semantic functions when the Turbine runtime context registry resolves the name; otherwise it uses `execute_legacy_user_function_isolated` for legacy-shaped callback definitions. This is the concrete external compatibility boundary until Turbine carries semantic function bytecode/identity for every exported callback.
-- Dynamic closure/`feval` unresolved fallback: VM `call::feval::execute_feval` and runtime `feval` resolve embedded closure semantic IDs and semantic function handles before name fallback. Remaining unresolved closure/function-handle names still gather or ask name-based user-function maps because plain `Value::FunctionHandle(name)` has no semantic identity field.
+- Dynamic closure/`feval` unresolved fallback: VM `call::feval::execute_feval` and runtime `feval` resolve embedded closure semantic IDs and semantic function handles before name fallback. Compiler-produced `feval` string callees now bind to semantic handles when the registry knows the function. Remaining unresolved closure/function-handle names still gather or ask name-based user-function maps because plain `Value::FunctionHandle(name)` has no semantic identity field.
 - Runtime callback builtins: `cellfun` and `arrayfun` invoke embedded semantic closures or semantic function handles directly; compiler-produced local/session string callbacks are now rewritten to semantic function handles. Runtime string inputs and plain `FunctionHandle(name)` values remain name-based because they can originate outside the compiler product.
 
 Classification:
