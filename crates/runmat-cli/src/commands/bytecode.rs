@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use runmat_config::RunMatConfig;
 use runmat_hir::LoweringContext;
 use runmat_parser::ParserOptions;
-use runmat_vm::instr::Instr;
+use runmat_vm::Instr;
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 use std::fs;

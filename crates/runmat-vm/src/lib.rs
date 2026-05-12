@@ -5,8 +5,8 @@ pub mod bytecode;
 pub(crate) mod call;
 pub mod compiler;
 pub mod indexing;
-pub mod instr {
-    pub use crate::bytecode::instr::{ArgSpec, EmitLabel, EndExpr, Instr, StackEffect};
+pub(crate) mod instr {
+    pub use crate::bytecode::instr::{ArgSpec, EmitLabel, EndExpr, Instr};
 }
 pub(crate) mod interpreter;
 pub mod layout;
