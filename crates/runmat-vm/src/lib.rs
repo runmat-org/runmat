@@ -10,9 +10,9 @@ pub mod instr {
 }
 pub(crate) mod interpreter;
 pub mod layout;
-pub mod object;
-pub mod ops;
-pub mod runtime;
+pub(crate) mod object;
+pub(crate) mod ops;
+pub(crate) mod runtime;
 
 pub use bytecode::compile;
 pub use bytecode::{

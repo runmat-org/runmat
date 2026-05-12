@@ -207,9 +207,3 @@ pub fn persist_declared_for_bytecode(bytecode: &Bytecode, func_name: &str, vars:
         }
     }
 }
-
-pub fn clear_all_runtime_globals() {
-    GLOBALS.with(|g| g.borrow_mut().clear());
-    PERSISTENTS.with(|p| p.borrow_mut().clear());
-    PERSISTENTS_BY_NAME.with(|p| p.borrow_mut().clear());
-}
