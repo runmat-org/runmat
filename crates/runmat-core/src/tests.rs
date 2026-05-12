@@ -2020,6 +2020,20 @@ fn session_function_handle_uses_semantic_registry() {
         "function handle target should be present in semantic registry"
     );
     assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+        )),
+        "session function handles should carry semantic identity"
+    );
+    assert!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateFunctionHandle(name) if name == "inc"
+        )),
+        "session function handles should not remain name-only handles"
+    );
+    assert!(
         prepared.bytecode.functions.is_empty(),
         "function handle session semantic call should not require legacy bytecode functions"
     );

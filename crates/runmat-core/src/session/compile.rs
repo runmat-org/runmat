@@ -89,7 +89,7 @@ impl RunMatSession {
         if current_registry.functions.is_empty() {
             bytecode.semantic_function_registry = session_registry.clone();
             bytecode.semantic_functions = bytecode.semantic_function_registry.functions.clone();
-            bind_semantic_function_end_expr_calls(bytecode);
+            bind_semantic_function_references(bytecode);
             return (session_registry, next_semantic_function_id);
         }
 
@@ -138,7 +138,7 @@ impl RunMatSession {
 
         bytecode.semantic_function_registry = session_registry.clone();
         bytecode.semantic_functions = bytecode.semantic_function_registry.functions.clone();
-        bind_semantic_function_end_expr_calls(bytecode);
+        bind_semantic_function_references(bytecode);
         (session_registry, next_semantic_function_id)
     }
 
@@ -252,10 +252,15 @@ fn remap_semantic_function_instr(
     }
 }
 
-fn bind_semantic_function_end_expr_calls(bytecode: &mut runmat_vm::Bytecode) {
+fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
     let registry = bytecode.semantic_function_registry.clone();
     for instr in &mut bytecode.instructions {
         match instr {
+            runmat_vm::Instr::CreateFunctionHandle(name) => {
+                if let Some(function) = registry.resolve_name(name) {
+                    *instr = runmat_vm::Instr::CreateSemanticClosure(function, name.clone(), 0);
+                }
+            }
             runmat_vm::Instr::IndexSliceExpr {
                 range_start_exprs,
                 range_step_exprs,
