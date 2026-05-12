@@ -305,7 +305,7 @@ export default function MatlabOnlinePage() {
                 MATLAB online alternative
               </div>
               <h1 className="font-bold text-left leading-tight tracking-tight text-3xl sm:text-4xl md:text-5xl">
-                Run your MATLAB code in the browser blazing fast
+                Run MATLAB code in the browser blazing fast
               </h1>
               <p className="max-w-[42rem] leading-relaxed text-foreground text-[0.938rem]">
                 RunMat executes MATLAB-syntax code in your browser with auto GPU acceleration. No account or licence

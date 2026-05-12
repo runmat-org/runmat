@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Mutex as StdMutex};
 
+pub(crate) type SharedFileHandle = Arc<StdMutex<Option<File>>>;
+
 #[derive(Clone)]
 pub(crate) enum StandardStream {
     Stdin,
@@ -14,7 +16,12 @@ pub(crate) enum StandardStream {
 #[derive(Clone)]
 enum Resource {
     Standard,
-    File(Arc<StdMutex<File>>),
+    File(SharedFileHandle),
+}
+
+struct CloseEntry {
+    info: FileInfo,
+    handle: Option<SharedFileHandle>,
 }
 
 struct Entry {
@@ -59,7 +66,7 @@ impl Entry {
         }
     }
 
-    fn file_handle(&self) -> Option<Arc<StdMutex<File>>> {
+    fn file_handle(&self) -> Option<SharedFileHandle> {
         match &self.resource {
             Resource::File(handle) => Some(handle.clone()),
             Resource::Standard => None,
@@ -82,7 +89,7 @@ pub(crate) struct RegisteredFile {
     pub permission: String,
     pub machinefmt: String,
     pub encoding: String,
-    pub handle: Arc<StdMutex<File>>,
+    pub handle: SharedFileHandle,
 }
 
 impl RegisteredFile {
@@ -149,7 +156,7 @@ pub(crate) fn list_infos() -> Vec<FileInfo> {
     infos
 }
 
-pub(crate) fn take_handle(fid: i32) -> Option<Arc<StdMutex<File>>> {
+pub(crate) fn take_handle(fid: i32) -> Option<SharedFileHandle> {
     let guard = REGISTRY.lock().expect("file registry poisoned");
     guard
         .entries
@@ -157,12 +164,53 @@ pub(crate) fn take_handle(fid: i32) -> Option<Arc<StdMutex<File>>> {
         .and_then(|entry| entry.file_handle())
 }
 
+#[cfg(test)]
 pub(crate) fn close(fid: i32) -> Option<FileInfo> {
     if fid < 3 {
         return None;
     }
     let mut guard = REGISTRY.lock().expect("file registry poisoned");
     guard.entries.remove(&fid).map(|entry| entry.info())
+}
+
+pub(crate) async fn close_async(fid: i32) -> std::io::Result<Option<FileInfo>> {
+    let entry = {
+        if fid < 3 {
+            return Ok(None);
+        }
+        let guard = REGISTRY.lock().expect("file registry poisoned");
+        guard.entries.get(&fid).map(|entry| CloseEntry {
+            info: entry.info(),
+            handle: entry.file_handle(),
+        })
+    };
+
+    let Some(entry) = entry else {
+        return Ok(None);
+    };
+
+    if let Some(handle) = entry.handle {
+        let file = {
+            let mut guard = handle.lock().expect("registered file handle poisoned");
+            guard.take()
+        };
+        if let Some(mut file) = file {
+            if let Err(err) = file.flush_async().await {
+                let mut guard = handle.lock().expect("registered file handle poisoned");
+                if guard.is_none() {
+                    *guard = Some(file);
+                }
+                return Err(err);
+            }
+        }
+    }
+
+    let removed = {
+        let mut guard = REGISTRY.lock().expect("file registry poisoned");
+        guard.entries.remove(&fid).map(|entry| entry.info())
+    };
+
+    Ok(removed.or(Some(entry.info)))
 }
 
 #[cfg(test)]

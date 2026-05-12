@@ -3,6 +3,9 @@ use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
+use runmat_filesystem::FileHandle;
+
 use super::bindings::JsFsFuncs;
 
 pub(super) struct JsFileState {
@@ -19,12 +22,40 @@ pub(super) struct JsFileState {
 impl JsFileState {
     fn write_back(&mut self) -> io::Result<()> {
         if self.can_write && self.dirty {
-            self.dirty = false;
             let data = self.buffer.clone();
             let path = self.path.clone();
             self.funcs.write_file(&path, &data)?;
+            self.dirty = false;
         }
         Ok(())
+    }
+
+    async fn write_back_async(inner: Arc<Mutex<Self>>) -> io::Result<()> {
+        let Some((funcs, path, data)) = ({
+            let mut state = inner.lock().unwrap();
+            if state.can_write && state.dirty {
+                state.dirty = false;
+                Some((
+                    state.funcs.clone(),
+                    state.path.clone(),
+                    state.buffer.clone(),
+                ))
+            } else {
+                None
+            }
+        }) else {
+            return Ok(());
+        };
+
+        match funcs.write_file_async(&path, &data).await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                if let Ok(mut state) = inner.lock() {
+                    state.dirty = true;
+                }
+                Err(err)
+            }
+        }
     }
 }
 
@@ -101,6 +132,13 @@ impl Seek for JsFileHandle {
         }
         state.cursor = new_pos as usize;
         Ok(state.cursor as u64)
+    }
+}
+
+#[async_trait(?Send)]
+impl FileHandle for JsFileHandle {
+    async fn flush_async(&mut self) -> io::Result<()> {
+        JsFileState::write_back_async(self.inner.clone()).await
     }
 }
 

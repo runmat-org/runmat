@@ -1063,6 +1063,9 @@ impl Seek for RemoteFileHandle {
     }
 }
 
+#[async_trait(?Send)]
+impl FileHandle for RemoteFileHandle {}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MetadataResponse {

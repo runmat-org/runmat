@@ -133,31 +133,42 @@ impl FcloseEval {
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<FcloseEval> {
     let gathered = gather_args(args).await?;
     match gathered.len() {
-        0 => Ok(close_all()),
-        1 => handle_single_argument(&gathered[0]),
+        0 => Ok(close_all().await),
+        1 => handle_single_argument(&gathered[0]).await,
         _ => Err(fclose_error("fclose: too many input arguments")),
     }
 }
 
-fn handle_single_argument(value: &Value) -> BuiltinResult<FcloseEval> {
+async fn handle_single_argument(value: &Value) -> BuiltinResult<FcloseEval> {
     if matches_keyword(value, "all") {
-        return Ok(close_all());
+        return Ok(close_all().await);
     }
     let fids = collect_file_ids(value).map_err(|err| fclose_error(format!("fclose: {err}")))?;
-    Ok(close_fids(&fids))
+    Ok(close_fids(&fids).await)
 }
 
-fn close_all() -> FcloseEval {
+async fn close_all() -> FcloseEval {
     let infos = registry::list_infos();
+    let mut status_ok = true;
+    let mut message = String::new();
     for info in infos {
         if info.id >= 3 {
-            let _ = registry::close(info.id);
+            if let Err(err) = registry::close_async(info.id).await {
+                status_ok = false;
+                if message.is_empty() {
+                    message = err.to_string();
+                }
+            }
         }
     }
-    FcloseEval::success()
+    if status_ok {
+        FcloseEval::success()
+    } else {
+        FcloseEval::failure(message)
+    }
 }
 
-fn close_fids(fids: &[i32]) -> FcloseEval {
+async fn close_fids(fids: &[i32]) -> FcloseEval {
     if fids.is_empty() {
         return FcloseEval::success();
     }
@@ -174,10 +185,19 @@ fn close_fids(fids: &[i32]) -> FcloseEval {
         if fid < 3 {
             continue;
         }
-        if registry::close(fid).is_none() {
-            status_ok = false;
-            if message.is_empty() {
-                message = INVALID_IDENTIFIER_MESSAGE.to_string();
+        match registry::close_async(fid).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                status_ok = false;
+                if message.is_empty() {
+                    message = INVALID_IDENTIFIER_MESSAGE.to_string();
+                }
+            }
+            Err(err) => {
+                status_ok = false;
+                if message.is_empty() {
+                    message = err.to_string();
+                }
             }
         }
     }
@@ -275,10 +295,122 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::{fopen, registry};
     use runmat_builtins::{CellArray, LogicalArray, StringArray, Tensor};
     use runmat_time::system_time_now;
-    use std::io::Write;
+    use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
+    use std::path::Path;
     use std::path::PathBuf;
-    use std::sync::MutexGuard;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, MutexGuard};
     use std::time::UNIX_EPOCH;
+
+    struct FailingFlushProvider {
+        fail_flush: Arc<AtomicBool>,
+    }
+
+    fn unsupported_provider_op() -> io::Error {
+        io::Error::new(io::ErrorKind::Unsupported, "unsupported test provider op")
+    }
+
+    #[async_trait::async_trait(?Send)]
+    impl runmat_filesystem::FsProvider for FailingFlushProvider {
+        fn open(
+            &self,
+            _path: &Path,
+            _flags: &runmat_filesystem::OpenFlags,
+        ) -> io::Result<Box<dyn runmat_filesystem::FileHandle>> {
+            Ok(Box::new(FailingFlushHandle {
+                inner: Cursor::new(Vec::new()),
+                fail_flush: self.fail_flush.clone(),
+            }))
+        }
+
+        async fn read(&self, _path: &Path) -> io::Result<Vec<u8>> {
+            Err(unsupported_provider_op())
+        }
+
+        async fn write(&self, _path: &Path, _data: &[u8]) -> io::Result<()> {
+            Err(unsupported_provider_op())
+        }
+
+        async fn remove_file(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported_provider_op())
+        }
+
+        async fn metadata(&self, _path: &Path) -> io::Result<runmat_filesystem::FsMetadata> {
+            Err(unsupported_provider_op())
+        }
+
+        async fn symlink_metadata(
+            &self,
+            _path: &Path,
+        ) -> io::Result<runmat_filesystem::FsMetadata> {
+            Err(unsupported_provider_op())
+        }
+
+        async fn read_dir(&self, _path: &Path) -> io::Result<Vec<runmat_filesystem::DirEntry>> {
+            Err(unsupported_provider_op())
+        }
+
+        async fn canonicalize(&self, _path: &Path) -> io::Result<PathBuf> {
+            Err(unsupported_provider_op())
+        }
+
+        async fn create_dir(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported_provider_op())
+        }
+
+        async fn create_dir_all(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported_provider_op())
+        }
+
+        async fn remove_dir(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported_provider_op())
+        }
+
+        async fn remove_dir_all(&self, _path: &Path) -> io::Result<()> {
+            Err(unsupported_provider_op())
+        }
+
+        async fn rename(&self, _from: &Path, _to: &Path) -> io::Result<()> {
+            Err(unsupported_provider_op())
+        }
+
+        async fn set_readonly(&self, _path: &Path, _readonly: bool) -> io::Result<()> {
+            Err(unsupported_provider_op())
+        }
+    }
+
+    struct FailingFlushHandle {
+        inner: Cursor<Vec<u8>>,
+        fail_flush: Arc<AtomicBool>,
+    }
+
+    impl Read for FailingFlushHandle {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.inner.read(buf)
+        }
+    }
+
+    impl Write for FailingFlushHandle {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.inner.write(buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            if self.fail_flush.load(Ordering::SeqCst) {
+                Err(io::Error::other("flush failed"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    impl Seek for FailingFlushHandle {
+        fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+
+    impl runmat_filesystem::FileHandle for FailingFlushHandle {}
 
     fn unwrap_error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -405,6 +537,34 @@ pub(crate) mod tests {
         assert_eq!(second.status(), -1.0);
         assert_eq!(second.message(), INVALID_IDENTIFIER_MESSAGE);
         test_support::fs::remove_file(path).unwrap();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fclose_keeps_file_registered_when_flush_fails() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let fail_flush = Arc::new(AtomicBool::new(true));
+        let provider = Arc::new(FailingFlushProvider {
+            fail_flush: fail_flush.clone(),
+        });
+        let _provider_guard = runmat_filesystem::replace_provider(provider);
+
+        let eval = run_fopen(&[Value::from("flush_fail.txt"), Value::from("w")]).expect("fopen");
+        let fid = eval.as_open().expect("open result").fid;
+        assert!(fid >= 3.0);
+
+        let first = run_evaluate(&[Value::Num(fid)]).expect("first fclose");
+        assert_eq!(first.status(), -1.0);
+        assert!(first.message().contains("flush failed"));
+        assert!(registry::info_for(fid as i32).is_some());
+        let handle = registry::take_handle(fid as i32).expect("handle remains registered");
+        assert!(handle.lock().expect("handle lock").is_some());
+
+        fail_flush.store(false, Ordering::SeqCst);
+        let second = run_evaluate(&[Value::Num(fid)]).expect("second fclose");
+        assert_eq!(second.status(), 0.0);
+        assert!(registry::info_for(fid as i32).is_none());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
