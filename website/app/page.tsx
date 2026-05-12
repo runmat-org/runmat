@@ -219,10 +219,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
-              See your math in 3D
+              GPU Accelerated Computing
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              GPU-accelerated 2D and 3D plotting, built into the same environment as your code. Your plots are part of the same computation chain as your math. No copying data between systems, no separate plotting library.
+              GPU-accelerated 2D and 3D plotting, designed as tensor projection operations on your data in GPU memory. Since your plots are part of the same computation chain as your math no data needs to be copied between systems, allowing you to plot your data as fast as you can compute it.
             </p>
           </div>
           <div className="mx-auto max-w-3xl">
@@ -292,10 +292,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
-              The fastest runtime for your math
+              Blazing fast runtime for math
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-7">
-              RunMat runs math faster because of how the runtime is engineered. Fusion merges sequential operations into fewer GPU steps; residency keeps your arrays on-device between steps. That means less memory traffic, fewer program launches, and faster scripts.
+              RunMat automatically promotes tensor operations to GPUs where it helps. Fusion merges sequential operations into fewer GPU steps; residency keeps your arrays on-device between steps. That means your code runs on GPUs automatically where they're available, without you having to decide in your code what to run on what.
             </p>
           </div>
 
