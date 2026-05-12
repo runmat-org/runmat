@@ -1092,6 +1092,13 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         Value::Closure(c) => {
             let mut args = c.captures.clone();
             args.extend(rest);
+            if let Some(function) = c.semantic_function {
+                if let Some(result) =
+                    crate::user_functions::try_call_semantic_function(function, &args, 1).await
+                {
+                    return result;
+                }
+            }
             call_by_name(&c.function_name, &args).await
         }
         other => Err((format!("feval: unsupported function value {other:?}")).into()),
@@ -1389,5 +1396,33 @@ async fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Val
         }
         Value::ClassRef(cls) => Ok(Value::String(format!("@{cls}.{name}"))),
         other => Err((format!("getmethod unsupported on {other:?}")).into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::executor::block_on;
+    use std::sync::Arc;
+
+    #[test]
+    fn feval_closure_uses_semantic_function_identity() {
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |function, args, requested_outputs| {
+                assert_eq!(function, 42);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(7.0)) })
+            },
+        )));
+        let closure = Value::Closure(runmat_builtins::Closure {
+            function_name: "semantic_target".to_string(),
+            semantic_function: Some(42),
+            captures: Vec::new(),
+        });
+
+        let result = block_on(feval_builtin(closure, vec![Value::Num(2.0)]))
+            .expect("semantic closure feval succeeds");
+        assert_eq!(result, Value::Num(7.0));
     }
 }
