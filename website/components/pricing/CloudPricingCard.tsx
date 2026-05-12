@@ -53,7 +53,7 @@ const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
     inheritsFrom: "Everything in Pro, plus:",
     features: [
       { label: "100 GB storage", href: "#compare-storage" },
-      "SSO / SAML (and SCIM)",
+      "SSO / SAML / SCIM",
       "$50/mo LLM tokens included",
       "Priority support",
     ],
@@ -76,9 +76,9 @@ export default function CloudPricingCard() {
     <Card className="relative flex h-full flex-col border border-[hsl(var(--brand))]/50 shadow-sm">
       <CardHeader className="space-y-3 pb-4">
         <Badge className="w-fit bg-secondary text-foreground border-border hover:bg-secondary">
-          Desktop
+          App
         </Badge>
-        <CardTitle className="text-lg font-semibold text-foreground">RunMat Desktop</CardTitle>
+        <CardTitle className="text-lg font-semibold text-foreground">RunMat App</CardTitle>
         <p className="text-[0.938rem] text-foreground">High performance computing platform.</p>
         <p className="text-3xl font-bold text-foreground">{currentTier.price}</p>
       </CardHeader>

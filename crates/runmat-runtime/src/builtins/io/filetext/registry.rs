@@ -19,7 +19,7 @@ enum Resource {
     File(SharedFileHandle),
 }
 
-struct RemovedEntry {
+struct CloseEntry {
     info: FileInfo,
     handle: Option<SharedFileHandle>,
 }
@@ -174,32 +174,43 @@ pub(crate) fn close(fid: i32) -> Option<FileInfo> {
 }
 
 pub(crate) async fn close_async(fid: i32) -> std::io::Result<Option<FileInfo>> {
-    let removed = {
+    let entry = {
         if fid < 3 {
             return Ok(None);
         }
-        let mut guard = REGISTRY.lock().expect("file registry poisoned");
-        guard.entries.remove(&fid).map(|entry| RemovedEntry {
+        let guard = REGISTRY.lock().expect("file registry poisoned");
+        guard.entries.get(&fid).map(|entry| CloseEntry {
             info: entry.info(),
             handle: entry.file_handle(),
         })
     };
 
-    let Some(removed) = removed else {
+    let Some(entry) = entry else {
         return Ok(None);
     };
 
-    if let Some(handle) = removed.handle {
-        let mut file = {
+    if let Some(handle) = entry.handle {
+        let file = {
             let mut guard = handle.lock().expect("registered file handle poisoned");
             guard.take()
         };
-        if let Some(mut file) = file.take() {
-            file.flush_async().await?;
+        if let Some(mut file) = file {
+            if let Err(err) = file.flush_async().await {
+                let mut guard = handle.lock().expect("registered file handle poisoned");
+                if guard.is_none() {
+                    *guard = Some(file);
+                }
+                return Err(err);
+            }
         }
     }
 
-    Ok(Some(removed.info))
+    let removed = {
+        let mut guard = REGISTRY.lock().expect("file registry poisoned");
+        guard.entries.remove(&fid).map(|entry| entry.info())
+    };
+
+    Ok(removed.or(Some(entry.info)))
 }
 
 #[cfg(test)]

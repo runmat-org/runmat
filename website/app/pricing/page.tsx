@@ -62,7 +62,7 @@ const pricingFaqItems: { question: string; answer: string; answerContent?: React
   {
     question: "What's included in Cloud Hobby vs Pro vs Team?",
     answer:
-      "Hobby: unlimited projects, 100 MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: unlimited projects, SSO / SAML (and SCIM), 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
+      "Hobby: unlimited projects, 100 MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: unlimited projects, SSO / SAML / SCIM, 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
   },
   {
     question: "How does RunMat Cloud billing work?",
@@ -111,8 +111,11 @@ export default function PricingPage() {
         <section className="w-full pt-16 md:pt-24 lg:pt-32 pb-10 md:pb-12">
           <div className="mx-auto max-w-3xl space-y-4 text-center">
             <h1 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
-              Simple, transparent pricing
+              Pricing
             </h1>
+            <h2>
+              Start for free. Upgrade to get the capacity that exactly matches your team's needs.
+            </h2>
           </div>
         </section>
 
@@ -123,7 +126,7 @@ export default function PricingPage() {
                 <Badge className="w-fit bg-green-500/20 text-green-800 border-green-600/50 dark:text-green-200 dark:border-green-400/40 hover:bg-green-500/20">
                   OSS
                 </Badge>
-                <CardTitle className="text-lg font-semibold text-foreground">RunMat</CardTitle>
+                <CardTitle className="text-lg font-semibold text-foreground">RunMat Runtime</CardTitle>
                 <p className="text-[0.938rem] text-foreground">Open-source, GPU-accelerated math runtime. MATLAB syntax, no account required.</p>
                 <p className="text-3xl font-bold text-foreground">Free, forever</p>
               </CardHeader>
