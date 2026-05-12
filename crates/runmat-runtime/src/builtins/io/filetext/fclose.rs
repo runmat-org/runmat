@@ -133,31 +133,42 @@ impl FcloseEval {
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<FcloseEval> {
     let gathered = gather_args(args).await?;
     match gathered.len() {
-        0 => Ok(close_all()),
-        1 => handle_single_argument(&gathered[0]),
+        0 => Ok(close_all().await),
+        1 => handle_single_argument(&gathered[0]).await,
         _ => Err(fclose_error("fclose: too many input arguments")),
     }
 }
 
-fn handle_single_argument(value: &Value) -> BuiltinResult<FcloseEval> {
+async fn handle_single_argument(value: &Value) -> BuiltinResult<FcloseEval> {
     if matches_keyword(value, "all") {
-        return Ok(close_all());
+        return Ok(close_all().await);
     }
     let fids = collect_file_ids(value).map_err(|err| fclose_error(format!("fclose: {err}")))?;
-    Ok(close_fids(&fids))
+    Ok(close_fids(&fids).await)
 }
 
-fn close_all() -> FcloseEval {
+async fn close_all() -> FcloseEval {
     let infos = registry::list_infos();
+    let mut status_ok = true;
+    let mut message = String::new();
     for info in infos {
         if info.id >= 3 {
-            let _ = registry::close(info.id);
+            if let Err(err) = registry::close_async(info.id).await {
+                status_ok = false;
+                if message.is_empty() {
+                    message = err.to_string();
+                }
+            }
         }
     }
-    FcloseEval::success()
+    if status_ok {
+        FcloseEval::success()
+    } else {
+        FcloseEval::failure(message)
+    }
 }
 
-fn close_fids(fids: &[i32]) -> FcloseEval {
+async fn close_fids(fids: &[i32]) -> FcloseEval {
     if fids.is_empty() {
         return FcloseEval::success();
     }
@@ -174,10 +185,19 @@ fn close_fids(fids: &[i32]) -> FcloseEval {
         if fid < 3 {
             continue;
         }
-        if registry::close(fid).is_none() {
-            status_ok = false;
-            if message.is_empty() {
-                message = INVALID_IDENTIFIER_MESSAGE.to_string();
+        match registry::close_async(fid).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                status_ok = false;
+                if message.is_empty() {
+                    message = INVALID_IDENTIFIER_MESSAGE.to_string();
+                }
+            }
+            Err(err) => {
+                status_ok = false;
+                if message.is_empty() {
+                    message = err.to_string();
+                }
             }
         }
     }

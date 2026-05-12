@@ -433,10 +433,10 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<FopenEval> {
     if is_numeric_value(first) {
         return handle_query(first, &gathered[1..]);
     }
-    handle_open(first, &gathered[1..])
+    handle_open(first, &gathered[1..]).await
 }
 
-fn handle_open(path_value: &Value, rest: &[Value]) -> BuiltinResult<FopenEval> {
+async fn handle_open(path_value: &Value, rest: &[Value]) -> BuiltinResult<FopenEval> {
     if rest.len() > 3 {
         return Err(fopen_error("fopen: too many input arguments"));
     }
@@ -454,7 +454,7 @@ fn handle_open(path_value: &Value, rest: &[Value]) -> BuiltinResult<FopenEval> {
     options.append(permission.append);
     options.truncate(permission.truncate);
 
-    match options.open(&path) {
+    match options.open_async(&path).await {
         Ok(file) => {
             let handle = Arc::new(StdMutex::new(file));
             let registered = RegisteredFile {

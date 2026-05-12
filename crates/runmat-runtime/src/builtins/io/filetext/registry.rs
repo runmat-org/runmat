@@ -17,6 +17,11 @@ enum Resource {
     File(Arc<StdMutex<File>>),
 }
 
+struct RemovedEntry {
+    info: FileInfo,
+    handle: Option<Arc<StdMutex<File>>>,
+}
+
 struct Entry {
     id: i32,
     name: String,
@@ -157,12 +162,37 @@ pub(crate) fn take_handle(fid: i32) -> Option<Arc<StdMutex<File>>> {
         .and_then(|entry| entry.file_handle())
 }
 
+#[cfg(test)]
 pub(crate) fn close(fid: i32) -> Option<FileInfo> {
     if fid < 3 {
         return None;
     }
     let mut guard = REGISTRY.lock().expect("file registry poisoned");
     guard.entries.remove(&fid).map(|entry| entry.info())
+}
+
+pub(crate) async fn close_async(fid: i32) -> std::io::Result<Option<FileInfo>> {
+    let removed = {
+        if fid < 3 {
+            return Ok(None);
+        }
+        let mut guard = REGISTRY.lock().expect("file registry poisoned");
+        guard.entries.remove(&fid).map(|entry| RemovedEntry {
+            info: entry.info(),
+            handle: entry.file_handle(),
+        })
+    };
+
+    let Some(removed) = removed else {
+        return Ok(None);
+    };
+
+    if let Some(handle) = removed.handle {
+        let mut file = handle.lock().expect("registered file handle poisoned");
+        file.flush_async().await?;
+    }
+
+    Ok(Some(removed.info))
 }
 
 #[cfg(test)]
