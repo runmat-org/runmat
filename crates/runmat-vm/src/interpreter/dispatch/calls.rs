@@ -8,9 +8,10 @@ use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
 use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
-    build_expanded_args_from_specs, call_object_index_method, collect_multi_outputs,
-    expand_cell_indices, lookup_user_function, prepare_user_call, subsref_empty_brace_cell,
-    validate_user_function_arity, ObjectIndexKind, ObjectIndexOp, PreparedLegacyUserCall,
+    build_expanded_args_from_specs, call_object_index_method, collect_legacy_multi_outputs,
+    expand_cell_indices, lookup_legacy_user_function, prepare_legacy_user_call,
+    subsref_empty_brace_cell, validate_legacy_user_function_arity, ObjectIndexKind, ObjectIndexOp,
+    PreparedLegacyUserCall,
 };
 use crate::compiler::{CompileError, Compiler};
 use crate::functions::LegacyUserFunction;
@@ -295,9 +296,9 @@ fn prepare_named_user_dispatch(
     args: &[Value],
     vars: &[Value],
 ) -> Result<PreparedLegacyUserDispatch, RuntimeError> {
-    let func = lookup_user_function(name, functions)?;
-    validate_user_function_arity(name, &func, args.len())?;
-    let prepared = prepare_user_call(func, args, vars)?;
+    let func = lookup_legacy_user_function(name, functions)?;
+    validate_legacy_user_function_arity(name, &func, args.len())?;
+    let prepared = prepare_legacy_user_call(func, args, vars)?;
     Ok(unpack_prepared_user_call(prepared))
 }
 
@@ -309,7 +310,7 @@ fn push_user_call_outputs(
     func_result_vars: &[Value],
     out_count: usize,
 ) -> Result<(), RuntimeError> {
-    let outputs = collect_multi_outputs(name, func, var_map, func_result_vars, out_count)?;
+    let outputs = collect_legacy_multi_outputs(name, func, var_map, func_result_vars, out_count)?;
     for value in outputs {
         stack.push(value);
     }
@@ -323,7 +324,7 @@ fn output_list_for_user_call(
     func_result_vars: &[Value],
     out_count: usize,
 ) -> Result<Value, RuntimeError> {
-    let outputs = collect_multi_outputs(name, func, var_map, func_result_vars, out_count)?;
+    let outputs = collect_legacy_multi_outputs(name, func, var_map, func_result_vars, out_count)?;
     Ok(Value::OutputList(outputs))
 }
 

@@ -154,7 +154,7 @@ fn execute_user_function_isolated(
         Err(e) => Err(TurbineError::ExecutionError(e)),
     }?;
 
-    Ok(runmat_vm::call::shared::first_output_value(
+    Ok(runmat_vm::call::shared::first_legacy_output_value(
         &func,
         &var_map,
         &func_result_vars,

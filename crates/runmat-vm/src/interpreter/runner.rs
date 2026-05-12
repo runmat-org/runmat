@@ -229,7 +229,7 @@ async fn invoke_user_function_value(
     register_dynamic_user_functions(&func_bytecode.functions);
     let func_result_vars =
         interpret_function_with_counts(&func_bytecode, func_vars, name, 1, arg_count).await?;
-    Ok(crate::call::shared::first_output_value(
+    Ok(crate::call::shared::first_legacy_output_value(
         &func,
         &var_map,
         &func_result_vars,

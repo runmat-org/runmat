@@ -14,7 +14,7 @@ pub struct PreparedLegacyUserCall {
     pub func_vars: Vec<Value>,
 }
 
-pub fn lookup_user_function(
+pub fn lookup_legacy_user_function(
     name: &str,
     functions: &HashMap<String, LegacyUserFunction>,
 ) -> Result<LegacyUserFunction, RuntimeError> {
@@ -23,7 +23,7 @@ pub fn lookup_user_function(
     })
 }
 
-pub fn validate_user_function_arity(
+pub fn validate_legacy_user_function_arity(
     name: &str,
     func: &LegacyUserFunction,
     arg_count: usize,
@@ -59,7 +59,7 @@ pub fn validate_user_function_arity(
     Ok(())
 }
 
-pub fn prepare_user_call(
+pub fn prepare_legacy_user_call(
     func: LegacyUserFunction,
     args: &[Value],
     vars: &[Value],
@@ -147,7 +147,7 @@ pub fn prepare_user_call(
     })
 }
 
-pub fn first_output_value(
+pub fn first_legacy_output_value(
     func: &LegacyUserFunction,
     var_map: &HashMap<VarId, VarId>,
     func_result_vars: &[Value],
@@ -189,7 +189,7 @@ pub fn first_output_value(
         .unwrap_or(Value::Num(0.0))
 }
 
-pub fn collect_multi_outputs(
+pub fn collect_legacy_multi_outputs(
     name: &str,
     func: &LegacyUserFunction,
     var_map: &HashMap<VarId, VarId>,
