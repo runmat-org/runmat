@@ -1,6 +1,6 @@
 use crate::bytecode::{LegacyUserFunction, SemanticFunctionRegistry};
 use crate::call::user::try_builtin_fallback_single;
-use crate::interpreter::runner::dynamic_user_functions_snapshot;
+use crate::interpreter::runner::dynamic_legacy_user_functions_snapshot;
 use runmat_builtins::{Closure, Value};
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
@@ -82,7 +82,7 @@ pub async fn execute_feval(
             for (k, v) in context_functions {
                 functions.insert(k.clone(), v.clone());
             }
-            for (k, v) in dynamic_user_functions_snapshot() {
+            for (k, v) in dynamic_legacy_user_functions_snapshot() {
                 functions.insert(k, v);
             }
             Ok(FevalDispatch::InvokeUser {
