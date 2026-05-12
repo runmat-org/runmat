@@ -20,7 +20,24 @@ use crate::object::class_def as obj_class_def;
 use crate::object::resolve as obj_resolve;
 use runmat_builtins::{MException, Value};
 use runmat_runtime::RuntimeError;
+use std::cell::Cell;
 use std::future::Future;
+
+thread_local! {
+    static LEGACY_USER_DISPATCH_FALLBACK_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+pub fn legacy_user_dispatch_fallback_count() -> usize {
+    LEGACY_USER_DISPATCH_FALLBACK_COUNT.with(Cell::get)
+}
+
+pub fn reset_legacy_user_dispatch_fallback_count() {
+    LEGACY_USER_DISPATCH_FALLBACK_COUNT.with(|count| count.set(0));
+}
+
+fn note_legacy_user_dispatch_fallback() {
+    LEGACY_USER_DISPATCH_FALLBACK_COUNT.with(|count| count.set(count.get() + 1));
+}
 
 pub enum FevalHandling {
     Completed,
@@ -85,6 +102,7 @@ pub fn compile_legacy_user_dispatch_fallback(
     prepared: PreparedUserDispatch,
     functions: &std::collections::HashMap<String, UserFunction>,
 ) -> Result<CompiledUserDispatch, crate::compiler::CompileError> {
+    note_legacy_user_dispatch_fallback();
     let PreparedUserDispatch {
         func,
         var_map,

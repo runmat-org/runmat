@@ -31,8 +31,9 @@ pub use calls::{
     handle_load_method, handle_load_static_property, handle_method_call,
     handle_method_or_member_index_call, handle_method_or_member_index_expand_multi_call,
     handle_prepared_user_function_call, handle_register_class, handle_static_method_call,
-    handle_user_function_call, output_list_for_user_call, prepare_named_user_dispatch,
-    push_single_result, push_user_call_outputs, unpack_prepared_user_call, BuiltinHandling,
+    handle_user_function_call, legacy_user_dispatch_fallback_count, output_list_for_user_call,
+    prepare_named_user_dispatch, push_single_result, push_user_call_outputs,
+    reset_legacy_user_dispatch_fallback_count, unpack_prepared_user_call, BuiltinHandling,
     CompiledUserDispatch, FevalHandling, MethodHandling, UserCallHandling,
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};

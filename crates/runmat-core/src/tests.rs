@@ -1,6 +1,18 @@
 use crate::*;
 use futures::executor::block_on;
 
+fn reset_legacy_user_dispatch_fallback_count() {
+    runmat_vm::interpreter::dispatch::reset_legacy_user_dispatch_fallback_count();
+}
+
+fn assert_no_legacy_user_dispatch_fallback() {
+    assert_eq!(
+        runmat_vm::interpreter::dispatch::legacy_user_dispatch_fallback_count(),
+        0,
+        "semantic session call should not use legacy user dispatch fallback"
+    );
+}
+
 #[test]
 fn captures_basic_workspace_assignments() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
@@ -975,7 +987,9 @@ fn elementwise_logical_ops_use_semantic_vm() {
         "semantic logical ops should not lower through string-keyed builtin calls"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "0"
@@ -1804,7 +1818,9 @@ fn direct_session_function_call_uses_semantic_registry() {
         "direct session semantic call should not require legacy bytecode functions"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome("y = inc(2);")).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -1836,7 +1852,9 @@ fn direct_session_function_multi_output_uses_semantic_registry() {
         "direct session semantic multi-output call should not require legacy bytecode functions"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome("[a, b] = pair(2);")).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
@@ -1868,8 +1886,10 @@ fn direct_session_function_cell_expansion_uses_semantic_registry() {
         "direct session semantic expansion call should not require legacy bytecode functions"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome =
         block_on(session.execute_outcome("C = {2}; y = inc(C{:});")).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -1900,8 +1920,10 @@ fn direct_session_function_expansion_multi_output_uses_semantic_registry() {
         "direct session semantic expansion multi-output call should not require legacy bytecode functions"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome =
         block_on(session.execute_outcome("C = {2}; [a, b] = pair(C{:});")).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
@@ -1934,8 +1956,10 @@ fn session_function_handle_uses_semantic_registry() {
         "function handle session semantic call should not require legacy bytecode functions"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome("f = @inc; y = f(2);"))
         .expect("function handle call succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "3"
@@ -1967,8 +1991,10 @@ fn session_function_handle_feval_multi_output_uses_semantic_registry() {
         "function handle feval session semantic call should not require legacy bytecode functions"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome("f = @pair; [a, b] = feval(f, 2);"))
         .expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
@@ -2001,8 +2027,10 @@ fn session_function_handle_feval_expansion_uses_semantic_registry() {
         "function handle feval expansion session semantic call should not require legacy bytecode functions"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome("f = @add2; C = {2, 3}; y = feval(f, C{:});"))
         .expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "5"
@@ -2033,8 +2061,10 @@ fn session_function_handle_feval_expansion_multi_output_uses_semantic_registry()
         "function handle feval expansion multi-output session semantic call should not require legacy bytecode functions"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome("f = @pair; C = {2}; [a, b] = feval(f, C{:});"))
         .expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
