@@ -733,6 +733,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, StringArray};
     use std::convert::TryInto;
+    use std::sync::Arc;
 
     fn cellfun_builtin(func: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::cellfun_builtin(func, rest))
@@ -782,6 +783,32 @@ pub(crate) mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.data, vec![5.0, 7.0, 9.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cellfun_semantic_function_handle_uses_semantic_invoker() {
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |function, args, requested_outputs| {
+                assert_eq!(function, 77);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(9.0)) })
+            },
+        )));
+        let cell = crate::make_cell(vec![Value::Num(2.0)], 1, 1).expect("cell");
+        let handle = Value::SemanticFunctionHandle {
+            name: "semantic_cellfun_target".to_string(),
+            function: 77,
+        };
+
+        let result = cellfun_builtin(handle, vec![cell]).expect("semantic cellfun");
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 1]);
+                assert_eq!(tensor.data, vec![9.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

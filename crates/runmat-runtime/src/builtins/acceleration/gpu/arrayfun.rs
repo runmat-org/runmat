@@ -1032,6 +1032,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{ResolveContext, Tensor, Type};
+    use std::sync::Arc;
 
     fn call(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(arrayfun_builtin(func, rest))
@@ -1051,6 +1052,35 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![2, 3]);
                 assert_eq!(out.data, expected);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arrayfun_semantic_function_handle_uses_semantic_invoker() {
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |function, args, requested_outputs| {
+                assert_eq!(function, 78);
+                assert_eq!(requested_outputs, 1);
+                let [Value::Num(value)] = args else {
+                    panic!("expected scalar numeric argument, got {args:?}");
+                };
+                let value = *value;
+                Box::pin(async move { Ok(Value::Num(value + 10.0)) })
+            },
+        )));
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+        let handle = Value::SemanticFunctionHandle {
+            name: "semantic_arrayfun_target".to_string(),
+            function: 78,
+        };
+
+        let result = call(handle, vec![Value::Tensor(tensor)]).expect("semantic arrayfun");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![11.0, 12.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }
