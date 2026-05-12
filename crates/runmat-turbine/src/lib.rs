@@ -20,8 +20,7 @@ use futures::task::noop_waker;
 use log::{debug, error, info, warn};
 use runmat_builtins::Value;
 use runmat_runtime::{build_runtime_error, RuntimeError};
-use runmat_vm::interpreter::state::InterpreterOutcome;
-use runmat_vm::{Bytecode, Instr, SemanticFunctionRegistry};
+use runmat_vm::{Bytecode, Instr, InterpreterOutcome, SemanticFunctionRegistry};
 use std::cell::Cell;
 use std::env;
 use std::ffi::CStr;
@@ -121,44 +120,6 @@ fn declare_host_call_in_module(module: &mut JITModule) -> FuncId {
     module
         .declare_function("runmat_call_user_function", Linkage::Import, &sig)
         .expect("Failed to declare runmat_call_user_function")
-}
-
-/// Execute a user-defined function with access to global variables using the VM interpreter
-fn execute_user_function_isolated(
-    function_def: &runmat_vm::LegacyUserFunction,
-    args: &[Value],
-    all_functions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
-) -> Result<Value> {
-    let mut functions = all_functions.clone();
-    functions.insert(function_def.name.clone(), function_def.clone());
-    let compiled = runmat_vm::interpreter::dispatch::compile_legacy_named_user_dispatch_fallback(
-        &function_def.name,
-        &functions,
-        args,
-        &[],
-    )
-    .map_err(TurbineError::ExecutionError)?;
-    let runmat_vm::interpreter::dispatch::CompiledLegacyUserDispatch {
-        func,
-        var_map,
-        bytecode: func_bytecode,
-        mut func_vars,
-    } = compiled;
-
-    let func_result_vars = match run_immediate(Box::pin(runmat_vm::interpret_with_vars(
-        &func_bytecode,
-        &mut func_vars,
-        Some(func.name.as_str()),
-    )))? {
-        Ok(InterpreterOutcome::Completed(values)) => Ok(values),
-        Err(e) => Err(TurbineError::ExecutionError(e)),
-    }?;
-
-    Ok(runmat_vm::call::shared::first_legacy_output_value(
-        &func,
-        &var_map,
-        &func_result_vars,
-    ))
 }
 
 /// The main JIT compilation engine
@@ -856,7 +817,14 @@ pub extern "C" fn runmat_call_user_function(
         ))
         .and_then(|result| result.map_err(TurbineError::ExecutionError))
     } else if let Some(function_def) = context.functions.get(&name) {
-        execute_user_function_isolated(function_def, &args, &context.functions)
+        run_immediate(Box::pin(
+            runmat_vm::interpreter::runner::execute_legacy_user_function_isolated(
+                function_def,
+                &args,
+                &context.functions,
+            ),
+        ))
+        .and_then(|result| result.map_err(TurbineError::ExecutionError))
     } else {
         error!("Unknown user function requested: {name}");
         return 1;

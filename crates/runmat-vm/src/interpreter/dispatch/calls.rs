@@ -56,7 +56,7 @@ struct PreparedLegacyUserDispatch {
     pub func_vars: Vec<Value>,
 }
 
-pub struct CompiledLegacyUserDispatch {
+pub(crate) struct CompiledLegacyUserDispatch {
     pub func: LegacyUserFunction,
     pub var_map: std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
     pub bytecode: crate::bytecode::Bytecode,
@@ -120,7 +120,7 @@ fn compile_legacy_user_dispatch_fallback(
     })
 }
 
-pub fn compile_legacy_named_user_dispatch_fallback(
+pub(crate) fn compile_legacy_named_user_dispatch_fallback(
     name: &str,
     functions: &std::collections::HashMap<String, LegacyUserFunction>,
     args: &[Value],

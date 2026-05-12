@@ -147,7 +147,7 @@ pub(crate) fn prepare_legacy_user_call(
     })
 }
 
-pub fn first_legacy_output_value(
+pub(crate) fn first_legacy_output_value(
     func: &LegacyUserFunction,
     var_map: &HashMap<VarId, VarId>,
     func_result_vars: &[Value],
