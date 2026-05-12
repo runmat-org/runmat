@@ -7,7 +7,6 @@ pub mod compiler;
 pub mod functions {
     pub use crate::bytecode::program::{
         Bytecode, CallFrame, ExecutionContext, LegacyUserFunction, SemanticFunctionRegistry,
-        UserFunction,
     };
 }
 pub mod indexing;
@@ -23,7 +22,7 @@ pub mod runtime;
 pub use bytecode::compile;
 pub use bytecode::{
     ArgSpec, Bytecode, CallFrame, EmitLabel, EndExpr, ExecutionContext, Instr, LegacyUserFunction,
-    SemanticFunctionRegistry, StackEffect, UserFunction,
+    SemanticFunctionRegistry, StackEffect,
 };
 pub use compiler::CompileError;
 pub use interpreter::api::{
