@@ -1,15 +1,15 @@
 #![allow(clippy::result_large_err)]
 
 pub mod accel;
-pub mod bytecode;
+pub(crate) mod bytecode;
 pub(crate) mod call;
-pub mod compiler;
+pub(crate) mod compiler;
 pub mod indexing;
 pub(crate) mod instr {
     pub use crate::bytecode::instr::{ArgSpec, EmitLabel, EndExpr, Instr};
 }
 pub(crate) mod interpreter;
-pub mod layout;
+pub(crate) mod layout;
 pub(crate) mod object;
 pub(crate) mod ops;
 pub(crate) mod runtime;

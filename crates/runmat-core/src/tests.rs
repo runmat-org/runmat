@@ -460,7 +460,7 @@ fn range_slice_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::IndexSlice(..))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::IndexSlice(..))),
         "range indexing should lower to slice bytecode"
     );
 
@@ -540,7 +540,7 @@ fn range_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreSlice(..))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
         "range assignment should lower to slice store bytecode"
     );
     assert!(
@@ -548,7 +548,7 @@ fn range_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreIndex(1))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreIndex(1))),
         "range assignment should not rely on StoreIndex fallback"
     );
 
@@ -577,7 +577,7 @@ fn range_assignment_vector_rhs_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreSlice(..))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
         "range vector assignment should lower to slice store bytecode"
     );
     assert!(
@@ -585,7 +585,7 @@ fn range_assignment_vector_rhs_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreIndex(1))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreIndex(1))),
         "range vector assignment should not rely on StoreIndex fallback"
     );
 
@@ -635,7 +635,7 @@ fn logical_indexing_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::IndexSlice(..))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::IndexSlice(..))),
         "logical indexing should lower to slice bytecode"
     );
 
@@ -664,7 +664,7 @@ fn logical_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreSlice(..))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
         "logical assignment should lower to slice store bytecode"
     );
 
@@ -756,7 +756,7 @@ fn cell_range_paren_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreSlice(..))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
         "cell range paren assignment should lower to slice store bytecode"
     );
     assert!(
@@ -764,7 +764,7 @@ fn cell_range_paren_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreIndex(1))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreIndex(1))),
         "cell range paren assignment should not rely on StoreIndex fallback"
     );
 
@@ -814,7 +814,7 @@ fn cell_colon_paren_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreSlice(..))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
         "cell colon paren assignment should lower to slice store bytecode"
     );
 
@@ -1382,14 +1382,14 @@ fn dynamic_function_handle_call_uses_semantic_vm() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::bytecode::Instr::CreateFunctionHandle(name) if name == "sin"
+            runmat_vm::Instr::CreateFunctionHandle(name) if name == "sin"
         )),
         "function handle literals should lower to typed function-handle bytecode"
     );
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::bytecode::Instr::CallBuiltin(name, 1) if name == "make_handle"
+            runmat_vm::Instr::CallBuiltin(name, 1) if name == "make_handle"
         )),
         "function handle literals should not lower through the internal make_handle builtin"
     );
@@ -1462,7 +1462,7 @@ fn dynamic_function_handle_multi_output_uses_semantic_vm() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::bytecode::Instr::CallFevalMulti(_, 2)
+            runmat_vm::Instr::CallFevalMulti(_, 2)
         )),
         "dynamic multi-output function handle call should lower to typed feval multi-output bytecode"
     );
@@ -1493,7 +1493,7 @@ fn dynamic_function_handle_multi_output_with_expansion_uses_semantic_vm() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::bytecode::Instr::CallFevalExpandMultiOutput(_, 2)
+            runmat_vm::Instr::CallFevalExpandMultiOutput(_, 2)
         )),
         "dynamic multi-output expansion call should lower to typed feval expansion bytecode"
     );
@@ -1523,7 +1523,7 @@ fn try_catch_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::EnterTry(_, None))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::EnterTry(_, None))),
         "try/catch should lower to typed exception bytecode"
     );
 
@@ -1550,7 +1550,7 @@ fn try_catch_binding_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::EnterTry(_, Some(_)))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::EnterTry(_, Some(_)))),
         "try/catch binding should lower the catch binding into exception bytecode"
     );
 
@@ -1577,7 +1577,7 @@ fn indexed_member_slice_assignment_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::bytecode::Instr::StoreSlice(..))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSlice(..))),
         "indexed member slice assignment should lower to typed slice store bytecode"
     );
 
@@ -1602,7 +1602,7 @@ fn dotted_member_index_call_uses_semantic_vm() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::bytecode::Instr::CallMethodOrMemberIndex(name, 1) if name == "a"
+            runmat_vm::Instr::CallMethodOrMemberIndex(name, 1) if name == "a"
         )),
         "dotted member index call should lower to typed method/member-index bytecode"
     );
@@ -1628,7 +1628,7 @@ fn dotted_member_index_expansion_uses_semantic_vm() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::bytecode::Instr::CallMethodOrMemberIndexExpandMulti(name, _) if name == "a"
+            runmat_vm::Instr::CallMethodOrMemberIndexExpandMulti(name, _) if name == "a"
         )),
         "expanded dotted member index call should lower to typed expansion bytecode"
     );

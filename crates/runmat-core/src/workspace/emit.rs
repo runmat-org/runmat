@@ -112,7 +112,7 @@ pub(crate) fn format_type_info(value: &Value) -> String {
 
 pub(crate) fn execution_display_context(
     assembly: &HirAssembly,
-    layout: Option<&runmat_vm::layout::VmAssemblyLayout>,
+    layout: Option<&runmat_vm::VmAssemblyLayout>,
 ) -> ExecutionDisplayContext {
     semantic_display_context(assembly, layout).unwrap_or_else(|| ExecutionDisplayContext {
         display_var_ids: Vec::new(),
@@ -129,7 +129,7 @@ pub(crate) fn execution_display_context(
 
 fn semantic_display_context(
     assembly: &HirAssembly,
-    layout: Option<&runmat_vm::layout::VmAssemblyLayout>,
+    layout: Option<&runmat_vm::VmAssemblyLayout>,
 ) -> Option<ExecutionDisplayContext> {
     let entrypoint = assembly.entrypoints.first()?;
     let function = assembly
