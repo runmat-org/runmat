@@ -114,7 +114,7 @@ export default function PricingPage() {
               Pricing
             </h1>
             <h2>
-              Start for free. Upgrade to get the capacity that exactly matches your team's needs.
+              Start for free. Upgrade to get the capacity that exactly matches your team&apos;s needs.
             </h2>
           </div>
         </section>

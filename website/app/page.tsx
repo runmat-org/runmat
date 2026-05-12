@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SiGithub } from "react-icons/si";
 import { Users, GitBranch, Camera, Lock, Shield, Eye, ClipboardCheck, Cpu, Monitor, HardDrive } from "lucide-react";
@@ -295,7 +294,7 @@ export default function HomePage() {
               Blazing fast runtime for math
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-7">
-              RunMat automatically promotes tensor operations to GPUs where it helps. Fusion merges sequential operations into fewer GPU steps; residency keeps your arrays on-device between steps. That means your code runs on GPUs automatically where they're available, without you having to decide in your code what to run on what.
+              RunMat automatically promotes tensor operations to GPUs where it helps. Fusion merges sequential operations into fewer GPU steps; residency keeps your arrays on-device between steps. That means your code runs on GPUs automatically where they&apos;re available, without you having to decide in your code what to run on what.
             </p>
           </div>
 
