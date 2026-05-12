@@ -274,7 +274,7 @@ where
     Ok(())
 }
 
-pub fn unpack_prepared_user_call(prepared: PreparedUserCall) -> PreparedUserDispatch {
+fn unpack_prepared_user_call(prepared: PreparedUserCall) -> PreparedUserDispatch {
     let PreparedUserCall {
         func,
         var_map,
@@ -289,7 +289,7 @@ pub fn unpack_prepared_user_call(prepared: PreparedUserCall) -> PreparedUserDisp
     }
 }
 
-pub fn prepare_named_user_dispatch(
+fn prepare_named_user_dispatch(
     name: &str,
     functions: &std::collections::HashMap<String, UserFunction>,
     args: &[Value],
@@ -301,7 +301,7 @@ pub fn prepare_named_user_dispatch(
     Ok(unpack_prepared_user_call(prepared))
 }
 
-pub fn push_user_call_outputs(
+fn push_user_call_outputs(
     stack: &mut Vec<Value>,
     name: &str,
     func: &UserFunction,
@@ -316,7 +316,7 @@ pub fn push_user_call_outputs(
     Ok(())
 }
 
-pub fn output_list_for_user_call(
+fn output_list_for_user_call(
     name: &str,
     func: &UserFunction,
     var_map: &std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
@@ -327,7 +327,7 @@ pub fn output_list_for_user_call(
     Ok(Value::OutputList(outputs))
 }
 
-pub fn push_single_result(stack: &mut Vec<Value>, result: Value) {
+fn push_single_result(stack: &mut Vec<Value>, result: Value) {
     stack.push(result);
 }
 
