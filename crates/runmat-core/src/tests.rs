@@ -2295,6 +2295,45 @@ fn session_function_handle_feval_expansion_uses_semantic_registry() {
 }
 
 #[test]
+fn session_feval_string_expansion_uses_semantic_registry() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(session.execute_outcome("seed = 0;\nfunction z = add2(a, b)\n  z = a + b;\nend"))
+        .expect("define session function");
+
+    let prepared = session
+        .compile_input("C = {2, 3}; y = feval('add2', C{:});")
+        .expect("compile feval string expansion session call");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "add2"
+        )),
+        "session feval string expansion callee should carry semantic identity"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMulti(_))),
+        "session feval string expansion call should use typed feval expansion bytecode"
+    );
+    assert!(
+        prepared.bytecode.functions.is_empty(),
+        "session feval string expansion semantic call should not require legacy bytecode functions"
+    );
+
+    reset_legacy_user_dispatch_fallback_count();
+    let outcome = block_on(session.execute_outcome("C = {2, 3}; y = feval('add2', C{:});"))
+        .expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "5"
+    }));
+}
+
+#[test]
 fn session_function_handle_feval_expansion_multi_output_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(
