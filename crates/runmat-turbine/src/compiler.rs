@@ -17,6 +17,7 @@ struct CompileContext<'a> {
     function_definitions: &'a HashMap<String, runmat_vm::LegacyUserFunction>,
     module: &'a mut JITModule,
     runmat_call_user_function_id: FuncId,
+    runmat_call_semantic_function_id: FuncId,
 }
 
 /// Stack simulation for tracking values during compilation  
@@ -208,6 +209,7 @@ impl BytecodeCompiler {
         function_definitions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
         module: &mut JITModule,
         runmat_call_user_function_id: FuncId,
+        runmat_call_semantic_function_id: FuncId,
     ) -> Result<()> {
         let mut builder_context = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_context);
@@ -241,6 +243,7 @@ impl BytecodeCompiler {
             function_definitions,
             module,
             runmat_call_user_function_id,
+            runmat_call_semantic_function_id,
         };
 
         Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, &mut ctx)?;
@@ -590,11 +593,21 @@ impl BytecodeCompiler {
                         )?;
                         local_stack.push(result);
                     }
-                    Instr::CallSemanticFunction(_, _) => {
-                        return Err(execution_error(
-                            "Semantic function calls are not supported in JIT; use interpreter"
-                                .to_string(),
-                        ));
+                    Instr::CallSemanticFunction(function, arg_count) => {
+                        let mut args = Vec::new();
+                        for _ in 0..*arg_count {
+                            args.push(local_stack.pop()?);
+                        }
+                        args.reverse();
+
+                        let result = Self::call_semantic_function_jit(
+                            builder,
+                            ctx.module,
+                            ctx.runmat_call_semantic_function_id,
+                            function.0,
+                            &args,
+                        )?;
+                        local_stack.push(result);
                     }
                     Instr::CallSemanticFunctionMulti(_, _, _) => {
                         return Err(execution_error(
@@ -861,6 +874,89 @@ impl BytecodeCompiler {
         let result = builder.block_params(after_block)[0];
 
         // Seal all blocks
+        builder.seal_block(error_block);
+        builder.seal_block(success_block);
+        builder.seal_block(after_block);
+
+        Ok(result)
+    }
+
+    fn call_semantic_function_jit(
+        builder: &mut FunctionBuilder,
+        module: &mut JITModule,
+        runmat_call_semantic_function_id: FuncId,
+        function_id: usize,
+        args: &[Value],
+    ) -> Result<Value> {
+        let args_slot = if !args.is_empty() {
+            let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                (args.len() * 8) as u32,
+                8,
+            ));
+            let args_ptr = builder.ins().stack_addr(types::I64, slot, 0);
+
+            for (i, &arg) in args.iter().enumerate() {
+                let offset = builder.ins().iconst(types::I64, (i * 8) as i64);
+                let arg_addr = builder.ins().iadd(args_ptr, offset);
+                builder.ins().store(MemFlags::new(), arg, arg_addr, 0);
+            }
+
+            Some((args_ptr, slot))
+        } else {
+            None
+        };
+
+        let runtime_fn =
+            module.declare_func_in_func(runmat_call_semantic_function_id, builder.func);
+        let result_slot =
+            builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
+        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+        let function_id = builder.ins().iconst(types::I64, function_id as i64);
+
+        let call_args = if let Some((args_ptr, _)) = args_slot {
+            vec![
+                function_id,
+                args_ptr,
+                builder.ins().iconst(types::I32, args.len() as i64),
+                result_ptr,
+            ]
+        } else {
+            vec![
+                function_id,
+                builder.ins().iconst(types::I64, 0),
+                builder.ins().iconst(types::I32, 0),
+                result_ptr,
+            ]
+        };
+
+        let call = builder.ins().call(runtime_fn, &call_args);
+        let status = builder.inst_results(call)[0];
+        let zero = builder.ins().iconst(types::I32, 0);
+        let is_error = builder.ins().icmp(IntCC::NotEqual, status, zero);
+
+        let error_block = builder.create_block();
+        let success_block = builder.create_block();
+        let after_block = builder.create_block();
+
+        builder
+            .ins()
+            .brif(is_error, error_block, &[], success_block, &[]);
+
+        builder.switch_to_block(error_block);
+        let error_result = builder.ins().f64const(0.0);
+        builder.ins().jump(after_block, &[error_result]);
+
+        builder.switch_to_block(success_block);
+        let success_result = builder
+            .ins()
+            .load(types::F64, MemFlags::new(), result_ptr, 0);
+        builder.ins().jump(after_block, &[success_result]);
+
+        builder.switch_to_block(after_block);
+        builder.append_block_param(after_block, types::F64);
+        let result = builder.block_params(after_block)[0];
+
         builder.seal_block(error_block);
         builder.seal_block(success_block);
         builder.seal_block(after_block);

@@ -122,6 +122,20 @@ fn declare_host_call_in_module(module: &mut JITModule) -> FuncId {
         .expect("Failed to declare runmat_call_user_function")
 }
 
+fn declare_host_semantic_call_in_module(module: &mut JITModule) -> FuncId {
+    let mut sig = module.make_signature();
+    let pointer_type = module.isa().pointer_type();
+    sig.params.push(AbiParam::new(types::I64)); // function id
+    sig.params.push(AbiParam::new(pointer_type)); // args_ptr
+    sig.params.push(AbiParam::new(types::I32)); // args_len
+    sig.params.push(AbiParam::new(pointer_type)); // result_ptr
+    sig.returns.push(AbiParam::new(types::I32)); // status
+
+    module
+        .declare_function("runmat_call_semantic_function", Linkage::Import, &sig)
+        .expect("Failed to declare runmat_call_semantic_function")
+}
+
 /// The main JIT compilation engine
 pub struct TurbineEngine {
     module: JITModule,
@@ -131,6 +145,7 @@ pub struct TurbineEngine {
     target_isa: codegen::isa::OwnedTargetIsa,
     compiler: BytecodeCompiler,
     runmat_call_user_function_id: FuncId,
+    runmat_call_semantic_function_id: FuncId,
 }
 
 /// A compiled function ready for execution
@@ -248,12 +263,17 @@ impl TurbineEngine {
             "runmat_call_user_function",
             runmat_call_user_function as *const u8,
         );
+        builder.symbol(
+            "runmat_call_semantic_function",
+            runmat_call_semantic_function as *const u8,
+        );
 
         // Create the JIT module
         let mut module = JITModule::new(builder);
 
         // Declare the external function on the module using the expert's pattern
         let runmat_call_user_function_id = declare_host_call_in_module(&mut module);
+        let runmat_call_semantic_function_id = declare_host_semantic_call_in_module(&mut module);
 
         let ctx = module.make_context();
 
@@ -265,6 +285,7 @@ impl TurbineEngine {
             target_isa,
             compiler: BytecodeCompiler::new(),
             runmat_call_user_function_id,
+            runmat_call_semantic_function_id,
         };
 
         info!("Turbine JIT engine initialized successfully for {target_triple}");
@@ -335,6 +356,7 @@ impl TurbineEngine {
             &bytecode.functions,
             &mut self.module,
             self.runmat_call_user_function_id,
+            self.runmat_call_semantic_function_id,
         )?;
 
         // Compile to machine code
@@ -680,6 +702,11 @@ impl TurbineEngine {
                     name.hash(&mut hasher);
                     argc.hash(&mut hasher);
                 }
+                Instr::CallSemanticFunction(function, argc) => {
+                    "CallSemanticFunction".hash(&mut hasher);
+                    function.0.hash(&mut hasher);
+                    argc.hash(&mut hasher);
+                }
                 Instr::LoadLocal(offset) => {
                     "LoadLocal".hash(&mut hasher);
                     offset.hash(&mut hasher);
@@ -846,6 +873,83 @@ pub extern "C" fn runmat_call_user_function(
         }
         _ => {
             error!("User function returned unsupported value: {output:?}");
+            return 1;
+        }
+    };
+
+    unsafe {
+        *result_ptr = output_value;
+    }
+
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn runmat_call_semantic_function(
+    function_id: i64,
+    args_ptr: *const f64,
+    args_len: i32,
+    result_ptr: *mut f64,
+) -> i32 {
+    if result_ptr.is_null() {
+        error!("Null result pointer passed to runmat_call_semantic_function");
+        return 1;
+    }
+
+    let args_slice = if args_len > 0 {
+        if args_ptr.is_null() {
+            error!("Null args pointer passed to runmat_call_semantic_function");
+            return 1;
+        }
+        unsafe { std::slice::from_raw_parts(args_ptr, args_len as usize) }
+    } else {
+        &[]
+    };
+
+    let context = match get_runtime_context() {
+        Some(ctx) => ctx,
+        None => {
+            error!("No runtime context available for semantic function call");
+            return 1;
+        }
+    };
+
+    let function_id = match usize::try_from(function_id) {
+        Ok(function_id) => function_id,
+        Err(_) => {
+            error!("Invalid semantic function id: {function_id}");
+            return 1;
+        }
+    };
+    let args: Vec<Value> = args_slice.iter().map(|value| Value::Num(*value)).collect();
+    let output = run_immediate(Box::pin(runmat_vm::invoke_semantic_function_value(
+        function_id,
+        &args,
+        1,
+        &context.semantic_registry,
+    )))
+    .and_then(|result| result.map_err(TurbineError::ExecutionError));
+
+    let output = match output {
+        Ok(result) => result,
+        Err(err) => {
+            error!("Semantic function execution failed: {err}");
+            return 1;
+        }
+    };
+
+    let output_value = match output {
+        Value::Num(val) => val,
+        Value::Int(val) => val.to_f64(),
+        Value::Bool(val) => {
+            if val {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        _ => {
+            error!("Semantic function returned unsupported value: {output:?}");
             return 1;
         }
     };

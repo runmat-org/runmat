@@ -17,7 +17,7 @@ pub(crate) mod runtime;
 pub use bytecode::compile;
 pub use bytecode::{
     ArgSpec, Bytecode, CallFrame, EmitLabel, EndExpr, ExecutionContext, Instr, LegacyUserFunction,
-    SemanticFunctionRegistry, StackEffect,
+    SemanticFunctionBytecode, SemanticFunctionRegistry, StackEffect,
 };
 pub use compiler::CompileError;
 pub use interpreter::api::{
