@@ -254,6 +254,7 @@ fn remap_semantic_function_instr(
 
 fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
     let registry = bytecode.semantic_function_registry.clone();
+    bind_semantic_callback_literals(bytecode, &registry);
     for instr in &mut bytecode.instructions {
         match instr {
             runmat_vm::Instr::CreateFunctionHandle(name) => {
@@ -287,6 +288,69 @@ fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
             _ => {}
         }
     }
+}
+
+fn bind_semantic_callback_literals(
+    bytecode: &mut runmat_vm::Bytecode,
+    registry: &runmat_vm::SemanticFunctionRegistry,
+) {
+    let mut stack: Vec<usize> = Vec::new();
+    let mut replacements = Vec::new();
+
+    for (pc, instr) in bytecode.instructions.iter().enumerate() {
+        match instr {
+            runmat_vm::Instr::CallBuiltin(name, argc)
+                if matches!(name.as_str(), "cellfun" | "arrayfun") && *argc > 0 =>
+            {
+                if stack.len() >= *argc {
+                    let producer = stack[stack.len() - *argc];
+                    if let Some((function, display_name)) =
+                        semantic_callback_literal(bytecode.instructions.get(producer), registry)
+                    {
+                        replacements.push((producer, function, display_name));
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        let Some(effect) = instr.stack_effect() else {
+            stack.clear();
+            continue;
+        };
+        if effect.pops > stack.len() {
+            stack.clear();
+        } else {
+            for _ in 0..effect.pops {
+                stack.pop();
+            }
+        }
+        for _ in 0..effect.pushes {
+            stack.push(pc);
+        }
+    }
+
+    for (producer, function, display_name) in replacements {
+        bytecode.instructions[producer] =
+            runmat_vm::Instr::CreateSemanticClosure(function, display_name, 0);
+    }
+}
+
+fn semantic_callback_literal(
+    instr: Option<&runmat_vm::Instr>,
+    registry: &runmat_vm::SemanticFunctionRegistry,
+) -> Option<(runmat_hir::FunctionId, String)> {
+    let text = match instr? {
+        runmat_vm::Instr::LoadString(text) | runmat_vm::Instr::LoadCharRow(text) => text,
+        _ => return None,
+    };
+    let name = text.trim().strip_prefix('@').unwrap_or(text.trim()).trim();
+    if name.is_empty() {
+        return None;
+    }
+    registry
+        .resolve_name(name)
+        .map(|function| (function, name.to_string()))
 }
 
 fn bind_optional_end_exprs(

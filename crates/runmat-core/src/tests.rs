@@ -1803,6 +1803,13 @@ fn cellfun_named_local_function_uses_semantic_callback() {
         "local callback target should be available as semantic function bytecode"
     );
     assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+        )),
+        "local string callback should be bound to a semantic closure"
+    );
+    assert!(
         prepared.bytecode.functions.is_empty(),
         "semantic compile should not require legacy user-function bytecode entries"
     );
@@ -1853,6 +1860,13 @@ fn cellfun_session_function_uses_semantic_registry() {
             .functions_for_source(inc_source)
             .contains(&inc_id),
         "session semantic callback target should be indexed by source ownership"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+        )),
+        "session string callback should be bound to a semantic closure"
     );
 
     reset_legacy_user_dispatch_fallback_count();
