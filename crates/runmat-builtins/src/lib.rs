@@ -96,6 +96,11 @@ pub enum Value {
     OutputList(Vec<Value>),
     // Function handle pointing to a named function (builtin or user)
     FunctionHandle(String),
+    // Function handle with compiler/session semantic identity.
+    SemanticFunctionHandle {
+        name: String,
+        function: usize,
+    },
     Closure(Closure),
     ClassRef(String),
     MException(MException),
@@ -1162,7 +1167,7 @@ impl Type {
             Value::HandleObject(_) => Type::Unknown,
             Value::Listener(_) => Type::Unknown,
             Value::Struct(_) => Type::Struct { known_fields: None },
-            Value::FunctionHandle(_) => Type::Function {
+            Value::FunctionHandle(_) | Value::SemanticFunctionHandle { .. } => Type::Function {
                 params: vec![Type::Unknown],
                 returns: Box::new(Type::Unknown),
             },
@@ -1920,6 +1925,7 @@ impl fmt::Display for Value {
                 write!(f, "]")
             }
             Value::FunctionHandle(name) => write!(f, "@{name}"),
+            Value::SemanticFunctionHandle { name, .. } => write!(f, "@{name}"),
             Value::Closure(c) => write!(
                 f,
                 "<closure {} captures={}>",

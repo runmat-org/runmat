@@ -110,6 +110,7 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)

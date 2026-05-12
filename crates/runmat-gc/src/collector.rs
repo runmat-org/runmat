@@ -206,7 +206,7 @@ impl MarkSweepCollector {
             | Value::LogicalArray(_) => {
                 // Primitive values don't contain references
             }
-            Value::FunctionHandle(_) => {}
+            Value::FunctionHandle(_) | Value::SemanticFunctionHandle { .. } => {}
             Value::ClassRef(_) => {}
             Value::Closure(c) => {
                 for v in &c.captures {
@@ -264,7 +264,7 @@ impl MarkSweepCollector {
             }
             Value::StringArray(_sa) => {}
             Value::GpuTensor(_) => {}
-            Value::FunctionHandle(_) => {}
+            Value::FunctionHandle(_) | Value::SemanticFunctionHandle { .. } => {}
             Value::ClassRef(_) => {}
             Value::Closure(c) => {
                 for v in &c.captures {

@@ -134,6 +134,7 @@ async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         Value::GpuTensor(handle) => Ok(flip_gpu_with("fliplr", handle, &LR_DIM).await?),
         Value::Cell(_) => Err(fliplr_error("fliplr: cell arrays are not yet supported")),
         Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)
         | Value::Object(_)

@@ -137,6 +137,7 @@ fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)

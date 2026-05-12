@@ -512,7 +512,9 @@ where
                         .await?,
                     );
                 }
-                Value::FunctionHandle(_) | Value::Closure(_) => {
+                Value::FunctionHandle(_)
+                | Value::SemanticFunctionHandle { .. }
+                | Value::Closure(_) => {
                     let numeric = linear_index_values_to_f64(&raw_indices).await?;
                     let args = numeric.into_iter().map(Value::Num).collect::<Vec<_>>();
                     match crate::call::feval::execute_feval(

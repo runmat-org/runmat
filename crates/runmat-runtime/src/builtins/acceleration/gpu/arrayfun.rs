@@ -584,6 +584,11 @@ impl Callable {
             }
             Value::StringArray(sa) if sa.data.len() == 1 => Self::from_text(&sa.data[0]),
             Value::FunctionHandle(name) => Self::from_text(&name),
+            Value::SemanticFunctionHandle { name, function } => Ok(Callable::Closure(Closure {
+                function_name: name,
+                semantic_function: Some(function),
+                captures: Vec::new(),
+            })),
             Value::Closure(closure) => Ok(Callable::Closure(closure)),
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => Err(arrayfun_flow(
                 "arrayfun: expected function handle or builtin name, not a scalar value",

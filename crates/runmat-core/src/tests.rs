@@ -1805,9 +1805,9 @@ fn cellfun_named_local_function_uses_semantic_callback() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
         )),
-        "local string callback should be bound to a semantic closure"
+        "local string callback should be bound to a semantic function handle"
     );
     assert!(
         prepared.bytecode.functions.is_empty(),
@@ -1864,9 +1864,9 @@ fn cellfun_session_function_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
         )),
-        "session string callback should be bound to a semantic closure"
+        "session string callback should be bound to a semantic function handle"
     );
 
     reset_legacy_user_dispatch_fallback_count();
@@ -1889,9 +1889,9 @@ fn arrayfun_named_local_function_uses_semantic_callback() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
         )),
-        "local arrayfun string callback should be bound to a semantic closure"
+        "local arrayfun string callback should be bound to a semantic function handle"
     );
     assert!(
         prepared.bytecode.functions.is_empty(),
@@ -1920,9 +1920,9 @@ fn arrayfun_session_function_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
         )),
-        "session arrayfun string callback should be bound to a semantic closure"
+        "session arrayfun string callback should be bound to a semantic function handle"
     );
     assert!(
         prepared.bytecode.functions.is_empty(),
@@ -2096,7 +2096,7 @@ fn session_function_handle_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
         )),
         "session function handles should carry semantic identity"
     );

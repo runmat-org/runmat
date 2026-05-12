@@ -1331,6 +1331,7 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Object(_) => "Object",
         Value::HandleObject(_) => "HandleObject",
         Value::FunctionHandle(_) => "FunctionHandle",
+        Value::SemanticFunctionHandle { .. } => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::Complex(_, _) => "Complex",

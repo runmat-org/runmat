@@ -154,6 +154,7 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
             )],
         },
         Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Object(_)
         | Value::HandleObject(_)
@@ -527,6 +528,7 @@ fn summarize_for_cell(value: &Value) -> String {
         Value::Struct(_) => "[1x1 struct]".to_string(),
         Value::Cell(inner) => format!("[{} cell]", dims_to_string(&canonical_dims(&inner.shape))),
         Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Object(_)
         | Value::HandleObject(_)

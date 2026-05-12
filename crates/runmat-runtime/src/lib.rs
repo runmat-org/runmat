@@ -423,6 +423,11 @@ async fn notify_builtin(
                 a.extend(args.into_iter());
                 let _ = crate::call_builtin_async("feval", &a).await?;
             }
+            Value::SemanticFunctionHandle { .. } => {
+                let mut a = vec![cbv.clone()];
+                a.extend(args.into_iter());
+                let _ = crate::call_builtin_async("feval", &a).await?;
+            }
             Value::Closure(_) => {
                 let mut a = vec![cbv.clone()];
                 a.extend(args.into_iter());
@@ -1089,6 +1094,14 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             }
         }
         Value::FunctionHandle(name) => call_by_name(&name, &rest).await,
+        Value::SemanticFunctionHandle { name, function } => {
+            if let Some(result) =
+                crate::user_functions::try_call_semantic_function(function, &rest, 1).await
+            {
+                return result;
+            }
+            call_by_name(&name, &rest).await
+        }
         Value::Closure(c) => {
             let mut args = c.captures.clone();
             args.extend(rest);
@@ -1424,5 +1437,25 @@ mod tests {
         let result = block_on(feval_builtin(closure, vec![Value::Num(2.0)]))
             .expect("semantic closure feval succeeds");
         assert_eq!(result, Value::Num(7.0));
+    }
+
+    #[test]
+    fn feval_semantic_function_handle_uses_semantic_identity() {
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |function, args, requested_outputs| {
+                assert_eq!(function, 43);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(3.0)]);
+                Box::pin(async { Ok(Value::Num(9.0)) })
+            },
+        )));
+        let handle = Value::SemanticFunctionHandle {
+            name: "semantic_target".to_string(),
+            function: 43,
+        };
+
+        let result = block_on(feval_builtin(handle, vec![Value::Num(3.0)]))
+            .expect("semantic function handle feval succeeds");
+        assert_eq!(result, Value::Num(9.0));
     }
 }

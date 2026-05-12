@@ -390,7 +390,9 @@ fn describe_value_kind(value: &Value) -> String {
         Value::Object(obj) => format!("{} object", obj.class_name),
         Value::HandleObject(h) => format!("handle object ({})", h.class_name),
         Value::Listener(l) => format!("listener for {}", l.event_name),
-        Value::FunctionHandle(_) | Value::Closure(_) => "function handle".to_string(),
+        Value::FunctionHandle(_) | Value::SemanticFunctionHandle { .. } | Value::Closure(_) => {
+            "function handle".to_string()
+        }
         Value::ClassRef(_) => "class reference".to_string(),
         Value::MException(_) => "exception".to_string(),
         Value::OutputList(_) => "output list".to_string(),

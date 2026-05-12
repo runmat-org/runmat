@@ -280,7 +280,7 @@ fn value_tag(value: &Value) -> &'static str {
         Value::Object(_) => "Object",
         Value::HandleObject(_) => "HandleObject",
         Value::Listener(_) => "Listener",
-        Value::FunctionHandle(_) => "FunctionHandle",
+        Value::FunctionHandle(_) | Value::SemanticFunctionHandle { .. } => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",
         Value::MException(_) => "MException",

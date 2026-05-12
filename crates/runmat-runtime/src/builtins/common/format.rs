@@ -1122,6 +1122,7 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         | Value::Object(_)
         | Value::Struct(_)
         | Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_) => {
             return Err(format_error(format!(

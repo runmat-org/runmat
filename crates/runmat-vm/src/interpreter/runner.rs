@@ -770,6 +770,7 @@ async fn run_interpreter_inner(
             | Instr::CallMethodOrMemberIndexExpandMulti(_, _)
             | Instr::LoadMethod(_)
             | Instr::CreateFunctionHandle(_)
+            | Instr::CreateSemanticFunctionHandle(_, _)
             | Instr::CreateClosure(_, _)
             | Instr::CreateSemanticClosure(_, _, _)
             | Instr::LoadStaticProperty(_, _)

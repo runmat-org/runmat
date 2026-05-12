@@ -137,6 +137,7 @@ async fn triu_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::Listener(_)
         | Value::Struct(_)
         | Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)

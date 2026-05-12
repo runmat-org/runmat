@@ -147,6 +147,7 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
             "flip: cell arrays are not yet supported",
         )),
         Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)
         | Value::Object(_)

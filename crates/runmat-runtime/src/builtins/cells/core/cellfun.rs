@@ -445,6 +445,11 @@ impl Callable {
                 }
             }
             Value::FunctionHandle(name) => Self::from_text(&name, true),
+            Value::SemanticFunctionHandle { name, function } => Ok(Callable::Closure(Closure {
+                function_name: name,
+                semantic_function: Some(function),
+                captures: Vec::new(),
+            })),
             Value::Closure(c) => Ok(Callable::Closure(c)),
             other => Err(cellfun_error_with_identifier(
                 format!("cellfun: expected function handle or builtin name, got {other:?}"),

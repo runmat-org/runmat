@@ -140,6 +140,7 @@ async fn circshift_builtin(
             "circshift: cell arrays are not yet supported",
         )),
         Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)
         | Value::Object(_)
@@ -304,6 +305,7 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
         }
         Value::Cell(_)
         | Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)
         | Value::Object(_)
@@ -397,6 +399,7 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         )),
         Value::Cell(_)
         | Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)
         | Value::Object(_)

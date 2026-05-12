@@ -1179,6 +1179,7 @@ fn normalize_numeric_value(value: Value, builtin: &'static str) -> BuiltinResult
         | Value::Complex(_, _)
         | Value::ComplexTensor(_)
         | Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
@@ -1216,6 +1217,7 @@ fn normalize_logical_value(value: Value, builtin: &'static str) -> BuiltinResult
         | Value::Complex(_, _)
         | Value::ComplexTensor(_)
         | Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)

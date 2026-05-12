@@ -59,7 +59,9 @@ pub(crate) fn class_name_for_value(value: &Value) -> String {
         Value::Cell(_) => "cell".to_string(),
         Value::Struct(_) => "struct".to_string(),
         Value::GpuTensor(_) => "gpuArray".to_string(),
-        Value::FunctionHandle(_) | Value::Closure(_) => "function_handle".to_string(),
+        Value::FunctionHandle(_) | Value::SemanticFunctionHandle { .. } | Value::Closure(_) => {
+            "function_handle".to_string()
+        }
         Value::HandleObject(handle) => {
             if handle.class_name.is_empty() {
                 "handle".to_string()

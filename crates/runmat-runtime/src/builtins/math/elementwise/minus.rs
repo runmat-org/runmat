@@ -213,6 +213,7 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)

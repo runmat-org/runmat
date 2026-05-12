@@ -217,6 +217,7 @@ fn remap_semantic_function_instr(
 ) {
     match instr {
         runmat_vm::Instr::CreateSemanticClosure(function, _, _)
+        | runmat_vm::Instr::CreateSemanticFunctionHandle(function, _)
         | runmat_vm::Instr::CallSemanticFunction(function, _)
         | runmat_vm::Instr::CallSemanticFunctionMulti(function, _, _)
         | runmat_vm::Instr::CallSemanticFunctionExpandMulti(function, _)
@@ -259,7 +260,7 @@ fn bind_semantic_function_references(bytecode: &mut runmat_vm::Bytecode) {
         match instr {
             runmat_vm::Instr::CreateFunctionHandle(name) => {
                 if let Some(function) = registry.resolve_name(name) {
-                    *instr = runmat_vm::Instr::CreateSemanticClosure(function, name.clone(), 0);
+                    *instr = runmat_vm::Instr::CreateSemanticFunctionHandle(function, name.clone());
                 }
             }
             runmat_vm::Instr::IndexSliceExpr {
@@ -332,7 +333,7 @@ fn bind_semantic_callback_literals(
 
     for (producer, function, display_name) in replacements {
         bytecode.instructions[producer] =
-            runmat_vm::Instr::CreateSemanticClosure(function, display_name, 0);
+            runmat_vm::Instr::CreateSemanticFunctionHandle(function, display_name);
     }
 }
 

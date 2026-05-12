@@ -391,6 +391,7 @@ fn flatten_numeric(value: &Value) -> BuiltinResult<Vec<f64>> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)

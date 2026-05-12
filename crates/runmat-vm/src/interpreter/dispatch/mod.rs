@@ -952,6 +952,15 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CreateSemanticFunctionHandle(function, name) => {
+            stack.push(Value::SemanticFunctionHandle {
+                name: name.clone(),
+                function: function.0,
+            });
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::LoadStaticProperty(class_name, prop) => {
             handle_load_static_property(stack, class_name, prop)?;
             Ok(Some(DispatchHandled::Generic(

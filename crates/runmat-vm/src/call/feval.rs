@@ -107,6 +107,20 @@ pub async fn execute_feval(
                 forward_builtin_feval(Value::FunctionHandle(name), args).await?,
             ))
         }
+        Value::SemanticFunctionHandle { name, function } => {
+            if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
+                function,
+                &args,
+                requested_outputs,
+            )
+            .await
+            {
+                return Ok(FevalDispatch::Completed(result?));
+            }
+            Ok(FevalDispatch::Completed(
+                forward_builtin_feval(Value::FunctionHandle(name), args).await?,
+            ))
+        }
         other => Ok(FevalDispatch::Completed(
             forward_builtin_feval(other, args).await?,
         )),
