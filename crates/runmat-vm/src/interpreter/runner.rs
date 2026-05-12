@@ -109,7 +109,7 @@ runmat_thread_local! {
     static DYNAMIC_LEGACY_USER_FUNCTIONS: RefCell<HashMap<String, LegacyUserFunction>> = RefCell::new(HashMap::new());
 }
 
-pub fn dynamic_legacy_user_functions_snapshot() -> HashMap<String, LegacyUserFunction> {
+pub(crate) fn dynamic_legacy_user_functions_snapshot() -> HashMap<String, LegacyUserFunction> {
     DYNAMIC_LEGACY_USER_FUNCTIONS.with(|slot| slot.borrow().clone())
 }
 

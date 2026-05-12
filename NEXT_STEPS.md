@@ -190,8 +190,8 @@ Current state:
 - `feval` closure dispatch resolves closure names through the semantic registry when an embedded semantic function id is unavailable.
 - Legacy named user-call bytecode dispatch now checks the semantic registry before builtin fallback or the centralized named legacy fallback.
 - Multi-output `feval` legacy user fallback is centralized behind one dispatch helper instead of duplicated in direct and expanded `feval` bytecode handlers.
-- Named legacy user fallback preparation and compilation is centralized behind `compile_legacy_named_user_dispatch_fallback` for VM dispatch, callback runner, and Turbine fallback sites.
-- Unresolved/external dynamic user-function callbacks still centralize through `compile_legacy_named_user_dispatch_fallback`, which wraps a private `compile_legacy_user_dispatch_fallback` over reconstructed `LegacyHirProgram`.
+- Named legacy user fallback preparation and compilation is centralized behind crate-private VM dispatch helpers; Turbine now enters through `execute_legacy_user_function_isolated` instead of destructuring compiled fallback internals.
+- Unresolved/external dynamic user-function callbacks still centralize through crate-private `compile_legacy_named_user_dispatch_fallback`, which wraps a private `compile_legacy_user_dispatch_fallback` over reconstructed `LegacyHirProgram`.
 - The raw unresolved/external fallback is private inside VM dispatch so new semantic call paths cannot treat it as normal dispatch infrastructure.
 
 Target state:
@@ -208,7 +208,7 @@ Target state:
 
 Design implication:
 
-- `PreparedLegacyUserCall`, `PreparedLegacyUserDispatch`, `CompiledLegacyUserDispatch`, and `LegacyUserFunction` should become transitional compatibility structures. Their long-term replacement is a semantic call descriptor keyed by `FunctionId`/`DefPath` plus layout/capture data.
+- `PreparedLegacyUserCall`, `PreparedLegacyUserDispatch`, `CompiledLegacyUserDispatch`, and `LegacyUserFunction` are transitional compatibility structures. The prepared/compiled dispatch records are crate-private; their long-term replacement is a semantic call descriptor keyed by `FunctionId`/`DefPath` plus layout/capture data.
 - The private raw legacy fallback should be treated as the final centralized legacy boundary before removal, not a reusable abstraction to extend.
 
 First implementation slice:
