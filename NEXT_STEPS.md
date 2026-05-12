@@ -208,7 +208,7 @@ Target state:
 
 Design implication:
 
-- `PreparedUserCall`, `PreparedUserDispatch`, and `LegacyUserFunction` should become transitional compatibility structures. Their long-term replacement is a semantic call descriptor keyed by `FunctionId`/`DefPath` plus layout/capture data.
+- `PreparedLegacyUserCall`, `PreparedLegacyUserDispatch`, `CompiledLegacyUserDispatch`, and `LegacyUserFunction` should become transitional compatibility structures. Their long-term replacement is a semantic call descriptor keyed by `FunctionId`/`DefPath` plus layout/capture data.
 - The private raw legacy fallback should be treated as the final centralized legacy boundary before removal, not a reusable abstraction to extend.
 
 First implementation slice:

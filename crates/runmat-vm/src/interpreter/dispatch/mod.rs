@@ -32,7 +32,7 @@ pub use calls::{
     handle_method_or_member_index_call, handle_method_or_member_index_expand_multi_call,
     handle_prepared_user_function_call, handle_register_class, handle_static_method_call,
     handle_user_function_call, legacy_user_dispatch_fallback_count,
-    reset_legacy_user_dispatch_fallback_count, BuiltinHandling, CompiledUserDispatch,
+    reset_legacy_user_dispatch_fallback_count, BuiltinHandling, CompiledLegacyUserDispatch,
     FevalHandling, MethodHandling, UserCallHandling,
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};

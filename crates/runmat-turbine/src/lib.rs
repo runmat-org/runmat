@@ -138,7 +138,7 @@ fn execute_user_function_isolated(
         &[],
     )
     .map_err(TurbineError::ExecutionError)?;
-    let runmat_vm::interpreter::dispatch::CompiledUserDispatch {
+    let runmat_vm::interpreter::dispatch::CompiledLegacyUserDispatch {
         func,
         var_map,
         bytecode: func_bytecode,

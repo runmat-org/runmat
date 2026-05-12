@@ -10,7 +10,7 @@ use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
     build_expanded_args_from_specs, call_object_index_method, collect_multi_outputs,
     expand_cell_indices, lookup_user_function, prepare_user_call, subsref_empty_brace_cell,
-    validate_user_function_arity, ObjectIndexKind, ObjectIndexOp, PreparedUserCall,
+    validate_user_function_arity, ObjectIndexKind, ObjectIndexOp, PreparedLegacyUserCall,
 };
 use crate::compiler::{CompileError, Compiler};
 use crate::functions::LegacyUserFunction;
@@ -48,14 +48,14 @@ pub enum FevalHandling {
     },
 }
 
-pub struct PreparedUserDispatch {
+pub struct PreparedLegacyUserDispatch {
     pub func: LegacyUserFunction,
     pub var_map: std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
     pub func_program: runmat_hir::LegacyHirProgram,
     pub func_vars: Vec<Value>,
 }
 
-pub struct CompiledUserDispatch {
+pub struct CompiledLegacyUserDispatch {
     pub func: LegacyUserFunction,
     pub var_map: std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
     pub bytecode: crate::bytecode::Bytecode,
@@ -99,11 +99,11 @@ fn compile_legacy_fallback_bytecode(
 }
 
 fn compile_legacy_user_dispatch_fallback(
-    prepared: PreparedUserDispatch,
+    prepared: PreparedLegacyUserDispatch,
     functions: &std::collections::HashMap<String, LegacyUserFunction>,
-) -> Result<CompiledUserDispatch, crate::compiler::CompileError> {
+) -> Result<CompiledLegacyUserDispatch, crate::compiler::CompileError> {
     note_legacy_user_dispatch_fallback();
-    let PreparedUserDispatch {
+    let PreparedLegacyUserDispatch {
         func,
         var_map,
         func_program,
@@ -111,7 +111,7 @@ fn compile_legacy_user_dispatch_fallback(
     } = prepared;
     let mut bytecode = compile_legacy_fallback_bytecode(&func_program, functions)?;
     bytecode.source_id = func.source_id;
-    Ok(CompiledUserDispatch {
+    Ok(CompiledLegacyUserDispatch {
         func,
         var_map,
         bytecode,
@@ -124,7 +124,7 @@ pub fn compile_legacy_named_user_dispatch_fallback(
     functions: &std::collections::HashMap<String, LegacyUserFunction>,
     args: &[Value],
     vars: &[Value],
-) -> Result<CompiledUserDispatch, RuntimeError> {
+) -> Result<CompiledLegacyUserDispatch, RuntimeError> {
     let prepared = prepare_named_user_dispatch(name, functions, args, vars)?;
     Ok(compile_legacy_user_dispatch_fallback(prepared, functions)?)
 }
@@ -253,7 +253,7 @@ where
     }
 
     let compiled = compile_legacy_named_user_dispatch_fallback(&name, &functions, &args, vars)?;
-    let CompiledUserDispatch {
+    let CompiledLegacyUserDispatch {
         func,
         var_map,
         bytecode: func_bytecode,
@@ -274,14 +274,14 @@ where
     Ok(())
 }
 
-fn unpack_prepared_user_call(prepared: PreparedUserCall) -> PreparedUserDispatch {
-    let PreparedUserCall {
+fn unpack_prepared_user_call(prepared: PreparedLegacyUserCall) -> PreparedLegacyUserDispatch {
+    let PreparedLegacyUserCall {
         func,
         var_map,
         func_program,
         func_vars,
     } = prepared;
-    PreparedUserDispatch {
+    PreparedLegacyUserDispatch {
         func,
         var_map,
         func_program,
@@ -294,7 +294,7 @@ fn prepare_named_user_dispatch(
     functions: &std::collections::HashMap<String, LegacyUserFunction>,
     args: &[Value],
     vars: &[Value],
-) -> Result<PreparedUserDispatch, RuntimeError> {
+) -> Result<PreparedLegacyUserDispatch, RuntimeError> {
     let func = lookup_user_function(name, functions)?;
     validate_user_function_arity(name, &func, args.len())?;
     let prepared = prepare_user_call(func, args, vars)?;
@@ -771,7 +771,7 @@ where
 
     let compiled =
         compile_legacy_named_user_dispatch_fallback(name, bytecode_functions, &args, vars)?;
-    let CompiledUserDispatch {
+    let CompiledLegacyUserDispatch {
         func,
         var_map,
         bytecode: func_bytecode,

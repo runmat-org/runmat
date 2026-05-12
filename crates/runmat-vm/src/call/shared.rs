@@ -7,7 +7,7 @@ use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
 use std::future::Future;
 
-pub struct PreparedUserCall {
+pub struct PreparedLegacyUserCall {
     pub func: LegacyUserFunction,
     pub var_map: HashMap<VarId, VarId>,
     pub func_program: HirProgram,
@@ -63,7 +63,7 @@ pub fn prepare_user_call(
     func: LegacyUserFunction,
     args: &[Value],
     vars: &[Value],
-) -> Result<PreparedUserCall, CompileError> {
+) -> Result<PreparedLegacyUserCall, CompileError> {
     let var_map =
         remapping::create_complete_function_var_map(&func.params, &func.outputs, &func.body);
     let local_var_count = var_map.len();
@@ -139,7 +139,7 @@ pub fn prepare_user_call(
         var_types: func_var_types,
     };
 
-    Ok(PreparedUserCall {
+    Ok(PreparedLegacyUserCall {
         func,
         var_map,
         func_program,

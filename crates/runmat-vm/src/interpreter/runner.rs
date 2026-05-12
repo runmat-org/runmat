@@ -220,7 +220,7 @@ async fn invoke_user_function_value(
     let arg_count = args.len();
     let compiled =
         interp_dispatch::compile_legacy_named_user_dispatch_fallback(name, functions, args, vars)?;
-    let interp_dispatch::CompiledUserDispatch {
+    let interp_dispatch::CompiledLegacyUserDispatch {
         func,
         var_map,
         bytecode: func_bytecode,
