@@ -1416,7 +1416,10 @@ async fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Val
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use std::sync::Arc;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     #[test]
     fn feval_closure_uses_semantic_function_identity() {
@@ -1457,5 +1460,37 @@ mod tests {
         let result = block_on(feval_builtin(handle, vec![Value::Num(3.0)]))
             .expect("semantic function handle feval succeeds");
         assert_eq!(result, Value::Num(9.0));
+    }
+
+    #[test]
+    fn notify_semantic_function_handle_uses_semantic_identity() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen_calls = Arc::clone(&calls);
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |function, args, requested_outputs| {
+                assert_eq!(function, 44);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args.len(), 1);
+                assert!(matches!(args[0], Value::HandleObject(_)));
+                seen_calls.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(Value::Num(0.0)) })
+            },
+        )));
+        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
+            .expect("handle target");
+        let callback = Value::SemanticFunctionHandle {
+            name: "semantic_event_callback".to_string(),
+            function: 44,
+        };
+
+        block_on(addlistener_builtin(
+            target.clone(),
+            "Changed".to_string(),
+            callback,
+        ))
+        .expect("listener registered");
+        block_on(notify_builtin(target, "Changed".to_string(), Vec::new()))
+            .expect("notify succeeds");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }
