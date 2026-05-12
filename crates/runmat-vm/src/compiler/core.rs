@@ -459,7 +459,7 @@ impl Compiler {
         })
     }
 
-    pub fn new_legacy(prog: &HirProgram) -> Self {
+    pub(crate) fn new_legacy(prog: &HirProgram) -> Self {
         let mut max_var = 0;
         fn visit_expr(expr: &HirExpr, max: &mut usize) {
             match &expr.kind {
