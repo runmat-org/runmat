@@ -1879,6 +1879,66 @@ fn cellfun_session_function_uses_semantic_registry() {
 }
 
 #[test]
+fn arrayfun_named_local_function_uses_semantic_callback() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source =
+        "A = [2, 3]; B = arrayfun('inc', A); y = B(2);\nfunction z = inc(x)\n  z = x + 1;\nend";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile named local arrayfun callback");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+        )),
+        "local arrayfun string callback should be bound to a semantic closure"
+    );
+    assert!(
+        prepared.bytecode.functions.is_empty(),
+        "semantic arrayfun callback should not require legacy user-function bytecode entries"
+    );
+
+    reset_legacy_user_dispatch_fallback_count();
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "4"
+    }));
+}
+
+#[test]
+fn arrayfun_session_function_uses_semantic_registry() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
+        .expect("define session function");
+
+    let source = "A = [2, 3]; B = arrayfun('inc', A); y = B(2);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile session arrayfun callback");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticClosure(_, name, 0) if name == "inc"
+        )),
+        "session arrayfun string callback should be bound to a semantic closure"
+    );
+    assert!(
+        prepared.bytecode.functions.is_empty(),
+        "session semantic arrayfun callback should not require legacy bytecode functions"
+    );
+
+    reset_legacy_user_dispatch_fallback_count();
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "4"
+    }));
+}
+
+#[test]
 fn direct_session_function_call_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
