@@ -12,7 +12,7 @@ export default function Hero() {
               Run math blazing fast
             </p>
             <p className="max-w-[42rem] leading-relaxed text-foreground text-[0.938rem] sm:text-base">
-              Write MATLAB-syntax code and run it with GPU acceleration, in your browser, on the desktop, or from the CLI. No license required.
+              High performance, GPU-accelerated math. Run in your browser, on the desktop, or from the CLI.
             </p>
             <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
               <Button

@@ -126,7 +126,7 @@ export function CompareProductsTable() {
       </h2>
       <div className="rounded-xl border border-border/60 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w--[480px] text-sm">
+          <table className="w-full min-w-[480px] text-sm">
             <thead>
               <tr className="border-b border-border/40">
                 <th className="text-left py-4 px-5 text-sm font-medium text-muted-foreground w-[40%]">
