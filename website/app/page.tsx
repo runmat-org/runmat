@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SiGithub } from "react-icons/si";
 import { Users, GitBranch, Camera, Lock, Shield, Eye, ClipboardCheck, Cpu, Monitor, HardDrive, FlaskConical, FileDiff, ShieldCheck, History, Layers } from "lucide-react";
@@ -230,7 +229,7 @@ export default function HomePage() {
               See your math in 3D
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              Render millions of points straight from a GPU tensor. 2D and 3D plots run on the same compute chain as your math, in the same runtime. The platform's agent has its own camera and can rotate, zoom, and inspect plots while you work on something else.
+              Render millions of points straight from a GPU tensor. 2D and 3D plots run on the same compute chain as your math, in the same runtime. The platform&apos;s agent has its own camera and can rotate, zoom, and inspect plots while you work on something else.
             </p>
           </div>
           <div className="mx-auto max-w-3xl">
@@ -625,7 +624,7 @@ export default function HomePage() {
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">Provider-agnostic architecture</p>
-                    <p className="text-[0.938rem] text-foreground">The agent runs on a model-agnostic harness. No lock-in to one provider's roadmap.</p>
+                    <p className="text-[0.938rem] text-foreground">The agent runs on a model-agnostic harness. No lock-in to one provider&apos;s roadmap.</p>
                   </div>
                 </div>
               </div>
