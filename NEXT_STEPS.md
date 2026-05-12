@@ -183,11 +183,15 @@ Current state:
 - Direct cell-expansion calls to functions defined in previous interactive inputs resolve through the session semantic registry and lower to `CallSemanticFunctionExpandMulti`.
 - Direct cell-expansion multi-output calls to functions defined in previous interactive inputs resolve through the session semantic registry and lower to `CallSemanticFunctionExpandMultiOutput`.
 - Function-handle calls to functions defined in previous interactive inputs execute through the session semantic registry before legacy fallback.
+- Function-handle literals for functions defined in previous interactive inputs now bind to `CreateSemanticClosure` after session registry attachment, so `@f` carries semantic identity instead of a name-only `FunctionHandle` when the target is known.
 - `feval` multi-output calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
 - Expanded `feval` calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
 - Expanded multi-output `feval` calls through previous-input function handles resolve names through the session semantic registry before runtime/legacy fallback.
 - Multi-output `feval` fallback dispatch now checks the semantic registry before invoking the centralized legacy named fallback.
 - `feval` closure dispatch resolves closure names through the semantic registry when an embedded semantic function id is unavailable.
+- Runtime `feval` now invokes embedded `Closure.semantic_function` identities directly before name fallback.
+- Local and previous-input user-function calls inside `end` expressions now carry `EndExpr::SemanticCall` identities instead of relying on name recovery.
+- `cellfun` and `arrayfun` string callback literals for local/session semantic functions now bind to zero-capture `CreateSemanticClosure` bytecode before reaching runtime builtins.
 - Legacy named user-call bytecode dispatch now checks the semantic registry before builtin fallback or the centralized named legacy fallback.
 - Multi-output `feval` legacy user fallback is centralized behind one dispatch helper instead of duplicated in direct and expanded `feval` bytecode handlers.
 - Named legacy user fallback preparation and compilation is centralized behind crate-private VM dispatch helpers; Turbine now enters through `execute_legacy_user_function_isolated` instead of destructuring compiled fallback internals.
@@ -216,14 +220,15 @@ Current legacy fallback caller inventory:
 - Raw fallback compiler boundary: `compile_legacy_user_dispatch_fallback` is private in VM dispatch and is only reached through crate-private `compile_legacy_named_user_dispatch_fallback`.
 - Multi-output `feval` fallback: `handle_feval_user_multi_output` first asks `SemanticFunctionRegistry` / `runmat_runtime::user_functions::try_call_semantic_function`; it falls back only when `FevalDispatch::InvokeUser` carries a name that did not resolve semantically.
 - Named/expanded user-call fallback: `handle_prepared_user_function_call` first checks the semantic registry, then builtin dispatch, then legacy named fallback. Remaining work is to remove cases where semantic lowering still emits generic `CallFunction*` for functions that should have stable semantic identity.
-- End-expression callback fallback: `invoke_user_function_value` resolves the semantic registry before legacy fallback. Remaining work is to pass stable semantic function identity into callback/end-expression call sites instead of recovering by name.
+- End-expression callback fallback: local/session user-function calls now carry `EndExpr::SemanticCall`; remaining fallback is for unresolved names or values without semantic identity.
 - Turbine external callback fallback: `runmat_call_user_function` invokes semantic functions when the Turbine runtime context registry resolves the name; otherwise it uses `execute_legacy_user_function_isolated` for legacy-shaped callback definitions. This is the concrete external compatibility boundary until Turbine carries semantic function bytecode/identity for every exported callback.
-- Dynamic closure/`feval` unresolved fallback: `call::feval::execute_feval` resolves embedded closure semantic IDs and registry names before returning `FevalDispatch::InvokeUser`; unresolved closure names still gather legacy function maps from bytecode, runtime context, and dynamic legacy snapshots.
+- Dynamic closure/`feval` unresolved fallback: VM `call::feval::execute_feval` and runtime `feval` resolve embedded closure semantic IDs before name fallback. Remaining unresolved closure/function-handle names still gather or ask name-based user-function maps because plain `Value::FunctionHandle(name)` has no semantic identity field.
+- Runtime callback builtins: `cellfun` and `arrayfun` invoke embedded semantic closures directly; compiler-produced local/session string callbacks are now rewritten to semantic closures. Runtime string inputs and plain `FunctionHandle(name)` values remain name-based because they can originate outside the compiler product.
 
 Classification:
 
-- Semantic-first, replaceable next: named/expanded user calls that still arrive as generic `CallFunction*`, and end-expression callback paths that can carry `FunctionId` or a semantic callable descriptor.
-- Semantic-first, blocked by callable identity shape: dynamic closure/`feval` unresolved names where the runtime value lacks stable semantic identity or complete capture/layout metadata.
+- Semantic-first, replaceable next: named/expanded user calls that still arrive as generic `CallFunction*` for targets that should already be known to semantic lowering.
+- Semantic-first, blocked by callable identity shape: runtime-created strings and plain `Value::FunctionHandle(name)` values where the runtime value lacks stable semantic identity or complete capture/layout metadata.
 - External compatibility boundary: Turbine callbacks whose host context still owns only `LegacyUserFunction` records for some exported functions.
 - Dead/duplicate raw fallback call sites: none found; the remaining four VM raw fallback calls all sit behind semantic-first checks or the Turbine external boundary.
 
