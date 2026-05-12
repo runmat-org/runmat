@@ -9,8 +9,6 @@ pub type VmResult<T> = Result<T, RuntimeError>;
 
 #[derive(Debug, Clone, Default)]
 pub struct IndexPlanProperties {
-    pub is_empty: bool,
-    pub is_scalar: bool,
     pub full_row: Option<usize>,
     pub full_column: Option<usize>,
 }
@@ -50,15 +48,11 @@ fn derive_plan_properties(
     dims: usize,
     base_shape: &[usize],
 ) -> IndexPlanProperties {
-    let is_empty = indices.is_empty();
-    let is_scalar = !is_empty && indices.len() == 1;
     let mut properties = IndexPlanProperties {
-        is_empty,
-        is_scalar,
         full_row: None,
         full_column: None,
     };
-    if dims != 2 || is_empty {
+    if dims != 2 || indices.is_empty() {
         return properties;
     }
     let rows = base_shape.first().copied().unwrap_or(1);

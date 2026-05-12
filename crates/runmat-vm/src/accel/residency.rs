@@ -16,11 +16,3 @@ pub fn same_gpu_handle(lhs: &Value, rhs: &Value) -> bool {
         (Value::GpuTensor(left), Value::GpuTensor(right)) if left.buffer_id == right.buffer_id
     )
 }
-
-#[cfg(feature = "native-accel")]
-pub fn mark(handle: &runmat_accelerate_api::GpuTensorHandle) {
-    runmat_accelerate::fusion_residency::mark(handle);
-}
-
-#[cfg(not(feature = "native-accel"))]
-pub fn mark(_handle: &runmat_accelerate_api::GpuTensorHandle) {}

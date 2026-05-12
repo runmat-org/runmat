@@ -1,6 +1,6 @@
-pub mod auto_promote;
+pub(crate) mod auto_promote;
 pub mod fusion;
-pub mod graph;
-pub mod idioms;
-pub mod residency;
-pub mod stack_layout;
+pub(crate) mod graph;
+pub(crate) mod idioms;
+pub(crate) mod residency;
+pub(crate) mod stack_layout;

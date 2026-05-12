@@ -1,6 +1,5 @@
 use crate::call::shared::{call_object_index_method, ObjectIndexKind, ObjectIndexOp};
 use crate::indexing::plan::IndexPlan;
-use crate::indexing::selectors::SliceSelector;
 use crate::interpreter::errors::mex;
 use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
@@ -643,98 +642,4 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
         .upload(&view)
         .map_err(|e| format!("reupload after slice assign: {e}"))?;
     Ok(Value::GpuTensor(new_h))
-}
-
-pub struct ExprSelectorSpec<'a> {
-    pub dims: usize,
-    pub colon_mask: u32,
-    pub end_mask: u32,
-    pub range_dims: &'a [usize],
-    pub range_params: &'a [(f64, f64)],
-    pub range_start_exprs: &'a [Option<crate::bytecode::EndExpr>],
-    pub range_step_exprs: &'a [Option<crate::bytecode::EndExpr>],
-    pub range_end_exprs: &'a [crate::bytecode::EndExpr],
-    pub numeric: &'a [Value],
-    pub shape: &'a [usize],
-}
-
-pub async fn build_expr_selectors<ResolveEnd, Fut>(
-    spec: ExprSelectorSpec<'_>,
-    mut resolve_end: ResolveEnd,
-) -> Result<Vec<SliceSelector>, RuntimeError>
-where
-    ResolveEnd: FnMut(usize, &crate::bytecode::EndExpr) -> Fut,
-    Fut: std::future::Future<Output = Result<i64, RuntimeError>>,
-{
-    let mut selectors: Vec<SliceSelector> = Vec::with_capacity(spec.dims);
-    let mut num_iter = 0usize;
-    let mut rp_iter = 0usize;
-    for d in 0..spec.dims {
-        if let Some(pos) = spec.range_dims.iter().position(|&rd| rd == d) {
-            let (raw_st, raw_sp) = spec.range_params[rp_iter];
-            let dim_len = *spec.shape.get(d).unwrap_or(&1);
-            let st = if let Some(expr) = &spec.range_start_exprs[rp_iter] {
-                resolve_end(dim_len, expr).await? as f64
-            } else {
-                raw_st
-            };
-            let sp = if let Some(expr) = &spec.range_step_exprs[rp_iter] {
-                resolve_end(dim_len, expr).await? as f64
-            } else {
-                raw_sp
-            };
-            rp_iter += 1;
-            let step_i = if sp >= 0.0 {
-                sp as i64
-            } else {
-                -(sp.abs() as i64)
-            };
-            let end_i = resolve_end(dim_len, &spec.range_end_exprs[pos]).await?;
-            if step_i == 0 {
-                return Err(mex("IndexStepZero", "Index step cannot be zero"));
-            }
-            let mut vals = Vec::new();
-            let mut cur = st as i64;
-            if step_i > 0 {
-                while cur <= end_i {
-                    if cur < 1 || cur > dim_len as i64 {
-                        break;
-                    }
-                    vals.push(cur as usize);
-                    cur += step_i;
-                }
-            } else {
-                while cur >= end_i {
-                    if cur < 1 || cur > dim_len as i64 {
-                        break;
-                    }
-                    vals.push(cur as usize);
-                    cur += step_i;
-                }
-            }
-            selectors.push(SliceSelector::Indices(vals));
-            continue;
-        }
-        let is_colon = (spec.colon_mask & (1u32 << d)) != 0;
-        let is_end = (spec.end_mask & (1u32 << d)) != 0;
-        if is_colon {
-            selectors.push(SliceSelector::Colon);
-        } else if is_end {
-            selectors.push(SliceSelector::Scalar(*spec.shape.get(d).unwrap_or(&1)));
-        } else {
-            let v = spec
-                .numeric
-                .get(num_iter)
-                .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index"))?;
-            num_iter += 1;
-            let dim_len = *spec.shape.get(d).unwrap_or(&1);
-            selectors.push(
-                match crate::indexing::selectors::selector_from_value_dim(v, dim_len).await? {
-                    SliceSelector::LinearIndices { values, .. } => SliceSelector::Indices(values),
-                    other => other,
-                },
-            );
-        }
-    }
-    Ok(selectors)
 }
