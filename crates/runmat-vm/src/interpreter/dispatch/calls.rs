@@ -1,4 +1,8 @@
-use crate::bytecode::{ArgSpec, Instr, SemanticFunctionRegistry};
+#[cfg(feature = "native-accel")]
+use crate::accel::graph::build_accel_graph;
+#[cfg(feature = "native-accel")]
+use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
+use crate::bytecode::{ArgSpec, Bytecode, Instr, SemanticFunctionRegistry};
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
@@ -8,6 +12,7 @@ use crate::call::shared::{
     expand_cell_indices, lookup_user_function, prepare_user_call, subsref_empty_brace_cell,
     validate_user_function_arity, ObjectIndexKind, ObjectIndexOp, PreparedUserCall,
 };
+use crate::compiler::{CompileError, Compiler};
 use crate::functions::UserFunction;
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -40,6 +45,42 @@ pub struct CompiledUserDispatch {
     pub func_vars: Vec<Value>,
 }
 
+fn compile_legacy_fallback_bytecode(
+    prog: &runmat_hir::LegacyHirProgram,
+    existing_functions: &std::collections::HashMap<String, UserFunction>,
+) -> Result<Bytecode, CompileError> {
+    let mut compiler = Compiler::new_legacy(prog);
+    compiler.functions = existing_functions.clone();
+    compiler.compile_program_legacy(prog)?;
+    #[cfg(feature = "native-accel")]
+    let accel_graph = build_accel_graph(&compiler.instructions, &compiler.var_types);
+    #[cfg(feature = "native-accel")]
+    let mut fusion_groups = accel_graph.detect_fusion_groups();
+    #[cfg(feature = "native-accel")]
+    annotate_fusion_groups_with_stack_layout(
+        &compiler.instructions,
+        &accel_graph,
+        &mut fusion_groups,
+    );
+    Ok(Bytecode {
+        instructions: compiler.instructions,
+        instr_spans: compiler.instr_spans,
+        call_arg_spans: compiler.call_arg_spans,
+        source_id: None,
+        var_count: compiler.var_count,
+        functions: compiler.functions,
+        semantic_functions: std::collections::HashMap::new(),
+        semantic_function_registry: SemanticFunctionRegistry::default(),
+        var_types: compiler.var_types,
+        var_names: std::collections::HashMap::new(),
+        layout: None,
+        #[cfg(feature = "native-accel")]
+        accel_graph: Some(accel_graph),
+        #[cfg(feature = "native-accel")]
+        fusion_groups,
+    })
+}
+
 pub fn compile_legacy_user_dispatch_fallback(
     prepared: PreparedUserDispatch,
     functions: &std::collections::HashMap<String, UserFunction>,
@@ -50,7 +91,7 @@ pub fn compile_legacy_user_dispatch_fallback(
         func_program,
         func_vars,
     } = prepared;
-    let mut bytecode = crate::bytecode::compile::compile_legacy(&func_program, functions)?;
+    let mut bytecode = compile_legacy_fallback_bytecode(&func_program, functions)?;
     bytecode.source_id = func.source_id;
     Ok(CompiledUserDispatch {
         func,

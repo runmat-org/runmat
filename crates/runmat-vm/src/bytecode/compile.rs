@@ -2,10 +2,10 @@
 use crate::accel::graph::build_accel_graph;
 #[cfg(feature = "native-accel")]
 use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
-use crate::bytecode::{Bytecode, SemanticFunctionBytecode, SemanticFunctionRegistry, UserFunction};
+use crate::bytecode::{Bytecode, SemanticFunctionBytecode, SemanticFunctionRegistry};
 use crate::compiler::{CompileError, Compiler};
 use crate::layout::derive_layout;
-use runmat_hir::{EntrypointId, FunctionId, HirAssembly, LegacyHirProgram as HirProgram};
+use runmat_hir::{EntrypointId, FunctionId, HirAssembly};
 use runmat_mir::MirAssembly;
 use std::collections::HashMap;
 
@@ -114,38 +114,6 @@ fn compile_semantic_functions(
         );
     }
     Ok(functions)
-}
-
-pub(crate) fn compile_legacy(
-    prog: &HirProgram,
-    existing_functions: &HashMap<String, UserFunction>,
-) -> Result<Bytecode, CompileError> {
-    let mut c = Compiler::new_legacy(prog);
-    c.functions = existing_functions.clone();
-    c.compile_program_legacy(prog)?;
-    #[cfg(feature = "native-accel")]
-    let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
-    #[cfg(feature = "native-accel")]
-    let mut fusion_groups = accel_graph.detect_fusion_groups();
-    #[cfg(feature = "native-accel")]
-    annotate_fusion_groups_with_stack_layout(&c.instructions, &accel_graph, &mut fusion_groups);
-    Ok(Bytecode {
-        instructions: c.instructions,
-        instr_spans: c.instr_spans,
-        call_arg_spans: c.call_arg_spans,
-        source_id: None,
-        var_count: c.var_count,
-        functions: c.functions,
-        semantic_functions: HashMap::new(),
-        semantic_function_registry: SemanticFunctionRegistry::default(),
-        var_types: c.var_types,
-        var_names: HashMap::new(),
-        layout: None,
-        #[cfg(feature = "native-accel")]
-        accel_graph: Some(accel_graph),
-        #[cfg(feature = "native-accel")]
-        fusion_groups,
-    })
 }
 
 #[cfg(test)]
