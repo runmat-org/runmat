@@ -632,6 +632,11 @@ impl Callable {
     async fn call(&self, args: &[Value]) -> crate::BuiltinResult<Value> {
         match self {
             Callable::Builtin { name } => {
+                if let Some(result) =
+                    user_functions::try_call_semantic_function_by_name(name, args, 1).await
+                {
+                    return result;
+                }
                 if let Some(result) = user_functions::try_call_user_function(name, args).await {
                     return result;
                 }
@@ -1081,6 +1086,39 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
                 assert_eq!(out.data, vec![11.0, 12.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arrayfun_name_only_callback_uses_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_arrayfun_target").then_some(80)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 80);
+                assert_eq!(requested_outputs, 1);
+                let [Value::Num(value)] = args else {
+                    panic!("expected scalar numeric argument, got {args:?}");
+                };
+                let value = *value;
+                Box::pin(async move { Ok(Value::Num(value + 20.0)) })
+            }),
+        ));
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+
+        let result = call(
+            Value::String("resolved_arrayfun_target".to_string()),
+            vec![Value::Tensor(tensor)],
+        )
+        .expect("resolved name-only arrayfun");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![21.0, 22.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

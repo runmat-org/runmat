@@ -1048,6 +1048,11 @@ async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(name = "feval", builtin_path = "crate")]
 async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     async fn call_by_name(name: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
+        if let Some(result) =
+            crate::user_functions::try_call_semantic_function_by_name(name, args, 1).await
+        {
+            return result;
+        }
         if let Some(result) = crate::user_functions::try_call_user_function(name, args).await {
             match result {
                 Ok(value) => return Ok(value),
@@ -1460,6 +1465,29 @@ mod tests {
         let result = block_on(feval_builtin(handle, vec![Value::Num(3.0)]))
             .expect("semantic function handle feval succeeds");
         assert_eq!(result, Value::Num(9.0));
+    }
+
+    #[test]
+    fn feval_name_only_handle_uses_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_target").then_some(45)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 45);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(11.0)) })
+            }),
+        ));
+
+        let result = block_on(feval_builtin(
+            Value::FunctionHandle("resolved_target".to_string()),
+            vec![Value::Num(4.0)],
+        ))
+        .expect("resolved name-only handle feval succeeds");
+        assert_eq!(result, Value::Num(11.0));
     }
 
     #[test]

@@ -503,6 +503,11 @@ impl Callable {
         }
         match self {
             Callable::Builtin { name } => {
+                if let Some(result) =
+                    user_functions::try_call_semantic_function_by_name(name, args, 1).await
+                {
+                    return result;
+                }
                 if let Some(result) = user_functions::try_call_user_function(name, args).await {
                     match result {
                         Ok(value) => return Ok(value),
@@ -809,6 +814,36 @@ pub(crate) mod tests {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
                 assert_eq!(tensor.data, vec![9.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cellfun_name_only_callback_uses_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_cellfun_target").then_some(79)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 79);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(3.0)]);
+                Box::pin(async { Ok(Value::Num(13.0)) })
+            }),
+        ));
+        let cell = crate::make_cell(vec![Value::Num(3.0)], 1, 1).expect("cell");
+
+        let result = cellfun_builtin(
+            Value::String("resolved_cellfun_target".to_string()),
+            vec![cell],
+        )
+        .expect("resolved name-only cellfun");
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 1]);
+                assert_eq!(tensor.data, vec![13.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

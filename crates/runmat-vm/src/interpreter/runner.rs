@@ -523,6 +523,13 @@ async fn run_interpreter_inner(
                 })
             },
         )));
+    let semantic_registry_for_semantic_resolver = Arc::clone(&semantic_registry);
+    let _semantic_resolver_guard =
+        user_functions::install_semantic_function_resolver(Some(Arc::new(move |name: &str| {
+            semantic_registry_for_semantic_resolver
+                .resolve_name(name)
+                .map(|function| function.0)
+        })));
     CALL_COUNTS.with(|cc| {
         *cc.borrow_mut() = call_counts.clone();
     });
