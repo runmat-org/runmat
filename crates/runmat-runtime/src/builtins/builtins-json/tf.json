@@ -108,9 +108,15 @@
       "description": "Supported forms",
       "input": "H = tf(num, den)\nH = tf(num, den, Ts)\nH = tf(num, den, 'Variable', variable)\nH = tf(num, den, 'Ts', Ts)",
       "output": "H is a tf object."
-    }
+    },
+    "points": [
+      "`num` and `den` are numeric scalar, row-vector, or column-vector coefficient inputs. Coefficients are stored using MATLAB's highest-order-term-first polynomial convention.",
+      "`Ts` is an optional finite non-negative sample time. Positive sample times default the transfer-function variable to `'z'` unless `Variable` is provided explicitly.",
+      "`Variable` accepts `'s'`, `'p'`, `'z'`, `'q'`, `'z^-1'`, or `'q^-1'`. The denominator vector must contain at least one non-zero coefficient."
+    ]
   },
   "validation": {
+    "summary": "`tf` validates coefficient shapes, finite numeric values, supported variable names, and sample-time constraints before constructing the host-side transfer-function object. Unit and integration tests cover continuous and discrete constructors, row normalization, option parsing, and invalid denominator or matrix coefficient inputs.",
     "implementation": {
       "label": "`crates/runmat-runtime/src/builtins/control/tf.rs`",
       "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/control/tf.rs"
