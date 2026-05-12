@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UserFunction {
+pub struct LegacyUserFunction {
     pub name: String,
     pub params: Vec<VarId>,
     pub outputs: Vec<VarId>,
@@ -23,6 +23,8 @@ pub struct UserFunction {
     #[serde(default)]
     pub source_id: Option<runmat_hir::SourceId>,
 }
+
+pub type UserFunction = LegacyUserFunction;
 
 #[derive(Debug, Clone)]
 pub struct CallFrame {

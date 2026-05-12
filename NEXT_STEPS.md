@@ -208,7 +208,7 @@ Target state:
 
 Design implication:
 
-- `PreparedUserCall`, `PreparedUserDispatch`, and `UserFunction` should become transitional compatibility structures. Their long-term replacement is a semantic call descriptor keyed by `FunctionId`/`DefPath` plus layout/capture data.
+- `PreparedUserCall`, `PreparedUserDispatch`, and the compatibility `UserFunction` alias should become transitional compatibility structures. The legacy-shaped function record now has the explicit `LegacyUserFunction` name; its long-term replacement is a semantic call descriptor keyed by `FunctionId`/`DefPath` plus layout/capture data.
 - The private raw legacy fallback should be treated as the final centralized legacy boundary before removal, not a reusable abstraction to extend.
 
 First implementation slice:
@@ -222,6 +222,7 @@ First implementation slice:
 Observed older-HIR artifacts worth collapsing:
 
 - `LegacyHirProgram`, `LegacyHirStmt`, and `LegacyHirExpr` remain in VM compiler modules and many tests.
+- `runmat_vm::UserFunction` remains as a compatibility alias for `LegacyUserFunction` while downstream callers move to semantic function bytecode/registry APIs.
 - `compile_legacy` is no longer re-exported from the `runmat-vm` crate root or `runmat_vm::bytecode`; direct test users go through `runmat_vm::bytecode::compile::compile_legacy` and production unresolved callbacks go through the centralized dynamic callback fallback.
 - `RunMatSession` keeps `workspace_bindings` to seed workspace variables across REPL inputs, but those bindings are still plain VM slot indices rather than durable semantic workspace binding IDs.
 - `LoweringResult` still carries both `assembly` and legacy `hir`, `variables`, `functions`, `var_types`, and legacy inference placeholders.
