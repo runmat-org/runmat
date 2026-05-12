@@ -546,6 +546,27 @@ fn semantic_anonymous_function_handle_feval_executes() {
 }
 
 #[test]
+fn semantic_function_handle_index_call_executes() {
+    let bytecode =
+        compile_semantic_source("h = @inc; y = h(2);\nfunction z = inc(x)\n  z = x + 1;\nend")
+            .unwrap();
+    assert!(
+        bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+        )),
+        "semantic function handle index calls should carry semantic identity"
+    );
+
+    runmat_vm::reset_legacy_user_dispatch_fallback_count();
+    let vars = interpret(&bytecode).expect("semantic handle index call should execute");
+    assert_eq!(runmat_vm::legacy_user_dispatch_fallback_count(), 0);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-12)));
+}
+
+#[test]
 fn cellfun_upper_function_handle_round_trip() {
     let input =
         "names = {'Ada', 'Linus', 'Katherine'}; upper = cellfun(@upper, names, 'UniformOutput', false);";
