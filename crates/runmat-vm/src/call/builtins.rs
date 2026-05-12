@@ -1,4 +1,3 @@
-use crate::bytecode::Instr;
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::pop_args;
 use runmat_builtins::Value;
@@ -78,13 +77,6 @@ pub fn vm_intrinsic_counter_builtin(
             Ok(Some(Value::Num(nout as f64)))
         }
         None => Ok(None),
-    }
-}
-
-pub fn requested_output_count(instructions: &[Instr], pc: usize) -> Option<usize> {
-    match instructions.get(pc + 1) {
-        Some(Instr::Unpack(count)) => Some(*count),
-        _ => None,
     }
 }
 

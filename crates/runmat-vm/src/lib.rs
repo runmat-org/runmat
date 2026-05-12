@@ -2,7 +2,7 @@
 
 pub mod accel;
 pub mod bytecode;
-pub mod call;
+pub(crate) mod call;
 pub mod compiler;
 pub mod functions {
     pub use crate::bytecode::program::{
