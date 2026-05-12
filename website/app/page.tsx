@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SiGithub } from "react-icons/si";
-import { Users, GitBranch, Camera, Lock, Shield, Eye, ClipboardCheck, Cpu, Monitor, HardDrive } from "lucide-react";
+import { Users, GitBranch, Camera, Lock, Shield, Eye, ClipboardCheck, Cpu, Monitor, HardDrive, FlaskConical, FileDiff, ShieldCheck, History, Layers } from "lucide-react";
 
 import dynamic from "next/dynamic";
 import Hero from "@/components/Hero";
@@ -83,12 +83,15 @@ const jsonLd = {
       "softwareVersion": "Beta",
       "featureList": [
         "JIT-accelerated MATLAB-style syntax",
-        "RunMat Desktop: Full IDE experience with code editor, file explorer, and live plotting in-browser",
+        "Full IDE experience with code editor, file explorer, and live plotting in-browser",
         "Automatic GPU Fusion & Memory Management",
         "Cross-platform binary (Metal, Vulkan, DX12) and CLI support",
         "Interactive 2D and 3D plotting with GPU acceleration",
         "Real-time type and shape tracking with dimension error detection",
-        "Execution tracing and diagnostic logging"
+        "Execution tracing and diagnostic logging",
+        "Built-in agent with runtime execution and workspace inspection",
+        "OS-level sandboxed agent execution",
+        "Deterministic session replay and audit journal"
       ],
       "offers": {
         "@type": "Offer",
@@ -120,9 +123,9 @@ const jsonLd = {
 };
 
 export const metadata: Metadata = {
-  title: "RunMat: Free Runtime for MATLAB Code (Browser & Desktop)",
+  title: "RunMat: GPU Computing Platform for Engineering Math",
   description:
-    "Execute .m files instantly with automatic GPU acceleration. An open-source runtime built on MATLAB semantics. No license or installation required.",
+    "GPU-accelerated MATLAB-syntax math with a built-in agent that runs code, checks results, and iterates. Open source, browser or CLI. No license required.",
   keywords: [
     "run matlab online",
     "free matlab runtime",
@@ -147,6 +150,11 @@ export const metadata: Metadata = {
     "matlab vs julia",
     "matlab vs scilab",
     "matlab blas lapack",
+    "matlab ai",
+    "matlab ai assistant",
+    "matlab copilot alternative",
+    "ai for matlab",
+    "ai engineering math",
   ],
   alternates: { canonical: "/" },
   robots: {
@@ -161,9 +169,9 @@ export const metadata: Metadata = {
     },
   },
   openGraph: {
-    title: "RunMat: Free Runtime for MATLAB Code (Browser & Desktop)",
+    title: "RunMat: GPU Computing Platform for Engineering Math",
     description:
-      "Execute .m files instantly with automatic GPU acceleration. An open-source runtime built on MATLAB semantics. No license or installation required.",
+      "GPU-accelerated MATLAB-syntax math with a built-in agent that runs code, checks results, and iterates. Open source, browser or CLI. No license required.",
     url: "/",
     siteName: "RunMat",
     type: "website",
@@ -176,9 +184,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "RunMat: Free Runtime for MATLAB Code (Browser & Desktop)",
+    title: "RunMat: GPU Computing Platform for Engineering Math",
     description:
-      "Execute .m files instantly with automatic GPU acceleration. An open-source runtime built on MATLAB semantics. No license or installation required.",
+      "GPU-accelerated MATLAB-syntax math with a built-in agent that runs code, checks results, and iterates. Open source, browser or CLI. No license required.",
   },
 };
 
@@ -206,9 +214,9 @@ export default function HomePage() {
         }}
       />
       <div className="sr-only">
-        <h1>RunMat: Free Runtime for MATLAB Code (Browser & Desktop)</h1>
+        <h1>RunMat: GPU Computing Platform for Engineering Math</h1>
         <p>
-          Execute .m files instantly with automatic GPU acceleration. An open-source runtime built on MATLAB semantics. No license or installation required.
+          GPU-accelerated MATLAB-syntax math with a built-in agent that runs code, checks results, and iterates. Open source, browser or CLI. No license required.
         </p>
       </div>
 
@@ -218,11 +226,11 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               See your math in 3D
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              GPU-accelerated 2D and 3D plotting, built into the same environment as your code. Your plots are part of the same computation chain as your math. No copying data between systems, no separate plotting library.
+              Render millions of points straight from a GPU tensor. 2D and 3D plots run on the same compute chain as your math, in the same runtime. The platform's agent has its own camera and can rotate, zoom, and inspect plots while you work on something else.
             </p>
           </div>
           <div className="mx-auto max-w-3xl">
@@ -257,11 +265,63 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Agent: works inside the runtime */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+              An agent built into the runtime, not on top of your files
+            </h2>
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-7">
+              The agent runs your code, inspects workspace variables, and reads 3D plot data. You review every change as a diff before it lands.
+            </p>
+          </div>
+          {/* TODO: replace placeholder wave-simulation video with a proper agent demo recording when ready */}
+          <div className="mx-auto max-w-3xl mb-8">
+            <div className="rounded-lg border border-border overflow-hidden elevated-panel">
+              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-lg overflow-hidden">
+                <LazyVideo
+                  className="w-full h-auto"
+                  muted
+                  loop
+                  playsInline
+                  poster="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp"
+                  aria-label="RunMat agent exploration demo (placeholder)"
+                >
+                  <source src="https://web.runmatstatic.com/video/runmat-wave-simulation.mp4" type="video/mp4" />
+                </LazyVideo>
+              </Link>
+            </div>
+          </div>
+          <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                <FlaskConical className="h-5 w-5" />
+              </span>
+              <h3 className="text-lg font-semibold text-foreground">Runtime-aware inspection</h3>
+              <p className="text-[0.938rem] text-foreground mt-1">Checks tensors for NaN, verifies shapes against expected dimensions, and reads plot data from any 3D camera angle.</p>
+            </div>
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                <FileDiff className="h-5 w-5" />
+              </span>
+              <h3 className="text-lg font-semibold text-foreground">Every change is reviewable</h3>
+              <p className="text-[0.938rem] text-foreground mt-1">Edits are presented as diffs. Accept or reject each change. Conversations are stored as searchable project files.</p>
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
+            <Link href="/sandbox" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
+              Try it in the sandbox
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {/* Fastest to Read: Syntax you already know */}
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Syntax you already know.
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-8">
@@ -291,11 +351,12 @@ export default function HomePage() {
       <section id="benchmarks" className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               The fastest runtime for your math
             </h2>
+            {/* VERIFY: confirm benchmark numbers (150-180x Octave, 10x NumPy, 3.8x PyTorch) are current and approved for public copy before deploy */}
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-7">
-              RunMat runs math faster because of how the runtime is engineered. Fusion merges sequential operations into fewer GPU steps; residency keeps your arrays on-device between steps. That means less memory traffic, fewer program launches, and faster scripts.
+              RunMat runs 150-180x faster than GNU Octave, up to 10x faster than NumPy, and up to 3.8x faster than PyTorch on GPU image pipelines. The runtime fuses sequential operations into fewer GPU steps and keeps your arrays on-device between them.
             </p>
           </div>
 
@@ -319,17 +380,15 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Future: Fastest to Write (LLM / agent section) — insert here when ready */}
-
       {/* Fastest to Debug: shape tracking, diagnostics */}
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Debug with full visibility
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              Debug faster by seeing everything as you write. Hover any variable to see its shape and type. Click on an intermediate value to inspect it. Dimension mismatches are flagged in the editor before you run.
+              Debug faster by seeing everything as you write. Hover any variable to see its shape and type. Click on an intermediate value to inspect it. Dimension mismatches are flagged in the editor before you run. The agent uses the same inspection tools: materializing variables, checking shapes, and locating where a computation went wrong.
             </p>
           </div>
           <div className="mx-auto max-w-3xl">
@@ -355,11 +414,11 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Every change versioned. No git required.
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              Every save is a version, automatically. Per-file history and full project snapshots track every change, even on terabyte-scale datasets. Share projects with your team, no git setup, no merge conflicts.
+              Every save is a version, automatically. Per-file history and full project snapshots track every change, even on terabyte-scale datasets. Share projects with your team, no git setup, no merge conflicts. Agent-generated edits get the same treatment: versioned and reversible.
             </p>
           </div>
           <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
@@ -416,7 +475,7 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Scale your math, not your toolchain
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
@@ -462,7 +521,7 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto max-w-2xl text-center">
-            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl mb-8">
+            <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl mb-8">
               Open source, MIT licensed
             </h2>
             <Card className="border border-border bg-card">
@@ -476,7 +535,7 @@ export default function HomePage() {
                   <SiGithub className="h-8 w-8" />
                 </Link>
                 <p className="text-[0.938rem] text-foreground">
-                  Read every line of code that runs your math. Fork it, audit it, self-host it. No vendor lock-in, no black boxes. The runtime is on{" "}
+                  Read every line of code that runs your math. Fork the runtime to audit or self-host. No vendor lock-in, no black boxes. The runtime is on{" "}
                   <Link href="https://github.com/runmat-org/runmat" className="underline text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80" target="_blank" rel="noreferrer">
                     GitHub
                   </Link>
@@ -496,7 +555,7 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Secure by design
             </h2>
             <p className="max-w-[42rem] text-[0.938rem] leading-relaxed text-foreground">
@@ -540,6 +599,33 @@ export default function HomePage() {
                   <div>
                     <p className="text-xl font-medium text-foreground">SOC 2 ready</p>
                     <p className="text-[0.938rem] text-foreground">Built to SOC 2 standards. Audit planned for Q2 2026.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-foreground/10 text-foreground">
+                    <ShieldCheck className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <p className="text-xl font-medium text-foreground">Sandboxed agent execution</p>
+                    <p className="text-[0.938rem] text-foreground">Agent commands run inside OS-level sandboxes (Seatbelt on macOS, bubblewrap on Linux). Network is denied by default. Filesystem access is scoped to the project root. Secrets are redacted from the environment before any process runs.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-foreground/10 text-foreground">
+                    <History className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <p className="text-xl font-medium text-foreground">Replayable agent sessions</p>
+                    <p className="text-[0.938rem] text-foreground">Every agent action is journaled with content hashes. Replay a session to verify exactly what the agent did, step by step. Built for environments where audit trails are mandatory.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-foreground/10 text-foreground">
+                    <Layers className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <p className="text-xl font-medium text-foreground">Provider-agnostic architecture</p>
+                    <p className="text-[0.938rem] text-foreground">The agent runs on a model-agnostic harness. No lock-in to one provider's roadmap.</p>
                   </div>
                 </div>
               </div>
