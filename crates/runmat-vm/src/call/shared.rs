@@ -1,4 +1,4 @@
-use crate::bytecode::{ArgSpec, UserFunction};
+use crate::bytecode::{ArgSpec, LegacyUserFunction};
 use crate::compiler::CompileError;
 use crate::object::{BRACE_SELECTOR_NAME, MEMBER_SELECTOR_NAME, PAREN_SELECTOR_NAME};
 use runmat_builtins::{Type, Value};
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::future::Future;
 
 pub struct PreparedUserCall {
-    pub func: UserFunction,
+    pub func: LegacyUserFunction,
     pub var_map: HashMap<VarId, VarId>,
     pub func_program: HirProgram,
     pub func_vars: Vec<Value>,
@@ -16,8 +16,8 @@ pub struct PreparedUserCall {
 
 pub fn lookup_user_function(
     name: &str,
-    functions: &HashMap<String, UserFunction>,
-) -> Result<UserFunction, RuntimeError> {
+    functions: &HashMap<String, LegacyUserFunction>,
+) -> Result<LegacyUserFunction, RuntimeError> {
     functions.get(name).cloned().ok_or_else(|| {
         crate::interpreter::errors::mex("UndefinedFunction", &format!("Undefined function: {name}"))
     })
@@ -25,7 +25,7 @@ pub fn lookup_user_function(
 
 pub fn validate_user_function_arity(
     name: &str,
-    func: &UserFunction,
+    func: &LegacyUserFunction,
     arg_count: usize,
 ) -> Result<(), RuntimeError> {
     if !func.has_varargin {
@@ -60,7 +60,7 @@ pub fn validate_user_function_arity(
 }
 
 pub fn prepare_user_call(
-    func: UserFunction,
+    func: LegacyUserFunction,
     args: &[Value],
     vars: &[Value],
 ) -> Result<PreparedUserCall, CompileError> {
@@ -148,7 +148,7 @@ pub fn prepare_user_call(
 }
 
 pub fn first_output_value(
-    func: &UserFunction,
+    func: &LegacyUserFunction,
     var_map: &HashMap<VarId, VarId>,
     func_result_vars: &[Value],
 ) -> Value {
@@ -191,7 +191,7 @@ pub fn first_output_value(
 
 pub fn collect_multi_outputs(
     name: &str,
-    func: &UserFunction,
+    func: &LegacyUserFunction,
     var_map: &HashMap<VarId, VarId>,
     func_result_vars: &[Value],
     out_count: usize,

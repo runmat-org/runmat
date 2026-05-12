@@ -1,6 +1,6 @@
 use crate::call::builtins::is_vm_intrinsic_counter_builtin;
 use crate::compiler::CompileError;
-use crate::functions::UserFunction;
+use crate::functions::LegacyUserFunction;
 use crate::instr::{ArgSpec, EmitLabel, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
@@ -34,7 +34,7 @@ pub struct Compiler {
     pub call_arg_spans: Vec<Option<Vec<runmat_hir::Span>>>,
     pub var_count: usize,
     pub loop_stack: Vec<LoopLabels>,
-    pub functions: HashMap<String, UserFunction>,
+    pub functions: HashMap<String, LegacyUserFunction>,
     pub imports: Vec<(Vec<String>, bool)>,
     pub var_types: Vec<Type>,
     pub layout: Option<VmAssemblyLayout>,

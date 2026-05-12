@@ -13,7 +13,7 @@ use crate::call::shared::{
     validate_user_function_arity, ObjectIndexKind, ObjectIndexOp, PreparedUserCall,
 };
 use crate::compiler::{CompileError, Compiler};
-use crate::functions::UserFunction;
+use crate::functions::LegacyUserFunction;
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
@@ -44,19 +44,19 @@ pub enum FevalHandling {
     InvokeUser {
         name: String,
         args: Vec<Value>,
-        functions: std::collections::HashMap<String, crate::functions::UserFunction>,
+        functions: std::collections::HashMap<String, crate::functions::LegacyUserFunction>,
     },
 }
 
 pub struct PreparedUserDispatch {
-    pub func: UserFunction,
+    pub func: LegacyUserFunction,
     pub var_map: std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
     pub func_program: runmat_hir::LegacyHirProgram,
     pub func_vars: Vec<Value>,
 }
 
 pub struct CompiledUserDispatch {
-    pub func: UserFunction,
+    pub func: LegacyUserFunction,
     pub var_map: std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
     pub bytecode: crate::bytecode::Bytecode,
     pub func_vars: Vec<Value>,
@@ -64,7 +64,7 @@ pub struct CompiledUserDispatch {
 
 fn compile_legacy_fallback_bytecode(
     prog: &runmat_hir::LegacyHirProgram,
-    existing_functions: &std::collections::HashMap<String, UserFunction>,
+    existing_functions: &std::collections::HashMap<String, LegacyUserFunction>,
 ) -> Result<Bytecode, CompileError> {
     let mut compiler = Compiler::new_legacy(prog);
     compiler.functions = existing_functions.clone();
@@ -100,7 +100,7 @@ fn compile_legacy_fallback_bytecode(
 
 fn compile_legacy_user_dispatch_fallback(
     prepared: PreparedUserDispatch,
-    functions: &std::collections::HashMap<String, UserFunction>,
+    functions: &std::collections::HashMap<String, LegacyUserFunction>,
 ) -> Result<CompiledUserDispatch, crate::compiler::CompileError> {
     note_legacy_user_dispatch_fallback();
     let PreparedUserDispatch {
@@ -121,7 +121,7 @@ fn compile_legacy_user_dispatch_fallback(
 
 pub fn compile_legacy_named_user_dispatch_fallback(
     name: &str,
-    functions: &std::collections::HashMap<String, UserFunction>,
+    functions: &std::collections::HashMap<String, LegacyUserFunction>,
     args: &[Value],
     vars: &[Value],
 ) -> Result<CompiledUserDispatch, RuntimeError> {
@@ -168,9 +168,9 @@ pub struct UserCallContext<'a> {
     pub stack: &'a mut Vec<Value>,
     pub name: &'a str,
     pub out_count: usize,
-    pub bytecode_functions: &'a std::collections::HashMap<String, UserFunction>,
+    pub bytecode_functions: &'a std::collections::HashMap<String, LegacyUserFunction>,
     pub semantic_registry: &'a SemanticFunctionRegistry,
-    pub caller_functions: &'a mut std::collections::HashMap<String, UserFunction>,
+    pub caller_functions: &'a mut std::collections::HashMap<String, LegacyUserFunction>,
     pub exception: ExceptionRouteContext<'a>,
 }
 
@@ -228,11 +228,11 @@ pub fn handle_feval_dispatch(
 
 pub async fn handle_feval_user_multi_output<IF, IFFut>(
     stack: &mut Vec<Value>,
-    caller_functions: &mut std::collections::HashMap<String, UserFunction>,
+    caller_functions: &mut std::collections::HashMap<String, LegacyUserFunction>,
     vars: &[Value],
     name: String,
     args: Vec<Value>,
-    functions: std::collections::HashMap<String, UserFunction>,
+    functions: std::collections::HashMap<String, LegacyUserFunction>,
     semantic_registry: &SemanticFunctionRegistry,
     out_count: usize,
     interpret_counts: IF,
@@ -291,7 +291,7 @@ fn unpack_prepared_user_call(prepared: PreparedUserCall) -> PreparedUserDispatch
 
 fn prepare_named_user_dispatch(
     name: &str,
-    functions: &std::collections::HashMap<String, UserFunction>,
+    functions: &std::collections::HashMap<String, LegacyUserFunction>,
     args: &[Value],
     vars: &[Value],
 ) -> Result<PreparedUserDispatch, RuntimeError> {
@@ -304,7 +304,7 @@ fn prepare_named_user_dispatch(
 fn push_user_call_outputs(
     stack: &mut Vec<Value>,
     name: &str,
-    func: &UserFunction,
+    func: &LegacyUserFunction,
     var_map: &std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
     func_result_vars: &[Value],
     out_count: usize,
@@ -318,7 +318,7 @@ fn push_user_call_outputs(
 
 fn output_list_for_user_call(
     name: &str,
-    func: &UserFunction,
+    func: &LegacyUserFunction,
     var_map: &std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
     func_result_vars: &[Value],
     out_count: usize,

@@ -1,6 +1,6 @@
 use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
-use crate::bytecode::{Bytecode, Instr, SemanticFunctionRegistry, UserFunction};
+use crate::bytecode::{Bytecode, Instr, LegacyUserFunction, SemanticFunctionRegistry};
 use crate::call::user as call_user;
 use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
 use crate::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
@@ -48,7 +48,7 @@ type VmResult<T> = Result<T, RuntimeError>;
 fn invoke_user_for_end_expr_adapter<'a>(
     name: &'a str,
     argv: Vec<Value>,
-    functions: &'a HashMap<String, UserFunction>,
+    functions: &'a HashMap<String, LegacyUserFunction>,
     vars_ref: &'a [Value],
 ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
     Box::pin(async move {
@@ -106,10 +106,10 @@ runmat_thread_local! {
 }
 
 runmat_thread_local! {
-    static DYNAMIC_USER_FUNCTIONS: RefCell<HashMap<String, UserFunction>> = RefCell::new(HashMap::new());
+    static DYNAMIC_USER_FUNCTIONS: RefCell<HashMap<String, LegacyUserFunction>> = RefCell::new(HashMap::new());
 }
 
-pub fn dynamic_user_functions_snapshot() -> HashMap<String, UserFunction> {
+pub fn dynamic_user_functions_snapshot() -> HashMap<String, LegacyUserFunction> {
     DYNAMIC_USER_FUNCTIONS.with(|slot| slot.borrow().clone())
 }
 
@@ -117,7 +117,7 @@ fn clear_dynamic_user_functions() {
     DYNAMIC_USER_FUNCTIONS.with(|slot| slot.borrow_mut().clear());
 }
 
-fn register_dynamic_user_functions(functions: &HashMap<String, UserFunction>) {
+fn register_dynamic_user_functions(functions: &HashMap<String, LegacyUserFunction>) {
     DYNAMIC_USER_FUNCTIONS.with(|slot| {
         let mut map = slot.borrow_mut();
         for (k, v) in functions {
@@ -209,7 +209,7 @@ fn same_gpu_handle(lhs: &Value, rhs: &Value) -> bool {
 async fn invoke_user_function_value(
     name: &str,
     args: &[Value],
-    functions: &HashMap<String, UserFunction>,
+    functions: &HashMap<String, LegacyUserFunction>,
     semantic_registry: &SemanticFunctionRegistry,
     vars: &mut [Value],
 ) -> Result<Value, RuntimeError> {

@@ -1,4 +1,4 @@
-use crate::bytecode::{EndExpr, UserFunction};
+use crate::bytecode::{EndExpr, LegacyUserFunction};
 use crate::interpreter::errors::mex;
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
@@ -18,7 +18,7 @@ pub type BuiltinEndCallback<'a> = dyn Fn(
 pub type UserEndCallback<'a> = dyn Fn(
         &'a str,
         Vec<Value>,
-        &'a HashMap<String, UserFunction>,
+        &'a HashMap<String, LegacyUserFunction>,
         &'a [Value],
     ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
     + 'a;
@@ -41,7 +41,7 @@ pub fn eval_end_expr_value<'a>(
     expr: &'a EndExpr,
     end_value: f64,
     vars: &'a [Value],
-    functions: &'a HashMap<String, UserFunction>,
+    functions: &'a HashMap<String, LegacyUserFunction>,
     call_builtin: &'a BuiltinEndCallback<'a>,
     call_user: &'a UserEndCallback<'a>,
 ) -> Pin<Box<dyn Future<Output = Result<f64, RuntimeError>> + 'a>> {
@@ -178,7 +178,7 @@ pub async fn resolve_range_end_index<'a>(
     dim_len: usize,
     end_expr: &'a EndExpr,
     vars: &'a [Value],
-    functions: &'a HashMap<String, UserFunction>,
+    functions: &'a HashMap<String, LegacyUserFunction>,
     call_builtin: &'a BuiltinEndCallback<'a>,
     call_user: &'a UserEndCallback<'a>,
 ) -> Result<i64, RuntimeError> {

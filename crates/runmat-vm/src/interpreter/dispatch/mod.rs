@@ -53,7 +53,7 @@ pub enum DispatchHandled {
 pub type InvokeUserForEndExpr<'a> = dyn for<'b> Fn(
         &'b str,
         Vec<Value>,
-        &'b HashMap<String, crate::bytecode::UserFunction>,
+        &'b HashMap<String, crate::bytecode::LegacyUserFunction>,
         &'b [Value],
     ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>>
     + 'a;
@@ -77,7 +77,7 @@ pub type InterpretFunctionCounts<'a> = dyn Fn(
 pub struct DispatchMeta<'a> {
     pub instr: &'a Instr,
     pub var_names: &'a HashMap<usize, String>,
-    pub bytecode_functions: &'a HashMap<String, crate::bytecode::UserFunction>,
+    pub bytecode_functions: &'a HashMap<String, crate::bytecode::LegacyUserFunction>,
     pub semantic_registry: &'a crate::bytecode::SemanticFunctionRegistry,
     pub source_id: Option<runmat_hir::SourceId>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,

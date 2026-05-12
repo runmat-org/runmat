@@ -1,4 +1,4 @@
-use crate::bytecode::{SemanticFunctionRegistry, UserFunction};
+use crate::bytecode::{LegacyUserFunction, SemanticFunctionRegistry};
 use crate::call::user::try_builtin_fallback_single;
 use crate::interpreter::runner::dynamic_user_functions_snapshot;
 use runmat_builtins::{Closure, Value};
@@ -38,7 +38,7 @@ pub enum FevalDispatch {
     InvokeUser {
         name: String,
         args: Vec<Value>,
-        functions: HashMap<String, UserFunction>,
+        functions: HashMap<String, LegacyUserFunction>,
     },
 }
 
@@ -46,8 +46,8 @@ pub async fn execute_feval(
     func_val: Value,
     args: Vec<Value>,
     requested_outputs: usize,
-    context_functions: &HashMap<String, UserFunction>,
-    bytecode_functions: &HashMap<String, UserFunction>,
+    context_functions: &HashMap<String, LegacyUserFunction>,
+    bytecode_functions: &HashMap<String, LegacyUserFunction>,
     semantic_registry: &SemanticFunctionRegistry,
 ) -> Result<FevalDispatch, RuntimeError> {
     match func_val {

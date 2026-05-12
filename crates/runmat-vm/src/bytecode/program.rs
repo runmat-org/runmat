@@ -40,7 +40,7 @@ pub struct ExecutionContext {
     pub call_stack: Vec<CallFrame>,
     pub locals: Vec<Value>,
     pub instruction_pointer: usize,
-    pub functions: std::collections::HashMap<String, UserFunction>,
+    pub functions: std::collections::HashMap<String, LegacyUserFunction>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,7 +167,7 @@ pub struct Bytecode {
     #[serde(default)]
     pub source_id: Option<runmat_hir::SourceId>,
     pub var_count: usize,
-    pub functions: HashMap<String, UserFunction>,
+    pub functions: HashMap<String, LegacyUserFunction>,
     #[serde(default)]
     pub semantic_functions: HashMap<FunctionId, SemanticFunctionBytecode>,
     #[serde(default)]

@@ -2,7 +2,7 @@
 
 use crate::compiler::core::Compiler;
 use crate::compiler::CompileError;
-use crate::functions::UserFunction;
+use crate::functions::LegacyUserFunction;
 use crate::instr::Instr;
 use runmat_builtins::Type;
 use runmat_hir::{
@@ -255,7 +255,7 @@ impl Compiler {
                 }
             }
         }
-        let user_func = UserFunction {
+        let user_func = LegacyUserFunction {
             name: name.to_string(),
             params: params.to_vec(),
             outputs: outputs.to_vec(),
@@ -306,7 +306,7 @@ impl Compiler {
         )];
 
         let synthesized = format!("__anon_{}", self.functions.len());
-        let user_func = UserFunction {
+        let user_func = LegacyUserFunction {
             name: synthesized.clone(),
             params: placeholder_params,
             outputs: vec![output_id],

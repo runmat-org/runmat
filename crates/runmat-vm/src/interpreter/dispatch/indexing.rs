@@ -1,4 +1,4 @@
-use crate::bytecode::{EndExpr, UserFunction};
+use crate::bytecode::{EndExpr, LegacyUserFunction};
 use crate::call::shared::{
     call_object_index_method, object_protocol_index_cell, ObjectIndexKind, ObjectIndexOp,
 };
@@ -164,14 +164,14 @@ fn apply_end_offsets_to_numeric<'a, F>(
     ctx: IndexContext<'a>,
     end_offsets: &'a [(usize, EndExpr)],
     vars: &'a mut [Value],
-    functions: &'a HashMap<String, UserFunction>,
+    functions: &'a HashMap<String, LegacyUserFunction>,
     call_user: F,
 ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, RuntimeError>> + 'a>>
 where
     F: Fn(
             &'a str,
             Vec<Value>,
-            &'a HashMap<String, UserFunction>,
+            &'a HashMap<String, LegacyUserFunction>,
             &'a [Value],
         ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
         + Copy
@@ -195,14 +195,14 @@ async fn resolve_range_end_index<'a, F>(
     dim_len: usize,
     end_expr: &'a EndExpr,
     vars: &'a [Value],
-    functions: &'a HashMap<String, UserFunction>,
+    functions: &'a HashMap<String, LegacyUserFunction>,
     call_user: F,
 ) -> Result<i64, RuntimeError>
 where
     F: Fn(
             &'a str,
             Vec<Value>,
-            &'a HashMap<String, UserFunction>,
+            &'a HashMap<String, LegacyUserFunction>,
             &'a [Value],
         ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
         + Copy
@@ -212,14 +212,14 @@ where
         expr: &'a EndExpr,
         end_value: f64,
         vars: &'a [Value],
-        functions: &'a HashMap<String, UserFunction>,
+        functions: &'a HashMap<String, LegacyUserFunction>,
         call_user: F,
     ) -> Pin<Box<dyn Future<Output = Result<f64, RuntimeError>> + 'a>>
     where
         F: Fn(
                 &'a str,
                 Vec<Value>,
-                &'a HashMap<String, UserFunction>,
+                &'a HashMap<String, LegacyUserFunction>,
                 &'a [Value],
             ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
             + Copy
@@ -446,7 +446,7 @@ pub async fn dispatch_indexing<F>(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
     vars: &mut Vec<Value>,
-    functions: &HashMap<String, UserFunction>,
+    functions: &HashMap<String, LegacyUserFunction>,
     semantic_registry: &crate::bytecode::SemanticFunctionRegistry,
     pc: usize,
     mut clear_value_residency: impl FnMut(&Value),
@@ -456,7 +456,7 @@ where
     F: for<'b> Fn(
             &'b str,
             Vec<Value>,
-            &'b HashMap<String, UserFunction>,
+            &'b HashMap<String, LegacyUserFunction>,
             &'b [Value],
         ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>>
         + Copy,
