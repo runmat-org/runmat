@@ -259,6 +259,28 @@ where
                         )
                     })
                 }
+                EndExpr::SemanticCall(function, name, args) => {
+                    let mut argv: Vec<Value> = Vec::with_capacity(args.len());
+                    for a in args {
+                        let val =
+                            eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
+                        argv.push(Value::Num(val));
+                    }
+                    let v = match runmat_runtime::user_functions::try_call_semantic_function(
+                        function.0, &argv, 1,
+                    )
+                    .await
+                    {
+                        Some(result) => result?,
+                        None => call_user(name, argv, functions, vars).await?,
+                    };
+                    idx_end_expr::value_to_f64(&v).map_err(|_| {
+                        crate::interpreter::errors::mex(
+                            "UnsupportedIndexType",
+                            "end call must return scalar",
+                        )
+                    })
+                }
                 EndExpr::Add(a, b) => Ok(eval_end_expr_value(
                     a, end_value, vars, functions, call_user,
                 )
@@ -355,7 +377,7 @@ fn encode_end_expr_value(expr: &EndExpr) -> Result<Value, RuntimeError> {
         EndExpr::End => Ok(Value::String("end".to_string())),
         EndExpr::Const(v) => Ok(Value::Num(*v)),
         EndExpr::Var(i) => Ok(Value::String(format!("var:{i}"))),
-        EndExpr::Call(name, args) => {
+        EndExpr::Call(name, args) | EndExpr::SemanticCall(_, name, args) => {
             let mut items = vec![
                 Value::String("call".to_string()),
                 Value::String(name.clone()),

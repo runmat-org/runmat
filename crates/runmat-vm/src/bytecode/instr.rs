@@ -19,6 +19,7 @@ pub enum EndExpr {
     Const(f64),
     Var(usize),
     Call(String, Vec<EndExpr>),
+    SemanticCall(FunctionId, String, Vec<EndExpr>),
     Add(Box<EndExpr>, Box<EndExpr>),
     Sub(Box<EndExpr>, Box<EndExpr>),
     Mul(Box<EndExpr>, Box<EndExpr>),

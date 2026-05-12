@@ -474,6 +474,35 @@ fn range_slice_uses_semantic_vm() {
 }
 
 #[test]
+fn end_expression_user_function_call_uses_semantic_identity() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source =
+        "function y = pick(n)\n  y = n;\nend\nx = [10 20 30 40 50 60 70 80]; a = x(pick(end-3));";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile end-expression function call");
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::IndexSliceExpr { end_numeric_exprs, .. }
+                if end_numeric_exprs.iter().any(|(_, expr)| matches!(
+                    expr,
+                    runmat_vm::EndExpr::SemanticCall(_, name, _) if name == "pick"
+                ))
+        )),
+        "end-expression user calls should carry semantic function identity"
+    );
+
+    reset_legacy_user_dispatch_fallback_count();
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
+            && upsert.value.to_string() == "50"
+    }));
+}
+
+#[test]
 fn for_range_loop_uses_semantic_vm_without_rerunning_prefix() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("prefix = 0;")).expect("seed prefix");
@@ -1491,10 +1520,11 @@ fn dynamic_function_handle_multi_output_with_expansion_uses_semantic_vm() {
         "dynamic multi-output expansion call should compile through semantic HIR/MIR/VM"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::CallFevalExpandMultiOutput(_, 2)
-        )),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMultiOutput(_, 2))),
         "dynamic multi-output expansion call should lower to typed feval expansion bytecode"
     );
 

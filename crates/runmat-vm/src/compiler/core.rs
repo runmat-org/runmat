@@ -2567,6 +2567,10 @@ impl Compiler {
     }
 
     fn mir_call_end_expr_internal(&self, call: &MirCall) -> Option<(EndExpr, bool)> {
+        let semantic_function = match &call.callee {
+            MirCallee::Static(HirCallableRef::Function(function)) => Some(*function),
+            _ => None,
+        };
         let name = match &call.callee {
             MirCallee::Static(HirCallableRef::Function(function)) => self
                 .layout
@@ -2589,7 +2593,11 @@ impl Compiler {
             args.push(expr);
             has_end |= arg_has_end;
         }
-        Some((EndExpr::Call(name, args), has_end))
+        let expr = match semantic_function {
+            Some(function) => EndExpr::SemanticCall(function, name, args),
+            None => EndExpr::Call(name, args),
+        };
+        Some((expr, has_end))
     }
 
     fn mir_local_matches_rvalue(
