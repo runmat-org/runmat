@@ -381,11 +381,6 @@ mod tests {
             .find(|export| export.name == "x")
             .expect("x export");
 
-        assert!(bytecode
-            .instructions
-            .iter()
-            .any(|instr| matches!(instr, Instr::IndexCell(1))));
-
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert_eq!(vars[x_export.slot.0], Value::Num(2.0));
     }

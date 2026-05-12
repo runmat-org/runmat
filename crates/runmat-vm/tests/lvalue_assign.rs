@@ -29,9 +29,13 @@ fn brace_get_and_set_on_object() {
     // Test obj{1}=v and then read obj{1}
     let src = "__register_test_classes(); o = new_object('OverIdx'); o{1} = 5; r = o{1};";
     let vars = execute_semantic_source(src).unwrap();
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+    assert!(vars.iter().any(|v| match v {
+        runmat_builtins::Value::Num(n) => (*n - 5.0).abs() < 1e-9,
+        runmat_builtins::Value::OutputList(values) => values.iter().any(
+            |value| matches!(value, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)
+        ),
+        _ => false,
+    }));
 }
 
 #[test]

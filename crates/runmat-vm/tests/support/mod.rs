@@ -2,7 +2,7 @@
 
 use futures::executor::block_on;
 use runmat_builtins::Value;
-use runmat_hir::{LegacyHirProgram as HirProgram, LoweringContext, SemanticError};
+use runmat_hir::LoweringContext;
 use runmat_runtime::RuntimeError;
 
 const EXEC_STACK_BYTES: usize = 32 * 1024 * 1024;
@@ -20,24 +20,6 @@ where
         Ok(result) => Ok(result),
         Err(_) => Err(RuntimeError::new("test thread panicked")),
     }
-}
-
-#[allow(dead_code)]
-pub fn execute(program: &HirProgram) -> Result<Vec<Value>, RuntimeError> {
-    let program = program.clone();
-    run_with_stack(move || {
-        let bc = runmat_vm::bytecode::compile::compile_legacy(
-            &program,
-            &std::collections::HashMap::new(),
-        )
-        .map_err(RuntimeError::from)?;
-        block_on(runmat_vm::interpret(&bc))
-    })?
-}
-
-#[allow(dead_code)]
-pub fn lower(program: &runmat_parser::Program) -> Result<HirProgram, SemanticError> {
-    runmat_hir::lower(program, &LoweringContext::empty()).map(|result| result.hir)
 }
 
 pub fn compile_semantic_source(source: &str) -> Result<runmat_vm::Bytecode, RuntimeError> {
