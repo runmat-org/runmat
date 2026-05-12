@@ -70,13 +70,13 @@ fn run_immediate<F: Future>(mut future: Pin<Box<F>>) -> Result<F::Output> {
 }
 
 struct RuntimeContext {
-    functions: std::collections::HashMap<String, runmat_vm::UserFunction>,
+    functions: std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
     semantic_registry: SemanticFunctionRegistry,
 }
 
 impl RuntimeContext {
     fn new(
-        functions: std::collections::HashMap<String, runmat_vm::UserFunction>,
+        functions: std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
         semantic_registry: SemanticFunctionRegistry,
     ) -> Self {
         Self {
@@ -125,9 +125,9 @@ fn declare_host_call_in_module(module: &mut JITModule) -> FuncId {
 
 /// Execute a user-defined function with access to global variables using the VM interpreter
 fn execute_user_function_isolated(
-    function_def: &runmat_vm::UserFunction,
+    function_def: &runmat_vm::LegacyUserFunction,
     args: &[Value],
-    all_functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
+    all_functions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
 ) -> Result<Value> {
     let mut functions = all_functions.clone();
     functions.insert(function_def.name.clone(), function_def.clone());
@@ -411,7 +411,7 @@ impl TurbineEngine {
         &mut self,
         hash: u64,
         vars: &mut [Value],
-        functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
+        functions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
     ) -> Result<i32> {
         self.execute_compiled_with_function_products(
             hash,
@@ -425,7 +425,7 @@ impl TurbineEngine {
         &mut self,
         hash: u64,
         vars: &mut [Value],
-        functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
+        functions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
         semantic_registry: &SemanticFunctionRegistry,
     ) -> Result<i32> {
         let func = self

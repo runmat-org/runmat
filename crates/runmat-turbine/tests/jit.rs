@@ -986,7 +986,7 @@ fn test_jit_user_function_fallback() {
     let mut functions = HashMap::new();
     functions.insert(
         "my_double".to_string(),
-        runmat_vm::UserFunction {
+        runmat_vm::LegacyUserFunction {
             name: "my_double".to_string(),
             params: vec![runmat_hir::VarId(0)],
             outputs: vec![runmat_hir::VarId(1)],
@@ -1083,7 +1083,7 @@ fn test_jit_function_variable_preservation() {
     let mut functions = HashMap::new();
     functions.insert(
         "add_globals".to_string(),
-        runmat_vm::UserFunction {
+        runmat_vm::LegacyUserFunction {
             name: "add_globals".to_string(),
             params: vec![],
             outputs: vec![runmat_hir::VarId(2)],
@@ -1162,7 +1162,7 @@ fn test_jit_mixed_execution_patterns() {
     let mut functions = HashMap::new();
     functions.insert(
         "square".to_string(),
-        runmat_vm::UserFunction {
+        runmat_vm::LegacyUserFunction {
             name: "square".to_string(),
             params: vec![runmat_hir::VarId(0)],
             outputs: vec![runmat_hir::VarId(1)],
@@ -1299,7 +1299,7 @@ fn test_jit_engine_statistics_with_functions() {
     let mut functions = HashMap::new();
     functions.insert(
         "noop".to_string(),
-        runmat_vm::UserFunction {
+        runmat_vm::LegacyUserFunction {
             name: "noop".to_string(),
             params: vec![],
             outputs: vec![],
@@ -1342,7 +1342,7 @@ fn test_jit_simple_function_compilation() {
     let mut functions = HashMap::new();
     functions.insert(
         "double".to_string(),
-        runmat_vm::UserFunction {
+        runmat_vm::LegacyUserFunction {
             name: "double".to_string(),
             params: vec![runmat_hir::VarId(0)],
             outputs: vec![runmat_hir::VarId(1)],
@@ -1432,7 +1432,7 @@ fn test_jit_nested_function_calls_compilation() {
 
     functions.insert(
         "add".to_string(),
-        runmat_vm::UserFunction {
+        runmat_vm::LegacyUserFunction {
             name: "add".to_string(),
             params: vec![runmat_hir::VarId(0), runmat_hir::VarId(1)],
             outputs: vec![runmat_hir::VarId(2)],
@@ -1468,7 +1468,7 @@ fn test_jit_nested_function_calls_compilation() {
 
     functions.insert(
         "multiply_and_add".to_string(),
-        runmat_vm::UserFunction {
+        runmat_vm::LegacyUserFunction {
             name: "multiply_and_add".to_string(),
             params: vec![runmat_hir::VarId(3)],
             outputs: vec![runmat_hir::VarId(4)],
@@ -1578,7 +1578,7 @@ fn test_jit_function_parameter_validation() {
     let mut functions = HashMap::new();
     functions.insert(
         "add_two".to_string(),
-        runmat_vm::UserFunction {
+        runmat_vm::LegacyUserFunction {
             name: "add_two".to_string(),
             params: vec![runmat_hir::VarId(0), runmat_hir::VarId(1)],
             outputs: vec![runmat_hir::VarId(2)],
@@ -1676,7 +1676,7 @@ fn test_jit_function_variable_isolation() {
     let mut functions = HashMap::new();
     functions.insert(
         "isolate_test".to_string(),
-        runmat_vm::UserFunction {
+        runmat_vm::LegacyUserFunction {
             name: "isolate_test".to_string(),
             params: vec![runmat_hir::VarId(0)],
             outputs: vec![runmat_hir::VarId(1)],
@@ -1760,7 +1760,7 @@ fn test_jit_function_compilation_performance() {
     let mut functions = HashMap::new();
     functions.insert(
         "compute_intensive".to_string(),
-        runmat_vm::UserFunction {
+        runmat_vm::LegacyUserFunction {
             name: "compute_intensive".to_string(),
             params: vec![runmat_hir::VarId(0)],
             outputs: vec![runmat_hir::VarId(1)],
@@ -1889,7 +1889,7 @@ fn test_jit_function_error_handling() {
     let mut functions = HashMap::new();
     functions.insert(
         "simple".to_string(),
-        runmat_vm::UserFunction {
+        runmat_vm::LegacyUserFunction {
             name: "simple".to_string(),
             params: vec![runmat_hir::VarId(0)],
             outputs: vec![runmat_hir::VarId(1)],

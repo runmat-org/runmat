@@ -14,7 +14,7 @@ use std::collections::{BTreeSet, HashMap};
 /// Context for compilation containing related parameters
 struct CompileContext<'a> {
     vars_ptr: Value,
-    function_definitions: &'a HashMap<String, runmat_vm::UserFunction>,
+    function_definitions: &'a HashMap<String, runmat_vm::LegacyUserFunction>,
     module: &'a mut JITModule,
     runmat_call_user_function_id: FuncId,
 }
@@ -205,7 +205,7 @@ impl BytecodeCompiler {
         instructions: &[Instr],
         func: &mut codegen::ir::Function,
         _var_count: usize,
-        function_definitions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
+        function_definitions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
         module: &mut JITModule,
         runmat_call_user_function_id: FuncId,
     ) -> Result<()> {
@@ -736,7 +736,7 @@ impl BytecodeCompiler {
         runmat_call_user_function_id: FuncId,
         func_name: &str,
         args: &[Value],
-        function_definitions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
+        function_definitions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
     ) -> Result<Value> {
         // Look up the function definition
         let function_def = function_definitions
