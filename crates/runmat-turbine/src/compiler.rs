@@ -8,13 +8,14 @@ use cranelift::prelude::*;
 use cranelift_codegen::ir::ValueDef;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
-use runmat_vm::Instr;
+use runmat_vm::{Instr, SemanticFunctionRegistry};
 use std::collections::{BTreeSet, HashMap};
 
 /// Context for compilation containing related parameters
 struct CompileContext<'a> {
     vars_ptr: Value,
     function_definitions: &'a HashMap<String, runmat_vm::LegacyUserFunction>,
+    semantic_registry: &'a SemanticFunctionRegistry,
     module: &'a mut JITModule,
     runmat_call_user_function_id: FuncId,
     runmat_call_semantic_function_id: FuncId,
@@ -207,6 +208,7 @@ impl BytecodeCompiler {
         func: &mut codegen::ir::Function,
         _var_count: usize,
         function_definitions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
+        semantic_registry: &SemanticFunctionRegistry,
         module: &mut JITModule,
         runmat_call_user_function_id: FuncId,
         runmat_call_semantic_function_id: FuncId,
@@ -241,6 +243,7 @@ impl BytecodeCompiler {
         let mut ctx = CompileContext {
             vars_ptr,
             function_definitions,
+            semantic_registry,
             module,
             runmat_call_user_function_id,
             runmat_call_semantic_function_id,
@@ -590,6 +593,7 @@ impl BytecodeCompiler {
                             func_name,
                             &args,
                             ctx.function_definitions,
+                            ctx.semantic_registry,
                         )?;
                         local_stack.push(result);
                     }
@@ -751,20 +755,19 @@ impl BytecodeCompiler {
         func_name: &str,
         args: &[Value],
         function_definitions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
+        semantic_registry: &SemanticFunctionRegistry,
     ) -> Result<Value> {
-        // Look up the function definition
-        let function_def = function_definitions
-            .get(func_name)
-            .ok_or_else(|| execution_error(format!("Unknown function: {func_name}")))?;
-
-        // Validate argument count
-        if args.len() != function_def.params.len() {
-            return Err(execution_error(format!(
-                "Function {} expects {} arguments, got {}",
-                func_name,
-                function_def.params.len(),
-                args.len()
-            )));
+        if let Some(function_def) = function_definitions.get(func_name) {
+            if args.len() != function_def.params.len() {
+                return Err(execution_error(format!(
+                    "Function {} expects {} arguments, got {}",
+                    func_name,
+                    function_def.params.len(),
+                    args.len()
+                )));
+            }
+        } else if semantic_registry.resolve_name(func_name).is_none() {
+            return Err(execution_error(format!("Unknown function: {func_name}")));
         }
 
         // For JIT compilation of user-defined functions, we need to call a runtime function

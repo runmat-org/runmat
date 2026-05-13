@@ -354,6 +354,7 @@ impl TurbineEngine {
             &mut func,
             bytecode.var_count,
             &bytecode.functions,
+            &bytecode.semantic_registry(),
             &mut self.module,
             self.runmat_call_user_function_id,
             self.runmat_call_semantic_function_id,
