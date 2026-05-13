@@ -133,12 +133,12 @@ export function CompareProductsTable() {
                   Feature
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
-                  <div className="text-sm font-semibold text-foreground">RunMat</div>
-                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Essential runtime features</div>
+                  <div className="text-sm font-semibold text-foreground">Runtime</div>
+                  <div className="text-xs font-normal text-muted-foreground mt-0.5">GPU-accelerated math runtime</div>
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
-                  <div className="text-sm font-semibold text-foreground">Cloud</div>
-                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Cloud-based solution</div>
+                  <div className="text-sm font-semibold text-foreground">App</div>
+                  <div className="text-xs font-normal text-muted-foreground mt-0.5">High performance computing platform</div>
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
                   <div className="text-sm font-semibold text-foreground">Enterprise</div>

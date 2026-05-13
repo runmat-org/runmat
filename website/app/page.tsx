@@ -229,7 +229,7 @@ export default function HomePage() {
               See your math in 3D
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              Render millions of points straight from a GPU tensor. 2D and 3D plots run on the same compute chain as your math, in the same runtime. The platform&apos;s agent has its own camera and can rotate, zoom, and inspect plots while you work on something else.
+              Render millions of points straight from GPU memory. 2D and 3D plots run on the same compute chain as your math, so data does not need to be copied between systems while you visualize it.
             </p>
           </div>
           <div className="mx-auto max-w-3xl">
@@ -351,11 +351,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
-              The fastest runtime for your math
+              Blazing fast runtime for math
             </h2>
-            {/* VERIFY: confirm benchmark numbers (150-180x Octave, 10x NumPy, 3.8x PyTorch) are current and approved for public copy before deploy */}
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-7">
-              RunMat runs 150-180x faster than GNU Octave, up to 10x faster than NumPy, and up to 3.8x faster than PyTorch on GPU image pipelines. The runtime fuses sequential operations into fewer GPU steps and keeps your arrays on-device between them.
+              RunMat automatically promotes tensor operations to GPUs where it helps. Fusion merges sequential operations into fewer GPU steps; residency keeps your arrays on-device between steps. That means your code runs on GPUs automatically where they&apos;re available, without you having to decide in your code what to run on what.
             </p>
           </div>
 
