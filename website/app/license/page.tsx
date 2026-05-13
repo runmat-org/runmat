@@ -1,12 +1,13 @@
 import { Metadata } from "next";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { CheckCircle, AlertCircle, HelpCircle, Mail } from "lucide-react";
+import { CheckCircle, Code, Sparkles, Mail } from "lucide-react";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "RunMat License",
-  description: "RunMat is licensed under the MIT License with Attribution Requirements and Commercial Scientific Software Company Copyleft Provisions. See runmat.com/license for the full license text.",
+  title: "RunMat License — MIT, Open Source",
+  description:
+    "The RunMat runtime is open source under the MIT License — the same license used by Julia, VS Code, TypeScript, and Bun. Free to use, modify, and redistribute for any purpose.",
   alternates: { canonical: "https://runmat.com/license" },
   openGraph: {
     url: "https://runmat.com/license",
@@ -20,9 +21,9 @@ const jsonLd = {
       "@type": "WebPage",
       "@id": "https://runmat.com/license#webpage",
       url: "https://runmat.com/license",
-      name: "RunMat License",
+      name: "RunMat License — MIT, Open Source",
       description:
-        "RunMat is licensed under the MIT License with Attribution Requirements and Commercial Scientific Software Company Copyleft Provisions. Free for everyone with clear terms.",
+        "The RunMat runtime is open source under the MIT License. Free for everyone — individuals, academics, and companies of any size — with no attribution requirements or field-of-use restrictions.",
       inLanguage: "en",
       isPartOf: { "@id": "https://runmat.com/#website" },
       author: { "@id": "https://runmat.com/#organization" },
@@ -37,42 +38,74 @@ const jsonLd = {
       mainEntity: [
         {
           "@type": "Question",
+          name: "Is RunMat open source?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Yes. The RunMat runtime is licensed under the MIT License, which is approved by the Open Source Initiative (OSI). It is the same license used by Julia, VS Code, TypeScript, Bun, and Node.js.",
+          },
+        },
+        {
+          "@type": "Question",
           name: "Can I use RunMat for free?",
           acceptedAnswer: {
             "@type": "Answer",
-            text: "Yes! RunMat is completely free for individual researchers and scientists, academic institutions and educational organizations, students for learning and coursework, most commercial companies and startups, open source projects, and government agencies and non-profits.",
+            text: "Yes. The MIT License lets anyone use RunMat for any purpose — individuals, researchers, students, startups, large enterprises, and government organizations. There are no fees, no usage limits, and no field-of-use restrictions.",
           },
         },
         {
           "@type": "Question",
-          name: "What does attribution required mean?",
+          name: "Can I use RunMat in a commercial product?",
           acceptedAnswer: {
             "@type": "Answer",
-            text: "Any distribution or modification of RunMat must credit 'RunMat by Dystr'. This includes startup messages or about dialogs, documentation and README files, package names or project titles, and web interfaces showing 'Powered by RunMat by Dystr'.",
+            text: "Yes. The MIT License explicitly permits commercial use. You can embed RunMat in proprietary software, ship it inside paid products, integrate it into internal tools, or use it as a dependency in any commercial context. Your own code that uses RunMat remains your own.",
           },
         },
         {
           "@type": "Question",
-          name: "What are the special rules for scientific software companies?",
+          name: "Can I fork RunMat or modify it?",
           acceptedAnswer: {
             "@type": "Answer",
-            text: "Companies whose primary business involves developing, licensing, or selling scientific computing software (like MathWorks, Ansys, COMSOL, etc.) must distribute any RunMat modifications as open source under the same license. This does NOT apply to companies using RunMat without modification, companies whose primary business is not scientific computing software, internal modifications not distributed to third parties, or academic institutions.",
+            text: "Yes. You can fork, modify, redistribute, and sublicense RunMat. The only requirement is that you preserve the MIT copyright notice in source files. There are no attribution requirements in startup messages, documentation, or user interfaces.",
           },
         },
         {
           "@type": "Question",
-          name: "Can I create proprietary software that uses RunMat?",
+          name: "What about the Dystr AI assistant — is that open source?",
           acceptedAnswer: {
             "@type": "Answer",
-            text: "Yes! Most users can create proprietary software that uses or embeds RunMat. The license only requires that if you distribute or modify RunMat itself, you provide attribution to 'RunMat by Dystr', include the license notice, and share any modifications to RunMat itself if you're a scientific software company. Your own code that calls RunMat functions remains proprietary.",
+            text: "No. The Dystr AI assistant and Dystr Cloud are commercial products built on top of the open-source RunMat runtime. This is a standard open-core model, similar to VS Code (open source) plus Pylance and GitHub Copilot (commercial). See runmat.com/pricing for details.",
           },
         },
         {
           "@type": "Question",
-          name: "How does this compare to other open source licenses?",
+          name: "Do I need to credit RunMat?",
           acceptedAnswer: {
             "@type": "Answer",
-            text: "RunMat's license is based on the MIT License with two additional requirements: Attribution (similar to BSD licenses, ensures credit is maintained) and Targeted copyleft (only applies to large scientific software companies, ensuring community contributions). For most users, it's as permissive as MIT.",
+            text: "Beyond preserving the copyright notice in source files (a standard MIT requirement), no. We appreciate attribution in your README or about page, but it is not legally required.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Is the MIT License OSI-approved?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Yes. The MIT License is one of the original licenses approved by the Open Source Initiative and is on every major enterprise legal team's pre-approved license list. This means RunMat can be adopted at organizations that require formally OSI-approved open-source software.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Will the license ever change?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "We have no plans to change the license of the RunMat runtime away from MIT. Past releases will always remain available under the MIT terms they were originally published under, regardless of any future changes.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Is 'RunMat' a trademark?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Yes. 'RunMat' is a trademark of Dystr, Inc. The MIT License covers the source code but does not grant rights to the RunMat name or logo. You can fork the code freely; please don't call your fork 'RunMat'. For trademark questions, contact legal@dystr.com.",
           },
         },
       ],
@@ -90,7 +123,7 @@ export default function LicensePage() {
         }}
       />
       <div className="container mx-auto max-w-4xl px-4 md:px-6 py-16 md:py-24 lg:py-32">
-        
+
         {/* Header */}
         <div className="mb-12">
           <Badge variant="secondary" className="mb-4">Legal</Badge>
@@ -98,8 +131,9 @@ export default function LicensePage() {
             RunMat License
           </h1>
           <p className="text-[0.938rem] text-foreground leading-relaxed">
-            RunMat is free and open source software with clear, fair licensing terms. 
-            This page explains what you can and cannot do with RunMat.
+            The RunMat runtime is open source under the <strong>MIT License</strong> —
+            the same license used by Julia, VS Code, TypeScript, and Bun.
+            Free to use, modify, and redistribute for any purpose.
           </p>
         </div>
 
@@ -108,35 +142,35 @@ export default function LicensePage() {
           <Card className="border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/50 shadow-sm">
             <CardHeader className="text-center pb-3">
               <CheckCircle className="h-8 w-8 mx-auto mb-2 text-green-600 dark:text-green-400" />
-              <CardTitle className="text-lg text-foreground dark:text-green-100 font-semibold">Free for Most Uses</CardTitle>
+              <CardTitle className="text-lg text-foreground dark:text-green-100 font-semibold">Open Source (MIT)</CardTitle>
             </CardHeader>
             <CardContent className="text-center">
               <p className="text-sm text-foreground dark:text-green-200 font-medium">
-                Individuals, researchers, students, and most companies can use RunMat freely
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-orange-300 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/50 shadow-sm">
-            <CardHeader className="text-center pb-3">
-              <AlertCircle className="h-8 w-8 mx-auto mb-2 text-orange-600 dark:text-orange-400" />
-              <CardTitle className="text-lg text-foreground dark:text-orange-100 font-semibold">Attribution Required</CardTitle>
-            </CardHeader>
-            <CardContent className="text-center">
-              <p className="text-sm text-foreground dark:text-orange-200 font-medium">
-                Must credit &ldquo;RunMat by Dystr&rdquo; in distributions and derivative works
+                Free for everyone — individuals, academics, and companies of any size
               </p>
             </CardContent>
           </Card>
 
           <Card className="bg-card border-border">
             <CardHeader className="text-center pb-3">
-              <HelpCircle className="h-8 w-8 mx-auto mb-2 text-[hsl(var(--brand))]" />
-              <CardTitle className="text-lg text-foreground font-semibold">Special Rules</CardTitle>
+              <Code className="h-8 w-8 mx-auto mb-2 text-[hsl(var(--brand))]" />
+              <CardTitle className="text-lg text-foreground font-semibold">No Restrictions</CardTitle>
             </CardHeader>
             <CardContent className="text-center">
               <p className="text-sm text-foreground font-medium">
-                Commercial scientific software companies must keep modifications open source
+                Use commercially, modify, redistribute. No attribution display required.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-card border-border">
+            <CardHeader className="text-center pb-3">
+              <Sparkles className="h-8 w-8 mx-auto mb-2 text-[hsl(var(--brand))]" />
+              <CardTitle className="text-lg text-foreground font-semibold">AI Assistant Separate</CardTitle>
+            </CardHeader>
+            <CardContent className="text-center">
+              <p className="text-sm text-foreground font-medium">
+                The Dystr AI assistant is a commercial product — like VS Code + Copilot
               </p>
             </CardContent>
           </Card>
@@ -147,8 +181,31 @@ export default function LicensePage() {
           <h2 className="text-xl sm:text-2xl font-bold mb-8 text-foreground">
             Frequently Asked Questions
           </h2>
-          
+
           <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg font-semibold text-foreground">
+                  Is RunMat open source?
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-foreground">
+                  <strong>Yes.</strong> The RunMat runtime is licensed under the MIT License,
+                  which is approved by the{" "}
+                  <Link
+                    href="https://opensource.org/license/mit"
+                    className="underline"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open Source Initiative
+                  </Link>
+                  . It is the same license used by Julia, VS Code, TypeScript, Bun, and Node.js.
+                </p>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg font-semibold text-foreground">
@@ -157,37 +214,18 @@ export default function LicensePage() {
               </CardHeader>
               <CardContent>
                 <p className="text-foreground mb-3">
-                  <strong>Yes!</strong> RunMat is completely free for:
+                  <strong>Yes.</strong> The MIT License lets anyone use RunMat for any purpose:
                 </p>
                 <ul className="list-disc list-inside space-y-1 text-foreground/80 ml-4">
-                  <li>Individual researchers and scientists</li>
+                  <li>Individual researchers, scientists, and engineers</li>
                   <li>Academic institutions and educational organizations</li>
                   <li>Students for learning and coursework</li>
-                  <li>Most commercial companies and startups</li>
-                  <li>Open source projects</li>
+                  <li>Companies of any size, including direct competitors</li>
+                  <li>Open source projects and their maintainers</li>
                   <li>Government agencies and non-profits</li>
                 </ul>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg font-semibold text-foreground">
-                  What does &quot;attribution required&quot; mean?
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-foreground mb-3">
-                  Any distribution or modification of RunMat must credit <strong>&quot;RunMat by Dystr&quot;</strong>. This includes:
-                </p>
-                <ul className="list-disc list-inside space-y-1 text-foreground/80 ml-4">
-                  <li>Startup messages or about dialogs</li>
-                  <li>Documentation and README files</li>
-                  <li>Package names or project titles</li>
-                  <li>Web interfaces showing &quot;Powered by RunMat by Dystr&quot;</li>
-                </ul>
                 <p className="text-foreground/90 mt-3">
-                  This ensures Dystr receives appropriate credit for creating RunMat.
+                  There are no fees, no usage limits, and no field-of-use restrictions.
                 </p>
               </CardContent>
             </Card>
@@ -195,44 +233,16 @@ export default function LicensePage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg font-semibold text-foreground">
-                  What are the special rules for scientific software companies?
+                  Can I use RunMat in a commercial product?
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-foreground mb-3">
-                  Companies whose <strong>primary business</strong> involves developing, licensing, or selling scientific computing software 
-                  (like MathWorks, Ansys, COMSOL, etc.) must distribute any RunMat modifications as open source under the same license.
-                </p>
-                <p className="text-foreground mb-3">
-                  <strong>This does NOT apply to:</strong>
-                </p>
-                <ul className="list-disc list-inside space-y-1 text-foreground/80 ml-4">
-                  <li>Companies using RunMat without modification</li>
-                  <li>Companies whose primary business is not scientific computing software</li>
-                  <li>Internal modifications not distributed to third parties</li>
-                  <li>Academic institutions or research organizations</li>
-                </ul>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg font-semibold text-foreground">
-                  Can I create proprietary software that uses RunMat?
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-foreground mb-3">
-                  <strong>Yes!</strong> Most users can create proprietary software that uses or embeds RunMat. 
-                  The license only requires that if you distribute or modify RunMat itself, you must:
-                </p>
-                <ul className="list-disc list-inside space-y-1 text-foreground/80 ml-4">
-                  <li>You provide attribution to &quot;RunMat by Dystr&quot;</li>
-                  <li>You include the license notice</li>
-                  <li>Any modifications to RunMat itself are shared (if you&apos;re a scientific software company)</li>
-                </ul>
-                <p className="text-foreground/90 mt-3">
-                  Your own code that calls RunMat functions remains proprietary.
+                <p className="text-foreground">
+                  <strong>Yes.</strong> The MIT License explicitly permits commercial use.
+                  You can embed RunMat in proprietary software, ship it inside paid products,
+                  integrate it into internal tools, or use it as a dependency in any commercial
+                  context. Your own code that uses RunMat remains your own — RunMat does not
+                  impose copyleft on derivative works.
                 </p>
               </CardContent>
             </Card>
@@ -240,20 +250,15 @@ export default function LicensePage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg font-semibold text-foreground">
-                  How does this compare to other open source licenses?
+                  Can I fork RunMat or modify it?
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-foreground mb-3">
-                  RunMat&apos;s license is based on the MIT License with two additional requirements:
-                </p>
-                <ul className="list-disc list-inside space-y-1 text-foreground/80 ml-4">
-                  <li><strong>Attribution:</strong> Similar to BSD licenses, ensures credit is maintained</li>
-                  <li><strong>Targeted copyleft:</strong> Only applies to large scientific software companies, ensuring community contributions</li>
-                </ul>
-                <p className="text-foreground/90 mt-3">
-                  For most users, it&apos;s as permissive as MIT. For the few companies it affects, 
-                  it encourages open source contribution rather than proprietary appropriation.
+                <p className="text-foreground">
+                  <strong>Yes.</strong> You can fork, modify, redistribute, and sublicense RunMat.
+                  The only requirement is that you preserve the MIT copyright notice in source files.
+                  There are no attribution requirements in startup messages, documentation, or user
+                  interfaces.
                 </p>
               </CardContent>
             </Card>
@@ -261,20 +266,95 @@ export default function LicensePage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg font-semibold text-foreground">
-                  I&apos;m still not sure if my use case is allowed. What should I do?
+                  What about the Dystr AI assistant — is that open source?
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-foreground/90 mb-4">
-                  When in doubt, reach out! We&apos;re happy to clarify licensing questions and work with you 
-                  to ensure your use case is properly covered.
+                <p className="text-foreground mb-3">
+                  <strong>No.</strong> The Dystr AI assistant and Dystr Cloud are commercial
+                  products built on top of the open-source RunMat runtime.
                 </p>
-                <div className="flex items-center space-x-2 text-[hsl(var(--brand))]">
-                  <Mail className="h-4 w-4" />
-                  <Link href="mailto:legal@dystr.com" className="hover:underline">
+                <p className="text-foreground mb-3">
+                  This is a standard open-core model, similar to VS Code (open source under MIT)
+                  paired with Pylance and GitHub Copilot (commercial). The runtime is free forever;
+                  the AI assistant is a paid Dystr product.
+                </p>
+                <p className="text-foreground/90">
+                  See{" "}
+                  <Link href="/pricing" className="underline">
+                    runmat.com/pricing
+                  </Link>{" "}
+                  for details on the AI assistant.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg font-semibold text-foreground">
+                  Do I need to credit RunMat?
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-foreground">
+                  Beyond preserving the copyright notice in source files (a standard MIT requirement),
+                  <strong> no</strong>. We appreciate attribution in your README or about page,
+                  but it is not legally required.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg font-semibold text-foreground">
+                  Is the MIT License OSI-approved?
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-foreground">
+                  <strong>Yes.</strong> The MIT License is one of the original licenses approved by
+                  the Open Source Initiative and is on every major enterprise legal team&apos;s
+                  pre-approved license list. RunMat can be adopted at organizations that require
+                  formally OSI-approved open-source software.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg font-semibold text-foreground">
+                  Will the license ever change?
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-foreground">
+                  We have no plans to change the license of the RunMat runtime away from MIT.
+                  Past releases will always remain available under the MIT terms they were
+                  originally published under, regardless of any future changes.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg font-semibold text-foreground">
+                  Is &quot;RunMat&quot; a trademark?
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-foreground mb-3">
+                  Yes. <strong>&quot;RunMat&quot;</strong> is a trademark of Dystr, Inc.
+                  The MIT License covers the source code but does not grant rights to the RunMat
+                  name or logo.
+                </p>
+                <p className="text-foreground/90">
+                  You can fork the code freely; please don&apos;t call your fork &quot;RunMat&quot;.
+                  For trademark questions, contact{" "}
+                  <Link href="mailto:legal@dystr.com" className="underline">
                     legal@dystr.com
                   </Link>
-                </div>
+                  .
+                </p>
               </CardContent>
             </Card>
           </div>
@@ -283,43 +363,19 @@ export default function LicensePage() {
         {/* Full License Text */}
         <section className="mb-12">
           <h2 className="text-xl sm:text-2xl font-bold mb-8 text-foreground">
-            Full License Text         
+            Full License Text
           </h2>
-          
+
           <Card className="p-0">
             <CardContent className="p-6">
               <div className="font-mono text-sm text-foreground/90 whitespace-pre-line leading-relaxed">
-{`# License
+{`MIT License
 
-RunMat is licensed under the **MIT License** with **Attribution Requirements** and **Commercial Scientific Software Company Copyleft** Provisions.
-
-## MIT License with Additional Terms
-
-Copyright (c) 2025 Dystr Inc. and RunMat contributors
+Copyright (c) 2024-2026 Dystr, Inc. and RunMat contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
-### Attribution Requirement
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. Any distribution, fork, modification, or derivative work of this Software must maintain attribution to "RunMat by Dystr" in a prominent location visible to end users. This includes but is not limited to:
-
-1. **Startup messages** or **about dialogs** displaying "RunMat by Dystr"
-2. **Documentation** and **README files** crediting "RunMat by Dystr"  
-3. **Package names** or **project titles** indicating the RunMat origin
-4. **Web interfaces** showing "Powered by RunMat by Dystr"
-
-### Commercial Scientific Software Company Copyleft
-
-Any entity whose **primary business purpose** involves the development, licensing, or sale of scientific computing software, engineering simulation software, mathematical computing environments, or technical computing platforms (including but not limited to companies like MathWorks, Ansys, COMSOL Multiphysics, Dassault Systèmes, Autodesk, PTC, Siemens Digital Industries Software, Altair, and similar organizations) that creates a fork, derivative work, or modification of this Software **MUST** distribute their modified version under the same license terms as this license, making their modifications available as open source.
-
-This copyleft provision does **NOT** apply to:
-- Individual researchers, academic institutions, or educational organizations
-- Companies using RunMat as a dependency without modification
-- Companies whose primary business is not scientific/technical computing software
-- Internal modifications not distributed to third parties
-- Other open source projects and their maintainers
-
-### Disclaimer
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`}
               </div>
@@ -332,10 +388,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
           <Card className="bg-card border-border">
             <CardContent className="p-6 text-center">
               <h3 className="text-lg font-semibold mb-3 text-foreground">
-                Need Legal Clarification?
+                Questions about commercial products or trademarks?
               </h3>
               <p className="text-[0.938rem] text-foreground mb-4">
-                Our legal team is happy to help clarify licensing questions or discuss commercial licensing options.
+                The MIT License covers the runtime. For questions about the Dystr AI assistant,
+                Dystr Cloud, enterprise agreements, or trademark use, get in touch.
               </p>
               <p className="text-xs text-foreground mb-4">
                 New to MATLAB? Read the primer{" "}
@@ -346,8 +403,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
               </p>
               <div className="flex items-center justify-center space-x-2">
                 <Mail className="h-4 w-4 text-[hsl(var(--brand))]" />
-                <Link 
-                  href="mailto:legal@dystr.com" 
+                <Link
+                  href="mailto:legal@dystr.com"
                   className="text-[hsl(var(--brand))] hover:underline font-medium"
                 >
                   legal@dystr.com

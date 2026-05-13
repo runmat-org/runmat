@@ -29,7 +29,9 @@ const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
     features: [
       { label: "GPU accelerated plotting", href: "#compare-plotting" },
       "Plot, code and variable version history",
+      "Project sharing and team workspaces",
       { label: "100 MB storage", href: "#compare-storage" },
+      "Limited LLM tokens included",
       "Community support",
     ],
     ctaLabel: "Start free",
@@ -41,6 +43,7 @@ const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
     features: [
       { label: "GPU accelerated plotting", href: "#compare-plotting" },
       { label: "Plot, code and variable version history", href: "#compare-versioning" },
+      "Project sharing and team workspaces",
       { label: "10 GB storage", href: "#compare-storage" },
       { label: "$10/mo LLM tokens included", href: "#compare-llm" },
     ],

@@ -226,10 +226,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
-              See your math in 3D
+              GPU accelerated plotting
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              Render millions of points straight from GPU memory. 2D and 3D plots run on the same compute chain as your math, so data does not need to be copied between systems while you visualize it.
+              Render millions of points straight from a GPU tensor. 2D and 3D plots run on the same compute chain as your math, in the same runtime. The platform&apos;s agent has its own camera and can rotate, zoom, and inspect plots while you work on something else.
             </p>
           </div>
           <div className="mx-auto max-w-3xl">
@@ -275,7 +275,6 @@ export default function HomePage() {
               The agent runs your code, inspects workspace variables, and reads 3D plot data. You review every change as a diff before it lands.
             </p>
           </div>
-          {/* TODO: replace placeholder wave-simulation video with a proper agent demo recording when ready */}
           <div className="mx-auto max-w-3xl mb-8">
             <div className="rounded-lg border border-border overflow-hidden elevated-panel">
               <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-lg overflow-hidden">
@@ -284,10 +283,10 @@ export default function HomePage() {
                   muted
                   loop
                   playsInline
-                  poster="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp"
-                  aria-label="RunMat agent exploration demo (placeholder)"
+                  poster="https://web.runmatstatic.com/video/posters/runmat-agent-demo-speaker.webp"
+                  aria-label="RunMat agent exploring a speaker interference pattern in 3D — opens the sandbox"
                 >
-                  <source src="https://web.runmatstatic.com/video/runmat-wave-simulation.mp4" type="video/mp4" />
+                  <source src="https://web.runmatstatic.com/video/runmat-agent-demo-speaker.mp4" type="video/mp4" />
                 </LazyVideo>
               </Link>
             </div>
@@ -307,11 +306,6 @@ export default function HomePage() {
               <h3 className="text-lg font-semibold text-foreground">Every change is reviewable</h3>
               <p className="text-[0.938rem] text-foreground mt-1">Edits are presented as diffs. Accept or reject each change. Conversations are stored as searchable project files.</p>
             </div>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
-            <Link href="/sandbox" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
-              Try it in the sandbox
-            </Link>
           </div>
         </div>
       </section>
@@ -351,10 +345,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
-              Blazing fast runtime for math
+              The fastest runtime for your math
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-7">
-              RunMat automatically promotes tensor operations to GPUs where it helps. Fusion merges sequential operations into fewer GPU steps; residency keeps your arrays on-device between steps. That means your code runs on GPUs automatically where they&apos;re available, without you having to decide in your code what to run on what.
+              RunMat runs 150-180x faster than GNU Octave, up to 10x faster than NumPy, and up to 3.8x faster than PyTorch on GPU image pipelines. The runtime fuses sequential operations into fewer GPU steps and keeps your arrays on-device between them.
             </p>
           </div>
 
