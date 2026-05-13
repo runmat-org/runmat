@@ -348,7 +348,7 @@ export default function HomePage() {
               The fastest runtime for your math
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-7">
-              RunMat runs 150-180x faster than GNU Octave, up to 10x faster than NumPy, and up to 3.8x faster than PyTorch on GPU image pipelines. The runtime fuses sequential operations into fewer GPU steps and keeps your arrays on-device between them.
+              In verified benchmarks, RunMat runs 150-180x faster than GNU Octave, up to 10x faster than NumPy, and up to 3.8x faster than PyTorch on GPU image pipelines. The runtime fuses sequential operations into fewer GPU steps and keeps your arrays on-device between them.
             </p>
           </div>
 

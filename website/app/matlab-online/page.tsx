@@ -367,18 +367,27 @@ export default function MatlabOnlinePage() {
               </div>
             </div>
             <div className="rounded-xl border border-border bg-card p-2">
-              <video
-                className="w-full h-auto rounded-lg"
-                autoPlay
-                muted
-                loop
-                playsInline
-                preload="none"
-                poster={heroPosterSrc}
-                aria-label="RunMat MATLAB-style code example demo"
+              <Link
+                href="/sandbox"
+                className="block rounded-lg overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                data-ph-capture-attribute-destination="sandbox"
+                data-ph-capture-attribute-source="matlab-online-hero-video"
+                data-ph-capture-attribute-cta="try-runmat-browser"
+                aria-label="Open the RunMat sandbox"
               >
-                <source src={heroVideoSrc} type="video/mp4" />
-              </video>
+                <video
+                  className="w-full h-auto rounded-lg"
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  preload="none"
+                  poster={heroPosterSrc}
+                  aria-label="RunMat MATLAB-style code example demo"
+                >
+                  <source src={heroVideoSrc} type="video/mp4" />
+                </video>
+              </Link>
             </div>
           </div>
         </div>
