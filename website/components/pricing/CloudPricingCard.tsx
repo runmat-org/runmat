@@ -79,7 +79,7 @@ export default function CloudPricingCard() {
           App
         </Badge>
         <CardTitle className="text-lg font-semibold text-foreground">RunMat App</CardTitle>
-        <p className="text-[0.938rem] text-foreground">High performance computing platform.</p>
+        <p className="text-[0.938rem] text-foreground">High-performance computing platform.</p>
         <p className="text-3xl font-bold text-foreground">{currentTier.price}</p>
       </CardHeader>
       <CardContent className="flex flex-1 min-h-0 flex-col space-y-5">

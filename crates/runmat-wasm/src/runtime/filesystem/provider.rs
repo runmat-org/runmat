@@ -130,7 +130,7 @@ impl JsFsProvider {
             ));
         }
 
-        if flags.create && !exists {
+        if (flags.create || flags.create_new) && !exists {
             exists = true;
             dirty = true;
         }
@@ -166,5 +166,64 @@ impl JsFsProvider {
 }
 
 fn should_load_initial(flags: &OpenFlags) -> bool {
-    flags.read || (!flags.create && !flags.create_new) || flags.append
+    !(flags.truncate && flags.create && !flags.read && !flags.append && !flags.create_new)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flags(configure: impl FnOnce(&mut OpenFlags)) -> OpenFlags {
+        let mut flags = OpenFlags::default();
+        configure(&mut flags);
+        flags
+    }
+
+    #[test]
+    fn create_new_loads_initial_to_check_existence() {
+        let flags = flags(|flags| {
+            flags.write = true;
+            flags.create_new = true;
+        });
+
+        assert!(should_load_initial(&flags));
+    }
+
+    #[test]
+    fn create_without_truncate_loads_initial_to_preserve_existing_data() {
+        let flags = flags(|flags| {
+            flags.write = true;
+            flags.create = true;
+        });
+
+        assert!(should_load_initial(&flags));
+    }
+
+    #[test]
+    fn create_with_truncate_can_skip_initial_when_not_reading_or_appending() {
+        let flags = flags(|flags| {
+            flags.write = true;
+            flags.create = true;
+            flags.truncate = true;
+        });
+
+        assert!(!should_load_initial(&flags));
+    }
+
+    #[test]
+    fn read_or_append_still_loads_initial_with_create_and_truncate() {
+        let read_flags = flags(|flags| {
+            flags.read = true;
+            flags.create = true;
+            flags.truncate = true;
+        });
+        let append_flags = flags(|flags| {
+            flags.append = true;
+            flags.create = true;
+            flags.truncate = true;
+        });
+
+        assert!(should_load_initial(&read_flags));
+        assert!(should_load_initial(&append_flags));
+    }
 }

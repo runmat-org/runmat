@@ -295,11 +295,14 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::{fopen, registry};
     use runmat_builtins::{CellArray, LogicalArray, StringArray, Tensor};
     use runmat_time::system_time_now;
+    use std::future::Future;
     use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
     use std::path::Path;
     use std::path::PathBuf;
+    use std::pin::Pin;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, MutexGuard};
+    use std::task::{Context, Poll};
     use std::time::UNIX_EPOCH;
 
     struct FailingFlushProvider {
@@ -384,6 +387,24 @@ pub(crate) mod tests {
         fail_flush: Arc<AtomicBool>,
     }
 
+    struct YieldOnce {
+        yielded: bool,
+    }
+
+    impl Future for YieldOnce {
+        type Output = ();
+
+        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            if self.yielded {
+                Poll::Ready(())
+            } else {
+                self.yielded = true;
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }
+    }
+
     impl Read for FailingFlushHandle {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             self.inner.read(buf)
@@ -410,7 +431,13 @@ pub(crate) mod tests {
         }
     }
 
-    impl runmat_filesystem::FileHandle for FailingFlushHandle {}
+    #[async_trait::async_trait(?Send)]
+    impl runmat_filesystem::FileHandle for FailingFlushHandle {
+        async fn flush_async(&mut self) -> io::Result<()> {
+            YieldOnce { yielded: false }.await;
+            self.flush()
+        }
+    }
 
     fn unwrap_error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -565,6 +592,33 @@ pub(crate) mod tests {
         let second = run_evaluate(&[Value::Num(fid)]).expect("second fclose");
         assert_eq!(second.status(), 0.0);
         assert!(registry::info_for(fid as i32).is_none());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn concurrent_fclose_only_one_call_closes_file() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let _provider_guard = runmat_filesystem::replace_provider(Arc::new(FailingFlushProvider {
+            fail_flush: Arc::new(AtomicBool::new(false)),
+        }));
+
+        let eval =
+            run_fopen(&[Value::from("yielding_close.txt"), Value::from("w")]).expect("fopen");
+        let fid = eval.as_open().expect("open result").fid as i32;
+        assert!(fid >= 3);
+
+        let (first, second) = futures::executor::block_on(futures::future::join(
+            registry::close_async(fid),
+            registry::close_async(fid),
+        ));
+        let closed_count = [first.expect("first close"), second.expect("second close")]
+            .into_iter()
+            .filter(Option::is_some)
+            .count();
+
+        assert_eq!(closed_count, 1);
+        assert!(registry::info_for(fid).is_none());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

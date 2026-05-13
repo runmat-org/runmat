@@ -138,7 +138,7 @@ export function CompareProductsTable() {
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
                   <div className="text-sm font-semibold text-foreground">App</div>
-                  <div className="text-xs font-normal text-muted-foreground mt-0.5">High performance computing platform</div>
+                  <div className="text-xs font-normal text-muted-foreground mt-0.5">High-performance computing platform</div>
                 </th>
                 <th className="text-center py-4 px-3 w-[20%]">
                   <div className="text-sm font-semibold text-foreground">Enterprise</div>

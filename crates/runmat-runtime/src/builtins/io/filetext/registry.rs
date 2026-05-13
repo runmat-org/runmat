@@ -21,7 +21,8 @@ enum Resource {
 
 struct CloseEntry {
     info: FileInfo,
-    handle: Option<SharedFileHandle>,
+    entry: Entry,
+    file: Option<File>,
 }
 
 struct Entry {
@@ -178,39 +179,40 @@ pub(crate) async fn close_async(fid: i32) -> std::io::Result<Option<FileInfo>> {
         if fid < 3 {
             return Ok(None);
         }
-        let guard = REGISTRY.lock().expect("file registry poisoned");
-        guard.entries.get(&fid).map(|entry| CloseEntry {
-            info: entry.info(),
-            handle: entry.file_handle(),
+        let mut guard = REGISTRY.lock().expect("file registry poisoned");
+        guard.entries.remove(&fid).map(|entry| {
+            let file = entry.file_handle().and_then(|handle| {
+                let mut guard = handle.lock().expect("registered file handle poisoned");
+                guard.take()
+            });
+            CloseEntry {
+                info: entry.info(),
+                entry,
+                file,
+            }
         })
     };
 
-    let Some(entry) = entry else {
+    let Some(mut entry) = entry else {
         return Ok(None);
     };
 
-    if let Some(handle) = entry.handle {
-        let file = {
-            let mut guard = handle.lock().expect("registered file handle poisoned");
-            guard.take()
-        };
-        if let Some(mut file) = file {
-            if let Err(err) = file.flush_async().await {
+    if let Some(mut file) = entry.file.take() {
+        if let Err(err) = file.flush_async().await {
+            if let Some(handle) = entry.entry.file_handle() {
                 let mut guard = handle.lock().expect("registered file handle poisoned");
                 if guard.is_none() {
                     *guard = Some(file);
                 }
-                return Err(err);
             }
+
+            let mut guard = REGISTRY.lock().expect("file registry poisoned");
+            guard.entries.insert(fid, entry.entry);
+            return Err(err);
         }
     }
 
-    let removed = {
-        let mut guard = REGISTRY.lock().expect("file registry poisoned");
-        guard.entries.remove(&fid).map(|entry| entry.info())
-    };
-
-    Ok(removed.or(Some(entry.info)))
+    Ok(Some(entry.info))
 }
 
 #[cfg(test)]
