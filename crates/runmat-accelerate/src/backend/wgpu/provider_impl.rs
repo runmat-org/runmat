@@ -138,9 +138,14 @@ fn validate_compute_binding_counts(
     Ok(())
 }
 
+fn checked_binding_count(operation: &str, left: usize, right: usize) -> Result<usize> {
+    left.checked_add(right)
+        .ok_or_else(|| anyhow!("{}: binding count overflow", operation))
+}
+
 #[cfg(test)]
 mod compute_binding_count_tests {
-    use super::validate_compute_binding_counts;
+    use super::{checked_binding_count, validate_compute_binding_counts};
 
     #[test]
     fn rejects_storage_bindings_over_adapter_stage_limit() {
@@ -167,6 +172,14 @@ mod compute_binding_count_tests {
 
         validate_compute_binding_counts("fused_elementwise", 10, 11, &limits)
             .expect("limits are inclusive");
+    }
+
+    #[test]
+    fn rejects_binding_count_overflow() {
+        let err = checked_binding_count("fused_elementwise", usize::MAX, 1)
+            .expect_err("binding count overflow should be rejected");
+
+        assert!(err.to_string().contains("binding count overflow"));
     }
 }
 
@@ -3623,10 +3636,12 @@ impl WgpuProvider {
         if len > u32::MAX as usize {
             return Err(anyhow!("fused_elementwise: tensor too large"));
         }
+        let storage_bindings = checked_binding_count("fused_elementwise", inputs.len(), 1)?;
+        let total_bindings = checked_binding_count("fused_elementwise", inputs.len(), 2)?;
         validate_compute_binding_counts(
             "fused_elementwise",
-            inputs.len() + 1,
-            inputs.len() + 2,
+            storage_bindings,
+            total_bindings,
             &self.adapter_limits,
         )?;
         let entries = inputs
@@ -3769,7 +3784,7 @@ impl WgpuProvider {
 
         let (mut uniform_state, uniform_buffer) = uniform_state;
 
-        let mut bind_entries = Vec::with_capacity(inputs.len() + 2);
+        let mut bind_entries = Vec::with_capacity(total_bindings);
         for (idx, entry) in entries.iter().enumerate() {
             bind_entries.push(wgpu::BindGroupEntry {
                 binding: idx as u32,
@@ -3781,7 +3796,7 @@ impl WgpuProvider {
             resource: output_buffer.as_ref().as_entire_binding(),
         });
         bind_entries.push(wgpu::BindGroupEntry {
-            binding: (inputs.len() + 1) as u32,
+            binding: storage_bindings as u32,
             resource: uniform_buffer.as_ref().as_entire_binding(),
         });
 
@@ -3907,10 +3922,13 @@ impl WgpuProvider {
         if len > u32::MAX as usize {
             return Err(anyhow!("fused_elementwise_multi: tensor too large"));
         }
+        let storage_bindings =
+            checked_binding_count("fused_elementwise_multi", inputs.len(), num_outputs)?;
+        let total_bindings = checked_binding_count("fused_elementwise_multi", storage_bindings, 1)?;
         validate_compute_binding_counts(
             "fused_elementwise_multi",
-            inputs.len() + num_outputs,
-            inputs.len() + num_outputs + 1,
+            storage_bindings,
+            total_bindings,
             &self.adapter_limits,
         )?;
 
@@ -4046,7 +4064,7 @@ impl WgpuProvider {
             template: bytes,
         };
 
-        let mut bind_entries = Vec::with_capacity(inputs.len() + num_outputs + 1);
+        let mut bind_entries = Vec::with_capacity(total_bindings);
         for (idx, entry) in entries.iter().enumerate() {
             bind_entries.push(wgpu::BindGroupEntry {
                 binding: idx as u32,
@@ -4060,7 +4078,7 @@ impl WgpuProvider {
             });
         }
         bind_entries.push(wgpu::BindGroupEntry {
-            binding: (inputs.len() + num_outputs) as u32,
+            binding: storage_bindings as u32,
             resource: uniform_buffer.as_ref().as_entire_binding(),
         });
 
