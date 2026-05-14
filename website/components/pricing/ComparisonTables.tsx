@@ -28,7 +28,7 @@ const productRows: ProductRow[] = [
   ["File versioning", "x", "check", "check", "Built-in version history on all App tiers; counts toward storage.", "compare-versioning"],
   ["Cloud storage", "x", "100 MB (Hobby); 10 GB (Pro); 100 GB (Team)", "Included", "Cloud storage is shared across your organization. Hobby: 100 MB. Pro: 10 GB included. Team: 100 GB included. Need more? Add storage from your account. Version history counts toward storage.", "compare-storage"],
   ["LLM token credits", "x", "Pro: $10/mo; Team: $50/mo", "Included", "Hosted LLM-enabled features include monthly token credits on paid App tiers.", "compare-llm"],
-  ["SOC 2 compliance", "x", "check", "check", "Designed to SOC 2 standards. Audit planned for Q2 2026."],
+  ["SOC 2 compliance", "x", "check", "check", "Designed to SOC 2 standards. Audit planned for Q4 2026."],
   ["SSO / SAML", "x", "Team plan", "check", "Single sign-on and SAML for enterprise."],
   ["Audit logs", "x", "x", "check", "Audit logging for Enterprise deployment and compliance."],
   ["Air-gapped deployment", "x", "x", "check", "Deploy RunMat Enterprise in isolated networks."],

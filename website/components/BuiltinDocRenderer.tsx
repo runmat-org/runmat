@@ -173,9 +173,9 @@ function renderBlock(block: BuiltinDocBlock): React.ReactNode {
     case 'faq':
       return (
         <div className="grid max-w-5xl gap-4 my-4">
-          {block.items.map((item, i) => (
+          {block.items.map((item) => (
             <details
-              key={i}
+              key={inlineNodesToString(item.question)}
               className="group self-start rounded-xl border border-border/60 bg-card shadow-sm"
             >
               <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-4 text-foreground">
@@ -263,6 +263,18 @@ function renderCodeBlock(block: Extract<BuiltinDocBlock, { type: 'code' }>) {
       </pre>
     </div>
   );
+}
+
+function inlineNodesToString(nodes: BuiltinDocInlineNode[]): string {
+  return nodes.map(n => {
+    switch (n.type) {
+      case 'text': return n.value;
+      case 'code': return n.value;
+      case 'link': return inlineNodesToString(n.label);
+      case 'strong': return inlineNodesToString(n.content);
+      default: return '';
+    }
+  }).join('');
 }
 
 function renderInlineNodes(nodes: BuiltinDocInlineNode[]): React.ReactNode[] {

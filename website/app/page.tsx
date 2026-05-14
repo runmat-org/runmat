@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { SiGithub } from "react-icons/si";
-import { Users, GitBranch, Camera, Lock, Shield, Eye, ClipboardCheck, Cpu, Monitor, HardDrive, FlaskConical, FileDiff, ShieldCheck, History } from "lucide-react";
+import { Users, GitBranch, Camera, Lock, Shield, Eye, ClipboardCheck, Cpu, Monitor, HardDrive, FlaskConical, FileDiff, ShieldCheck, History, Layers } from "lucide-react";
 
 import dynamic from "next/dynamic";
 import Hero from "@/components/Hero";
@@ -592,7 +592,7 @@ export default function HomePage() {
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">Sandboxed agent execution</p>
-                    <p className="text-[0.938rem] text-foreground">Agent commands run in OS-level sandboxes with network off by default and filesystem access scoped to your project.</p>
+                    <p className="text-[0.938rem] text-foreground">Agent commands run inside OS-level sandboxes (Seatbelt on macOS, bubblewrap on Linux), with network denied by default, filesystem scoped to your project, and known secret patterns stripped.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
@@ -602,6 +602,15 @@ export default function HomePage() {
                   <div>
                     <p className="text-xl font-medium text-foreground">Replayable agent sessions</p>
                     <p className="text-[0.938rem] text-foreground">Durable sessions journal each agent step, so teams can replay work for audit and review.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-foreground/10 text-foreground">
+                    <Layers className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <p className="text-xl font-medium text-foreground">Provider-agnostic architecture</p>
+                    <p className="text-[0.938rem] text-foreground">The agent runs on a model-agnostic harness. No lock-in to one provider&apos;s roadmap.</p>
                   </div>
                 </div>
               </div>

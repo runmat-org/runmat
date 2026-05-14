@@ -381,6 +381,15 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
 
     if (pairs.length === 0) return input;
 
+    function escapeJsx(s: string): string {
+      return s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\{/g, '&#123;')
+        .replace(/\}/g, '&#125;');
+    }
+
     const detailsClass = 'group self-start rounded-xl border border-border/60 bg-card shadow-sm';
     const summaryClass = 'flex cursor-pointer list-none items-center justify-between px-6 py-4 text-foreground';
     const chevronClass = 'text-muted-foreground transition-transform duration-200 group-open:rotate-180 ml-2 shrink-0';
@@ -389,7 +398,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const answer = p.answerLines.join('\n').trim();
       return [
         `<details className="${detailsClass}">`,
-        `<summary className="${summaryClass}"><span className="text-sm font-medium">${p.question}</span><span className="${chevronClass}">⌄</span></summary>`,
+        `<summary className="${summaryClass}"><span className="text-sm font-medium">${escapeJsx(p.question)}</span><span className="${chevronClass}">⌄</span></summary>`,
         `<div className="px-6 pb-4 text-sm text-foreground leading-relaxed">`,
         '',
         answer,
