@@ -16,7 +16,7 @@
 
 <p align="center">
   <a href="https://github.com/runmat-org/runmat/actions"><img src="https://img.shields.io/github/actions/workflow/status/runmat-org/runmat/ci.yml?branch=main" alt="Build Status"></a>
-  <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-MIT%20with%20Attribution-blue.svg" alt="License"></a>
+  <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://crates.io/crates/runmat"><img src="https://img.shields.io/crates/v/runmat.svg" alt="Crates.io"></a>
   <a href="https://crates.io/crates/runmat"><img src="https://img.shields.io/crates/d/runmat.svg" alt="Downloads"></a>
   <a href="https://github.com/runmat-org/runmat/stargazers"><img src="https://img.shields.io/github/stars/runmat-org/runmat" alt="GitHub Stars"></a>
@@ -504,25 +504,24 @@ RunMat is open source and contributions are welcome.
 
 ### Connect
 
-- **GitHub Discussions**: [Share ideas and get help](https://github.com/runmat-org/runmat/discussions)  
-- **X (Twitter)**: [@runmat_com](https://x.com/runmat_com) for updates and announcements  
+- **GitHub Discussions**: [Share ideas and get help](https://github.com/runmat-org/runmat/discussions)
+- **X (Twitter)**: [@runmat_com](https://x.com/runmat_com) for updates and announcements
 - **LinkedIn**: [RunMat](https://www.linkedin.com/company/runmat)
 
 ---
 
 ## License
 
-The RunMat runtime is open source and licensed under the **MIT License with Attribution Requirements**. This means:
+The RunMat runtime is open source under the **MIT License** — the same license used by Julia, VS Code, TypeScript, and Bun. This means:
 
-- **Free for everyone** - individuals, academics, most companies  
-- **Open source forever** - the runtime will always be free and open  
-- **Commercial use allowed** - embed in your products freely  
-- **Attribution required** - credit "RunMat by Dystr" in public distributions  
-- **Special provisions** - large scientific software companies must keep modifications open source  
+- **Free for everyone** — individuals, academics, companies of any size
+- **Use anywhere** — commercial products, internal tools, research, teaching
+- **Modify and redistribute freely** — fork it, embed it, ship it
+- **Open source forever** — the runtime will always be free and open
 
-RunMat Cloud and the desktop app are separate products built on top of this open-source runtime. See [runmat.com/pricing](https://runmat.com/pricing) for details.
+The Dystr AI assistant and Dystr Cloud are commercial products built on top of this open-source runtime. See [runmat.com/pricing](https://runmat.com/pricing) for details.
 
-See [LICENSE.md](LICENSE.md) for complete terms or visit [runmat.com/license](https://runmat.com/license) for FAQs.
+See [LICENSE.md](LICENSE.md) for the full license text or visit [runmat.com/license](https://runmat.com/license) for FAQs.
 
 ---
 

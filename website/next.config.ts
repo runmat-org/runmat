@@ -35,6 +35,51 @@ function loadBuiltinAliasRedirects() {
   return redirects;
 }
 
+const missingBuiltinReferenceSlugs = [
+  "__make_cell",
+  "accumarray",
+  "convertStringsToChars",
+  "isprop",
+  "mat2str",
+  "new_object",
+  "notify",
+  "null",
+  "num2cell",
+  "ops",
+  "overidx.and",
+  "overidx.eq",
+  "overidx.gt",
+  "overidx.ldivide",
+  "overidx.lt",
+  "overidx.mtimes",
+  "overidx.or",
+  "overidx.plus",
+  "overidx.rdivide",
+  "overidx.subsasgn",
+  "overidx.subsref",
+  "overidx.times",
+  "overidx.uplus",
+  "overidx.xor",
+  "pkgf.foo",
+  "pkgg.foo",
+  "point.move",
+  "point.origin",
+  "profile",
+  "residue",
+  "set.p",
+  "shape.area",
+  "spdiags",
+  "writecell",
+];
+
+const legacyIgnitionDocSlugs = [
+  "compiler-pipeline",
+  "error-model",
+  "indexing-and-slicing",
+  "instr-set",
+  "oop-semantics",
+];
+
 const nextConfig: NextConfig = {
   // Allow API routes to run on Vercel (no static export)
   images: {
@@ -62,6 +107,16 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       ...loadBuiltinAliasRedirects(),
+      ...missingBuiltinReferenceSlugs.map((slug) => ({
+        source: `/docs/reference/builtins/${slug}`,
+        destination: '/docs/matlab-function-reference',
+        permanent: false,
+      })),
+      ...legacyIgnitionDocSlugs.map((slug) => ({
+        source: `/docs/ignition/${slug}`,
+        destination: '/docs/architecture',
+        permanent: false,
+      })),
       {
         source: '/run-matlab-online',
         destination: '/matlab-online',
@@ -101,6 +156,11 @@ const nextConfig: NextConfig = {
         source: '/docs/elements-of-matlab',
         destination: '/docs/matlab-function-reference',
         permanent: true,
+      },
+      {
+        source: '/docs/package-manager',
+        destination: '/docs/how-it-works',
+        permanent: false,
       },
 
       // Privacy — no dedicated page yet; temporary redirect until one is created

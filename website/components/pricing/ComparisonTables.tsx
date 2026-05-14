@@ -122,7 +122,7 @@ function ExpandableRow({
 export function CompareProductsTable() {
   return (
     <section className="pb-16 md:pb-24">
-      <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground mb-10 text-center">
+      <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground mb-10 text-center">
         Compare products
       </h2>
       <div className="rounded-xl border border-border/60 overflow-hidden">
