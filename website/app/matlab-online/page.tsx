@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SandboxCta } from "@/components/SandboxCta";
+import { FAQAccordion } from "@/components/FAQAccordion";
 import LazyVideo from "@/components/LazyVideo";
 import dynamic from "next/dynamic";
 
@@ -1050,24 +1051,7 @@ export default function MatlabOnlinePage() {
               Common questions about RunMat and MATLAB compatibility.
             </p>
           </div>
-          <div className="mx-auto grid max-w-5xl gap-4 md:grid-cols-2">
-            {faqItems.map(item => (
-              <details
-                key={item.question}
-                className="group self-start rounded-xl border border-border/60 bg-card shadow-sm"
-              >
-                <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-4 text-foreground">
-                  <span className="text-sm font-medium">{item.question}</span>
-                  <span className="text-muted-foreground transition-transform duration-200 group-open:rotate-180">
-                    ⌄
-                  </span>
-                </summary>
-                <div className="px-6 pb-4 text-sm text-foreground">
-                  {item.answerContent ?? item.answer}
-                </div>
-              </details>
-            ))}
-          </div>
+          <FAQAccordion items={faqItems} />
         </div>
       </section>
 

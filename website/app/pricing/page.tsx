@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import CloudPricingCard from "@/components/pricing/CloudPricingCard";
 import { CompareProductsTable } from "@/components/pricing/ComparisonTables";
+import { FAQAccordion } from "@/components/FAQAccordion";
 
 export const metadata: Metadata = {
   title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
@@ -210,24 +211,7 @@ export default function PricingPage() {
               Frequently asked questions
             </h2>
           </div>
-          <div className="mx-auto grid max-w-5xl gap-3 md:grid-cols-2">
-            {pricingFaqItems.map(item => (
-              <details
-                key={item.question}
-                className="group self-start rounded-lg border border-border/60 bg-card shadow-sm"
-              >
-                <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-foreground">
-                  <span className="text-xs font-medium">{item.question}</span>
-                  <span className="text-muted-foreground transition-transform duration-200 group-open:rotate-180 ml-2 shrink-0">
-                    ⌄
-                  </span>
-                </summary>
-                <div className="px-4 pb-3 text-xs text-foreground leading-relaxed">
-                  {item.answerContent ?? item.answer}
-                </div>
-              </details>
-            ))}
-          </div>
+          <FAQAccordion items={pricingFaqItems} size="compact" />
         </section>
 
         <div className="text-center pb-16">

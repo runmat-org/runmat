@@ -327,12 +327,13 @@ function renderValidation(validation: BuiltinDocValidation, title: string): Buil
 }
 
 function renderFaqs(faqs: BuiltinDocFAQ[]): BuiltinDocBlock[] {
-  const blocks: BuiltinDocBlock[] = [];
-  for (const faq of faqs) {
-    blocks.push(createHeading(3, parseInline(faq.question)));
-    blocks.push(...parseMarkdownBlocks(faq.answer));
-  }
-  return blocks;
+  return [{
+    type: 'faq',
+    items: faqs.map(faq => ({
+      question: parseInline(faq.question),
+      answerBlocks: parseMarkdownBlocks(faq.answer),
+    })),
+  }];
 }
 
 function renderSourceSection(source: BuiltinDocLink, title?: string): BuiltinDocBlock | null {

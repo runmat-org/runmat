@@ -348,6 +348,75 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
   } as const;
 
   const merged: MarkdownRendererComponents = { ...defaultComponents, ...components };
+
+  function transformFaqSections(input: string): string {
+    const lines = input.split(/\r?\n/);
+    const isFaqHeading = (l: string) => /^#{2}\s+(FAQ|Frequently\s+asked\s+questions)\s*$/i.test(l.trim());
+    const faqStart = lines.findIndex(isFaqHeading);
+    if (faqStart === -1) return input;
+
+    const sectionEnd = lines.findIndex(
+      (l, i) => i > faqStart && /^#{1,2}\s/.test(l) && !isFaqHeading(l)
+    );
+    const end = sectionEnd === -1 ? lines.length : sectionEnd;
+    const faqLines = lines.slice(faqStart + 1, end);
+
+    type QA = { question: string; answerLines: string[] };
+    const pairs: QA[] = [];
+    let current: QA | null = null;
+
+    for (const line of faqLines) {
+      const boldMatch = line.match(/^\*\*(.+?)\*\*\s*$/);
+      const h3Match = line.match(/^###\s+(.+)$/);
+      if (boldMatch || h3Match) {
+        if (current) pairs.push(current);
+        current = { question: (boldMatch?.[1] ?? h3Match?.[1] ?? '').trim(), answerLines: [] };
+        continue;
+      }
+      if (current) {
+        current.answerLines.push(line);
+      }
+    }
+    if (current) pairs.push(current);
+
+    if (pairs.length === 0) return input;
+
+    const detailsClass = 'group self-start rounded-xl border border-border/60 bg-card shadow-sm';
+    const summaryClass = 'flex cursor-pointer list-none items-center justify-between px-6 py-4 text-foreground';
+    const chevronClass = 'text-muted-foreground transition-transform duration-200 group-open:rotate-180 ml-2 shrink-0';
+
+    const htmlItems = pairs.map(p => {
+      const answer = p.answerLines.join('\n').trim();
+      return [
+        `<details className="${detailsClass}">`,
+        `<summary className="${summaryClass}"><span className="text-sm font-medium">${p.question}</span><span className="${chevronClass}">⌄</span></summary>`,
+        `<div className="px-6 pb-4 text-sm text-foreground leading-relaxed">`,
+        '',
+        answer,
+        '',
+        `</div>`,
+        `</details>`,
+      ].join('\n');
+    });
+
+    const replacement = [
+      lines[faqStart],
+      '',
+      `<div className="grid max-w-5xl gap-4 my-4">`,
+      '',
+      htmlItems.join('\n\n'),
+      '',
+      `</div>`,
+    ];
+
+    const output = [
+      ...lines.slice(0, faqStart),
+      ...replacement,
+      ...lines.slice(end),
+    ];
+    return output.join('\n');
+  }
+
   // Sanitize MDX pitfalls before compiling:
   // - Angle-bracket generics like Vec<ArgSpec> get interpreted as JSX. Wrap them in backticks.
   // - Bare braces like { dims, numeric_count } in prose are treated as JS expressions. Wrap in backticks outside code fences.
@@ -381,7 +450,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     }
     return lines.join('\n');
   }
-  const sanitized = sanitizeMarkdown(source);
+  const sanitized = sanitizeMarkdown(transformFaqSections(source));
   return (
     <MDXRemote
       source={sanitized}
