@@ -139,28 +139,15 @@ There are compiler/VM paths that encode runtime behavior through hard-coded buil
 
 ## Recommended Immediate Slice
 
-Start with MIR indexing/assignment classification.
+The fast semantic-call cleanup slices are complete. The next changes should avoid adding VM heuristics and instead close one of the remaining designed ABI gaps.
 
-Concrete first target:
+Concrete next targets:
 
-- Inspect MIR place/index lowering for assignments.
-- Ensure range/vector/logical paren assignments lower to slice assignment intentionally.
-- Add regression tests that assert semantic bytecode uses slice store paths for `A(2:3) = ...` and similar cases.
-- Remove or narrow the VM `StoreIndex` fallback logic added to reinterpret tensor-valued indices.
+- Define the output-list ABI Turbine needs before compiling `CallSemanticFunctionMulti` / expanded call instructions.
+- Keep the centralized legacy fallback only for unresolved/external callback identities that are not present in a semantic registry.
+- Start object/index descriptor design before replacing the remaining `subsref` / `subsasgn` protocol assembly paths.
 
-This directly addresses the most common band-aid pattern from the recent work.
-
-## Follow-Up Slice
-
-After indexing assignment classification, target remaining hard-coded function-handle and dynamic-call dispatch names.
-
-Concrete next target:
-
-- Keep `CreateFunctionHandle` as the typed function-handle lowering path and remove remaining legacy string-era assumptions around handle targets.
-- Replace remaining `feval` string-era fallback paths with explicit dynamic-call lowering and resolver facts.
-- Preserve semantic closure behavior and existing function-handle ratchets.
-
-This is narrower than object `subsref` / `subsasgn` and should reduce compiler/runtime string coupling without requiring a full object protocol rewrite.
+Avoid spending more time on scalar/range assignment band-aids: semantic MIR/bytecode now lowers common range, vector, logical, cell, and member store-back cases through typed slice/index instructions, and `StoreIndex` is narrowed to scalar indices.
 
 ## Semantic Compiler Design Work
 
@@ -196,6 +183,8 @@ Current state:
 - Compiler-produced `feval('name', ...)` callees for local/session semantic functions now bind to `CreateSemanticFunctionHandle` before reaching runtime `feval`, including multi-output and expanded-argument forms.
 - `cellfun` and `arrayfun` string callback literals for local/session semantic functions now bind to `CreateSemanticFunctionHandle` bytecode before reaching runtime builtins.
 - Legacy named user-call bytecode dispatch now checks the semantic registry before builtin fallback or the centralized named legacy fallback.
+- Turbine direct `CallSemanticFunction` bytecode now compiles through a semantic host callback by `FunctionId` instead of falling back to the interpreter.
+- Turbine named `CallFunction(name)` bytecode now resolves the active `SemanticFunctionRegistry` at compile time and lowers semantic-known names directly by `FunctionId`, before considering legacy-shaped callback definitions.
 - Multi-output `feval` legacy user fallback is centralized behind one dispatch helper instead of duplicated in direct and expanded `feval` bytecode handlers.
 - Named legacy user fallback preparation and compilation is centralized behind crate-private VM dispatch helpers; Turbine now enters through `execute_legacy_user_function_isolated` instead of destructuring compiled fallback internals.
 - Unresolved/external dynamic user-function callbacks still centralize through crate-private `compile_legacy_named_user_dispatch_fallback`, which wraps a private `compile_legacy_user_dispatch_fallback` over reconstructed `LegacyHirProgram`.
@@ -224,22 +213,22 @@ Current legacy fallback caller inventory:
 - Multi-output `feval` fallback: `handle_feval_user_multi_output` first asks `SemanticFunctionRegistry` / `runmat_runtime::user_functions::try_call_semantic_function`; it falls back only when `FevalDispatch::InvokeUser` carries a name that did not resolve semantically.
 - Named/expanded user-call fallback: `handle_prepared_user_function_call` first checks the semantic registry, then builtin dispatch, then legacy named fallback. Primary MIR lowering emits `CallSemanticFunction*` for semantic function callees; remaining generic `CallFunction*` emissions are in legacy HIR compiler paths or unresolved/name-only dynamic forms.
 - End-expression callback fallback: local/session user-function calls now carry `EndExpr::SemanticCall`; remaining fallback is for unresolved names or values without semantic identity.
-- Turbine external callback fallback: `runmat_call_user_function` invokes semantic functions when the Turbine runtime context registry resolves the name; otherwise it uses `execute_legacy_user_function_isolated` for legacy-shaped callback definitions. This is the concrete external compatibility boundary until Turbine carries semantic function bytecode/identity for every exported callback.
+- Turbine external callback fallback: direct semantic calls and semantic-known named calls lower by `FunctionId`; the remaining `runmat_call_user_function` name callback invokes semantic functions when the Turbine runtime context registry resolves the name, otherwise it uses `execute_legacy_user_function_isolated` for legacy-shaped callback definitions. This is the concrete external compatibility boundary for unresolved/external callback names.
 - Dynamic closure/`feval` unresolved fallback: VM `call::feval::execute_feval` and runtime `feval` resolve embedded closure semantic IDs, semantic function handles, and VM-resolved semantic names before name fallback. Compiler-produced `feval` string callees now bind to semantic handles when the registry knows the function, including multi-output and expanded-argument forms. Remaining unresolved closure/function-handle names still gather or ask name-based user-function maps only when the active semantic resolver cannot resolve them.
 - Runtime callback builtins: `cellfun` and `arrayfun` invoke embedded semantic closures or semantic function handles directly, and runtime string/name-only callback values now ask the active VM semantic resolver before name fallback. Compiler-produced local/session string callbacks are still rewritten to semantic function handles when possible.
 
 Classification:
 
-- Semantic-first, replaceable next: non-primary/legacy consumers that still produce generic `CallFunction*` for semantically known targets, or runtime producers that can be upgraded to semantic handles before crossing the VM/runtime ABI.
+- Semantic-first, replaceable next: runtime producers that can be upgraded to semantic handles before crossing the VM/runtime ABI, plus expanded/multi-output JIT call shapes after the output-list ABI is explicit.
 - Semantic-first, blocked by callable identity shape: runtime-created strings and plain `Value::FunctionHandle(name)` values where no active semantic resolver is installed or the resolver cannot map the name to a stable semantic identity; compiler/session-produced handles now carry `Value::SemanticFunctionHandle` identity.
-- External compatibility boundary: Turbine callbacks whose host context still owns only `LegacyUserFunction` records for some exported functions.
+- External compatibility boundary: Turbine callbacks whose host context still owns only `LegacyUserFunction` records for unresolved/external exported functions.
 - Dead/duplicate raw fallback call sites: none found; the remaining four VM raw fallback calls all sit behind semantic-first checks or the Turbine external boundary.
 
-First implementation slice:
+Completed implementation slices:
 
-- Add a semantic user-function invoker path that can execute a `SemanticFunctionBytecode` by `FunctionId` with captures, args, and requested outputs.
-- Route one dynamic callback site through that path when the callee maps to a semantic function already present in the current bytecode product.
-- Keep the centralized legacy fallback only for unresolved/external dynamic functions until the registry is complete.
+- Added a semantic user-function invoker path that executes `SemanticFunctionBytecode` by `FunctionId` with captures, args, and requested outputs.
+- Routed VM/runtime callback paths and Turbine direct/named call paths through semantic registry identity when the current bytecode product knows the callee.
+- Kept the centralized legacy fallback only for unresolved/external dynamic functions until the registry is complete.
 
 ### 2. Collapse Legacy HIR Compatibility Seams
 
