@@ -466,6 +466,16 @@ fn expected_identifier_reports_offending_token_position() {
 }
 
 #[test]
+fn expected_member_name_reports_offending_token_position() {
+    let src = "x = a.(";
+    let err = parse(src).unwrap_err();
+    assert_eq!(err.message, "expected member name after '.'");
+    assert_eq!(err.position, src.find('(').unwrap());
+    assert_eq!(err.found_token.as_deref(), Some("("));
+    assert_eq!(err.expected.as_deref(), Some("identifier"));
+}
+
+#[test]
 fn invalid_token_produces_error() {
     assert!(parse("1 + $").is_err());
 }

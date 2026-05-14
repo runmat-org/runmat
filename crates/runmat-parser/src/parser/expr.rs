@@ -245,13 +245,24 @@ impl Parser {
                     break;
                 }
                 self.pos += 1;
-                let name_token = match self.next() {
+                let name_token = match self.peek().cloned() {
                     Some(TokenInfo {
                         token: Token::Ident,
                         lexeme,
                         position,
                         end,
-                    }) => (lexeme, position, end),
+                    }) => {
+                        self.pos += 1;
+                        (lexeme, position, end)
+                    }
+                    Some(token) => {
+                        return Err(SyntaxError {
+                            message: "expected member name after '.'".to_string(),
+                            position: token.position,
+                            found_token: Some(token.lexeme),
+                            expected: Some("identifier".to_string()),
+                        })
+                    }
                     _ => {
                         return Err(self
                             .error_with_expected("expected member name after '.'", "identifier"))
