@@ -136,6 +136,25 @@ fn declare_host_semantic_call_in_module(module: &mut JITModule) -> FuncId {
         .expect("Failed to declare runmat_call_semantic_function")
 }
 
+fn declare_host_semantic_call_outputs_in_module(module: &mut JITModule) -> FuncId {
+    let mut sig = module.make_signature();
+    let pointer_type = module.isa().pointer_type();
+    sig.params.push(AbiParam::new(types::I64)); // function id
+    sig.params.push(AbiParam::new(pointer_type)); // args_ptr
+    sig.params.push(AbiParam::new(types::I32)); // args_len
+    sig.params.push(AbiParam::new(types::I32)); // out_count
+    sig.params.push(AbiParam::new(pointer_type)); // results_ptr
+    sig.returns.push(AbiParam::new(types::I32)); // status
+
+    module
+        .declare_function(
+            "runmat_call_semantic_function_outputs",
+            Linkage::Import,
+            &sig,
+        )
+        .expect("Failed to declare runmat_call_semantic_function_outputs")
+}
+
 /// The main JIT compilation engine
 pub struct TurbineEngine {
     module: JITModule,
@@ -146,6 +165,7 @@ pub struct TurbineEngine {
     compiler: BytecodeCompiler,
     runmat_call_user_function_id: FuncId,
     runmat_call_semantic_function_id: FuncId,
+    runmat_call_semantic_function_outputs_id: FuncId,
 }
 
 /// A compiled function ready for execution
@@ -267,6 +287,10 @@ impl TurbineEngine {
             "runmat_call_semantic_function",
             runmat_call_semantic_function as *const u8,
         );
+        builder.symbol(
+            "runmat_call_semantic_function_outputs",
+            runmat_call_semantic_function_outputs as *const u8,
+        );
 
         // Create the JIT module
         let mut module = JITModule::new(builder);
@@ -274,6 +298,8 @@ impl TurbineEngine {
         // Declare the external function on the module using the expert's pattern
         let runmat_call_user_function_id = declare_host_call_in_module(&mut module);
         let runmat_call_semantic_function_id = declare_host_semantic_call_in_module(&mut module);
+        let runmat_call_semantic_function_outputs_id =
+            declare_host_semantic_call_outputs_in_module(&mut module);
 
         let ctx = module.make_context();
 
@@ -286,6 +312,7 @@ impl TurbineEngine {
             compiler: BytecodeCompiler::new(),
             runmat_call_user_function_id,
             runmat_call_semantic_function_id,
+            runmat_call_semantic_function_outputs_id,
         };
 
         info!("Turbine JIT engine initialized successfully for {target_triple}");
@@ -358,6 +385,7 @@ impl TurbineEngine {
             &mut self.module,
             self.runmat_call_user_function_id,
             self.runmat_call_semantic_function_id,
+            self.runmat_call_semantic_function_outputs_id,
         )?;
 
         // Compile to machine code
@@ -703,10 +731,26 @@ impl TurbineEngine {
                     name.hash(&mut hasher);
                     argc.hash(&mut hasher);
                 }
+                Instr::CallFunctionMulti(name, argc, out_count) => {
+                    "CallFunctionMulti".hash(&mut hasher);
+                    name.hash(&mut hasher);
+                    argc.hash(&mut hasher);
+                    out_count.hash(&mut hasher);
+                }
                 Instr::CallSemanticFunction(function, argc) => {
                     "CallSemanticFunction".hash(&mut hasher);
                     function.0.hash(&mut hasher);
                     argc.hash(&mut hasher);
+                }
+                Instr::CallSemanticFunctionMulti(function, argc, out_count) => {
+                    "CallSemanticFunctionMulti".hash(&mut hasher);
+                    function.0.hash(&mut hasher);
+                    argc.hash(&mut hasher);
+                    out_count.hash(&mut hasher);
+                }
+                Instr::Unpack(count) => {
+                    "Unpack".hash(&mut hasher);
+                    count.hash(&mut hasher);
                 }
                 Instr::LoadLocal(offset) => {
                     "LoadLocal".hash(&mut hasher);
@@ -957,6 +1001,92 @@ pub extern "C" fn runmat_call_semantic_function(
 
     unsafe {
         *result_ptr = output_value;
+    }
+
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn runmat_call_semantic_function_outputs(
+    function_id: i64,
+    args_ptr: *const f64,
+    args_len: i32,
+    out_count: i32,
+    results_ptr: *mut f64,
+) -> i32 {
+    if results_ptr.is_null() {
+        error!("Null results pointer passed to runmat_call_semantic_function_outputs");
+        return 1;
+    }
+    if out_count < 0 {
+        error!("Invalid output count passed to runmat_call_semantic_function_outputs");
+        return 1;
+    }
+
+    let args_slice = if args_len > 0 {
+        if args_ptr.is_null() {
+            error!("Null args pointer passed to runmat_call_semantic_function_outputs");
+            return 1;
+        }
+        unsafe { std::slice::from_raw_parts(args_ptr, args_len as usize) }
+    } else {
+        &[]
+    };
+
+    let context = match get_runtime_context() {
+        Some(ctx) => ctx,
+        None => {
+            error!("No runtime context available for semantic function outputs call");
+            return 1;
+        }
+    };
+
+    let function_id = match usize::try_from(function_id) {
+        Ok(function_id) => function_id,
+        Err(_) => {
+            error!("Invalid semantic function id: {function_id}");
+            return 1;
+        }
+    };
+    let args: Vec<Value> = args_slice.iter().map(|value| Value::Num(*value)).collect();
+    let out_count = out_count as usize;
+    let output = run_immediate(Box::pin(runmat_vm::invoke_semantic_function_value(
+        function_id,
+        &args,
+        out_count,
+        &context.semantic_registry,
+    )))
+    .and_then(|result| result.map_err(TurbineError::ExecutionError));
+
+    let outputs = match output {
+        Ok(Value::OutputList(values)) => values,
+        Ok(value) => vec![value],
+        Err(err) => {
+            error!("Semantic function outputs execution failed: {err}");
+            return 1;
+        }
+    };
+
+    for i in 0..out_count {
+        let output_value = match outputs.get(i).cloned().unwrap_or(Value::Num(0.0)) {
+            Value::Num(val) => val,
+            Value::Int(val) => val.to_f64(),
+            Value::Bool(val) => {
+                if val {
+                    1.0
+                } else {
+                    0.0
+                }
+            }
+            other => {
+                error!("Semantic function returned unsupported output value: {other:?}");
+                return 1;
+            }
+        };
+
+        unsafe {
+            *results_ptr.add(i) = output_value;
+        }
     }
 
     0

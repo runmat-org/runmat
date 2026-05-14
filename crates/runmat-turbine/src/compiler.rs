@@ -19,6 +19,7 @@ struct CompileContext<'a> {
     module: &'a mut JITModule,
     runmat_call_user_function_id: FuncId,
     runmat_call_semantic_function_id: FuncId,
+    runmat_call_semantic_function_outputs_id: FuncId,
 }
 
 /// Stack simulation for tracking values during compilation  
@@ -212,6 +213,7 @@ impl BytecodeCompiler {
         module: &mut JITModule,
         runmat_call_user_function_id: FuncId,
         runmat_call_semantic_function_id: FuncId,
+        runmat_call_semantic_function_outputs_id: FuncId,
     ) -> Result<()> {
         let mut builder_context = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_context);
@@ -247,6 +249,7 @@ impl BytecodeCompiler {
             module,
             runmat_call_user_function_id,
             runmat_call_semantic_function_id,
+            runmat_call_semantic_function_outputs_id,
         };
 
         Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, &mut ctx)?;
@@ -623,11 +626,66 @@ impl BytecodeCompiler {
                         )?;
                         local_stack.push(result);
                     }
-                    Instr::CallSemanticFunctionMulti(_, _, _) => {
-                        return Err(execution_error(
-                            "Semantic multi-output function calls are not supported in JIT; use interpreter"
-                                .to_string(),
-                        ));
+                    Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => {
+                        match instructions.get(pc + 1) {
+                            Some(Instr::Unpack(count)) if count == out_count => {}
+                            _ => {
+                                return Err(execution_error(
+                                    "Semantic multi-output JIT calls require a following Unpack",
+                                ))
+                            }
+                        }
+
+                        let mut args = Vec::new();
+                        for _ in 0..*arg_count {
+                            args.push(local_stack.pop()?);
+                        }
+                        args.reverse();
+
+                        let results = Self::call_semantic_function_multi_jit(
+                            builder,
+                            ctx.module,
+                            ctx.runmat_call_semantic_function_outputs_id,
+                            function.0,
+                            &args,
+                            *out_count,
+                        )?;
+                        for result in results {
+                            local_stack.push(result);
+                        }
+                        pc += 1;
+                    }
+                    Instr::CallFunctionMulti(func_name, arg_count, out_count) => {
+                        let Some(function) = ctx.semantic_registry.resolve_name(func_name) else {
+                            return Err(execution_error(
+                                "Legacy multi-output function calls are not supported in JIT; use interpreter",
+                            ));
+                        };
+                        match instructions.get(pc + 1) {
+                            Some(Instr::Unpack(count)) if count == out_count => {}
+                            _ => return Err(execution_error(
+                                "Semantic named multi-output JIT calls require a following Unpack",
+                            )),
+                        }
+
+                        let mut args = Vec::new();
+                        for _ in 0..*arg_count {
+                            args.push(local_stack.pop()?);
+                        }
+                        args.reverse();
+
+                        let results = Self::call_semantic_function_multi_jit(
+                            builder,
+                            ctx.module,
+                            ctx.runmat_call_semantic_function_outputs_id,
+                            function.0,
+                            &args,
+                            *out_count,
+                        )?;
+                        for result in results {
+                            local_stack.push(result);
+                        }
+                        pc += 1;
                     }
                     Instr::LoadLocal(offset) => {
                         // Load from local variable slot
@@ -701,7 +759,6 @@ impl BytecodeCompiler {
                     | Instr::CallFunctionExpandMulti(_, _)
                     | Instr::CallSemanticFunctionExpandMulti(_, _)
                     | Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
-                    | Instr::CallFunctionMulti(_, _, _)
                     | Instr::CallFunctionExpandAt(_, _, _, _)
                     | Instr::Swap
                     | Instr::RegisterImport { .. }
@@ -974,6 +1031,107 @@ impl BytecodeCompiler {
         builder.seal_block(after_block);
 
         Ok(result)
+    }
+
+    fn call_semantic_function_multi_jit(
+        builder: &mut FunctionBuilder,
+        module: &mut JITModule,
+        runmat_call_semantic_function_outputs_id: FuncId,
+        function_id: usize,
+        args: &[Value],
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let args_slot = if !args.is_empty() {
+            let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                StackSlotKind::ExplicitSlot,
+                (args.len() * 8) as u32,
+                8,
+            ));
+            let args_ptr = builder.ins().stack_addr(types::I64, slot, 0);
+
+            for (i, &arg) in args.iter().enumerate() {
+                let offset = builder.ins().iconst(types::I64, (i * 8) as i64);
+                let arg_addr = builder.ins().iadd(args_ptr, offset);
+                builder.ins().store(MemFlags::new(), arg, arg_addr, 0);
+            }
+
+            Some((args_ptr, slot))
+        } else {
+            None
+        };
+
+        let runtime_fn =
+            module.declare_func_in_func(runmat_call_semantic_function_outputs_id, builder.func);
+        let result_slot = builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (out_count.max(1) * 8) as u32,
+            8,
+        ));
+        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
+        let function_id = builder.ins().iconst(types::I64, function_id as i64);
+
+        let call_args = if let Some((args_ptr, _)) = args_slot {
+            vec![
+                function_id,
+                args_ptr,
+                builder.ins().iconst(types::I32, args.len() as i64),
+                builder.ins().iconst(types::I32, out_count as i64),
+                result_ptr,
+            ]
+        } else {
+            vec![
+                function_id,
+                builder.ins().iconst(types::I64, 0),
+                builder.ins().iconst(types::I32, 0),
+                builder.ins().iconst(types::I32, out_count as i64),
+                result_ptr,
+            ]
+        };
+
+        let call = builder.ins().call(runtime_fn, &call_args);
+        let status = builder.inst_results(call)[0];
+        let zero = builder.ins().iconst(types::I32, 0);
+        let is_error = builder.ins().icmp(IntCC::NotEqual, status, zero);
+
+        let error_block = builder.create_block();
+        let success_block = builder.create_block();
+        let after_block = builder.create_block();
+        let result_types = vec![types::F64; out_count];
+
+        builder
+            .ins()
+            .brif(is_error, error_block, &[], success_block, &[]);
+
+        builder.switch_to_block(error_block);
+        let error_results: Vec<_> = (0..out_count)
+            .map(|_| builder.ins().f64const(0.0))
+            .collect();
+        builder.ins().jump(after_block, &error_results);
+
+        builder.switch_to_block(success_block);
+        let mut success_results = Vec::with_capacity(out_count);
+        for i in 0..out_count {
+            let offset = builder.ins().iconst(types::I64, (i * 8) as i64);
+            let value_ptr = builder.ins().iadd(result_ptr, offset);
+            success_results.push(
+                builder
+                    .ins()
+                    .load(types::F64, MemFlags::new(), value_ptr, 0),
+            );
+        }
+        builder.ins().jump(after_block, &success_results);
+
+        builder.switch_to_block(after_block);
+        for ty in result_types {
+            builder.append_block_param(after_block, ty);
+        }
+        let results = builder.block_params(after_block).to_vec();
+
+        builder.seal_block(error_block);
+        builder.seal_block(success_block);
+        builder.seal_block(after_block);
+
+        Ok(results)
     }
 
     fn call_runtime_sub_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
