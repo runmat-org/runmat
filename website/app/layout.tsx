@@ -130,7 +130,7 @@ export default function RootLayout({
                     "@type": "SearchAction",
                     "target": {
                       "@type": "EntryPoint",
-                       "urlTemplate": "https://runmat.com/search?q={search_term_string}"
+                       "urlTemplate": "https://runmat.com/docs/search?q={search_term_string}"
                     },
                     "query-input": "required name=search_term_string"
                   }
