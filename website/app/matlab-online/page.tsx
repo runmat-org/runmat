@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SandboxCta } from "@/components/SandboxCta";
-import { FAQAccordion } from "@/components/FAQAccordion";
+import { FAQAccordion, type FAQItem } from "@/components/FAQAccordion";
 import LazyVideo from "@/components/LazyVideo";
 import dynamic from "next/dynamic";
 
@@ -82,19 +82,22 @@ const heroPosterSrc = "https://web.runmatstatic.com/video/posters/clamp-agent-ru
 const agentVideoSrc = "https://web.runmatstatic.com/video/runmat-agent-demo-speaker.mp4";
 const agentPosterSrc = "https://web.runmatstatic.com/video/posters/runmat-agent-demo-speaker.webp";
 
-const faqItems: { question: string; answer: string; answerContent?: React.ReactNode }[] = [
+const faqItems: FAQItem[] = [
   {
+    id: "mo-same-as-matlab",
     question: "Is RunMat the same as MATLAB?",
     answer:
       "No. RunMat is an independent project with an open-source runtime that executes MATLAB-syntax code. It is not affiliated with or endorsed by MathWorks, the makers of MATLAB.",
   },
   {
+    id: "mo-ai-assistant",
     question: "Does RunMat have an AI assistant?",
     answer:
       "Yes. RunMat ships with a built-in agent in the sandbox. You describe what you want to compute; the agent writes MATLAB-syntax code, runs it on the same GPU-accelerated runtime, reads workspace variables and 2D/3D plot scenes, and iterates. Every change comes back as a diff you can accept or reject.",
   },
   // Reviewer tag: legal/product. MathWorks license and product claims are source-linked in answerContent.
   {
+    id: "mo-mathworks-ai",
     question: "Does MathWorks have an AI assistant?",
     answer:
       "As of May 2026, MathWorks publishes the MATLAB Agentic Toolkit for Claude Code, GitHub Copilot, OpenAI Codex, Gemini CLI, and Sourcegraph Amp. MathWorks lists MATLAB R2020b or later, a supported AI coding agent, and Git as prerequisites, and its product page says the toolkit requires a local MATLAB installation and an AI service subscription. MathWorks' README says MCP servers must be used with MATLAB under the MathWorks Software License Agreement and must not be shared by multiple users; the repository license also limits the software to use with MathWorks products and service offerings.",
@@ -105,6 +108,7 @@ const faqItems: { question: string; answer: string; answerContent?: React.ReactN
     ),
   },
   {
+    id: "mo-agent-vs-toolkit",
     question: "How is RunMat's agent different from the MATLAB Agentic Toolkit?",
     answer:
       "RunMat's runtime is open source under MIT and runs without a MATLAB license. MathWorks documents the Agentic Toolkit as skills plus a MATLAB MCP Core Server connection to a local MATLAB installation and a supported third-party agent. The MCP Core Server exposes five built-in tools for static analysis, code evaluation, file execution, test execution, and toolbox detection; MathWorks also says MCP servers must not be shared by multiple users. RunMat ships the agent and runtime together in the browser, so the agent can inspect RunMat workspace variables, tensor shapes, and plot scenes directly.",
@@ -115,54 +119,64 @@ const faqItems: { question: string; answer: string; answerContent?: React.ReactN
     ),
   },
   {
+    id: "mo-existing-scripts",
     question: "Can I run my existing MATLAB scripts in RunMat?",
     answer:
       "Many MATLAB scripts run without modification, especially those using core language features and common built-in functions. For scripts that use functions RunMat doesn't ship yet, the built-in agent can help adapt the code — running your script, reading the diagnostics, and proposing reviewable edits that replace unsupported calls with supported equivalents. Try your script in the sandbox; if something doesn't run, ask the agent to help adapt it.",
   },
   {
+    id: "mo-free",
     question: "Is RunMat really free?",
     answer:
       "The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. App features like storage, versioning, and project sharing start on the Hobby tier (100 MB). Paid plans add more storage and team features -- see pricing.",
     answerContent: <>The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. App features like storage, versioning, and project sharing start on the Hobby tier (100 MB). Paid plans add more storage and team features -- see <Link href="/pricing" className="underline hover:text-foreground">pricing</Link>.</>,
   },
   {
+    id: "mo-account",
     question: "Do I need to create an account?",
     answer:
       "No. The browser sandbox works immediately without sign-up. Creating a free account unlocks cloud storage (100 MB), file versioning, and project sharing.",
   },
   {
+    id: "mo-offline",
     question: "Does RunMat work offline?",
     answer:
       "Yes. Once the sandbox page loads, it can run code without an internet connection. For full offline use with local file access, use the RunMat CLI today. The desktop app with a full IDE experience is coming soon.",
     answerContent: <>Yes. Once the sandbox page loads, it can run code without an internet connection. For full offline use with local file access, use the <Link href="/docs/cli" className="underline hover:text-foreground">RunMat CLI</Link> today. The desktop app with a full IDE experience is coming soon.</>,
   },
   {
+    id: "mo-browser-how",
     question: "How does RunMat run code in the browser?",
     answer:
       "RunMat compiles to WebAssembly, which runs natively in your browser at near-native speed. For GPU-accelerated operations, it uses WebGPU (available in Chrome, Edge, Safari 18+, and Firefox 139+).",
   },
   {
+    id: "mo-code-private",
     question: "Is my code private?",
     answer:
       "Yes. Code execution happens entirely on your device. Nothing is uploaded to run your script. If you sign in for cloud storage, files sync to RunMat's servers. Using the built-in agent sends context to the configured LLM provider.",
   },
   {
+    id: "mo-gpu",
     question: "Can RunMat use my GPU?",
     answer:
       "Yes, in browsers that support WebGPU (Chrome, Edge, Safari 18+, and Firefox 139+). RunMat automatically offloads eligible operations to the GPU for faster execution.",
   },
   {
+    id: "mo-vs-octave",
     question: "What’s the difference between RunMat and GNU Octave?",
     answer:
       "Both run MATLAB-style syntax, but RunMat is designed for performance (JIT compilation, GPU acceleration) and runs natively in the browser. Octave is a mature desktop application with broader toolbox compatibility but no browser-native execution.",
   },
   {
+    id: "mo-desktop",
     question: "Is there a desktop version?",
     answer:
       "The RunMat desktop app is coming very soon. It will provide the same interface as the browser sandbox with full local file system access. In the meantime, the CLI is available today for local script execution.",
     answerContent: <>The RunMat desktop app is coming very soon. It will provide the same interface as the browser sandbox with full local file system access. In the meantime, the <Link href="/docs/cli" className="underline hover:text-foreground">CLI</Link> is available today for local script execution.</>,
   },
   {
+    id: "mo-plotting",
     question: "Does RunMat support plotting?",
     answer:
       "Yes. RunMat supports 20+ interactive plot types including plot, scatter, hist, histogram, surf, mesh, contour, contourf, imagesc, bar, pie, stem, quiver, area, errorbar, plot3, semilogx, semilogy, and loglog, all GPU-accelerated. 3D surface plots can be rotated, zoomed, and panned directly in the browser.",

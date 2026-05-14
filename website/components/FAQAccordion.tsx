@@ -1,6 +1,7 @@
 import React from "react";
 
 export type FAQItem = {
+  id: string;
   question: string;
   answer: string;
   answerContent?: React.ReactNode;
@@ -22,7 +23,7 @@ export function FAQAccordion({ items, columns = 2, size = "default" }: FAQAccord
     <div className={gridClass}>
       {items.map(item => (
         <details
-          key={item.question}
+          key={item.id}
           className="group self-start rounded-xl border border-border/60 bg-card shadow-sm"
         >
           <summary className={`flex cursor-pointer list-none items-center justify-between text-foreground ${isCompact ? "px-4 py-2.5" : "px-6 py-4"}`}>

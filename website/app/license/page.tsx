@@ -116,6 +116,7 @@ const jsonLd = {
 
 const licenseFaqItems: FAQItem[] = [
   {
+    id: "lic-open-source",
     question: "Is RunMat open source?",
     answer:
       "Yes. The RunMat runtime is licensed under the MIT License, which is approved by the Open Source Initiative. It is the same license used by Julia, VS Code, TypeScript, Bun, and Node.js.",
@@ -131,6 +132,7 @@ const licenseFaqItems: FAQItem[] = [
     ),
   },
   {
+    id: "lic-free-use",
     question: "Can I use RunMat for free?",
     answer:
       "Yes. The MIT License lets anyone use RunMat for any purpose. There are no fees, no usage limits, and no field-of-use restrictions.",
@@ -154,16 +156,19 @@ const licenseFaqItems: FAQItem[] = [
     ),
   },
   {
+    id: "lic-commercial",
     question: "Can I use RunMat in a commercial product?",
     answer:
       "Yes. The MIT License explicitly permits commercial use. You can embed RunMat in proprietary software, ship it inside paid products, integrate it into internal tools, or use it as a dependency in any commercial context. Your own code that uses RunMat remains your own — RunMat does not impose copyleft on derivative works.",
   },
   {
+    id: "lic-fork-modify",
     question: "Can I fork RunMat or modify it?",
     answer:
       "Yes. You can fork, modify, redistribute, and sublicense RunMat. The only requirement is that you preserve the MIT copyright notice in source files. There are no attribution requirements in startup messages, documentation, or user interfaces.",
   },
   {
+    id: "lic-dystr-ai",
     question: "What about the Dystr AI assistant — is that open source?",
     answer:
       "No. The Dystr AI assistant and Dystr Cloud are commercial products built on top of the open-source RunMat runtime. This is a standard open-core model, similar to VS Code (open source) plus Pylance and GitHub Copilot (commercial). See runmat.com/pricing for details.",
@@ -187,21 +192,25 @@ const licenseFaqItems: FAQItem[] = [
     ),
   },
   {
+    id: "lic-credit",
     question: "Do I need to credit RunMat?",
     answer:
       "Beyond preserving the copyright notice in source files (a standard MIT requirement), no. We appreciate attribution in your README or about page, but it is not legally required.",
   },
   {
+    id: "lic-osi-approved",
     question: "Is the MIT License OSI-approved?",
     answer:
       "Yes. The MIT License is one of the original licenses approved by the Open Source Initiative and is on every major enterprise legal team's pre-approved license list. RunMat can be adopted at organizations that require formally OSI-approved open-source software.",
   },
   {
+    id: "lic-change",
     question: "Will the license ever change?",
     answer:
       "We have no plans to change the license of the RunMat runtime away from MIT. Past releases will always remain available under the MIT terms they were originally published under, regardless of any future changes.",
   },
   {
+    id: "lic-trademark",
     question: 'Is "RunMat" a trademark?',
     answer:
       "Yes. \"RunMat\" is a trademark of Dystr, Inc. The MIT License covers the source code but does not grant rights to the RunMat name or logo. You can fork the code freely; please don't call your fork \"RunMat\". For trademark questions, contact legal@dystr.com.",

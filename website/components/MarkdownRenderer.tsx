@@ -351,7 +351,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
 
   function transformFaqSections(input: string): string {
     const lines = input.split(/\r?\n/);
-    const isFaqHeading = (l: string) => /^#{2}\s+(FAQ|Frequently\s+asked\s+questions)\s*$/i.test(l.trim());
+    const isFaqHeading = (l: string) => /^#{2}\s+(FAQs?|Frequently\s+asked\s+questions?)\s*[?:.]?\s*$/i.test(l.trim());
     const faqStart = lines.findIndex(isFaqHeading);
     if (faqStart === -1) return input;
 
@@ -395,13 +395,13 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     const chevronClass = 'text-muted-foreground transition-transform duration-200 group-open:rotate-180 ml-2 shrink-0';
 
     const htmlItems = pairs.map(p => {
-      const answer = p.answerLines.join('\n').trim();
+      const escapedAnswer = escapeJsx(p.answerLines.join('\n').trim());
       return [
         `<details className="${detailsClass}">`,
         `<summary className="${summaryClass}"><span className="text-sm font-medium">${escapeJsx(p.question)}</span><span className="${chevronClass}">⌄</span></summary>`,
         `<div className="px-6 pb-4 text-sm text-foreground leading-relaxed">`,
         '',
-        answer,
+        escapedAnswer,
         '',
         `</div>`,
         `</details>`,

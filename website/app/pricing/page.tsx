@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import CloudPricingCard from "@/components/pricing/CloudPricingCard";
 import { CompareProductsTable } from "@/components/pricing/ComparisonTables";
-import { FAQAccordion } from "@/components/FAQAccordion";
+import { FAQAccordion, type FAQItem } from "@/components/FAQAccordion";
 
 export const metadata: Metadata = {
   title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
@@ -44,42 +44,50 @@ const serverFeatures = [
   "Dedicated support",
 ];
 
-const pricingFaqItems: { question: string; answer: string; answerContent?: React.ReactNode }[] = [
+const pricingFaqItems: FAQItem[] = [
   {
+    id: "pricing-diff",
     question: "What's the difference between RunMat, App, and Enterprise?",
     answer:
       "RunMat is the free, open-source runtime — GPU acceleration, plotting, CLI, and browser sandbox. The desktop app is coming soon. RunMat App adds persistent storage, project sharing, and version history on top, with Hobby, Pro, and Team tiers. RunMat Enterprise is everything in App, deployed on your own infrastructure for air-gapped, compliance-ready environments.",
   },
   {
+    id: "pricing-free",
     question: "Is RunMat really free?",
     answer:
       "Yes. The RunMat runtime is open source and the browser sandbox is free. The desktop app is coming soon and will also be free. RunMat App has a $0 Hobby tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
   },
   {
+    id: "pricing-account",
     question: "Do I need an account to use RunMat?",
     answer:
       "No. The browser sandbox works without an account. The desktop app (coming soon) will also work without one. An account is only required for cloud storage and team features.",
   },
   {
+    id: "pricing-tiers",
     question: "What's included in App Hobby vs Pro vs Team?",
     answer:
       "Hobby: unlimited projects, 100 MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: unlimited projects, SSO / SAML / SCIM, 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
   },
   {
+    id: "pricing-billing",
     question: "How does RunMat App billing work?",
     answer:
       "Pro and Team are monthly subscriptions billed per user (per seat). You can upgrade or change plan from your account. Need more storage? Add space from your account settings.",
   },
   {
+    id: "pricing-enterprise",
     question: "When do I need RunMat Enterprise instead of App?",
     answer:
       "Choose Enterprise when you need on-prem or air-gapped deployment, strict data residency, or SSO and audit compliance that must stay in your environment.",
   },
   {
+    id: "pricing-trial",
     question: "Is there a free trial for Pro or Team?",
     answer: "Start on the Hobby tier and upgrade to Pro or Team from your account when you're ready. No sales call needed.",
   },
   {
+    id: "pricing-contact",
     question: "Who do I contact for Enterprise pricing?",
     answer: "You can sign up for Pro and Team directly from your account. For Enterprise, reach out via our contact page or email team@runmat.com.",
     answerContent: <>You can sign up for Pro and Team directly from your account. For Enterprise, reach out via our <Link href="/contact" className="underline hover:text-foreground">contact page</Link> or email <a href="mailto:team@runmat.com" className="underline hover:text-foreground">team@runmat.com</a>.</>,
