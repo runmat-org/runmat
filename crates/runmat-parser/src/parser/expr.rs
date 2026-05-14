@@ -320,7 +320,7 @@ impl Parser {
             // Meta-class query with controlled qualified name consumption to allow postfix chaining.
             // Consume packages (lowercase-leading) and exactly one Class segment (uppercase-leading), then stop.
             let mut parts: Vec<String> = Vec::new();
-            let first = self.expect_ident().map_err(|e| self.error(&e))?;
+            let first = self.expect_ident_syntax()?;
             let class_consumed = first
                 .chars()
                 .next()
@@ -344,7 +344,7 @@ impl Parser {
                     break;
                 }
                 self.pos += 1;
-                let seg = self.expect_ident().map_err(|e| self.error(&e))?;
+                let seg = self.expect_ident_syntax()?;
                 parts.push(seg);
                 if is_upper {
                     break;
@@ -393,9 +393,9 @@ impl Parser {
                     if self.consume(&Token::LParen) {
                         let mut params = Vec::new();
                         if !self.consume(&Token::RParen) {
-                            params.push(self.expect_ident().map_err(|e| self.error(&e))?);
+                            params.push(self.expect_ident_syntax()?);
                             while self.consume(&Token::Comma) {
-                                params.push(self.expect_ident().map_err(|e| self.error(&e))?);
+                                params.push(self.expect_ident_syntax()?);
                             }
                             if !self.consume(&Token::RParen) {
                                 return Err(self.error_with_expected(
@@ -412,7 +412,7 @@ impl Parser {
                             span,
                         })
                     } else {
-                        let name = self.expect_ident().map_err(|e| self.error(&e))?;
+                        let name = self.expect_ident_syntax()?;
                         let end = self.last_token_end();
                         let span = self.span_from(start, end);
                         Ok(Expr::FuncHandle(name, span))

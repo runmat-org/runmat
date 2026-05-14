@@ -64,7 +64,7 @@ impl Parser {
                     let span = self.span_from(name_token.position, expr.span().end);
                     Ok(Stmt::Assign(name_token.lexeme, expr, false, span))
                 } else if self.is_simple_assignment_ahead() {
-                    let name = self.expect_ident().map_err(|e| self.error(&e))?;
+                    let name = self.expect_ident_syntax()?;
                     let start = self.tokens[self.pos.saturating_sub(1)].position;
                     if !self.consume(&Token::Assign) {
                         return Err(self.error_with_expected("expected assignment operator", "'='"));
@@ -430,6 +430,19 @@ impl Parser {
             }) => Ok(lexeme),
             _ => Err("expected identifier".into()),
         }
+    }
+
+    pub(super) fn expect_ident_syntax(&mut self) -> Result<String, SyntaxError> {
+        let token = self.peek().cloned();
+        self.expect_ident().map_err(|message| SyntaxError {
+            message,
+            position: token
+                .as_ref()
+                .map(|token| token.position)
+                .unwrap_or_else(|| self.input.len()),
+            found_token: token.map(|token| token.lexeme),
+            expected: None,
+        })
     }
 
     pub(super) fn expect_ident_or_tilde(&mut self) -> Result<String, String> {

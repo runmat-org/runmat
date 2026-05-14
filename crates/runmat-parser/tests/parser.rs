@@ -457,6 +457,15 @@ fn unclosed_call_argument_reports_current_token_position() {
 }
 
 #[test]
+fn expected_identifier_reports_offending_token_position() {
+    let src = "?1";
+    let err = parse(src).unwrap_err();
+    assert_eq!(err.message, "expected identifier");
+    assert_eq!(err.position, src.find('1').unwrap());
+    assert_eq!(err.found_token.as_deref(), Some("1"));
+}
+
+#[test]
 fn invalid_token_produces_error() {
     assert!(parse("1 + $").is_err());
 }
