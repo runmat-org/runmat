@@ -599,7 +599,7 @@ export default function HomePage() {
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">Sandboxed agent execution</p>
-                    <p className="text-[0.938rem] text-foreground">Agent commands run inside OS-level sandboxes (Seatbelt on macOS, bubblewrap on Linux). Network is denied by default. Filesystem access is scoped to the project root. Secrets are redacted from the environment before any process runs.</p>
+                    <p className="text-[0.938rem] text-foreground">In default deployments, agent commands run inside OS-level sandboxes (Seatbelt on macOS, bubblewrap on Linux), with network denied by default, filesystem scoped to your project, and known secret patterns stripped from the child process environment. Behavior is profile-driven and configurable per deployment.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
@@ -608,7 +608,7 @@ export default function HomePage() {
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">Replayable agent sessions</p>
-                    <p className="text-[0.938rem] text-foreground">Every agent action is journaled with content hashes. Replay a session to verify exactly what the agent did, step by step. Built for environments where audit trails are mandatory.</p>
+                    <p className="text-[0.938rem] text-foreground">When durable persistence is enabled, agent actions are journaled in append-only order, and artifacts are content-addressed by hash. Replay a session to reconstruct what the agent did, step by step. Designed for environments that need audit trails.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">

@@ -92,20 +92,26 @@ const faqItems: { question: string; answer: string; answerContent?: React.ReactN
     answer:
       "Yes. RunMat ships with a built-in agent in the sandbox. You describe what you want to compute; the agent writes MATLAB-syntax code, runs it on the same GPU-accelerated runtime, reads workspace variables and 2D/3D plot scenes, and iterates. Every change comes back as a diff you can accept or reject.",
   },
+  // Reviewer tag: legal/product. MathWorks license and product claims are source-linked in answerContent.
   {
     question: "Does MathWorks have an AI assistant?",
     answer:
-      "MathWorks ships the MATLAB Agentic Toolkit, which connects an external AI coding agent (Claude Code, GitHub Copilot, OpenAI Codex, Gemini CLI, or Sourcegraph Amp) to a local MATLAB R2020b+ installation via an MCP server. The toolkit does not include the agent or the MATLAB license — both are brought separately. Per the LICENSE, the MCP server is not permitted to be shared across multiple users.",
+      "As of May 2026, MathWorks publishes the MATLAB Agentic Toolkit for Claude Code, GitHub Copilot, OpenAI Codex, Gemini CLI, and Sourcegraph Amp. MathWorks lists MATLAB R2020b or later, a supported AI coding agent, and Git as prerequisites, and its product page says the toolkit requires a local MATLAB installation and an AI service subscription. MathWorks' README says MCP servers must be used with MATLAB under the MathWorks Software License Agreement and must not be shared by multiple users; the repository license also limits the software to use with MathWorks products and service offerings.",
     answerContent: (
       <>
-        MathWorks ships the <Link href="https://github.com/matlab/matlab-agentic-toolkit" target="_blank" rel="noopener nofollow" className="underline hover:text-foreground">MATLAB Agentic Toolkit</Link>, which connects an external AI coding agent (Claude Code, GitHub Copilot, OpenAI Codex, Gemini CLI, or Sourcegraph Amp) to a local MATLAB R2020b+ installation via an MCP server. The toolkit does not include the agent or the MATLAB license — both are brought separately. Per the LICENSE, the MCP server is not permitted to be shared across multiple users.
+        As of May 2026, MathWorks publishes the <Link href="https://github.com/matlab/matlab-agentic-toolkit" target="_blank" rel="noopener nofollow" className="underline hover:text-foreground">MATLAB Agentic Toolkit</Link> for Claude Code, GitHub Copilot, OpenAI Codex, Gemini CLI, and Sourcegraph Amp. MathWorks lists MATLAB R2020b or later, a supported AI coding agent, and Git as prerequisites, and its <Link href="https://www.mathworks.com/products/matlab-agentic-toolkit.html" target="_blank" rel="noopener nofollow" className="underline hover:text-foreground">product page</Link> says the toolkit requires a local MATLAB installation and an AI service subscription. MathWorks&apos; README says MCP servers must be used with MATLAB under the MathWorks Software License Agreement and must not be shared by multiple users; the repository <Link href="https://github.com/matlab/matlab-agentic-toolkit/blob/main/LICENSE.md" target="_blank" rel="noopener nofollow" className="underline hover:text-foreground">license</Link> also limits the software to use with MathWorks products and service offerings.
       </>
     ),
   },
   {
     question: "How is RunMat's agent different from the MATLAB Agentic Toolkit?",
     answer:
-      "RunMat's runtime is open source under MIT and runs without a MATLAB license. The Agentic Toolkit requires paid MATLAB R2020b+ plus a third-party agent connected via MCP, and the MCP only exposes command-window text. Because RunMat ships the agent and runtime together, the agent reads workspace variables, tensor shapes, and plot scenes directly. RunMat is also browser-first and cloud-shareable; the Agentic Toolkit is local-only, and its license restricts the MCP server to a single user.",
+      "RunMat's runtime is open source under MIT and runs without a MATLAB license. MathWorks documents the Agentic Toolkit as skills plus a MATLAB MCP Core Server connection to a local MATLAB installation and a supported third-party agent. The MCP Core Server exposes five built-in tools for static analysis, code evaluation, file execution, test execution, and toolbox detection; MathWorks also says MCP servers must not be shared by multiple users. RunMat ships the agent and runtime together in the browser, so the agent can inspect RunMat workspace variables, tensor shapes, and plot scenes directly.",
+    answerContent: (
+      <>
+        RunMat&apos;s runtime is open source under MIT and runs without a MATLAB license. MathWorks documents the Agentic Toolkit as skills plus a <Link href="https://github.com/matlab/matlab-mcp-core-server#tools" target="_blank" rel="noopener nofollow" className="underline hover:text-foreground">MATLAB MCP Core Server</Link> connection to a local MATLAB installation and a supported third-party agent. The MCP Core Server exposes five built-in tools for static analysis, code evaluation, file execution, test execution, and toolbox detection; MathWorks also says MCP servers must not be shared by multiple users. RunMat ships the agent and runtime together in the browser, so the agent can inspect RunMat workspace variables, tensor shapes, and plot scenes directly.
+      </>
+    ),
   },
   {
     question: "Can I run my existing MATLAB scripts in RunMat?",
