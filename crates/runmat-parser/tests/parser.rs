@@ -447,6 +447,16 @@ fn missing_closing_paren_produces_error() {
 }
 
 #[test]
+fn unclosed_call_argument_reports_current_token_position() {
+    let src = "t0 = sqrt(2h0/g);";
+    let err = parse(src).unwrap_err();
+    assert_eq!(err.message, "expected ')' after arguments");
+    assert_eq!(err.position, src.find("h0").unwrap());
+    assert_eq!(err.found_token.as_deref(), Some("h0"));
+    assert_eq!(err.expected.as_deref(), Some("')'"));
+}
+
+#[test]
 fn invalid_token_produces_error() {
     assert!(parse("1 + $").is_err());
 }

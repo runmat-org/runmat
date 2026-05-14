@@ -375,14 +375,19 @@ impl RunMatSession {
                             } else {
                                 self.stats.interpreter_fallback += 1;
                             }
-                            if let Some(runmat_hir::HirStmt::Assign(var_id, _, _, _)) =
-                                hir.body.first()
-                            {
-                                if let Some(name) = id_to_name.get(&var_id.0) {
+                            for instr in &bytecode.instructions {
+                                if let runmat_vm::Instr::StoreVar(var_id) = instr {
+                                    if let Some(name) = id_to_name.get(var_id) {
+                                        assigned_this_execution.insert(name.clone());
+                                    }
+                                }
+                            }
+                            if let Some(var_id) = single_assign_var {
+                                if let Some(name) = id_to_name.get(&var_id) {
                                     assigned_this_execution.insert(name.clone());
                                 }
-                                if var_id.0 < self.variable_array.len() {
-                                    let assignment_value = self.variable_array[var_id.0].clone();
+                                if var_id < self.variable_array.len() {
+                                    let assignment_value = self.variable_array[var_id].clone();
                                     if !is_semicolon_suppressed {
                                         result_value = Some(assignment_value);
                                         if self.verbose {

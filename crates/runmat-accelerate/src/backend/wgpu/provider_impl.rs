@@ -111,6 +111,61 @@ fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
     anyhow::Error::new(err)
 }
 
+fn validate_compute_binding_counts(
+    operation: &str,
+    storage_bindings: usize,
+    total_bindings: usize,
+    limits: &wgpu::Limits,
+) -> Result<()> {
+    let storage_limit = limits.max_storage_buffers_per_shader_stage as usize;
+    ensure!(
+        storage_bindings <= storage_limit,
+        "{}: requires {} storage buffers, but this WebGPU adapter supports {} per shader stage",
+        operation,
+        storage_bindings,
+        storage_limit
+    );
+
+    let binding_limit = limits.max_bindings_per_bind_group as usize;
+    ensure!(
+        total_bindings <= binding_limit,
+        "{}: requires {} bind group entries, but this WebGPU adapter supports {} per bind group",
+        operation,
+        total_bindings,
+        binding_limit
+    );
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod compute_binding_count_tests {
+    use super::validate_compute_binding_counts;
+
+    #[test]
+    fn rejects_storage_bindings_over_adapter_stage_limit() {
+        let mut limits = wgpu::Limits::default();
+        limits.max_storage_buffers_per_shader_stage = 10;
+
+        let err = validate_compute_binding_counts("fused_elementwise_multi", 11, 12, &limits)
+            .expect_err(
+                "storage binding overflow should be rejected before creating a WGPU layout",
+            );
+
+        assert!(err.to_string().contains("requires 11 storage buffers"));
+    }
+
+    #[test]
+    fn accepts_bindings_at_adapter_limits() {
+        let mut limits = wgpu::Limits::default();
+        limits.max_storage_buffers_per_shader_stage = 10;
+        limits.max_bindings_per_bind_group = 11;
+
+        validate_compute_binding_counts("fused_elementwise", 10, 11, &limits)
+            .expect("limits are inclusive");
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct WgpuProviderOptions {
     pub power_preference: wgpu::PowerPreference,
@@ -3564,6 +3619,12 @@ impl WgpuProvider {
         if len > u32::MAX as usize {
             return Err(anyhow!("fused_elementwise: tensor too large"));
         }
+        validate_compute_binding_counts(
+            "fused_elementwise",
+            inputs.len() + 1,
+            inputs.len() + 2,
+            &self.adapter_limits,
+        )?;
         let entries = inputs
             .iter()
             .map(|h| self.get_entry(h))
@@ -3842,6 +3903,12 @@ impl WgpuProvider {
         if len > u32::MAX as usize {
             return Err(anyhow!("fused_elementwise_multi: tensor too large"));
         }
+        validate_compute_binding_counts(
+            "fused_elementwise_multi",
+            inputs.len() + num_outputs,
+            inputs.len() + num_outputs + 1,
+            &self.adapter_limits,
+        )?;
 
         let entries = inputs
             .iter()

@@ -7,6 +7,7 @@ use futures::executor::block_on;
 use runmat_core::RunMatSession;
 use runmat_gc::{gc_test_context, GcConfig};
 use runmat_time::Instant;
+use std::convert::TryInto;
 use std::thread;
 
 #[test]
@@ -60,6 +61,47 @@ fn test_hotspot_compilation_simulation() {
             interp_executions > 0 || _jit_executions > 0,
             "Should have some executions"
         );
+    });
+}
+
+#[test]
+fn exact_stop_time_regression_stays_numeric_after_session_execution() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::with_options(true, false).unwrap();
+        let code = "\
+g = 9.81;
+h0 = 2.0;
+ratio = sqrt(0.8);
+t0 = sqrt(2*h0/g);
+t1 = 2*sqrt(2*(0.8*h0)/g);
+exactStopTime = t0 + t1/(1-ratio)";
+
+        for _ in 0..12 {
+            let result = block_on(engine.execute(code)).unwrap();
+            assert!(result.error.is_none());
+            let value = result.value.as_ref().expect("final assignment emits value");
+            let numeric: f64 = value.try_into().unwrap();
+            assert!(
+                (numeric - 11.458330203035164).abs() < 1e-10,
+                "unexpected result: {numeric}"
+            );
+            let exact_entry = result
+                .workspace
+                .values
+                .iter()
+                .find(|entry| entry.name == "exactStopTime")
+                .expect("workspace includes exactStopTime");
+            let preview = exact_entry
+                .preview
+                .as_ref()
+                .expect("exactStopTime has scalar preview");
+            assert_eq!(preview.values.len(), 1);
+            assert!(
+                (preview.values[0] - 11.458330203035164).abs() < 1e-10,
+                "unexpected workspace preview: {}",
+                preview.values[0]
+            );
+        }
     });
 }
 

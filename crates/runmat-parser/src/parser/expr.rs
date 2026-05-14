@@ -80,7 +80,7 @@ impl Parser {
         Ok(node)
     }
 
-    fn parse_add_sub(&mut self) -> Result<Expr, String> {
+    fn parse_add_sub(&mut self) -> Result<Expr, SyntaxError> {
         let mut node = self.parse_mul_div()?;
         loop {
             if self.in_matrix_expr
@@ -133,7 +133,7 @@ impl Parser {
         Ok(node)
     }
 
-    fn parse_mul_div(&mut self) -> Result<Expr, String> {
+    fn parse_mul_div(&mut self) -> Result<Expr, SyntaxError> {
         let mut node = self.parse_unary()?;
         loop {
             if self.peek_token() == Some(&Token::Ident) && self.pos > 0 {
@@ -165,7 +165,7 @@ impl Parser {
         Ok(node)
     }
 
-    fn parse_pow(&mut self) -> Result<Expr, String> {
+    fn parse_pow(&mut self) -> Result<Expr, SyntaxError> {
         let node = self.parse_postfix()?;
         if let Some(token) = self.peek_token() {
             let op = match token {
@@ -181,7 +181,7 @@ impl Parser {
         }
     }
 
-    fn parse_postfix_with_base(&mut self, mut expr: Expr) -> Result<Expr, String> {
+    fn parse_postfix_with_base(&mut self, mut expr: Expr) -> Result<Expr, SyntaxError> {
         loop {
             if self.consume(&Token::LParen) {
                 let start = expr.span().start;
@@ -192,7 +192,7 @@ impl Parser {
                         args.push(self.parse_expr()?);
                     }
                     if !self.consume(&Token::RParen) {
-                        return Err("expected ')' after arguments".into());
+                        return Err(self.error_with_expected("expected ')' after arguments", "')'"));
                     }
                 }
                 let end = self.last_token_end();
@@ -213,7 +213,7 @@ impl Parser {
                     indices.push(self.parse_expr()?);
                 }
                 if !self.consume(&Token::RBracket) {
-                    return Err("expected ']'".into());
+                    return Err(self.error_with_expected("expected ']'", "']'"));
                 }
                 let end = self.last_token_end();
                 let span = self.span_from(start, end);
@@ -226,7 +226,7 @@ impl Parser {
                     indices.push(self.parse_expr()?);
                 }
                 if !self.consume(&Token::RBrace) {
-                    return Err("expected '}'".into());
+                    return Err(self.error_with_expected("expected '}'", "'}'"));
                 }
                 let end = self.last_token_end();
                 let span = self.span_from(start, end);
@@ -252,7 +252,10 @@ impl Parser {
                         position,
                         end,
                     }) => (lexeme, position, end),
-                    _ => return Err("expected member name after '.'".into()),
+                    _ => {
+                        return Err(self
+                            .error_with_expected("expected member name after '.'", "identifier"))
+                    }
                 };
                 if self.consume(&Token::LParen) {
                     let mut args = Vec::new();
@@ -262,7 +265,10 @@ impl Parser {
                             args.push(self.parse_expr()?);
                         }
                         if !self.consume(&Token::RParen) {
-                            return Err("expected ')' after method arguments".into());
+                            return Err(self.error_with_expected(
+                                "expected ')' after method arguments",
+                                "')'",
+                            ));
                         }
                     }
                     let end = self.last_token_end();
@@ -287,12 +293,12 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_postfix(&mut self) -> Result<Expr, String> {
+    fn parse_postfix(&mut self) -> Result<Expr, SyntaxError> {
         let expr = self.parse_primary()?;
         self.parse_postfix_with_base(expr)
     }
 
-    fn parse_unary(&mut self) -> Result<Expr, String> {
+    fn parse_unary(&mut self) -> Result<Expr, SyntaxError> {
         if self.peek_token() == Some(&Token::Plus) {
             let start = self.tokens[self.pos].position;
             self.pos += 1;
@@ -314,7 +320,7 @@ impl Parser {
             // Meta-class query with controlled qualified name consumption to allow postfix chaining.
             // Consume packages (lowercase-leading) and exactly one Class segment (uppercase-leading), then stop.
             let mut parts: Vec<String> = Vec::new();
-            let first = self.expect_ident()?;
+            let first = self.expect_ident().map_err(|e| self.error(&e))?;
             let class_consumed = first
                 .chars()
                 .next()
@@ -338,7 +344,7 @@ impl Parser {
                     break;
                 }
                 self.pos += 1;
-                let seg = self.expect_ident()?;
+                let seg = self.expect_ident().map_err(|e| self.error(&e))?;
                 parts.push(seg);
                 if is_upper {
                     break;
@@ -353,7 +359,7 @@ impl Parser {
         }
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, String> {
+    fn parse_primary(&mut self) -> Result<Expr, SyntaxError> {
         match self.next() {
             Some(info) => match info.token {
                 Token::Integer | Token::Float => {
@@ -387,17 +393,18 @@ impl Parser {
                     if self.consume(&Token::LParen) {
                         let mut params = Vec::new();
                         if !self.consume(&Token::RParen) {
-                            params.push(self.expect_ident()?);
+                            params.push(self.expect_ident().map_err(|e| self.error(&e))?);
                             while self.consume(&Token::Comma) {
-                                params.push(self.expect_ident()?);
+                                params.push(self.expect_ident().map_err(|e| self.error(&e))?);
                             }
                             if !self.consume(&Token::RParen) {
-                                return Err(
-                                    "expected ')' after anonymous function parameters".into()
-                                );
+                                return Err(self.error_with_expected(
+                                    "expected ')' after anonymous function parameters",
+                                    "')'",
+                                ));
                             }
                         }
-                        let body = self.parse_expr().map_err(|e| e.message)?;
+                        let body = self.parse_expr()?;
                         let span = self.span_from(start, body.span().end);
                         Ok(Expr::AnonFunc {
                             params,
@@ -405,7 +412,7 @@ impl Parser {
                             span,
                         })
                     } else {
-                        let name = self.expect_ident()?;
+                        let name = self.expect_ident().map_err(|e| self.error(&e))?;
                         let end = self.last_token_end();
                         let span = self.span_from(start, end);
                         Ok(Expr::FuncHandle(name, span))
@@ -415,7 +422,9 @@ impl Parser {
                     let start = info.position;
                     let expr = self.parse_expr()?;
                     if !self.consume(&Token::RParen) {
-                        return Err("expected ')' to close parentheses".into());
+                        return Err(
+                            self.error_with_expected("expected ')' to close parentheses", "')'")
+                        );
                     }
                     let end = self.last_token_end();
                     let span = self.span_from(start, end);
@@ -425,7 +434,9 @@ impl Parser {
                     let start = info.position;
                     let matrix = self.parse_matrix()?;
                     if !self.consume(&Token::RBracket) {
-                        return Err("expected ']' to close matrix literal".into());
+                        return Err(
+                            self.error_with_expected("expected ']' to close matrix literal", "']'")
+                        );
                     }
                     let end = self.last_token_end();
                     let span = self.span_from(start, end);
@@ -435,7 +446,9 @@ impl Parser {
                     let start = info.position;
                     let cell = self.parse_cell()?;
                     if !self.consume(&Token::RBrace) {
-                        return Err("expected '}' to close cell literal".into());
+                        return Err(
+                            self.error_with_expected("expected '}' to close cell literal", "'}'")
+                        );
                     }
                     let end = self.last_token_end();
                     let span = self.span_from(start, end);
@@ -445,13 +458,18 @@ impl Parser {
                     let span = self.span_from(info.position, info.end);
                     Ok(Expr::Colon(span))
                 }
-                _ => Err(format!("unexpected token: {:?}", info.token)),
+                _ => Err(SyntaxError {
+                    message: format!("unexpected token: {:?}", info.token),
+                    position: info.position,
+                    found_token: Some(info.lexeme),
+                    expected: None,
+                }),
             },
-            None => Err("unexpected end of input".into()),
+            None => Err(self.error("unexpected end of input")),
         }
     }
 
-    fn parse_matrix(&mut self) -> Result<Expr, String> {
+    fn parse_matrix(&mut self) -> Result<Expr, SyntaxError> {
         self.skip_newlines();
         let mut rows = Vec::new();
         if self.peek_token() == Some(&Token::RBracket) {
@@ -513,15 +531,15 @@ impl Parser {
         Ok(Expr::Tensor(rows, Span::default()))
     }
 
-    fn parse_matrix_expr(&mut self) -> Result<Expr, String> {
+    fn parse_matrix_expr(&mut self) -> Result<Expr, SyntaxError> {
         let prior = self.in_matrix_expr;
         self.in_matrix_expr = true;
-        let expr = self.parse_expr().map_err(|e| e.message);
+        let expr = self.parse_expr();
         self.in_matrix_expr = prior;
         expr
     }
 
-    fn parse_cell(&mut self) -> Result<Expr, String> {
+    fn parse_cell(&mut self) -> Result<Expr, SyntaxError> {
         let mut rows = Vec::new();
         self.skip_newlines();
         if self.peek_token() == Some(&Token::RBrace) {
