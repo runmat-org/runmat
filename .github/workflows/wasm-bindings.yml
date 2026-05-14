@@ -42,6 +42,18 @@ on:
         required: true
         default: dev
         type: string
+      release_channel:
+        description: Publication channel
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
+      version:
+        description: Exact package version for production releases (for example, 0.4.7)
+        required: false
+        type: string
       publish:
         description: Whether to publish to npm
         required: true
@@ -59,10 +71,8 @@ jobs:
   build-and-publish:
     runs-on: ["self-hosted", "linux", "GCP"]
     # Environment-scoped secrets (NPM_TOKEN) require the job to declare the
-    # correct environment.  When triggered by a direct push or workflow_dispatch
-    # the job runs in the Dev environment; when called from release.yml via
-    # workflow_call the caller already has Production in scope and passes the
-    # secret explicitly, so this resolves to Production here as well.
+    # correct environment. Direct dev pushes use Dev; workflow_dispatch and
+    # release.yml workflow_call can select Production via release_channel=prod.
     environment: ${{ inputs.release_channel == 'prod' && 'Production' || 'Dev' }}
     env:
       RUST_BACKTRACE: 1
