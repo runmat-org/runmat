@@ -1027,7 +1027,7 @@ export default function MatlabOnlinePage() {
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">SOC 2 ready</p>
-                    <p className="text-[0.938rem] text-foreground">Built to SOC 2 standards. Audit planned for Q2 2026.</p>
+                    <p className="text-[0.938rem] text-foreground">Built to SOC 2 standards. Audit planned for Q4 2026.</p>
                   </div>
                 </div>
               </div>

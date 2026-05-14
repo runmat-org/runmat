@@ -73,7 +73,7 @@ No installation required. Works in Chrome, Edge, Firefox, and Safari.
 
 When you open the sandbox, you'll see four main areas:
 
-```
+```text
 ┌──────────┬──────────────────────┬──────────────────┐
 │ Sidebar  │       Editor         │  Runtime Panel   │
 │ (Files)  │  (Code + Tabs)       │  (Run, Vars,     │

@@ -33,7 +33,7 @@ export default function Hero() {
             className="group relative rounded-lg border border-border overflow-hidden min-h-[360px] flex items-center justify-center focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             data-ph-capture-attribute-destination="sandbox"
             data-ph-capture-attribute-source="home-hero-video"
-            data-ph-capture-attribute-cta="try-runmat-agent"
+            data-ph-capture-attribute-cta="open-sandbox"
             aria-label="Open the RunMat sandbox"
           >
             <LazyVideo
