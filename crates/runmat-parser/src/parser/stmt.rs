@@ -441,7 +441,7 @@ impl Parser {
                 .map(|token| token.position)
                 .unwrap_or_else(|| self.input.len()),
             found_token: token.map(|token| token.lexeme),
-            expected: None,
+            expected: Some("identifier".into()),
         })
     }
 

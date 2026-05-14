@@ -175,6 +175,20 @@ mod compute_binding_count_tests {
     }
 
     #[test]
+    fn rejects_bindings_over_bind_group_limit() {
+        let limits = wgpu::Limits {
+            max_storage_buffers_per_shader_stage: 10,
+            max_bindings_per_bind_group: 11,
+            ..Default::default()
+        };
+
+        let err = validate_compute_binding_counts("fused_elementwise", 10, 12, &limits)
+            .expect_err("bind group entry overflow should be rejected");
+
+        assert!(err.to_string().contains("requires 12 bind group entries"));
+    }
+
+    #[test]
     fn rejects_binding_count_overflow() {
         let err = checked_binding_count("fused_elementwise", usize::MAX, 1)
             .expect_err("binding count overflow should be rejected");
