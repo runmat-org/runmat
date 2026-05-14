@@ -144,8 +144,10 @@ mod compute_binding_count_tests {
 
     #[test]
     fn rejects_storage_bindings_over_adapter_stage_limit() {
-        let mut limits = wgpu::Limits::default();
-        limits.max_storage_buffers_per_shader_stage = 10;
+        let limits = wgpu::Limits {
+            max_storage_buffers_per_shader_stage: 10,
+            ..Default::default()
+        };
 
         let err = validate_compute_binding_counts("fused_elementwise_multi", 11, 12, &limits)
             .expect_err(
@@ -157,9 +159,11 @@ mod compute_binding_count_tests {
 
     #[test]
     fn accepts_bindings_at_adapter_limits() {
-        let mut limits = wgpu::Limits::default();
-        limits.max_storage_buffers_per_shader_stage = 10;
-        limits.max_bindings_per_bind_group = 11;
+        let limits = wgpu::Limits {
+            max_storage_buffers_per_shader_stage: 10,
+            max_bindings_per_bind_group: 11,
+            ..Default::default()
+        };
 
         validate_compute_binding_counts("fused_elementwise", 10, 11, &limits)
             .expect("limits are inclusive");
