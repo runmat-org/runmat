@@ -114,7 +114,7 @@ RunMat is for people who want a fast, pleasant MATLAB-style environment that evo
 ## Related
 
 - [High-Level Architecture](/docs/architecture) -- RunMat's V8-inspired execution model and subsystems.
-- [Package Manager](/docs/package-manager) -- the package system for extending RunMat.
+- [Package system](/docs/how-it-works) -- the package system for extending RunMat.
 - [Introduction to RunMat Fusion](/docs/accelerate/fusion-intro) -- GPU data residency and fusion.
 - [Correctness & Trust](/docs/correctness) -- how we validate every numerical path, with the full coverage table and parity-test index.
 - [Language Reference](/docs/language) -- compatibility modes and MATLAB syntax support.

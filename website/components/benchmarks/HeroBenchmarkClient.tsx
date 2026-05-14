@@ -85,7 +85,7 @@ export default function HeroBenchmarkClient({ slides }: HeroBenchmarkClientProps
             <div className="mb-2 p-0">
               🚀 Open Source • MIT Licensed • Pre-Release
             </div>
-            <h1 className="font-heading text-left leading-tight whitespace-nowrap tracking-tight text-[clamp(2.6rem,4.8vw,4.25rem)] sm:text-[clamp(3rem,4vw,5rem)] lg:text-[clamp(3.25rem,3.6vw,5.25rem)]">
+            <h1 className="font-bold text-left leading-tight whitespace-nowrap tracking-tight text-[clamp(2.6rem,4.8vw,4.25rem)] sm:text-[clamp(3rem,4vw,5rem)] lg:text-[clamp(3.25rem,3.6vw,5.25rem)]">
               Fastest runtime for
             </h1>
             <BenchmarkTicker slides={slides} activeIndex={activeIndex} onSelect={goToIndex} />

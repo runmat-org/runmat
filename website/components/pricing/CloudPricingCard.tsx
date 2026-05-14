@@ -27,9 +27,11 @@ const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
     price: "$0",
     description: "Sign up to get cloud storage and versioning.",
     features: [
-      "Unlimited projects",
+      { label: "GPU accelerated plotting", href: "#compare-plotting" },
+      "Plot, code and variable version history",
+      "Project sharing and team workspaces",
       { label: "100 MB storage", href: "#compare-storage" },
-      "Version history (uses storage)",
+      "Limited LLM tokens included",
       "Community support",
     ],
     ctaLabel: "Start free",
@@ -38,9 +40,12 @@ const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
   pro: {
     price: "$30/mo per user",
     description: "For individuals and small teams shipping real work.",
-    inheritsFrom: "Everything in Hobby, plus:",
     features: [
+      { label: "GPU accelerated plotting", href: "#compare-plotting" },
+      { label: "Plot, code and variable version history", href: "#compare-versioning" },
+      "Project sharing and team workspaces",
       { label: "10 GB storage", href: "#compare-storage" },
+      { label: "$10/mo LLM tokens included", href: "#compare-llm" },
     ],
     ctaLabel: "Get started",
     ctaHref: "/sandbox",
@@ -51,7 +56,8 @@ const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
     inheritsFrom: "Everything in Pro, plus:",
     features: [
       { label: "100 GB storage", href: "#compare-storage" },
-      "SSO / SAML (and SCIM)",
+      "SSO / SAML / SCIM",
+      "$50/mo LLM tokens included",
       "Priority support",
     ],
     ctaLabel: "Get started",
@@ -66,17 +72,17 @@ const cloudTierTabs: { id: CloudTier; label: string }[] = [
 ];
 
 export default function CloudPricingCard() {
-  const [activeTier, setActiveTier] = useState<CloudTier>("hobby");
+  const [activeTier, setActiveTier] = useState<CloudTier>("pro");
   const currentTier = cloudTierConfig[activeTier];
 
   return (
     <Card className="relative flex h-full flex-col border border-[hsl(var(--brand))]/50 shadow-sm">
       <CardHeader className="space-y-3 pb-4">
         <Badge className="w-fit bg-secondary text-foreground border-border hover:bg-secondary">
-          Cloud
+          App
         </Badge>
-        <CardTitle className="text-lg font-semibold text-foreground">RunMat Cloud</CardTitle>
-        <p className="text-[0.938rem] text-foreground">Everything in RunMat, plus cloud storage and versioning.</p>
+        <CardTitle className="text-lg font-semibold text-foreground">RunMat App</CardTitle>
+        <p className="text-[0.938rem] text-foreground">High-performance computing platform.</p>
         <p className="text-3xl font-bold text-foreground">{currentTier.price}</p>
       </CardHeader>
       <CardContent className="flex flex-1 min-h-0 flex-col space-y-5">

@@ -18,7 +18,7 @@ export function SandboxCta({
         Try RunMat for free
       </h3>
       <p className="text-foreground text-[0.938rem] max-w-md mx-auto">
-        Open the sandbox and start running MATLAB code in seconds. No account required.
+        Write code or describe what you want to compute. The sandbox is free, no account required.
       </p>
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1">
         <Button

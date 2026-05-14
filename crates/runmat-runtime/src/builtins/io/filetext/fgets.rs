@@ -138,13 +138,16 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
     }
     let handle = registry::take_handle(fid)
         .ok_or_else(|| fgets_error(format!("fgets: {INVALID_IDENTIFIER_MESSAGE}")))?;
-    let mut file = handle
-        .lock()
-        .map_err(|_| fgets_error("fgets: failed to lock file handle (poisoned mutex)"))?;
 
     let nchar_limit = parse_nchar(rest).await?;
     let max_bytes = apply_matlab_nchar_limit(nchar_limit);
-    let read = read_line(&mut file, max_bytes)?;
+    let mut guard = handle
+        .lock()
+        .map_err(|_| fgets_error("fgets: failed to lock file handle (poisoned mutex)"))?;
+    let file = guard
+        .as_mut()
+        .ok_or_else(|| fgets_error(format!("fgets: {INVALID_IDENTIFIER_MESSAGE}")))?;
+    let read = read_line(file, max_bytes)?;
     if read.eof_before_any {
         return Ok(FgetsEval::end_of_file());
     }

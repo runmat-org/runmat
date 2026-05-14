@@ -1,0 +1,26 @@
+# .coderabbit.yaml
+reviews:
+  auto_review:
+    enabled: true
+    base_branches:
+      - "main"
+      - "dev"
+  profile: assertive
+  high_level_summary: true
+  review_status: true
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        Prioritize catching:
+        - race conditions
+        - stale state propagation
+        - async ordering issues
+        - auth edge cases
+        - nullability bugs
+        - rollback inconsistencies
+        
+        Be aggressive about medium/high/critical severity findings.
+        Prefer false positives over missed bugs.
+        Prefix every actionable finding with one of:
+        [critical], [high], [medium], [low], [nit].
+        Only use [medium], [high], or [critical] for issues that should block CI.
