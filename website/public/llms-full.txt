@@ -104,7 +104,7 @@ Three mechanisms, stacked: inherited correctness from established Rust crates (`
 
 RunMat includes 40+ plotting builtins with interactive 2D and 3D rendering directly from GPU memory -- zero copy between computation and visualization.
 
-**2D chart types:** plot, scatter, bar, histogram, hist, area, stairs, stem, errorbar, pie, contour, contourf, image, imagesc, imshow, quiver
+**2D chart types:** plot, scatter, bar, histogram, hist, area, stairs, stem, errorbar, pie, contour, contourf, image, imagesc, imshow, quiver, heatmap
 
 **3D chart types:** plot3, surf, surfc, mesh, meshc, scatter3
 
@@ -114,7 +114,7 @@ RunMat includes 40+ plotting builtins with interactive 2D and 3D rendering direc
 
 **Handle graphics:** get, set
 
-3D surface plots can be rotated, zoomed, and panned directly in the browser. The plot is rendered as part of the same GPU pipeline that computed the data, avoiding the CPU-GPU transfer overhead that other tools incur. Advanced/specialized chart types (polar, heatmap, etc.) are not yet supported.
+3D surface plots can be rotated, zoomed, and panned directly in the browser. The plot is rendered as part of the same GPU pipeline that computed the data, avoiding the CPU-GPU transfer overhead that other tools incur. Advanced/specialized chart types (polar, geobubble, etc.) are not yet supported.
 
 ## Debugging and Diagnostics
 
@@ -191,7 +191,7 @@ RunMat Enterprise deploys as a single binary for ITAR-compliant, air-gapped envi
 
 - Language: Supports the core MATLAB language -- variables and data types (double, single, char, string, logicals, integers, complex), all operators, control flow, named and anonymous functions, N-D indexing, full classdef OOP, packages, imports, and exceptions
 - Built-in functions: 400+ (math, linear algebra, array ops, string, plotting, I/O). MATLAB has accumulated thousands over decades; RunMat covers the functions engineers use most and adds new ones based on user demand. The built-in agent can help adapt scripts that use unsupported functions.
-- Plotting: 40+ builtins covering 2D (plot, scatter, bar, histogram, area, stairs, stem, errorbar, pie, contour, contourf, image, imagesc, imshow, quiver), 3D (plot3, surf, surfc, mesh, meshc, scatter3), log-scale (semilogx, semilogy, loglog), figure management (figure, subplot, hold, clf, cla, close, title, sgtitle, xlabel, ylabel, zlabel, legend, colorbar, colormap, axis, grid, box, shading, view, drawnow, pause), and handle graphics (get/set). GPU-first rendering with interactive 3D camera.
+- Plotting: 40+ builtins covering 2D (plot, scatter, bar, histogram, area, stairs, stem, errorbar, pie, contour, contourf, image, imagesc, imshow, quiver, heatmap), 3D (plot3, surf, surfc, mesh, meshc, scatter3), log-scale (semilogx, semilogy, loglog), figure management (figure, subplot, hold, clf, cla, close, title, sgtitle, xlabel, ylabel, zlabel, legend, colorbar, colormap, axis, grid, box, shading, view, drawnow, pause), and handle graphics (get/set). GPU-first rendering with interactive 3D camera.
 - Not included: Simulink, MATLAB add-on toolboxes (Signal Processing, Control System, Image Processing, etc.), GUIDE/App Designer GUIs, MEX/Java/Python interop
 - Compatibility modes: "runmat" (default), "matlab" (MATLAB error namespaces), "strict" (explicit function calls only)
 - Full language coverage matrix: https://runmat.com/docs/language-coverage

@@ -207,12 +207,12 @@ The Variables pane shows **Residency** for each variable:
 
 Plots render directly in the browser using GPU-accelerated graphics. RunMat includes 40+ plotting builtins:
 
-- **2D:** `plot`, `scatter`, `bar`, `histogram`, `hist`, `area`, `stairs`, `stem`, `errorbar`, `pie`, `contour`, `contourf`, `image`, `imagesc`, `imshow`, `quiver`
+- **2D:** `plot`, `scatter`, `bar`, `histogram`, `hist`, `area`, `stairs`, `stem`, `errorbar`, `pie`, `contour`, `contourf`, `image`, `imagesc`, `imshow`, `quiver`, `heatmap`
 - **3D:** `plot3`, `surf`, `surfc`, `mesh`, `meshc`, `scatter3` (interactive rotate, zoom, pan)
 - **Log-scale:** `semilogx`, `semilogy`, `loglog`
 - **Figure management:** `figure`, `subplot`, `hold`, `clf`, `cla`, `close`, `title`, `sgtitle`, `xlabel`, `ylabel`, `zlabel`, `legend`, `colorbar`, `colormap`, `axis`, `grid`, `box`, `shading`, `view`, `drawnow`, `pause`
 
-Advanced/specialized chart types (`polar`, `heatmap`, `geobubble`, `wordcloud`) are not yet supported. For the full list, see the [Compatibility](/docs/compatibility) page.
+Advanced/specialized chart types (`polar`, `geobubble`, `wordcloud`) are not yet supported. For the full list, see the [Compatibility](/docs/compatibility) page.
 
 ---
 

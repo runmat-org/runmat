@@ -34,7 +34,7 @@ Browse the complete list: [Built-in Function Reference](/docs/matlab-function-re
 
 RunMat includes 40+ plotting builtins with GPU-first rendering, interactive 3D camera, theming, and scene persistence.
 
-**2D chart types:** `plot`, `scatter`, `bar`, `histogram`, `hist`, `area`, `stairs`, `stem`, `errorbar`, `pie`, `contour`, `contourf`, `image`, `imagesc`, `imshow`, `quiver`
+**2D chart types:** `plot`, `scatter`, `bar`, `histogram`, `hist`, `area`, `stairs`, `stem`, `errorbar`, `pie`, `contour`, `contourf`, `image`, `imagesc`, `imshow`, `quiver`, `heatmap`
 
 **3D chart types:** `plot3`, `surf`, `surfc`, `mesh`, `meshc`, `scatter3`
 
@@ -46,7 +46,7 @@ RunMat includes 40+ plotting builtins with GPU-first rendering, interactive 3D c
 
 Rendering is GPU-first: vertex buffers are built on-device and rendered through WebGPU in the browser or Metal/Vulkan/DX12 natively. Interactive 3D camera supports rotate, pan, and zoom with reversed-Z depth.
 
-Advanced/specialized chart types (`polar`, `heatmap`, `geobubble`, `wordcloud`, `stackedplot`, `swarmchart`) and full annotation objects are not yet supported.
+Advanced/specialized chart types (`polar`, `geobubble`, `wordcloud`, `stackedplot`, `swarmchart`) and full annotation objects are not yet supported.
 
 ## Toolbox coverage
 
@@ -58,9 +58,9 @@ RunMat focuses on core MATLAB — the language, operators, data types, and gener
 | Simulink | ❌ | RunMat is script-based only; no block-diagram modeling |
 | Signal Processing | ❌ | Not implemented |
 | Control System | ❌ | Not implemented |
-| Image Processing | ❌ | Basic array ops and `image`/`imagesc`/`imshow` work on image data |
+| Image Processing | ❌ | `imread`, `imshow`, `image`, `imagesc`, and color conversion (`rgb2gray`, `im2double`, `im2uint8`, `rgb2hsv`, `hsv2rgb`, `rgb2lab`, `lab2rgb`) are available as builtins |
 | Statistics & Machine Learning | ❌ | Core stats functions (`mean`, `std`, `var`, `median`, `sort`, `hist`, etc.) are available as builtins |
-| Optimization | ❌ | Not implemented |
+| Optimization | ❌ | `fzero`, `fsolve`, and `optimset` are available as builtins |
 | Symbolic Math | ❌ | Not implemented |
 | Parallel Computing | ⚠️ | Different model — RunMat provides automatic GPU acceleration without explicit `gpuArray` or `parfor` |
 
@@ -98,7 +98,7 @@ Details: [Language Reference](/docs/language)
 - **No Simulink** — RunMat is a script/function runtime, not a block-diagram simulation environment
 - **No GUI frameworks** — GUIDE and App Designer are not supported
 - **No MATLAB toolboxes** — Signal Processing, Control System, Image Processing, etc. are not included (see table above)
-- **Plotting gaps** — specialized chart types (`polar`, `heatmap`, etc.) and full Handle Graphics property coverage are still being added
+- **Plotting gaps** — specialized chart types (`polar`, `geobubble`, etc.) and full Handle Graphics property coverage are still being added
 - **File I/O** — core functions (`load`, `save`, `fopen`, `fclose`, `fprintf`, `fscanf`, `fread`, `fwrite`, `readmatrix`, `writematrix`) are available; some advanced I/O functions are not yet implemented
 - **MEX / Java / Python interop** — not supported
 
