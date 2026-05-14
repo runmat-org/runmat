@@ -1165,6 +1165,79 @@ fn test_jit_named_call_resolves_semantic_registry() {
 }
 
 #[test]
+fn test_jit_named_call_prefers_semantic_registry_over_legacy_shape() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let function = runmat_hir::FunctionId(1);
+    let semantic_function = SemanticFunctionBytecode {
+        function,
+        display_name: "inc".to_string(),
+        source_id: None,
+        instructions: vec![
+            Instr::LoadVar(0),
+            Instr::LoadConst(1.0),
+            Instr::Add,
+            Instr::StoreVar(1),
+        ],
+        instr_spans: Vec::new(),
+        call_arg_spans: Vec::new(),
+        var_count: 2,
+        input_slots: vec![0],
+        varargin_slot: None,
+        output_slots: vec![1],
+        varargout_slot: None,
+        capture_slots: Vec::new(),
+    };
+
+    let mut semantic_functions = HashMap::new();
+    semantic_functions.insert(function, semantic_function);
+    let mut functions = HashMap::new();
+    functions.insert(
+        "inc".to_string(),
+        runmat_vm::LegacyUserFunction {
+            name: "inc".to_string(),
+            params: vec![],
+            outputs: vec![runmat_hir::VarId(0)],
+            body: Vec::new(),
+            local_var_count: 1,
+            has_varargin: false,
+            has_varargout: false,
+            var_types: Vec::new(),
+            source_id: None,
+        },
+    );
+    let bytecode = Bytecode {
+        functions,
+        semantic_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(9.0),
+                Instr::CallFunction("inc".to_string(), 1),
+                Instr::StoreVar(0),
+            ],
+            1,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "semantic registry identity should win over legacy-shaped metadata"
+    );
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[0], Value::Num(10.0));
+}
+
+#[test]
 fn test_jit_function_variable_preservation() {
     // Test: Variables should be preserved across JIT/interpreter transitions
     let mut engine = TurbineEngine::new().expect("Failed to create engine");

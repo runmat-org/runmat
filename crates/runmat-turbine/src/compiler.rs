@@ -586,15 +586,25 @@ impl BytecodeCompiler {
                         }
                         args.reverse();
 
-                        let result = Self::call_user_function_jit(
-                            builder,
-                            ctx.module,
-                            ctx.runmat_call_user_function_id,
-                            func_name,
-                            &args,
-                            ctx.function_definitions,
-                            ctx.semantic_registry,
-                        )?;
+                        let result =
+                            if let Some(function) = ctx.semantic_registry.resolve_name(func_name) {
+                                Self::call_semantic_function_jit(
+                                    builder,
+                                    ctx.module,
+                                    ctx.runmat_call_semantic_function_id,
+                                    function.0,
+                                    &args,
+                                )?
+                            } else {
+                                Self::call_user_function_jit(
+                                    builder,
+                                    ctx.module,
+                                    ctx.runmat_call_user_function_id,
+                                    func_name,
+                                    &args,
+                                    ctx.function_definitions,
+                                )?
+                            };
                         local_stack.push(result);
                     }
                     Instr::CallSemanticFunction(function, arg_count) => {
@@ -755,19 +765,18 @@ impl BytecodeCompiler {
         func_name: &str,
         args: &[Value],
         function_definitions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
-        semantic_registry: &SemanticFunctionRegistry,
     ) -> Result<Value> {
-        if let Some(function_def) = function_definitions.get(func_name) {
-            if args.len() != function_def.params.len() {
-                return Err(execution_error(format!(
-                    "Function {} expects {} arguments, got {}",
-                    func_name,
-                    function_def.params.len(),
-                    args.len()
-                )));
-            }
-        } else if semantic_registry.resolve_name(func_name).is_none() {
-            return Err(execution_error(format!("Unknown function: {func_name}")));
+        let function_def = function_definitions
+            .get(func_name)
+            .ok_or_else(|| execution_error(format!("Unknown function: {func_name}")))?;
+
+        if args.len() != function_def.params.len() {
+            return Err(execution_error(format!(
+                "Function {} expects {} arguments, got {}",
+                func_name,
+                function_def.params.len(),
+                args.len()
+            )));
         }
 
         // For JIT compilation of user-defined functions, we need to call a runtime function
