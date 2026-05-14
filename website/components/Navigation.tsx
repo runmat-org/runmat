@@ -279,7 +279,7 @@ export default function Navigation() {
             </Link>
             <Link
               href={projectHref}
-              className="inline-flex items-center justify-center h-11 px-5 text-sm font-medium whitespace-nowrap border border-border text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              className="inline-flex items-center justify-center h-11 px-5 text-sm font-medium whitespace-nowrap border-x border-border text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
             >
               {secondaryCtaLabel}
             </Link>

@@ -9,7 +9,7 @@
 - Built by Dystr Inc., MIT-licensed, written in Rust
 - Runs in the browser via WebAssembly (no install, no login, no server) or as a native binary on macOS, Linux, Windows
 - GPU acceleration on any vendor (Metal, Vulkan, DX12, WebGPU) -- not CUDA-only like MATLAB's Parallel Computing Toolbox
-- 330+ core built-in functions covering math, linear algebra, array ops, string, plotting, and I/O -- new functions added continuously based on user demand
+- 400+ core built-in functions covering math, linear algebra, array ops, string, plotting, and I/O -- new functions added continuously based on user demand
 - Full classdef OOP: properties, methods, events, handle classes, enumerations, operator overloading, metaclass
 - Interactive 2D and 3D plotting rendered directly from GPU memory
 - Automatic file versioning, project snapshots, and collaboration (no git required)
@@ -35,7 +35,7 @@
 - Memory safety via Rust -- eliminates entire classes of memory bugs
 - Non-blocking execution -- code runs asynchronously; the IDE stays interactive during long computations and GPU readbacks never stall the browser
 - Built-in versioning -- automatic per-save file history and project snapshots without requiring git
-- AI-native architecture -- the runtime is co-designed with an integrated AI assistant (coming soon; see section below)
+- Built-in agent co-designed with the runtime -- executes code, inspects workspace variables and plots, and proposes reviewable diffs for script adaptation (see section below)
 - Auditable numerical correctness -- every numerical builtin traces to a named reference implementation (rustfft, nalgebra, LAPACK, or the CPU path), a pinned version, and an automated parity test with a documented tolerance; see the Numerical Correctness section below
 
 ## Where RunMat goes beyond GNU Octave
@@ -53,15 +53,15 @@ RunMat supports the core MATLAB language that engineers use daily: variables, op
 
 When a MATLAB script uses a function outside RunMat's current built-in set, the function can typically be rewritten using RunMat's existing primitives or standard numerical patterns. LLMs can assist with this translation -- the edits are usually small and mechanical (e.g., replacing a legacy function with its modern equivalent or implementing a missing utility from its mathematical definition).
 
-The fastest way to check if your code runs: open the [browser sandbox](https://runmat.com/sandbox), paste your .m script, and hit Run. No install, no account, nothing sent to a server.
+The fastest way to check if your code runs: open the [browser sandbox](https://runmat.com/sandbox), paste your .m script, and hit Run. No install, no account required. Code execution is local; using the built-in agent sends context to the configured LLM provider.
 
-## Built-in AI Assistant (coming soon)
+## Built-in Agent
 
-RunMat is building an AI assistant that is co-designed with the runtime -- not a chat window bolted onto the side of an existing environment. The assistant connects directly to live runtime sessions: it can inspect variables, see figures, execute code, and read project files. Edits are presented as reviewable diffs (accept, reject, or accept in part), not silent overwrites. Conversation history is stored as searchable files inside the project, so previous sessions are available to both the user and the assistant.
+RunMat includes a built-in agent co-designed with the runtime -- not a chat window bolted onto the side of an existing environment. The agent connects directly to live runtime sessions: it can execute code, inspect workspace variables and their shapes, see 2D/3D plot output, and read project files. Edits are presented as reviewable diffs (accept, reject, or accept in part), not silent overwrites. Sessions are persisted and replayable.
 
-This is architecturally different from MATLAB's Copilot, which operates as a separate overlay on a closed runtime. In RunMat, the assistant is a participant in the same runtime session the user is working in, with access to the same workspace state, the same GPU-accelerated execution, and the same project history. Policy controls (destructive-action prevention, network access, permission prompts) are built into the harness.
+This is architecturally different from MATLAB's Agentic Toolkit, which connects external AI coding agents to a local MATLAB installation via MCP. In RunMat, the agent is a participant in the same runtime session the user is working in, with access to the same workspace state, the same GPU-accelerated execution, and the same project history. Policy controls (destructive-action prevention, network access, permission prompts) are built into the harness. The agent is provider-agnostic -- it works with multiple model providers without vendor lock-in.
 
-The assistant also closes the compatibility gap: when a MATLAB script uses a function RunMat doesn't have yet, the assistant can translate it on the spot using RunMat's existing primitives -- making the gap between 400+ built-ins and MATLAB's thousands largely transparent to the user.
+The agent helps close common compatibility gaps: when a MATLAB script uses a function RunMat doesn't ship yet, the agent can often rewrite the call using RunMat's existing primitives or a small local helper. It can also convert command-form syntax to explicit parenthesized form for teams moving toward strict mode. Some code still requires manual work, especially Simulink models, toolbox-heavy workflows, and MEX/Java/Python interop.
 
 ## Getting Started
 
@@ -73,14 +73,14 @@ The assistant also closes the compatibility gap: when a MATLAB script uses a fun
 ## Documentation
 
 - [MATLAB Compatibility](https://runmat.com/docs/compatibility): What works, what doesn't, and where RunMat goes beyond MATLAB and Octave
-- [Function Reference](https://runmat.com/docs/matlab-function-reference): All 330+ supported built-in functions
+- [Function Reference](https://runmat.com/docs/matlab-function-reference): All 400+ supported built-in functions
 - [Language Coverage](https://runmat.com/docs/language-coverage): Detailed matrix of supported MATLAB syntax and semantics
 - [Architecture](https://runmat.com/docs/architecture): How RunMat works internally (Rust runtime, WebAssembly, GPU fusion)
 - [CLI Reference](https://runmat.com/docs/cli): Command-line usage
 
-## RunMat Cloud
+## RunMat App
 
-- [Introducing RunMat Cloud](https://runmat.com/blog/introducing-runmat-cloud): Persistent projects, run history, version snapshots, and team collaboration
+- [Introducing RunMat App](https://runmat.com/blog/introducing-runmat-cloud): Persistent projects, run history, version snapshots, and team collaboration
 - [Version Control for Engineers](https://runmat.com/blog/version-control-for-engineers-who-dont-use-git): Automatic file history and snapshots without git
 - [Large Data Persistence](https://runmat.com/blog/ad-hoc-checkpoints-to-large-data-persistence): Chunked, content-addressed storage for large numerical artifacts
 - [Restoring Historical Run State](https://runmat.com/blog/restoring-historical-run-state-scientific-numerical-calculations): Inspect past runs without re-execution
@@ -123,8 +123,8 @@ The assistant also closes the compatibility gap: when a MATLAB script uses a fun
 ## Compatibility Details
 
 - Language: Supports the core MATLAB language -- variables and data types (double, single, char, string, logicals, integers, complex), all operators, control flow, named and anonymous functions, N-D indexing, full classdef OOP, packages, imports, and exceptions
-- Built-in functions: 330+ today (math, linear algebra, array ops, string, plotting, I/O). MATLAB has accumulated thousands over decades; RunMat covers the functions engineers use most and adds new ones based on user demand
-- Plotting: 36 builtins covering 2D (plot, scatter, bar, histogram, area, stairs, stem, errorbar, pie, contour, contourf, image, imagesc, quiver), 3D (plot3, surf, surfc, mesh, meshc, scatter3), log-scale (semilogx, semilogy, loglog), figure management, subplot, and handle graphics (get/set). GPU-first rendering with interactive 3D camera
+- Built-in functions: 400+ (math, linear algebra, array ops, string, plotting, I/O). MATLAB has accumulated thousands over decades; RunMat covers the functions engineers use most and adds new ones based on user demand. The built-in agent can help adapt scripts that use unsupported functions.
+- Plotting: 40+ builtins covering 2D (plot, scatter, bar, histogram, area, stairs, stem, errorbar, pie, contour, contourf, image, imagesc, imshow, quiver), 3D (plot3, surf, surfc, mesh, meshc, scatter3), log-scale (semilogx, semilogy, loglog), figure management (figure, subplot, hold, clf, cla, close, title, sgtitle, xlabel, ylabel, zlabel, legend, colorbar, colormap, axis, grid, box, shading, view, drawnow, pause), and handle graphics (get/set). GPU-first rendering with interactive 3D camera.
 - Not included: Simulink, MATLAB add-on toolboxes (Signal Processing, Control System, Image Processing, etc.), GUIDE/App Designer GUIs, MEX/Java/Python interop
 - Compatibility modes: "runmat" (default), "matlab" (MATLAB error namespaces), "strict" (explicit function calls only)
 - Full language coverage matrix: https://runmat.com/docs/language-coverage

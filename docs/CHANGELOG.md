@@ -83,7 +83,7 @@ _April 24, 2026_
 - Reorganize the browser/WASM runtime into dedicated API, plotting, session, stream, filesystem, GPU, snapshot, state, and wire-format modules
 - Improve replay smoke coverage and GPU gradient coverage for the WASM target
 
-### Cloud
+### App
 
 #### Changed
 - Update remote-project CLI documentation around authentication, project selection, filesystem history, snapshots, git sync, retention policies, and `remote run`
@@ -114,7 +114,7 @@ _April 15, 2026_
 - Fix workspace/variable display after `clear()` — variables assigned later in the same execution block now reappear correctly in workspace snapshots
 - Fix browser `input()` handling after session resets — reinitializing the WASM session now preserves the installed async input handler
 
-### Cloud
+### App
 
 #### Added
 - Expand the public API with project git import, project import status, usage notices, upgrade requests, chunk upload targets, data manifest access, run indexes, storage summaries, storage-category deletion, telemetry ingest, and web intake submission endpoints
@@ -202,7 +202,7 @@ Other:
 - Improve Auth0 email login flow
 - Improve stdout deduplication and clear event handling
 
-### Cloud
+### App
 
 #### Added
 - Add durable persistence and replay for run artifacts
@@ -254,7 +254,7 @@ _March 24, 2026_
 - Show struct values before tensor values in the output panel
 - Improve variable inspector layout
 
-### Cloud
+### App
 
 #### Added
 - Add organizations, projects, and team memberships

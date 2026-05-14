@@ -17,7 +17,9 @@ jsonLd:
     - "Interactive 2D and 3D plotting"
     - "Real-time variable inspector with type and shape tracking"
     - "Syntax highlighting and error diagnostics"
-    - "Cloud storage and automatic file versioning (with free account)"
+    - "Persistent storage and automatic file versioning (with free account)"
+    - "Built-in agent with runtime execution and workspace inspection"
+    - "Compatibility-guided script adaptation with reviewable diffs"
 ---
 
 # Browser Guide
@@ -26,9 +28,9 @@ The RunMat sandbox is a browser-based development environment for writing and ru
 
 ---
 
-## Sandbox vs Sandbox + Cloud
+## Sandbox vs Sandbox + App
 
-| Feature | Sandbox (no account) | Sandbox + Cloud (signed in) |
+| Feature | Sandbox (no account) | Sandbox + App (signed in) |
 |---|---|---|
 | Installation required | No | No |
 | Account required | No | Yes (free) |
@@ -36,9 +38,10 @@ The RunMat sandbox is a browser-based development environment for writing and ru
 | Interactive IDE | Yes | Yes |
 | Interactive plotting | Yes | Yes |
 | Variable inspector | Yes | Yes |
-| File storage | In-memory (cleared on tab close) | Cloud (persists across sessions and devices) |
+| File storage | In-memory (cleared on tab close) | App (persists across sessions and devices) |
 | File versioning | No | Automatic on every save |
 | Project sharing | No | Paid plans |
+| Built-in agent | Yes | Yes |
 
 ---
 
@@ -50,8 +53,9 @@ The sandbox lets you:
 - **Run scripts instantly** with automatic CPU/GPU acceleration
 - **See live plots** rendered directly in the browser
 - **Inspect variables** and console output in real time
+- **Ask the built-in agent** to run code, check results, and propose reviewable edits for script adaptation
 
-All computation happens locally in your browser. There's no server-side execution—your code and data never leave your machine.
+All computation happens locally in your browser via WebAssembly — there's no server-side execution. If you sign in for cloud storage or use the built-in agent, data is sent to RunMat's servers and the configured LLM provider respectively.
 
 ---
 
@@ -67,13 +71,17 @@ No installation required. Works in Chrome, Edge, Firefox, and Safari.
 
 ## The Interface
 
-When you open the sandbox, you'll see three main areas:
+When you open the sandbox, you'll see four main areas:
 
 ```
-┌─────────────┬────────────────────────┬─────────────────────┐
-│   Sidebar   │        Editor          │   Runtime Panel     │
-│  (Files)    │  (Code + Tabs)         │  (Run, Output, Vars)│
-└─────────────┴────────────────────────┴─────────────────────┘
+┌──────────┬──────────────────────┬──────────────────┐
+│ Sidebar  │       Editor         │  Runtime Panel   │
+│ (Files)  │  (Code + Tabs)       │  (Run, Vars,     │
+│          │                      │   Console, Figs) │
+│          ├──────────────────────┤                  │
+│          │    Agent Panel       │                  │
+│          │  (Chat + Diffs)      │                  │
+└──────────┴──────────────────────┴──────────────────┘
 ```
 
 ### Sidebar (Left)
@@ -96,7 +104,11 @@ When you open the sandbox, you'll see three main areas:
 - **Console** for standard output and input prompts
 - **Variables pane** showing workspace variables, their types, shapes, and whether they're on CPU or GPU
 
-All three panels are resizable—drag the borders to adjust.
+### Agent Panel (Below Editor)
+
+The agent panel is a chat interface connected to your live runtime session. The agent can execute code, read workspace variables and plot output, and search project files. When it suggests changes, they appear as diffs you can accept or reject individually. Sessions are persisted as project files so you can revisit them later.
+
+All four panels are resizable—drag the borders to adjust.
 
 ---
 
@@ -162,6 +174,17 @@ ylabel('sin(x) * exp(-x)');
 
 ---
 
+## Notebook Editor
+
+The sandbox includes a notebook editor for mixing markdown and code in a single document. Create a `.md` file in the sidebar and it opens in notebook mode.
+
+- Markdown cells for documentation, headings, and LaTeX math
+- Code cells with the same GPU acceleration and variable inspector as regular `.m` scripts
+- Run cells individually or execute all cells in sequence
+- Output (console and plots) appears inline below each code cell
+
+---
+
 ## How It Works
 
 ### Local Execution
@@ -182,12 +205,14 @@ The Variables pane shows **Residency** for each variable:
 
 ### Plotting
 
-Plots render directly in the browser using GPU-accelerated graphics. Currently supported:
-- `plot` — line plots
-- `scatter` — scatter plots
-- `surf`, `mesh` — 3D surface plots (interactive rotate, zoom, pan)
+Plots render directly in the browser using GPU-accelerated graphics. RunMat includes 40+ plotting builtins:
 
-Additional chart types (bar, histogram, subplots, figure handles) are in progress.
+- **2D:** `plot`, `scatter`, `bar`, `histogram`, `hist`, `area`, `stairs`, `stem`, `errorbar`, `pie`, `contour`, `contourf`, `image`, `imagesc`, `imshow`, `quiver`
+- **3D:** `plot3`, `surf`, `surfc`, `mesh`, `meshc`, `scatter3` (interactive rotate, zoom, pan)
+- **Log-scale:** `semilogx`, `semilogy`, `loglog`
+- **Figure management:** `figure`, `subplot`, `hold`, `clf`, `cla`, `close`, `title`, `sgtitle`, `xlabel`, `ylabel`, `zlabel`, `legend`, `colorbar`, `colormap`, `axis`, `grid`, `box`, `shading`, `view`, `drawnow`, `pause`
+
+Advanced/specialized chart types (`polar`, `heatmap`, `geobubble`, `wordcloud`) are not yet supported. For the full list, see the [Compatibility](/docs/compatibility) page.
 
 ---
 
@@ -195,15 +220,16 @@ Additional chart types (bar, histogram, subplots, figure handles) are in progres
 
 ### Without an account (sandbox mode)
 
-Without signing in, the sandbox runs entirely in your browser. Your files are stored in memory within your browser tab, and the RunMat runtime executes locally via WebAssembly. Your code stays on your machine—it is never sent to our servers.
+Without signing in, the sandbox runs entirely in your browser. Your files are stored in memory within your browser tab, and the RunMat runtime executes locally via WebAssembly.
 
 - No account required
-- Your code stays local
+- Code execution is local — nothing is uploaded to run your script
+- Using the built-in agent sends context to the configured LLM provider
 - Files are cleared when you close or refresh the tab
 
-### With a RunMat Cloud account
+### With a RunMat App account
 
-Sign in to get cloud storage, automatic file versioning, and access to your projects from any device. Your files sync to RunMat Cloud and persist across sessions.
+Sign in to get cloud storage, automatic file versioning, and access to your projects from any device. Your files sync to RunMat App and persist across sessions.
 
 - **Hobby tier** — 100 MB storage, unlimited projects, automatic version history
 - **Pro** — 10 GB storage, version history ($30/mo per user)
@@ -211,9 +237,9 @@ Sign in to get cloud storage, automatic file versioning, and access to your proj
 
 #### File versioning
 
-Every time you save a file, RunMat Cloud records a version automatically. You can browse and restore previous versions of any file at any time. Version history is available on all Cloud tiers (Hobby, Pro, and Team). Stored versions count toward your storage quota.
+Every time you save a file, RunMat App records a version automatically. You can browse and restore previous versions of any file at any time. Version history is available on all App tiers (Hobby, Pro, and Team). Stored versions count toward your storage quota.
 
-When signed in, your code is transmitted to RunMat Cloud for storage and sync. Execution still happens locally in your browser—your code is not executed on our servers.
+When signed in, your code is transmitted to RunMat App for storage and sync. Execution still happens locally in your browser—your code is not executed on our servers.
 
 See [pricing](https://runmat.com/pricing) for full plan details. For local persistence without an account, use the [CLI](https://runmat.com/docs/cli).
 
@@ -231,7 +257,7 @@ If WebGPU isn't available, RunMat falls back to CPU execution. You can still run
 
 ### Can I use my existing MATLAB files?
 
-Yes. RunMat supports standard `.m` file syntax. Many MATLAB scripts run with few or no changes.
+Yes. RunMat supports standard `.m` file syntax. Many MATLAB scripts run with few or no changes. If a script uses a function RunMat doesn't ship yet, the built-in agent can often help adapt it — running your code, reading the diagnostics, and proposing reviewable edits. See [Agent-assisted migration](/docs/compatibility#agent-assisted-migration) for details.
 
 See the [Language Coverage](/docs/language-coverage) guide for supported features.
 
@@ -257,7 +283,7 @@ Browsers limit how much GPU and CPU a website can use to preserve battery life. 
 
 ## Teams and Enterprise
 
-### Team features (Cloud Team plan)
+### Team features (App Team plan)
 
 - **Project sharing** — share projects with collaborators in your organization. Each editor is billed as a seat.
 - **Team workspaces** — organize projects under your team's organization.
@@ -283,9 +309,10 @@ See [pricing](https://runmat.com/pricing) for plan details. For Enterprise inqui
 Now that you've run your first script:
 
 - **Explore the built-in functions** — See the [Function Reference](https://runmat.com/docs/matlab-function-reference)
+- **Check MATLAB compatibility** — What works, what doesn't, and agent-assisted migration: [Compatibility](https://runmat.com/docs/compatibility)
 - **Learn about GPU acceleration** — Read [GPU Acceleration](https://runmat.com/docs/accelerate/fusion-intro)
 - **Install the CLI** — For local file access and scripting: [CLI Guide](https://runmat.com/docs/cli)
-- **Try the benchmarks** — Compare RunMat performance against NumPy and PyTorch
+- **Try the benchmarks** — Compare RunMat performance: [Benchmarks](https://runmat.com/benchmarks)
 
 ---
 

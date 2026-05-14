@@ -52,9 +52,9 @@ export const docsTree: DocsNode[] = [
         file: "docs/COLLABORATION.md",
         seo: {
           description: "How to collaborate with teams in RunMat: organizations, projects, roles, real-time sync, and enterprise SSO.",
-          keywords: ["collaboration", "teams", "organizations", "sharing", "real-time", "SSO", "RunMat Cloud"],
+          keywords: ["collaboration", "teams", "organizations", "sharing", "real-time", "SSO", "RunMat App"],
           ogTitle: "Collaboration & Teams",
-          ogDescription: "Share projects, manage teams, and collaborate in real time with RunMat Cloud.",
+          ogDescription: "Share projects, manage teams, and collaborate in real time with RunMat App.",
         },
       },
       {

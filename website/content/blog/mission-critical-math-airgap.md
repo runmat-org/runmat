@@ -84,7 +84,7 @@ jsonLd:
           name: "Does RunMat work in airgapped or SCIF environments?"
           acceptedAnswer:
             "@type": "Answer"
-            text: "Yes. Both the open-source runtime and RunMat Cloud are designed for air-gapped deployment. The runtime is a single binary you can carry in on approved media. RunMat Cloud runs from a single server binary with local Postgres and blob storage."
+            text: "Yes. Both the open-source runtime and RunMat App are designed for air-gapped deployment. The runtime is a single binary you can carry in on approved media. RunMat App runs from a single server binary with local Postgres and blob storage."
         - "@type": "Question"
           name: "Does RunMat require a MATLAB license?"
           acceptedAnswer:

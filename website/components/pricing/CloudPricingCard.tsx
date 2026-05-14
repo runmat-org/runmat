@@ -89,7 +89,7 @@ export default function CloudPricingCard() {
         <div className="flex min-h-0 flex-1 flex-col space-y-5">
           <div
             role="tablist"
-            aria-label="RunMat Cloud tiers"
+            aria-label="RunMat App tiers"
             className="grid min-w-[7rem] grid-cols-3 gap-1 rounded-lg border border-border/60 bg-background/50 p-1"
           >
             {cloudTierTabs.map(({ id, label }) => {
