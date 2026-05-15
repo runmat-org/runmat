@@ -2019,6 +2019,35 @@ fn arrayfun_session_function_uses_semantic_registry() {
 }
 
 #[test]
+fn arrayfun_runtime_string_callback_uses_semantic_resolver() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source =
+        "name = 'inc'; A = [2, 3]; B = arrayfun(name, A); y = B(2);\nfunction z = inc(x)\n  z = x + 1;\nend";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile runtime arrayfun string callback");
+    assert!(
+        !prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
+        )),
+        "runtime arrayfun string callback variables should not be compile-time literal rewrites"
+    );
+    assert!(
+        prepared.bytecode.functions.is_empty(),
+        "runtime arrayfun semantic callback should not require legacy bytecode functions"
+    );
+
+    reset_legacy_user_dispatch_fallback_count();
+    let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
+    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
+        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+            && upsert.value.to_string() == "4"
+    }));
+}
+
+#[test]
 fn direct_session_function_call_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
@@ -2465,7 +2494,9 @@ fn session_semantic_registry_replaces_redefined_function() {
         "semantic registry should retire the old definition"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
             && upsert.value.to_string() == "12"
@@ -2516,7 +2547,9 @@ fn local_function_multi_output_with_cell_expansion_uses_semantic_vm() {
         "local multi-output expansion should compile through semantic HIR/MIR/VM"
     );
 
+    reset_legacy_user_dispatch_fallback_count();
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
+    assert_no_legacy_user_dispatch_fallback();
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
             && upsert.value.to_string() == "2"
