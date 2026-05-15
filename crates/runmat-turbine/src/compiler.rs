@@ -1941,6 +1941,46 @@ impl Default for BytecodeCompiler {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn named_user_call_lowering_stays_centralized() {
+        let source = include_str!("compiler.rs");
+
+        assert_eq!(
+            source
+                .matches(&["Instr::", "CallFunction(func_name"].concat())
+                .count(),
+            1
+        );
+        assert_eq!(
+            source
+                .matches(&["Instr::", "CallFunctionMulti(func_name"].concat())
+                .count(),
+            1
+        );
+        assert_eq!(
+            source
+                .matches(&["Self::", "compile_named_function_call_jit("].concat())
+                .count(),
+            1
+        );
+        assert_eq!(
+            source
+                .matches(&["Self::", "compile_named_function_multi_call_jit("].concat())
+                .count(),
+            1
+        );
+        assert_eq!(
+            source
+                .matches(&["Self::", "call_user_function_jit("].concat())
+                .count(),
+            1,
+            "legacy host callback should only be reachable through semantic-first named call lowering"
+        );
+    }
+}
+
 /// Optimization level for JIT compilation
 #[derive(Debug, Clone, Copy, Default)]
 pub enum OptimizationLevel {
