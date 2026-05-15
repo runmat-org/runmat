@@ -2921,3 +2921,34 @@ fn emit_string_literal(compiler: &mut Compiler, value: &str) {
         compiler.emit(Instr::LoadString(value.to_string()));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn legacy_user_call_emission_stays_centralized() {
+        let compiler_sources = [
+            include_str!("expressions.rs"),
+            include_str!("lvalues.rs"),
+            include_str!("statements.rs"),
+        ];
+        for source in compiler_sources {
+            assert_eq!(source.matches("Instr::CallFunction").count(), 0);
+        }
+
+        let core = include_str!("core.rs");
+        assert_eq!(
+            core.matches(&["Instr::", "CallFunction("].concat()).count(),
+            1
+        );
+        assert_eq!(
+            core.matches(&["Instr::", "CallFunctionMulti("].concat())
+                .count(),
+            1
+        );
+        assert_eq!(
+            core.matches(&["Instr::", "CallFunctionExpandMulti("].concat())
+                .count(),
+            1
+        );
+    }
+}
