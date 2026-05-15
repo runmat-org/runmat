@@ -583,40 +583,13 @@ impl BytecodeCompiler {
                         block_terminated = true;
                     }
                     Instr::CallFunction(func_name, arg_count) => {
-                        // Compile user-defined function call to native code
-                        let mut args = Vec::new();
-                        for _ in 0..*arg_count {
-                            args.push(local_stack.pop()?);
-                        }
-                        args.reverse();
-
+                        let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
                         let result =
-                            if let Some(function) = ctx.semantic_registry.resolve_name(func_name) {
-                                Self::call_semantic_function_jit(
-                                    builder,
-                                    ctx.module,
-                                    ctx.runmat_call_semantic_function_id,
-                                    function.0,
-                                    &args,
-                                )?
-                            } else {
-                                Self::call_user_function_jit(
-                                    builder,
-                                    ctx.module,
-                                    ctx.runmat_call_user_function_id,
-                                    func_name,
-                                    &args,
-                                    ctx.function_definitions,
-                                )?
-                            };
+                            Self::compile_named_function_call_jit(builder, ctx, func_name, &args)?;
                         local_stack.push(result);
                     }
                     Instr::CallSemanticFunction(function, arg_count) => {
-                        let mut args = Vec::new();
-                        for _ in 0..*arg_count {
-                            args.push(local_stack.pop()?);
-                        }
-                        args.reverse();
+                        let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
 
                         let result = Self::call_semantic_function_jit(
                             builder,
@@ -637,11 +610,7 @@ impl BytecodeCompiler {
                             }
                         }
 
-                        let mut args = Vec::new();
-                        for _ in 0..*arg_count {
-                            args.push(local_stack.pop()?);
-                        }
-                        args.reverse();
+                        let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
 
                         let results = Self::call_semantic_function_multi_jit(
                             builder,
@@ -657,11 +626,6 @@ impl BytecodeCompiler {
                         pc += 1;
                     }
                     Instr::CallFunctionMulti(func_name, arg_count, out_count) => {
-                        let Some(function) = ctx.semantic_registry.resolve_name(func_name) else {
-                            return Err(execution_error(
-                                "Legacy multi-output function calls are not supported in JIT; use interpreter",
-                            ));
-                        };
                         match instructions.get(pc + 1) {
                             Some(Instr::Unpack(count)) if count == out_count => {}
                             _ => return Err(execution_error(
@@ -669,19 +633,9 @@ impl BytecodeCompiler {
                             )),
                         }
 
-                        let mut args = Vec::new();
-                        for _ in 0..*arg_count {
-                            args.push(local_stack.pop()?);
-                        }
-                        args.reverse();
-
-                        let results = Self::call_semantic_function_multi_jit(
-                            builder,
-                            ctx.module,
-                            ctx.runmat_call_semantic_function_outputs_id,
-                            function.0,
-                            &args,
-                            *out_count,
+                        let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
+                        let results = Self::compile_named_function_multi_call_jit(
+                            builder, ctx, func_name, &args, *out_count,
                         )?;
                         for result in results {
                             local_stack.push(result);
@@ -812,6 +766,64 @@ impl BytecodeCompiler {
 
     fn call_runtime_add_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
         builder.ins().fadd(a, b)
+    }
+
+    fn pop_call_args(stack: &mut StackSimulator, arg_count: usize) -> Result<Vec<Value>> {
+        let mut args = Vec::with_capacity(arg_count);
+        for _ in 0..arg_count {
+            args.push(stack.pop()?);
+        }
+        args.reverse();
+        Ok(args)
+    }
+
+    fn compile_named_function_call_jit(
+        builder: &mut FunctionBuilder,
+        ctx: &mut CompileContext<'_>,
+        func_name: &str,
+        args: &[Value],
+    ) -> Result<Value> {
+        if let Some(function) = ctx.semantic_registry.resolve_name(func_name) {
+            return Self::call_semantic_function_jit(
+                builder,
+                ctx.module,
+                ctx.runmat_call_semantic_function_id,
+                function.0,
+                args,
+            );
+        }
+
+        Self::call_user_function_jit(
+            builder,
+            ctx.module,
+            ctx.runmat_call_user_function_id,
+            func_name,
+            args,
+            ctx.function_definitions,
+        )
+    }
+
+    fn compile_named_function_multi_call_jit(
+        builder: &mut FunctionBuilder,
+        ctx: &mut CompileContext<'_>,
+        func_name: &str,
+        args: &[Value],
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let Some(function) = ctx.semantic_registry.resolve_name(func_name) else {
+            return Err(execution_error(
+                "Legacy multi-output function calls are not supported in JIT; use interpreter",
+            ));
+        };
+
+        Self::call_semantic_function_multi_jit(
+            builder,
+            ctx.module,
+            ctx.runmat_call_semantic_function_outputs_id,
+            function.0,
+            args,
+            out_count,
+        )
     }
 
     /// Compile user-defined function call to native machine code
