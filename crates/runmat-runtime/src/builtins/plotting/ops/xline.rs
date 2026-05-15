@@ -274,6 +274,7 @@ mod tests {
     use crate::builtins::plotting::plot::plot_builtin;
     use crate::builtins::plotting::state::PlotTestLockGuard;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
+    use crate::builtins::plotting::xlabel::xlabel_builtin;
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
 
     fn setup() -> PlotTestLockGuard {
@@ -334,5 +335,16 @@ mod tests {
         let handles = xline_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))]).unwrap();
         let tensor = Tensor::try_from(&handles).unwrap();
         assert_eq!(tensor.data.len(), 3);
+    }
+
+    #[test]
+    fn xline_preserves_existing_axis_labels() {
+        let _guard = setup();
+        xlabel_builtin(vec![Value::String("Time".into())]).unwrap();
+        xline_builtin(vec![Value::Num(5.0)]).unwrap();
+
+        let figure = clone_figure(current_figure_handle()).unwrap();
+        let meta = figure.axes_metadata(0).unwrap();
+        assert_eq!(meta.x_label.as_deref(), Some("Time"));
     }
 }

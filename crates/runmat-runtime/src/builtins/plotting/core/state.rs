@@ -2221,9 +2221,11 @@ where
             if !opts.title.is_empty() {
                 state.figure.set_axes_title(axes_index, opts.title);
             }
-            state
-                .figure
-                .set_axes_labels(axes_index, opts.x_label, opts.y_label);
+            if !opts.x_label.is_empty() || !opts.y_label.is_empty() {
+                state
+                    .figure
+                    .set_axes_labels(axes_index, opts.x_label, opts.y_label);
+            }
             state.figure.set_grid(opts.grid);
             state.figure.set_axis_equal(opts.axis_equal);
 
