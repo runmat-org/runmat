@@ -1,4 +1,4 @@
-use crate::bytecode::LegacyUserFunction;
+use crate::bytecode::program::LegacyUserFunction;
 use crate::call::builtins::is_vm_intrinsic_counter_builtin;
 use crate::compiler::CompileError;
 use crate::instr::{ArgSpec, EmitLabel, EndExpr, Instr};

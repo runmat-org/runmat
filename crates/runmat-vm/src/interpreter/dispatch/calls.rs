@@ -2,7 +2,7 @@
 use crate::accel::graph::build_accel_graph;
 #[cfg(feature = "native-accel")]
 use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
-use crate::bytecode::LegacyUserFunction;
+use crate::bytecode::program::LegacyUserFunction;
 use crate::bytecode::{ArgSpec, Bytecode, Instr, SemanticFunctionRegistry};
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
@@ -45,7 +45,7 @@ pub enum FevalHandling {
     InvokeUser {
         name: String,
         args: Vec<Value>,
-        functions: std::collections::HashMap<String, crate::bytecode::LegacyUserFunction>,
+        functions: std::collections::HashMap<String, crate::bytecode::program::LegacyUserFunction>,
     },
 }
 

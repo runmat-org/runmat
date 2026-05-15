@@ -1,5 +1,5 @@
 use crate::accel::residency as accel_residency;
-use crate::bytecode::ExecutionContext;
+use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::Instr;
 use crate::interpreter::engine as interp_engine;
 use crate::interpreter::errors::mex;

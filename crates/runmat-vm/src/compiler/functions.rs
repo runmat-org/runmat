@@ -1,6 +1,6 @@
 //! Function, nested-function, and closure lowering.
 
-use crate::bytecode::LegacyUserFunction;
+use crate::bytecode::program::LegacyUserFunction;
 use crate::compiler::core::Compiler;
 use crate::compiler::CompileError;
 use crate::instr::Instr;

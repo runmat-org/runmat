@@ -1,6 +1,7 @@
 use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
-use crate::bytecode::{Bytecode, Instr, LegacyUserFunction, SemanticFunctionRegistry};
+use crate::bytecode::program::LegacyUserFunction;
+use crate::bytecode::{Bytecode, Instr, SemanticFunctionRegistry};
 use crate::call::user as call_user;
 use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
 use crate::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
@@ -365,7 +366,7 @@ pub async fn invoke_semantic_function_value(
 }
 
 fn collect_semantic_outputs(
-    func: &crate::bytecode::SemanticFunctionBytecode,
+    func: &crate::bytecode::program::SemanticFunctionBytecode,
     result_vars: &[Value],
     requested_outputs: usize,
 ) -> Result<Vec<Value>, RuntimeError> {

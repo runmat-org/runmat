@@ -1,4 +1,5 @@
-use crate::bytecode::{Bytecode, ExecutionContext};
+use crate::bytecode::program::ExecutionContext;
+use crate::bytecode::Bytecode;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{prepare_fusion_plan, FusionPlan};
 use runmat_builtins::Value;

@@ -36,7 +36,7 @@ pub use runtime::workspace::{
 };
 
 pub mod legacy {
-    pub use crate::bytecode::LegacyUserFunction;
+    pub use crate::bytecode::program::LegacyUserFunction;
     pub use crate::interpreter::dispatch::{
         legacy_user_dispatch_fallback_count, reset_legacy_user_dispatch_fallback_count,
     };

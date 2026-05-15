@@ -1,4 +1,5 @@
-use crate::bytecode::{ArgSpec, LegacyUserFunction};
+use crate::bytecode::program::LegacyUserFunction;
+use crate::bytecode::ArgSpec;
 use crate::compiler::CompileError;
 use crate::object::{BRACE_SELECTOR_NAME, MEMBER_SELECTOR_NAME, PAREN_SELECTOR_NAME};
 use runmat_builtins::{Type, Value};

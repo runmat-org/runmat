@@ -1,4 +1,5 @@
-use crate::bytecode::{LegacyUserFunction, SemanticFunctionRegistry};
+use crate::bytecode::program::LegacyUserFunction;
+use crate::bytecode::SemanticFunctionRegistry;
 use crate::call::user::try_builtin_fallback_single;
 use crate::interpreter::runner::dynamic_legacy_user_functions_snapshot;
 use runmat_builtins::{Closure, Value};

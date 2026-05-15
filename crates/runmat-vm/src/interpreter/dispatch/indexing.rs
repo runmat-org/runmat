@@ -1,4 +1,5 @@
-use crate::bytecode::{EndExpr, LegacyUserFunction};
+use crate::bytecode::program::LegacyUserFunction;
+use crate::bytecode::EndExpr;
 use crate::call::shared::{
     call_object_index_method, object_protocol_index_cell, ObjectIndexKind, ObjectIndexOp,
 };

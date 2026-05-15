@@ -2,7 +2,8 @@
 use crate::accel::graph::build_accel_graph;
 #[cfg(feature = "native-accel")]
 use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
-use crate::bytecode::{Bytecode, SemanticFunctionBytecode, SemanticFunctionRegistry};
+use crate::bytecode::program::SemanticFunctionBytecode;
+use crate::bytecode::{Bytecode, SemanticFunctionRegistry};
 use crate::compiler::{CompileError, Compiler};
 use crate::layout::derive_layout;
 use runmat_hir::{EntrypointId, FunctionId, HirAssembly};

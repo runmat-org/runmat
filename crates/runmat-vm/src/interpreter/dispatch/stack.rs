@@ -1,5 +1,5 @@
+use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::EmitLabel;
-use crate::bytecode::ExecutionContext;
 use crate::ops::stack as stack_ops;
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;

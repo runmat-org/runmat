@@ -4,7 +4,4 @@ pub mod program;
 
 pub use compile::compile;
 pub use instr::{ArgSpec, EmitLabel, EndExpr, Instr, StackEffect};
-pub use program::{
-    Bytecode, ExecutionContext, LegacyUserFunction, SemanticFunctionBytecode,
-    SemanticFunctionRegistry,
-};
+pub use program::{Bytecode, SemanticFunctionBytecode, SemanticFunctionRegistry};

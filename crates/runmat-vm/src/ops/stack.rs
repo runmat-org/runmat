@@ -1,5 +1,5 @@
+use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::EmitLabel;
-use crate::bytecode::ExecutionContext;
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop2, pop_value};
 use crate::runtime::workspace::{

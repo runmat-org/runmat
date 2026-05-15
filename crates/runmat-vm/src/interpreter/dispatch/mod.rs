@@ -49,7 +49,7 @@ pub enum DispatchHandled {
 pub type InvokeUserForEndExpr<'a> = dyn for<'b> Fn(
         &'b str,
         Vec<Value>,
-        &'b HashMap<String, crate::bytecode::LegacyUserFunction>,
+        &'b HashMap<String, crate::bytecode::program::LegacyUserFunction>,
         &'b [Value],
     ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>>
     + 'a;
@@ -73,7 +73,7 @@ pub type InterpretFunctionCounts<'a> = dyn Fn(
 pub struct DispatchMeta<'a> {
     pub instr: &'a Instr,
     pub var_names: &'a HashMap<usize, String>,
-    pub bytecode_functions: &'a HashMap<String, crate::bytecode::LegacyUserFunction>,
+    pub bytecode_functions: &'a HashMap<String, crate::bytecode::program::LegacyUserFunction>,
     pub semantic_registry: &'a crate::bytecode::SemanticFunctionRegistry,
     pub source_id: Option<runmat_hir::SourceId>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
@@ -85,7 +85,7 @@ pub struct DispatchMeta<'a> {
 pub struct DispatchState<'a> {
     pub stack: &'a mut Vec<Value>,
     pub vars: &'a mut Vec<Value>,
-    pub context: &'a mut crate::bytecode::ExecutionContext,
+    pub context: &'a mut crate::bytecode::program::ExecutionContext,
     pub try_stack: &'a mut Vec<(usize, Option<usize>)>,
     pub last_exception: &'a mut Option<runmat_builtins::MException>,
     pub imports: &'a mut Vec<(Vec<String>, bool)>,
