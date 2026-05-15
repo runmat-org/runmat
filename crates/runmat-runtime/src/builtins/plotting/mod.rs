@@ -122,10 +122,14 @@ pub(crate) mod view;
 pub(crate) mod xlabel;
 #[path = "ops/xlim.rs"]
 pub(crate) mod xlim;
+#[path = "ops/xline.rs"]
+pub(crate) mod xline;
 #[path = "ops/ylabel.rs"]
 pub(crate) mod ylabel;
 #[path = "ops/ylim.rs"]
 pub(crate) mod ylim;
+#[path = "ops/yline.rs"]
+pub(crate) mod yline;
 #[path = "ops/zlabel.rs"]
 pub(crate) mod zlabel;
 #[path = "ops/zlim.rs"]

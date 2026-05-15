@@ -1197,6 +1197,9 @@ fn get_plot_child_property(
         super::state::PlotChildHandleState::ContourFill(plot) => {
             get_contour_fill_property(plot, property, builtin)
         }
+        super::state::PlotChildHandleState::ReferenceLine(plot) => {
+            get_reference_line_property(plot, property, builtin)
+        }
         super::state::PlotChildHandleState::Pie(plot) => get_pie_property(plot, property, builtin),
         super::state::PlotChildHandleState::Text(text) => {
             get_world_text_property(text, property, builtin)
@@ -1258,6 +1261,9 @@ fn apply_plot_child_property(
         }
         super::state::PlotChildHandleState::ContourFill(plot) => {
             apply_contour_fill_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::ReferenceLine(plot) => {
+            apply_reference_line_property(plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Pie(plot) => {
             apply_pie_property(plot, key, value, builtin)
@@ -1466,6 +1472,76 @@ fn get_line_property(
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
         Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
         Some(name) => line_marker_property_value(&line.marker, name, builtin),
+    }
+}
+
+fn get_reference_line_property(
+    line_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(line_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::ReferenceLine(line) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid reference line handle"),
+        ));
+    };
+    let orientation = match line.orientation {
+        runmat_plot::plots::ReferenceLineOrientation::Vertical => "vertical",
+        runmat_plot::plots::ReferenceLineOrientation::Horizontal => "horizontal",
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st =
+                child_base_struct("constantline", line_handle.figure, line_handle.axes_index);
+            st.insert("Value", Value::Num(line.value));
+            st.insert("Orientation", Value::String(orientation.into()));
+            st.insert("Color", Value::String(color_to_short_name(line.color)));
+            st.insert("LineWidth", Value::Num(line.line_width as f64));
+            st.insert(
+                "LineStyle",
+                Value::String(line_style_name(line.line_style).into()),
+            );
+            st.insert(
+                "Label",
+                Value::String(line.label.clone().unwrap_or_default()),
+            );
+            st.insert(
+                "LabelOrientation",
+                Value::String(line.label_orientation.clone()),
+            );
+            st.insert(
+                "DisplayName",
+                Value::String(line.display_name.clone().unwrap_or_default()),
+            );
+            st.insert(
+                "Visible",
+                Value::String(if line.visible { "on" } else { "off" }.into()),
+            );
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("constantline".into())),
+        Some("parent") => Ok(child_parent_handle(
+            line_handle.figure,
+            line_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("value") => Ok(Value::Num(line.value)),
+        Some("orientation") => Ok(Value::String(orientation.into())),
+        Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+        Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
+        Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
+        Some("label") => Ok(Value::String(line.label.unwrap_or_default())),
+        Some("labelorientation") => Ok(Value::String(line.label_orientation)),
+        Some("displayname") => Ok(Value::String(line.display_name.unwrap_or_default())),
+        Some("visible") => Ok(Value::String(
+            if line.visible { "on" } else { "off" }.into(),
+        )),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported reference line property `{other}`"),
+        )),
     }
 }
 
@@ -2648,6 +2724,68 @@ fn apply_line_property(
     super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
         if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
             apply_line_plot_properties(line, key, value, builtin);
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_reference_line_property(
+    line_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::ReferenceLine(line) = plot {
+            match key {
+                "value" => {
+                    if let Some(v) = value_as_f64(value) {
+                        if v.is_finite() {
+                            line.value = v;
+                        }
+                    }
+                }
+                "color" => {
+                    if let Ok(c) =
+                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                    {
+                        line.color = c;
+                    }
+                }
+                "linewidth" => {
+                    if let Some(v) = value_as_f64(value) {
+                        if v > 0.0 {
+                            line.line_width = v as f32;
+                        }
+                    }
+                }
+                "linestyle" => {
+                    if let Some(s) = value_as_string(value) {
+                        line.line_style = parse_line_style_name_for_props(&s);
+                    }
+                }
+                "label" => {
+                    line.label = value_as_string(value).map(|s| s.to_string());
+                }
+                "labelorientation" => {
+                    if let Some(s) = value_as_string(value) {
+                        line.label_orientation = s.to_ascii_lowercase();
+                    }
+                }
+                "displayname" => {
+                    line.display_name = value_as_string(value).map(|s| s.to_string());
+                }
+                "visible" => {
+                    if let Some(v) = value_as_bool(value) {
+                        line.visible = v;
+                    } else if let Some(s) = value_as_string(value) {
+                        line.visible =
+                            !matches!(s.trim().to_ascii_lowercase().as_str(), "off" | "false");
+                    }
+                }
+                _ => {}
+            }
         }
     })
     .map_err(|err| map_figure_error(builtin, err))?;

@@ -2,7 +2,8 @@ use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
     AreaPlot, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar, Figure,
     LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, PlotElement, PlotType, QuiverPlot,
-    Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot, StemPlot, SurfacePlot, TextStyle,
+    ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot,
+    StemPlot, SurfacePlot, TextStyle,
 };
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,19 @@ pub enum ScenePlot {
         line_style: String,
         axes_index: u32,
         label: Option<String>,
+        visible: bool,
+    },
+    ReferenceLine {
+        orientation: String,
+        #[serde(deserialize_with = "deserialize_f64_lossy")]
+        value: f64,
+        color_rgba: [f32; 4],
+        line_width: f32,
+        line_style: String,
+        label: Option<String>,
+        display_name: Option<String>,
+        label_orientation: String,
+        axes_index: u32,
         visible: bool,
     },
     Scatter {
@@ -731,6 +745,22 @@ impl ScenePlot {
                 label: line.label.clone(),
                 visible: line.visible,
             },
+            PlotElement::ReferenceLine(line) => Self::ReferenceLine {
+                orientation: match line.orientation {
+                    ReferenceLineOrientation::Vertical => "vertical",
+                    ReferenceLineOrientation::Horizontal => "horizontal",
+                }
+                .into(),
+                value: line.value,
+                color_rgba: vec4_to_rgba(line.color),
+                line_width: line.line_width,
+                line_style: format!("{:?}", line.line_style),
+                label: line.label.clone(),
+                display_name: line.display_name.clone(),
+                label_orientation: line.label_orientation.clone(),
+                axes_index,
+                visible: line.visible,
+            },
             PlotElement::Scatter(scatter) => Self::Scatter {
                 x: scatter.x_data.clone(),
                 y: scatter.y_data.clone(),
@@ -941,6 +971,34 @@ impl ScenePlot {
                 line.label = label;
                 line.set_visible(visible);
                 figure.add_line_plot_on_axes(line, axes_index as usize);
+            }
+            ScenePlot::ReferenceLine {
+                orientation,
+                value,
+                color_rgba,
+                line_width,
+                line_style,
+                label,
+                display_name,
+                label_orientation,
+                axes_index,
+                visible,
+            } => {
+                let orientation = if orientation.eq_ignore_ascii_case("horizontal") {
+                    ReferenceLineOrientation::Horizontal
+                } else {
+                    ReferenceLineOrientation::Vertical
+                };
+                let mut line = ReferenceLine::new(orientation, value)?.with_style(
+                    rgba_to_vec4(color_rgba),
+                    line_width,
+                    parse_line_style(&line_style),
+                );
+                line.label = label;
+                line.display_name = display_name;
+                line.label_orientation = label_orientation;
+                line.visible = visible;
+                figure.add_reference_line_on_axes(line, axes_index as usize);
             }
             ScenePlot::Scatter {
                 x,
@@ -1423,6 +1481,7 @@ pub enum PlotKind {
     Scatter3,
     Contour,
     ContourFill,
+    ReferenceLine,
 }
 
 impl From<PlotType> for PlotKind {
@@ -1442,6 +1501,7 @@ impl From<PlotType> for PlotKind {
             PlotType::Scatter3 => Self::Scatter3,
             PlotType::Contour => Self::Contour,
             PlotType::ContourFill => Self::ContourFill,
+            PlotType::ReferenceLine => Self::ReferenceLine,
         }
     }
 }
