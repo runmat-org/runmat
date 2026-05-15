@@ -1113,6 +1113,119 @@ pub extern "C" fn runmat_call_semantic_function_outputs(
     0
 }
 
+fn read_turbine_value_args(args_ptr: *const TurbineValue, args_len: i32) -> Result<Vec<Value>> {
+    if args_len < 0 {
+        return Err(execution_error("negative TurbineValue argument count"));
+    }
+    if args_len == 0 {
+        return Ok(Vec::new());
+    }
+    if args_ptr.is_null() {
+        return Err(execution_error("null TurbineValue args pointer"));
+    }
+
+    unsafe { std::slice::from_raw_parts(args_ptr, args_len as usize) }
+        .iter()
+        .map(|value| value.to_runtime_value())
+        .collect()
+}
+
+fn write_turbine_value(result_ptr: *mut TurbineValue, value: Value) -> Result<()> {
+    if result_ptr.is_null() {
+        return Err(execution_error("null TurbineValue result pointer"));
+    }
+    unsafe {
+        *result_ptr = TurbineValue::from_runtime_value(value)?;
+    }
+    Ok(())
+}
+
+#[no_mangle]
+pub extern "C" fn runmat_call_semantic_function_value(
+    function_id: i64,
+    args_ptr: *const TurbineValue,
+    args_len: i32,
+    result_ptr: *mut TurbineValue,
+) -> i32 {
+    let output = (|| -> Result<Value> {
+        let context = get_runtime_context().ok_or_else(|| {
+            execution_error("No runtime context available for TurbineValue semantic call")
+        })?;
+        let function_id = usize::try_from(function_id)
+            .map_err(|_| execution_error(format!("Invalid semantic function id: {function_id}")))?;
+        let args = read_turbine_value_args(args_ptr, args_len)?;
+        run_immediate(Box::pin(runmat_vm::invoke_semantic_function_value(
+            function_id,
+            &args,
+            1,
+            &context.semantic_registry,
+        )))?
+        .map_err(TurbineError::ExecutionError)
+    })();
+
+    match output.and_then(|value| write_turbine_value(result_ptr, value)) {
+        Ok(()) => 0,
+        Err(err) => {
+            error!("TurbineValue semantic function call failed: {err}");
+            1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn runmat_call_semantic_function_values(
+    function_id: i64,
+    args_ptr: *const TurbineValue,
+    args_len: i32,
+    out_count: i32,
+    results_ptr: *mut TurbineValue,
+) -> i32 {
+    let requested_out_count = out_count;
+    let output = (|| -> Result<Vec<Value>> {
+        if out_count < 0 {
+            return Err(execution_error("negative TurbineValue output count"));
+        }
+        if out_count > 0 && results_ptr.is_null() {
+            return Err(execution_error("null TurbineValue results pointer"));
+        }
+        let context = get_runtime_context().ok_or_else(|| {
+            execution_error("No runtime context available for TurbineValue semantic outputs call")
+        })?;
+        let function_id = usize::try_from(function_id)
+            .map_err(|_| execution_error(format!("Invalid semantic function id: {function_id}")))?;
+        let args = read_turbine_value_args(args_ptr, args_len)?;
+        let out_count = out_count as usize;
+        let output = run_immediate(Box::pin(runmat_vm::invoke_semantic_function_value(
+            function_id,
+            &args,
+            out_count,
+            &context.semantic_registry,
+        )))?
+        .map_err(TurbineError::ExecutionError)?;
+        Ok(match output {
+            Value::OutputList(values) => values,
+            value => vec![value],
+        })
+    })();
+
+    let outputs = match output {
+        Ok(outputs) => outputs,
+        Err(err) => {
+            error!("TurbineValue semantic function outputs call failed: {err}");
+            return 1;
+        }
+    };
+
+    for index in 0..requested_out_count as usize {
+        let value = outputs.get(index).cloned().unwrap_or(Value::Num(0.0));
+        if let Err(err) = write_turbine_value(unsafe { results_ptr.add(index) }, value) {
+            error!("TurbineValue semantic output write failed: {err}");
+            return 1;
+        }
+    }
+    0
+}
+
 /// Runtime builtin dispatcher for f64-returning functions
 ///
 /// # Arguments
@@ -1307,6 +1420,45 @@ pub extern "C" fn runtime_create_matrix(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use runmat_hir::FunctionId;
+    use runmat_vm::SemanticFunctionBytecode;
+    use std::collections::HashMap;
+
+    fn install_semantic_context(functions: Vec<SemanticFunctionBytecode>) {
+        let mut semantic_functions = HashMap::new();
+        for function in functions {
+            semantic_functions.insert(function.function, function);
+        }
+        let registry = SemanticFunctionRegistry::new(semantic_functions);
+        let context = Box::leak(Box::new(RuntimeContext::new(HashMap::new(), registry)));
+        set_runtime_context(context);
+    }
+
+    fn semantic_function(
+        function: FunctionId,
+        display_name: &str,
+        instructions: Vec<Instr>,
+        var_count: usize,
+        input_slots: Vec<usize>,
+        output_slots: Vec<usize>,
+    ) -> SemanticFunctionBytecode {
+        SemanticFunctionBytecode {
+            function,
+            display_name: display_name.to_string(),
+            source_id: None,
+            instructions,
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count,
+            input_slots,
+            varargin_slot: None,
+            output_slots,
+            varargout_slot: None,
+            capture_slots: Vec::new(),
+        }
+    }
+
     #[test]
     fn named_function_hashing_stays_centralized() {
         let source = include_str!("lib.rs");
@@ -1320,6 +1472,101 @@ mod tests {
                 .matches(&["Self::", "hash_named_function_call("].concat())
                 .count(),
             2
+        );
+    }
+
+    #[test]
+    fn semantic_function_value_host_call_round_trips_scalar() {
+        let function = FunctionId(1);
+        install_semantic_context(vec![semantic_function(
+            function,
+            "inc",
+            vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(1.0),
+                Instr::Add,
+                Instr::StoreVar(1),
+            ],
+            2,
+            vec![0],
+            vec![1],
+        )]);
+
+        let args = [TurbineValue::from_runtime_value(Value::Num(41.0)).unwrap()];
+        let mut result = TurbineValue::empty();
+        let status = runmat_call_semantic_function_value(
+            function.0 as i64,
+            args.as_ptr(),
+            args.len() as i32,
+            &mut result,
+        );
+        clear_runtime_context();
+
+        assert_eq!(status, 0);
+        assert_eq!(result.to_runtime_value().unwrap(), Value::Num(42.0));
+    }
+
+    #[test]
+    fn semantic_function_value_host_call_round_trips_handle_value() {
+        let function = FunctionId(2);
+        install_semantic_context(vec![semantic_function(
+            function,
+            "label",
+            vec![Instr::LoadString("ok".to_string()), Instr::StoreVar(0)],
+            1,
+            Vec::new(),
+            vec![0],
+        )]);
+
+        let mut result = TurbineValue::empty();
+        let status = runmat_call_semantic_function_value(
+            function.0 as i64,
+            std::ptr::null(),
+            0,
+            &mut result,
+        );
+        clear_runtime_context();
+
+        assert_eq!(status, 0);
+        assert_eq!(
+            result.to_runtime_value().unwrap(),
+            Value::String("ok".to_string())
+        );
+    }
+
+    #[test]
+    fn semantic_function_values_host_call_writes_multiple_outputs() {
+        let function = FunctionId(3);
+        install_semantic_context(vec![semantic_function(
+            function,
+            "pair",
+            vec![
+                Instr::LoadVar(0),
+                Instr::StoreVar(1),
+                Instr::LoadString("done".to_string()),
+                Instr::StoreVar(2),
+            ],
+            3,
+            vec![0],
+            vec![1, 2],
+        )]);
+
+        let args = [TurbineValue::from_runtime_value(Value::Num(7.0)).unwrap()];
+        let mut results = [TurbineValue::empty(), TurbineValue::empty()];
+        let status = runmat_call_semantic_function_values(
+            function.0 as i64,
+            args.as_ptr(),
+            args.len() as i32,
+            results.len() as i32,
+            results.as_mut_ptr(),
+        );
+        clear_runtime_context();
+
+        assert_eq!(status, 0);
+        assert_eq!(results[0].to_runtime_value().unwrap(), Value::Num(7.0));
+        assert_eq!(
+            results[1].to_runtime_value().unwrap(),
+            Value::String("done".to_string())
         );
     }
 }
