@@ -391,7 +391,7 @@ export default function AboutPage() {
                 <div className="relative">
                   <span className="absolute -left-[calc(1.5rem+5px)] top-1 h-2.5 w-2.5 rounded-full bg-amber-500" />
                   <p className="text-sm font-semibold text-foreground">Mar 2026</p>
-                  <p className="text-sm font-semibold text-foreground">Browser Sandbox + RunMat Cloud</p>
+                  <p className="text-sm font-semibold text-foreground">Browser Sandbox + RunMat App</p>
                   <p className="text-sm text-muted-foreground">
                     Client-side WebAssembly execution, persistent projects, versioning, and collaboration.{" "}
                     <Link href="/blog/introducing-runmat-cloud" className="underline underline-offset-2 hover:text-foreground">Read more</Link>
@@ -457,7 +457,7 @@ export default function AboutPage() {
             </Card>
             <Card className="border border-amber-500/30 bg-muted/40">
               <CardHeader className="border-b border-border/60">
-                <CardTitle className="text-lg text-foreground">RunMat Cloud</CardTitle>
+                <CardTitle className="text-lg text-foreground">RunMat App</CardTitle>
               </CardHeader>
               <CardContent className="text-[0.938rem] text-foreground space-y-2">
                 <div className="flex items-start gap-2">

@@ -32,7 +32,7 @@ export function BrowserTabContent() {
       <div>
         <h3 className="text-lg font-semibold mb-2 text-foreground">The interface</h3>
         <p className="text-foreground text-sm mb-2">
-          Three main areas: <strong>Sidebar</strong> (file tree, + to add files), <strong>Editor</strong> (code, Cmd/Ctrl+S to save), <strong>Runtime Panel</strong> (Run, Figures, Console, Variables). Panels are resizable.
+          Four main areas: <strong>Sidebar</strong> (file tree, + to add files), <strong>Editor</strong> (code, Cmd/Ctrl+S to save), <strong>Runtime Panel</strong> (Run, Figures, Console, Variables), and <strong>Agent Panel</strong> (chat, reviewable diffs). Panels are resizable.
         </p>
       </div>
 
@@ -101,8 +101,23 @@ export function BrowserTabContent() {
         </CardContent>
       </Card>
 
+      <Card className="bg-background">
+        <CardHeader>
+          <CardTitle className="flex items-center text-base">
+            <span className="bg-blue-100 dark:bg-blue-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-blue-600 dark:text-blue-400 mr-3">4</span>
+            Bring your existing scripts
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-foreground text-sm">
+            Paste an existing <code className="rounded bg-muted px-1 py-0.5">.m</code> file and run it. If something fails — an unsupported function or a toolbox-specific call — open the built-in agent and ask it to rework the code. It will propose reviewable edits you can accept or discard.
+            See <Link href="/docs/compatibility#agent-assisted-migration" className="text-primary underline underline-offset-4">Agent-assisted migration</Link> for details.
+          </p>
+        </CardContent>
+      </Card>
+
       <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-foreground">
-        <strong className="text-foreground">Sandbox storage:</strong> Files live in your browser tab. No account required; your code never leaves your machine. Files are cleared when you close or refresh the tab. Sign in free for 100 MB cloud storage with automatic versioning, or use the CLI for local persistence.
+        <strong className="text-foreground">Sandbox storage:</strong> Files live in your browser tab. No account required — code execution is local. Using the built-in agent sends context to the configured LLM provider. Files are cleared when you close or refresh the tab. Sign in free for 100 MB cloud storage with automatic versioning, or use the CLI for local persistence.
       </div>
     </div>
   );

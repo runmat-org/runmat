@@ -8,7 +8,7 @@ authors:
     url: "https://www.linkedin.com/in/finbarrwatterson/"
 readTime: "7 min read"
 slug: "version-control-for-engineers-who-dont-use-git"
-tags: ["version control", "MATLAB", "RunMat Cloud", "scientific computing", "collaboration", "git alternative", "electrical engineering", "engineering workflows"]
+tags: ["version control", "MATLAB", "RunMat App", "scientific computing", "collaboration", "git alternative", "electrical engineering", "engineering workflows"]
 keywords: "version control for engineers, version control without git, git alternative for engineers, version control for engineers building hardware, engineering file versioning, version control MATLAB, automatic version control, version control for non-developers, simulation version control, FEA version control, reproducibility scientific computing, RunMat versioning"
 visibility: public
 excerpt: "Engineers shouldn't need a CS degree to have a history of their work. RunMat versions every save automatically — no staging, no commits, no git required."
@@ -168,7 +168,7 @@ In mission-critical environments the costs accumulate over months and years and 
 
 ## What if version control just happened?
 
-When we built RunMat Cloud, we asked a simple question: what if version control worked like autosave, something the platform does for you rather than something you have to remember to do?
+When we built RunMat App, we asked a simple question: what if version control worked like autosave, something the platform does for you rather than something you have to remember to do?
 
 Save a file in a RunMat project and the platform creates an immutable version record: content hash, file size, who made the change, and when. It is built into the filesystem, so there are no commands to run and no workflow to learn. Code and config files (`.m`, `.py`, `.json`, `.yaml`, and others) always get full history; large binary outputs only get versioned when it is useful. For [massive datasets](/docs/large-dataset-persistence), RunMat versions the manifest (a small pointer file) rather than the terabytes of data, so you get full lineage without the storage cost.
 
@@ -202,4 +202,4 @@ But the consequences — lost work, no audit trail, irreproducible results, comp
 
 Go to [runmat.com/sandbox](https://runmat.com/sandbox), write a script, save it, and then click "History." That's it. You're done. You have version control.
 
-*RunMat Cloud ships with automatic versioning, snapshots, and git export built in. [Read the full Versioning & History reference](/docs/versioning) for details on how it works, or see [how RunMat compares to other MATLAB alternatives](/blog/free-matlab-alternatives) for the broader picture.*
+*RunMat App ships with automatic versioning, snapshots, and git export built in. [Read the full Versioning & History reference](/docs/versioning) for details on how it works, or see [how RunMat compares to other MATLAB alternatives](/blog/free-matlab-alternatives) for the broader picture.*

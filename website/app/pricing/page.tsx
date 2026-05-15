@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import CloudPricingCard from "@/components/pricing/CloudPricingCard";
 import { CompareProductsTable } from "@/components/pricing/ComparisonTables";
+import { FAQAccordion, type FAQItem } from "@/components/FAQAccordion";
 
 export const metadata: Metadata = {
   title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
@@ -43,42 +44,50 @@ const serverFeatures = [
   "Dedicated support",
 ];
 
-const pricingFaqItems: { question: string; answer: string; answerContent?: React.ReactNode }[] = [
+const pricingFaqItems: FAQItem[] = [
   {
-    question: "What's the difference between RunMat, Cloud, and Enterprise?",
+    id: "pricing-diff",
+    question: "What's the difference between RunMat, App, and Enterprise?",
     answer:
-      "RunMat is the free, open-source runtime — GPU acceleration, plotting, CLI, and browser sandbox. The desktop app is coming soon. RunMat Cloud adds cloud storage, project sharing, and version history on top, with Hobby, Pro, and Team tiers. RunMat Enterprise is everything in Cloud, deployed on your own infrastructure for air-gapped, compliance-ready environments.",
+      "RunMat is the free, open-source runtime — GPU acceleration, plotting, CLI, and browser sandbox. The desktop app is coming soon. RunMat App adds persistent storage, project sharing, and version history on top, with Hobby, Pro, and Team tiers. RunMat Enterprise is everything in App, deployed on your own infrastructure for air-gapped, compliance-ready environments.",
   },
   {
+    id: "pricing-free",
     question: "Is RunMat really free?",
     answer:
-      "Yes. The RunMat runtime is open source and the browser sandbox is free. The desktop app is coming soon and will also be free. RunMat Cloud has a $0 Hobby tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
+      "Yes. The RunMat runtime is open source and the browser sandbox is free. The desktop app is coming soon and will also be free. RunMat App has a $0 Hobby tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
   },
   {
+    id: "pricing-account",
     question: "Do I need an account to use RunMat?",
     answer:
       "No. The browser sandbox works without an account. The desktop app (coming soon) will also work without one. An account is only required for cloud storage and team features.",
   },
   {
-    question: "What's included in Cloud Hobby vs Pro vs Team?",
+    id: "pricing-tiers",
+    question: "What's included in App Hobby vs Pro vs Team?",
     answer:
       "Hobby: unlimited projects, 100 MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: unlimited projects, SSO / SAML / SCIM, 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
   },
   {
-    question: "How does RunMat Cloud billing work?",
+    id: "pricing-billing",
+    question: "How does RunMat App billing work?",
     answer:
       "Pro and Team are monthly subscriptions billed per user (per seat). You can upgrade or change plan from your account. Need more storage? Add space from your account settings.",
   },
   {
-    question: "When do I need RunMat Enterprise instead of Cloud?",
+    id: "pricing-enterprise",
+    question: "When do I need RunMat Enterprise instead of App?",
     answer:
       "Choose Enterprise when you need on-prem or air-gapped deployment, strict data residency, or SSO and audit compliance that must stay in your environment.",
   },
   {
+    id: "pricing-trial",
     question: "Is there a free trial for Pro or Team?",
     answer: "Start on the Hobby tier and upgrade to Pro or Team from your account when you're ready. No sales call needed.",
   },
   {
+    id: "pricing-contact",
     question: "Who do I contact for Enterprise pricing?",
     answer: "You can sign up for Pro and Team directly from your account. For Enterprise, reach out via our contact page or email team@runmat.com.",
     answerContent: <>You can sign up for Pro and Team directly from your account. For Enterprise, reach out via our <Link href="/contact" className="underline hover:text-foreground">contact page</Link> or email <a href="mailto:team@runmat.com" className="underline hover:text-foreground">team@runmat.com</a>.</>,
@@ -210,24 +219,7 @@ export default function PricingPage() {
               Frequently asked questions
             </h2>
           </div>
-          <div className="mx-auto grid max-w-5xl gap-3 md:grid-cols-2">
-            {pricingFaqItems.map(item => (
-              <details
-                key={item.question}
-                className="group self-start rounded-lg border border-border/60 bg-card shadow-sm"
-              >
-                <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-foreground">
-                  <span className="text-xs font-medium">{item.question}</span>
-                  <span className="text-muted-foreground transition-transform duration-200 group-open:rotate-180 ml-2 shrink-0">
-                    ⌄
-                  </span>
-                </summary>
-                <div className="px-4 pb-3 text-xs text-foreground leading-relaxed">
-                  {item.answerContent ?? item.answer}
-                </div>
-              </details>
-            ))}
-          </div>
+          <FAQAccordion items={pricingFaqItems} size="compact" />
         </section>
 
         <div className="text-center pb-16">

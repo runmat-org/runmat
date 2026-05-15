@@ -247,12 +247,14 @@
   {
     "title": "bar",
     "slug": "bar",
-    "summary": "Render MATLAB-compatible bar charts.",
+    "summary": "Create bar charts for categorical comparisons, grouped series, stacked values, and MATLAB `bar` workflows.",
     "keywords": [
       "bar",
       "bar chart",
-      "categories",
-      "gpuArray"
+      "grouped bar chart",
+      "stacked bar chart",
+      "matlab bar",
+      "categorical comparison"
     ]
   },
   {
@@ -404,6 +406,17 @@
     ]
   },
   {
+    "title": "cla",
+    "slug": "cla",
+    "summary": "Clear the contents of the current axes without clearing the whole figure.",
+    "keywords": [
+      "cla",
+      "clear axes",
+      "plotting",
+      "subplot"
+    ]
+  },
+  {
     "title": "class",
     "slug": "class",
     "summary": "Return the MATLAB class name for scalars, arrays, handles, and objects.",
@@ -449,6 +462,17 @@
       "workspace",
       "variables",
       "-except"
+    ]
+  },
+  {
+    "title": "clf",
+    "slug": "clf",
+    "summary": "Clear the contents of the current figure, selected figure handles, or all figures.",
+    "keywords": [
+      "clf",
+      "clear figure",
+      "plotting",
+      "graphics handles"
     ]
   },
   {
@@ -562,22 +586,26 @@
   {
     "title": "contour",
     "slug": "contour",
-    "summary": "Render MATLAB-compatible contour plots (iso-lines).",
+    "summary": "Create contour line plots for level sets, iso-lines, and MATLAB `contour` workflows.",
     "keywords": [
       "contour",
+      "contour lines",
       "iso-lines",
-      "gpuArray"
+      "level sets",
+      "matlab contour",
+      "topographic lines"
     ]
   },
   {
     "title": "contourf",
     "slug": "contourf",
-    "summary": "Render MATLAB-compatible filled contour plots.",
+    "summary": "Create filled contour plots for level regions, scalar fields, and MATLAB `contourf` workflows.",
     "keywords": [
       "contourf",
-      "contour",
-      "filled",
-      "gpuArray"
+      "filled contour plot",
+      "level regions",
+      "scalar field heatmap",
+      "matlab contourf"
     ]
   },
   {
@@ -802,6 +830,17 @@
       "datenum",
       "Format",
       "MATLAB compatibility"
+    ]
+  },
+  {
+    "title": "day",
+    "slug": "day",
+    "summary": "Extract day-of-month numbers from datetime values.",
+    "keywords": [
+      "day",
+      "datetime",
+      "date component",
+      "day of month"
     ]
   },
   {
@@ -1075,6 +1114,20 @@
     ]
   },
   {
+    "title": "exprnd",
+    "slug": "exprnd",
+    "summary": "Exponentially-distributed random numbers with mean mu.",
+    "keywords": [
+      "exprnd",
+      "exponential",
+      "random",
+      "distribution",
+      "statistics",
+      "queueing",
+      "poisson"
+    ]
+  },
+  {
     "title": "extractBetween",
     "slug": "extractbetween",
     "summary": "Extract text that lies between two boundary markers using string or position inputs.",
@@ -1206,6 +1259,17 @@
       "object",
       "handle",
       "properties"
+    ]
+  },
+  {
+    "title": "figure",
+    "slug": "figure",
+    "summary": "Create a new figure or select an existing figure handle.",
+    "keywords": [
+      "figure",
+      "plotting",
+      "graphics handle",
+      "window selection"
     ]
   },
   {
@@ -1359,6 +1423,22 @@
     ]
   },
   {
+    "title": "format",
+    "slug": "format",
+    "summary": "Set the numeric display format for console output, controlling how floating-point numbers are shown.",
+    "keywords": [
+      "format",
+      "display",
+      "precision",
+      "numeric",
+      "short",
+      "long",
+      "scientific",
+      "rational",
+      "hex"
+    ]
+  },
+  {
     "title": "fprintf",
     "slug": "fprintf",
     "summary": "Write formatted text to files or standard output/error using MATLAB-compatible semantics.",
@@ -1396,6 +1476,18 @@
       "seek",
       "io",
       "file identifier"
+    ]
+  },
+  {
+    "title": "fsolve",
+    "slug": "fsolve",
+    "summary": "Solve scalar or vector nonlinear equation systems using finite-difference Levenberg-Marquardt iterations.",
+    "keywords": [
+      "fsolve",
+      "nonlinear solve",
+      "root finding",
+      "Jacobian",
+      "Levenberg-Marquardt"
     ]
   },
   {
@@ -1438,6 +1530,18 @@
     ]
   },
   {
+    "title": "fzero",
+    "slug": "fzero",
+    "summary": "Find a zero of a scalar nonlinear function using bracket expansion and Brent's method.",
+    "keywords": [
+      "fzero",
+      "root finding",
+      "zero",
+      "brent",
+      "optimization"
+    ]
+  },
+  {
     "title": "gamma",
     "slug": "gamma",
     "summary": "Element-wise gamma function for scalars, vectors, matrices, and complex inputs.",
@@ -1461,6 +1565,28 @@
       "host copy",
       "accelerate",
       "residency"
+    ]
+  },
+  {
+    "title": "gca",
+    "slug": "gca",
+    "summary": "Return the handle for the current axes, or a struct describing the active axes state.",
+    "keywords": [
+      "gca",
+      "current axes",
+      "axes handle",
+      "plotting"
+    ]
+  },
+  {
+    "title": "gcf",
+    "slug": "gcf",
+    "summary": "Return the numeric handle of the current figure.",
+    "keywords": [
+      "gcf",
+      "current figure",
+      "figure handle",
+      "plotting"
     ]
   },
   {
@@ -1489,7 +1615,7 @@
   {
     "title": "get",
     "slug": "get",
-    "summary": "Inspect figure, axes, and plot-object properties through RunMat\u2019s graphics handles and MATLAB-style `get` workflows.",
+    "summary": "Inspect figure, axes, and plot-object properties through RunMat’s graphics handles and MATLAB-style `get` workflows.",
     "keywords": [
       "get",
       "graphics handle",
@@ -1574,6 +1700,17 @@
     ]
   },
   {
+    "title": "gray2rgb",
+    "slug": "gray2rgb",
+    "summary": "Replicate a grayscale image into an RGB truecolor image.",
+    "keywords": [
+      "gray2rgb",
+      "grayscale",
+      "rgb",
+      "image"
+    ]
+  },
+  {
     "title": "grid",
     "slug": "grid",
     "summary": "Toggle grid lines for charts, subplots, and MATLAB `grid on` / `grid off` workflows.",
@@ -1622,14 +1759,28 @@
     ]
   },
   {
+    "title": "heatmap",
+    "slug": "heatmap",
+    "summary": "Create heatmap charts from matrix data with optional row and column labels.",
+    "keywords": [
+      "heatmap",
+      "HeatmapChart",
+      "matrix visualization",
+      "colormap",
+      "plotting"
+    ]
+  },
+  {
     "title": "hist",
     "slug": "hist",
-    "summary": "Render MATLAB-compatible histograms using automatic or user-specified bin counts.",
+    "summary": "Create legacy center-based histograms for quick distribution plots and MATLAB `hist` workflows.",
     "keywords": [
       "hist",
-      "histogram",
-      "frequency",
-      "gpuArray"
+      "legacy histogram",
+      "bin centers",
+      "distribution plot",
+      "matlab hist",
+      "hist vs histogram"
     ]
   },
   {
@@ -1673,6 +1824,18 @@
     ]
   },
   {
+    "title": "hold",
+    "slug": "hold",
+    "summary": "Control whether new plots replace or append to the current axes.",
+    "keywords": [
+      "hold",
+      "hold on",
+      "hold off",
+      "plotting",
+      "append plots"
+    ]
+  },
+  {
     "title": "horzcat",
     "slug": "horzcat",
     "summary": "Concatenate inputs side-by-side (dimension 2) just like MATLAB's square-bracket syntax.",
@@ -1682,6 +1845,30 @@
       "square brackets",
       "array building",
       "gpu"
+    ]
+  },
+  {
+    "title": "hour",
+    "slug": "hour",
+    "summary": "Extract hour numbers from datetime values.",
+    "keywords": [
+      "hour",
+      "datetime",
+      "time component",
+      "clock hour"
+    ]
+  },
+  {
+    "title": "hsv2rgb",
+    "slug": "hsv2rgb",
+    "summary": "Convert HSV image or colormap values to RGB.",
+    "keywords": [
+      "hsv2rgb",
+      "hsv",
+      "rgb",
+      "color",
+      "image",
+      "colormap"
     ]
   },
   {
@@ -1729,6 +1916,45 @@
       "inverse fft shift",
       "frequency alignment",
       "gpu"
+    ]
+  },
+  {
+    "title": "im2double",
+    "slug": "im2double",
+    "summary": "Convert image data to double precision, scaling integer images into [0,1].",
+    "keywords": [
+      "im2double",
+      "image",
+      "double",
+      "uint8",
+      "uint16",
+      "convert"
+    ]
+  },
+  {
+    "title": "im2uint16",
+    "slug": "im2uint16",
+    "summary": "Convert image data to uint16 using image scaling rules.",
+    "keywords": [
+      "im2uint16",
+      "image",
+      "uint16",
+      "double",
+      "uint8",
+      "convert"
+    ]
+  },
+  {
+    "title": "im2uint8",
+    "slug": "im2uint8",
+    "summary": "Convert image data to uint8 using image scaling rules.",
+    "keywords": [
+      "im2uint8",
+      "image",
+      "uint8",
+      "double",
+      "uint16",
+      "convert"
     ]
   },
   {
@@ -1801,6 +2027,31 @@
     ]
   },
   {
+    "title": "imshow",
+    "slug": "imshow",
+    "summary": "Display grayscale, binary, truecolor, or file-backed images.",
+    "keywords": [
+      "imshow",
+      "image display",
+      "grayscale image",
+      "binary image",
+      "rgb image",
+      "matlab imshow"
+    ]
+  },
+  {
+    "title": "ind2rgb",
+    "slug": "ind2rgb",
+    "summary": "Convert indexed image data and a colormap to RGB truecolor data.",
+    "keywords": [
+      "ind2rgb",
+      "indexed image",
+      "colormap",
+      "rgb",
+      "image"
+    ]
+  },
+  {
     "title": "ind2sub",
     "slug": "ind2sub",
     "summary": "Convert MATLAB column-major linear indices into per-dimension subscript arrays.",
@@ -1824,6 +2075,31 @@
       "interactive",
       "pause",
       "gather"
+    ]
+  },
+  {
+    "title": "interp1",
+    "slug": "interp1",
+    "summary": "Interpolate one-dimensional sampled data at query points.",
+    "keywords": [
+      "interp1",
+      "interpolation",
+      "linear",
+      "nearest",
+      "spline",
+      "pchip"
+    ]
+  },
+  {
+    "title": "interp2",
+    "slug": "interp2",
+    "summary": "Interpolate values over a two-dimensional gridded surface.",
+    "keywords": [
+      "interp2",
+      "2-D interpolation",
+      "bilinear",
+      "nearest",
+      "meshgrid"
     ]
   },
   {
@@ -1962,7 +2238,7 @@
   {
     "title": "isinf",
     "slug": "isinf",
-    "summary": "Return a logical mask indicating which elements of the input are \u00b1Inf.",
+    "summary": "Return a logical mask indicating which elements of the input are ±Inf.",
     "keywords": [
       "isinf",
       "infinite mask",
@@ -2155,6 +2431,19 @@
       "tensor product",
       "block matrix",
       "gpu"
+    ]
+  },
+  {
+    "title": "lab2rgb",
+    "slug": "lab2rgb",
+    "summary": "Convert CIE L*a*b* values to sRGB using D65 white.",
+    "keywords": [
+      "lab2rgb",
+      "lab",
+      "cielab",
+      "rgb",
+      "color",
+      "image"
     ]
   },
   {
@@ -2443,23 +2732,25 @@
   {
     "title": "mesh",
     "slug": "mesh",
-    "summary": "Render MATLAB-compatible mesh (wireframe) plots.",
+    "summary": "Create wireframe surface plots for grids, height fields, and MATLAB `mesh` style visualization.",
     "keywords": [
       "mesh",
-      "wireframe",
-      "3-D plotting",
-      "gpuArray"
+      "wireframe plot",
+      "wireframe surface",
+      "matlab mesh",
+      "3-D grid visualization"
     ]
   },
   {
     "title": "meshc",
     "slug": "meshc",
-    "summary": "Render a wireframe surface with contour lines projected onto the base plane.",
+    "summary": "Create composite wireframe-and-contour plots for scalar fields with MATLAB `meshc` semantics and contour overlays.",
     "keywords": [
       "meshc",
-      "mesh",
-      "contour",
-      "gpuArray"
+      "mesh with contour",
+      "wireframe contour plot",
+      "composite mesh plot",
+      "matlab meshc"
     ]
   },
   {
@@ -2501,6 +2792,17 @@
     ]
   },
   {
+    "title": "minute",
+    "slug": "minute",
+    "summary": "Extract minute numbers from datetime values.",
+    "keywords": [
+      "minute",
+      "datetime",
+      "time component",
+      "clock minute"
+    ]
+  },
+  {
     "title": "mkdir",
     "slug": "mkdir",
     "summary": "Create folders with MATLAB-compatible status, message, and message ID outputs.",
@@ -2538,6 +2840,17 @@
       "remainder",
       "rounding",
       "gpu"
+    ]
+  },
+  {
+    "title": "month",
+    "slug": "month",
+    "summary": "Extract month numbers from datetime values.",
+    "keywords": [
+      "month",
+      "datetime",
+      "date component",
+      "calendar month"
     ]
   },
   {
@@ -2653,6 +2966,19 @@
     ]
   },
   {
+    "title": "normrnd",
+    "slug": "normrnd",
+    "summary": "Normally-distributed random numbers with mean mu and standard deviation sigma.",
+    "keywords": [
+      "normrnd",
+      "normal",
+      "gaussian",
+      "random",
+      "distribution",
+      "statistics"
+    ]
+  },
+  {
     "title": "not",
     "slug": "not",
     "summary": "Element-wise logical negation for scalars, arrays, and gpuArray values.",
@@ -2689,6 +3015,42 @@
     ]
   },
   {
+    "title": "ode15s",
+    "slug": "ode15s",
+    "summary": "Solve stiff ordinary differential equations with an adaptive implicit host-side integrator.",
+    "keywords": [
+      "ode15s",
+      "ode",
+      "stiff",
+      "implicit",
+      "adaptive step"
+    ]
+  },
+  {
+    "title": "ode23",
+    "slug": "ode23",
+    "summary": "Solve nonstiff ordinary differential equations with an adaptive Bogacki-Shampine 3(2) method.",
+    "keywords": [
+      "ode23",
+      "ode",
+      "nonstiff",
+      "Bogacki-Shampine",
+      "adaptive step"
+    ]
+  },
+  {
+    "title": "ode45",
+    "slug": "ode45",
+    "summary": "Solve nonstiff ordinary differential equations with an adaptive Dormand-Prince 5(4) method.",
+    "keywords": [
+      "ode45",
+      "ode",
+      "nonstiff",
+      "Dormand-Prince",
+      "adaptive step"
+    ]
+  },
+  {
     "title": "ones",
     "slug": "ones",
     "summary": "Create arrays filled with ones within the MATLAB language.",
@@ -2698,6 +3060,19 @@
       "logical",
       "gpu",
       "like"
+    ]
+  },
+  {
+    "title": "optimset",
+    "slug": "optimset",
+    "summary": "Create or update an optimization options structure for fzero and fsolve.",
+    "keywords": [
+      "optimset",
+      "options",
+      "TolX",
+      "TolFun",
+      "MaxIter",
+      "Display"
     ]
   },
   {
@@ -2776,6 +3151,17 @@
     ]
   },
   {
+    "title": "pchip",
+    "slug": "pchip",
+    "summary": "Shape-preserving piecewise cubic Hermite interpolation.",
+    "keywords": [
+      "pchip",
+      "piecewise cubic hermite",
+      "shape preserving",
+      "interpolation"
+    ]
+  },
+  {
     "title": "peaks",
     "slug": "peaks",
     "summary": "Sample data: 3-D test surface on an n-by-n grid.",
@@ -2814,7 +3200,7 @@
   {
     "title": "pinv",
     "slug": "pinv",
-    "summary": "Compute the Moore\u2013Penrose pseudoinverse of a matrix using SVD with MATLAB-compatible tolerance handling.",
+    "summary": "Compute the Moore–Penrose pseudoinverse of a matrix using SVD with MATLAB-compatible tolerance handling.",
     "keywords": [
       "pinv",
       "pseudoinverse",
@@ -2826,13 +3212,15 @@
   {
     "title": "plot",
     "slug": "plot",
-    "summary": "Draw 2-D line plots that mirror MATLAB's `plot(x, y)` semantics.",
+    "summary": "Create 2-D line plots with handle-based styling, multi-series support, and MATLAB `plot(x, y)` semantics.",
     "keywords": [
       "plot",
       "line plot",
-      "2D",
-      "visualization",
-      "gpuArray"
+      "2-D plotting",
+      "plot x y",
+      "matlab plot",
+      "gpu plotting",
+      "runmat plotting"
     ]
   },
   {
@@ -2929,6 +3317,17 @@
       "dot caret",
       "gpu",
       "broadcasting"
+    ]
+  },
+  {
+    "title": "ppval",
+    "slug": "ppval",
+    "summary": "Evaluate a piecewise-polynomial structure.",
+    "keywords": [
+      "ppval",
+      "piecewise polynomial",
+      "spline",
+      "pchip"
     ]
   },
   {
@@ -3215,6 +3614,55 @@
     ]
   },
   {
+    "title": "rethrow",
+    "slug": "rethrow",
+    "summary": "Propagate a caught exception without handling it locally.",
+    "keywords": [
+      "rethrow",
+      "exception",
+      "catch",
+      "error propagation"
+    ]
+  },
+  {
+    "title": "rgb2gray",
+    "slug": "rgb2gray",
+    "summary": "Convert an RGB image to grayscale using luminance weights.",
+    "keywords": [
+      "rgb2gray",
+      "rgb",
+      "grayscale",
+      "luminance",
+      "image"
+    ]
+  },
+  {
+    "title": "rgb2hsv",
+    "slug": "rgb2hsv",
+    "summary": "Convert RGB image or colormap values to HSV.",
+    "keywords": [
+      "rgb2hsv",
+      "rgb",
+      "hsv",
+      "color",
+      "image",
+      "colormap"
+    ]
+  },
+  {
+    "title": "rgb2lab",
+    "slug": "rgb2lab",
+    "summary": "Convert sRGB image or colormap values to CIE L*a*b* using D65 white.",
+    "keywords": [
+      "rgb2lab",
+      "rgb",
+      "lab",
+      "cielab",
+      "color",
+      "image"
+    ]
+  },
+  {
     "title": "rmdir",
     "slug": "rmdir",
     "summary": "Remove folders with MATLAB-compatible status, message, and message ID outputs.",
@@ -3330,23 +3778,38 @@
   {
     "title": "scatter",
     "slug": "scatter",
-    "summary": "Render MATLAB-compatible 2-D scatter plots.",
+    "summary": "Create 2-D scatter plots for point clouds, size/color encoding, and MATLAB `scatter` workflows.",
     "keywords": [
       "scatter",
+      "scatter plot",
       "2-D scatter",
       "marker plot",
-      "gpuArray"
+      "matlab scatter",
+      "point cloud visualization"
     ]
   },
   {
     "title": "scatter3",
     "slug": "scatter3",
-    "summary": "Create MATLAB-compatible 3-D scatter plots.",
+    "summary": "Create 3-D scatter plots for spatial point clouds, encoded markers, and MATLAB `scatter3` workflows.",
     "keywords": [
       "scatter3",
-      "3-D scatter",
+      "3-D scatter plot",
       "point cloud",
-      "gpuArray"
+      "matlab scatter3",
+      "spatial data visualization",
+      "gpu plotting"
+    ]
+  },
+  {
+    "title": "second",
+    "slug": "second",
+    "summary": "Extract second values from datetime values.",
+    "keywords": [
+      "second",
+      "datetime",
+      "time component",
+      "fractional seconds"
     ]
   },
   {
@@ -3376,7 +3839,7 @@
   {
     "title": "set",
     "slug": "set",
-    "summary": "Update figure, axes, and plot-object properties through RunMat\u2019s graphics handles and MATLAB-style `set` workflows.",
+    "summary": "Update figure, axes, and plot-object properties through RunMat’s graphics handles and MATLAB-style `set` workflows.",
     "keywords": [
       "set",
       "graphics handle",
@@ -3531,6 +3994,18 @@
     ]
   },
   {
+    "title": "spline",
+    "slug": "spline",
+    "summary": "Construct or evaluate a cubic spline interpolant.",
+    "keywords": [
+      "spline",
+      "cubic spline",
+      "interpolation",
+      "pp",
+      "ppval"
+    ]
+  },
+  {
     "title": "split",
     "slug": "split",
     "summary": "Split strings, character arrays, and cell arrays into substrings using delimiters.",
@@ -3581,12 +4056,13 @@
   {
     "title": "stairs",
     "slug": "stairs",
-    "summary": "Render MATLAB-compatible stairs (step) plots.",
+    "summary": "Create step plots for sampled signals, piecewise-constant data, and MATLAB `stairs` workflows.",
     "keywords": [
       "stairs",
       "step plot",
-      "2-D plotting",
-      "gpuArray"
+      "stair plot",
+      "sampled signal",
+      "matlab stairs"
     ]
   },
   {
@@ -3741,6 +4217,17 @@
     ]
   },
   {
+    "title": "strjoin",
+    "slug": "strjoin",
+    "summary": "Join text across each input row using an explicit delimiter.",
+    "keywords": [
+      "strjoin",
+      "join strings",
+      "delimiter",
+      "row-wise join"
+    ]
+  },
+  {
     "title": "strlength",
     "slug": "strlength",
     "summary": "Return the number of characters in each element of a string array, character array, or cell array of character vectors.",
@@ -3839,6 +4326,28 @@
     ]
   },
   {
+    "title": "subsasgn",
+    "slug": "subsasgn",
+    "summary": "Dispatch object assignment requests to a class-specific `Class.subsasgn` implementation.",
+    "keywords": [
+      "subsasgn",
+      "object assignment",
+      "overloaded indexing",
+      "dot assignment"
+    ]
+  },
+  {
+    "title": "subsref",
+    "slug": "subsref",
+    "summary": "Dispatch object indexing requests to a class-specific `Class.subsref` implementation.",
+    "keywords": [
+      "subsref",
+      "object indexing",
+      "overloaded indexing",
+      "dot indexing"
+    ]
+  },
+  {
     "title": "sum",
     "slug": "sum",
     "summary": "Sum elements of scalars, vectors, matrices, or N-D tensors with MATLAB-compatible options.",
@@ -3852,23 +4361,26 @@
   {
     "title": "surf",
     "slug": "surf",
-    "summary": "Render MATLAB-compatible 3-D surface plots.",
+    "summary": "Create shaded 3-D surface plots from grids or mesh coordinates with GPU-backed rendering and MATLAB `surf` semantics.",
     "keywords": [
       "surf",
       "surface plot",
-      "3-D plotting",
-      "gpuArray"
+      "3-D surface",
+      "height map",
+      "matlab surf",
+      "gpu surface rendering"
     ]
   },
   {
     "title": "surfc",
     "slug": "surfc",
-    "summary": "Render a shaded surface with contour lines on the base plane.",
+    "summary": "Create composite surface-and-contour plots for scalar fields with MATLAB `surfc` semantics and projected contour overlays.",
     "keywords": [
       "surfc",
-      "surface",
-      "contour",
-      "gpuArray"
+      "surface with contour",
+      "composite surface plot",
+      "projected contour overlay",
+      "matlab surfc"
     ]
   },
   {
@@ -3972,6 +4484,17 @@
     ]
   },
   {
+    "title": "tf",
+    "slug": "tf",
+    "summary": "Create a SISO transfer-function object from numerator and denominator coefficient vectors.",
+    "keywords": [
+      "tf",
+      "transfer function",
+      "control system",
+      "coefficient vector"
+    ]
+  },
+  {
     "title": "tic",
     "slug": "tic",
     "summary": "Start a high-resolution stopwatch and optionally return a handle for toc.",
@@ -4005,6 +4528,18 @@
       ".*",
       "gpu",
       "implicit expansion"
+    ]
+  },
+  {
+    "title": "title",
+    "slug": "title",
+    "summary": "Set the title of the current axes or a specified axes handle.",
+    "keywords": [
+      "title",
+      "axes title",
+      "plot title",
+      "label",
+      "matlab title"
     ]
   },
   {
@@ -4086,6 +4621,18 @@
       "logical",
       "array",
       "mask"
+    ]
+  },
+  {
+    "title": "unifrnd",
+    "slug": "unifrnd",
+    "summary": "Uniformly-distributed random numbers on the interval [a, b).",
+    "keywords": [
+      "unifrnd",
+      "uniform",
+      "random",
+      "distribution",
+      "statistics"
     ]
   },
   {
@@ -4289,6 +4836,17 @@
       "boolean xor",
       "MATLAB xor",
       "gpuArray xor"
+    ]
+  },
+  {
+    "title": "year",
+    "slug": "year",
+    "summary": "Extract year numbers from datetime values.",
+    "keywords": [
+      "year",
+      "datetime",
+      "date component",
+      "calendar year"
     ]
   },
   {

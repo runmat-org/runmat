@@ -102,7 +102,7 @@ and full GPU acceleration.<br/><br/>
 &nbsp;
 </td>
 <td align="center" width="20%">
-<h3>☁️ Cloud</h3>
+<h3>🌐 App</h3>
 Hobby tier available<br/><br/>
 Versioning, collaboration,<br/>
 team management.<br/><br/>

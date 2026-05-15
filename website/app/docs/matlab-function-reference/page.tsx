@@ -5,7 +5,7 @@ import { buildPageMetadata } from '@/lib/seo';
 export const metadata = buildPageMetadata({
   title: 'Built-in Function Reference: MATLAB-Compatible & Beyond | Docs',
   description:
-    'Browse 310+ built-in functions in RunMat. MATLAB-compatible math, linear algebra, I/O, and GPU-accelerated extensions. Free, open-source, no license required.',
+    'Browse 400+ built-in functions in RunMat. MATLAB-compatible math, linear algebra, I/O, and GPU-accelerated extensions. Free, open-source, no license required.',
   canonicalPath: '/docs/matlab-function-reference',
   ogType: 'website',
   ogImagePath: '/docs/opengraph-image',
