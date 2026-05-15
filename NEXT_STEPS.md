@@ -438,6 +438,7 @@ Current ratchet status:
 - VM indexing-property tests now run semantic bytecode for scalar/logical/range write broadcasts, end-arithmetic stores, negative-step linear indexing, roundtrip scatter, fastpath broadcasts, and simple cell expansion; advanced N-D empty/vector selector and expansion cases remain legacy-executed.
 - Remaining `functions.rs` legacy execution sites cover semantic gaps for varargout mismatch diagnostics, struct-field vector/range indexing through member reads, test-class constructor resolution, metaclass postfix member/method lowering, dependent property backing behavior, `containers.Map` package calls, and string aggregate concatenation.
 - Turbine mixed arithmetic/function-call, simple scalar function compilation, scalar callback variable-isolation, compute-intensive scalar callback, nested scalar callback, function-parameter validation, and error-handling success-path coverage now use semantic registry-backed named calls instead of hand-built legacy function metadata.
+- The remaining Turbine legacy-shaped fixtures are intentional boundary coverage: unresolved/external fallback execution, semantic-over-legacy precedence, caller-variable preservation through legacy fallback, and statistics smoke coverage with fallback execution.
 - Remaining production legacy compilation usage is centralized behind `compile_legacy_user_dispatch_fallback`; remaining legacy-shaped test fixtures are tied to unresolved/external callback fallback coverage, native-accel graph construction, or semantic gaps called out above.
 
 ## Validation Cadence

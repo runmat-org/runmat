@@ -981,7 +981,7 @@ fn test_jit_user_function_fallback() {
     // Test: User-defined functions should fallback to interpreter correctly
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Create bytecode with user function definition and call
+    // Intentional legacy fixture: this covers the unresolved/external callback fallback boundary.
     use std::collections::HashMap;
     let mut functions = HashMap::new();
     functions.insert(
@@ -1194,6 +1194,7 @@ fn test_jit_named_call_prefers_semantic_registry_over_legacy_shape() {
 
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(function, semantic_function);
+    // Intentional legacy fixture: semantic registry identity must win even if legacy-shaped metadata exists.
     let mut functions = HashMap::new();
     functions.insert(
         "inc".to_string(),
@@ -1384,7 +1385,7 @@ fn test_jit_function_variable_preservation() {
     assert_eq!(vars[0], Value::Num(42.0));
     assert_eq!(vars[1], Value::Num(100.0));
 
-    // Now execute function code that uses those variables
+    // Intentional legacy fixture: legacy fallback can still see caller variables for unresolved external callbacks.
     let mut functions = HashMap::new();
     functions.insert(
         "add_globals".to_string(),
@@ -1587,7 +1588,7 @@ fn test_jit_engine_statistics_with_functions() {
         let _ = engine.execute_or_compile(&jit_bytecode, &mut vars);
     }
 
-    // Now execute function code
+    // Intentional legacy fixture: statistics smoke coverage still exercises fallback execution.
     let mut functions = HashMap::new();
     functions.insert(
         "noop".to_string(),
