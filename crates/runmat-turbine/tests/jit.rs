@@ -1951,46 +1951,33 @@ fn test_jit_function_variable_isolation() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Create a function that uses local variables
-    let mut functions = HashMap::new();
-    functions.insert(
-        "isolate_test".to_string(),
-        runmat_vm::legacy::LegacyUserFunction {
-            name: "isolate_test".to_string(),
-            params: vec![runmat_hir::VarId(0)],
-            outputs: vec![runmat_hir::VarId(1)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(1),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Binary(
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                        runmat_parser::BinOp::Add,
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Number("42".to_string()),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false,
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 2,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
+    let function = runmat_hir::FunctionId(1);
+    let mut semantic_functions = HashMap::new();
+    semantic_functions.insert(
+        function,
+        SemanticFunctionBytecode {
+            function,
+            display_name: "isolate_test".to_string(),
             source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(42.0),
+                Instr::Add,
+                Instr::StoreVar(1),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 2,
+            input_slots: vec![0],
+            varargin_slot: None,
+            output_slots: vec![1],
+            varargout_slot: None,
+            capture_slots: Vec::new(),
         },
     );
 
     let bytecode = Bytecode {
-        functions,
+        semantic_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(100.0),
