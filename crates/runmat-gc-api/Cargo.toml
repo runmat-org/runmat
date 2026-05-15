@@ -1,6 +1,6 @@
 [package]
 name = "runmat-gc-api"
-version = "0.4.6"
+version = "0.4.8"
 edition = "2021"
 description = "Public API types for the RunMat garbage collector"
 homepage = "https://runmat.com"
