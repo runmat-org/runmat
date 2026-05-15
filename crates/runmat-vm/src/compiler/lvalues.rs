@@ -293,11 +293,12 @@ impl Compiler {
                                             .get(fname)
                                             .map(|f| f.outputs.len().max(1))
                                             .unwrap_or(1);
-                                        self.emit(Instr::CallFunctionMulti(
+                                        self.emit_legacy_user_call_multi(
                                             fname.clone(),
                                             fargs.len(),
                                             outc,
-                                        ));
+                                            &[],
+                                        );
                                         self.emit(Instr::Unpack(outc));
                                         if dims_len == 1 || is_col_slice {
                                             self.emit(Instr::PackToCol(outc));
@@ -383,11 +384,12 @@ impl Compiler {
                                     .get(fname)
                                     .map(|f| f.outputs.len().max(1))
                                     .unwrap_or(1);
-                                self.emit(Instr::CallFunctionMulti(
+                                self.emit_legacy_user_call_multi(
                                     fname.clone(),
                                     fargs.len(),
                                     outc,
-                                ));
+                                    &[],
+                                );
                                 self.emit(Instr::Unpack(outc));
                                 self.emit(Instr::PackToCol(outc));
                             } else {

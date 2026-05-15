@@ -2822,6 +2822,34 @@ impl Compiler {
         pc
     }
 
+    pub(crate) fn emit_legacy_user_call(
+        &mut self,
+        name: String,
+        argc: usize,
+        arg_spans: &[runmat_hir::Span],
+    ) -> usize {
+        self.emit_call_with_arg_spans(Instr::CallFunction(name, argc), arg_spans)
+    }
+
+    pub(crate) fn emit_legacy_user_call_multi(
+        &mut self,
+        name: String,
+        argc: usize,
+        out_count: usize,
+        arg_spans: &[runmat_hir::Span],
+    ) -> usize {
+        self.emit_call_with_arg_spans(Instr::CallFunctionMulti(name, argc, out_count), arg_spans)
+    }
+
+    pub(crate) fn emit_legacy_user_call_expand_multi(
+        &mut self,
+        name: String,
+        specs: Vec<ArgSpec>,
+        arg_spans: &[runmat_hir::Span],
+    ) -> usize {
+        self.emit_call_with_arg_spans(Instr::CallFunctionExpandMulti(name, specs), arg_spans)
+    }
+
     pub fn patch(&mut self, idx: usize, instr: Instr) {
         self.instructions[idx] = instr;
     }

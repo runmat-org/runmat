@@ -268,18 +268,16 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                             }
                         }
-                        self.emit_call_with_arg_spans(
-                            Instr::CallFunctionExpandMulti(name.clone(), specs),
+                        self.emit_legacy_user_call_expand_multi(
+                            name.clone(),
+                            specs,
                             &call_arg_spans,
                         );
                     } else {
                         for arg in args {
                             self.compile_expr(arg)?;
                         }
-                        self.emit_call_with_arg_spans(
-                            Instr::CallFunction(name.clone(), args.len()),
-                            &call_arg_spans,
-                        );
+                        self.emit_legacy_user_call(name.clone(), args.len(), &call_arg_spans);
                     }
                 } else {
                     let CallImportResolution {
@@ -321,8 +319,9 @@ impl Compiler {
                                     self.compile_expr(arg)?;
                                 }
                             }
-                            self.emit_call_with_arg_spans(
-                                Instr::CallFunctionExpandMulti(resolved.clone(), specs),
+                            self.emit_legacy_user_call_expand_multi(
+                                resolved.clone(),
+                                specs,
                                 &call_arg_spans,
                             );
                             return Ok(());
@@ -339,11 +338,12 @@ impl Compiler {
                                             .get(inner)
                                             .map(|f| f.outputs.len().max(1))
                                             .unwrap_or(1);
-                                        self.emit(Instr::CallFunctionMulti(
+                                        self.emit_legacy_user_call_multi(
                                             inner.clone(),
                                             inner_args.len(),
                                             outc,
-                                        ));
+                                            &[],
+                                        );
                                         self.emit(Instr::Unpack(outc));
                                         total_argc += outc;
                                         continue;
@@ -352,8 +352,9 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                                 total_argc += 1;
                             }
-                            self.emit_call_with_arg_spans(
-                                Instr::CallFunction(resolved.clone(), total_argc),
+                            self.emit_legacy_user_call(
+                                resolved.clone(),
+                                total_argc,
                                 &call_arg_spans,
                             );
                             return Ok(());
@@ -404,11 +405,12 @@ impl Compiler {
                                         .get(inner)
                                         .map(|f| f.outputs.len().max(1))
                                         .unwrap_or(1);
-                                    self.emit(Instr::CallFunctionMulti(
+                                    self.emit_legacy_user_call_multi(
                                         inner.clone(),
                                         inner_args.len(),
                                         outc,
-                                    ));
+                                        &[],
+                                    );
                                     self.emit(Instr::Unpack(outc));
                                     total_argc += outc;
                                     did_expand_inner = true;

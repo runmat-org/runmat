@@ -302,8 +302,10 @@ impl Compiler {
                             for arg in args {
                                 self.compile_expr(arg)?;
                             }
-                            self.emit_call_with_arg_spans(
-                                Instr::CallFunctionMulti(name.clone(), args.len(), vars.len()),
+                            self.emit_legacy_user_call_multi(
+                                name.clone(),
+                                args.len(),
+                                vars.len(),
                                 &call_arg_spans,
                             );
                             self.emit(Instr::Unpack(vars.len()));
