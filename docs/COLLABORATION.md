@@ -64,7 +64,7 @@ So you might add your whole team to the org as members, then give only the core 
 
 ### Where to do it
 
-From the RunMat Cloud UI you can manage org members and project members in the relevant settings screens. From the API, membership and invite endpoints let you automate onboarding or sync with your own directory.
+From the RunMat App UI you can manage org members and project members in the relevant settings screens. From the API, membership and invite endpoints let you automate onboarding or sync with your own directory.
 
 ---
 

@@ -277,6 +277,7 @@ pub enum PlotChildHandleState {
     Scatter3(SimplePlotHandleState),
     Contour(SimplePlotHandleState),
     ContourFill(SimplePlotHandleState),
+    ReferenceLine(SimplePlotHandleState),
     Pie(SimplePlotHandleState),
     Text(TextAnnotationHandleState),
 }
@@ -1174,6 +1175,19 @@ pub fn register_line_handle(figure: FigureHandle, axes_index: usize, plot_index:
     register_simple_plot_handle(figure, axes_index, plot_index, PlotChildHandleState::Line)
 }
 
+pub fn register_reference_line_handle(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+) -> f64 {
+    register_simple_plot_handle(
+        figure,
+        axes_index,
+        plot_index,
+        PlotChildHandleState::ReferenceLine,
+    )
+}
+
 pub fn register_scatter_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
     register_simple_plot_handle(
         figure,
@@ -1572,6 +1586,7 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         | PlotChildHandleState::Scatter3(plot)
         | PlotChildHandleState::Contour(plot)
         | PlotChildHandleState::ContourFill(plot)
+        | PlotChildHandleState::ReferenceLine(plot)
         | PlotChildHandleState::Pie(plot) => plot.figure != handle,
         PlotChildHandleState::Stem(stem) => stem.figure != handle,
         PlotChildHandleState::ErrorBar(err) => err.figure != handle,
@@ -1597,6 +1612,7 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         | PlotChildHandleState::Scatter3(plot)
         | PlotChildHandleState::Contour(plot)
         | PlotChildHandleState::ContourFill(plot)
+        | PlotChildHandleState::ReferenceLine(plot)
         | PlotChildHandleState::Pie(plot) => {
             !(plot.figure == handle && plot.axes_index == axes_index)
         }
@@ -2131,9 +2147,11 @@ where
             if !opts.title.is_empty() {
                 state.figure.set_axes_title(axes_index, opts.title);
             }
-            state
-                .figure
-                .set_axes_labels(axes_index, opts.x_label, opts.y_label);
+            if !opts.x_label.is_empty() || !opts.y_label.is_empty() {
+                state
+                    .figure
+                    .set_axes_labels(axes_index, opts.x_label, opts.y_label);
+            }
             state.figure.set_grid(opts.grid);
             state.figure.set_axis_equal(opts.axis_equal);
 
@@ -2169,6 +2187,74 @@ where
     // On Web/WASM we deliberately decouple "mutate figure state" from "present pixels".
     // The host coalesces figure events and presents on a frame cadence, and `drawnow()` /
     // `pause()` provide explicit "flush" boundaries for scripts.
+    #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+    {
+        let _ = figure_clone;
+        Ok(format!("Figure {} updated", handle.as_u32()))
+    }
+
+    #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
+    {
+        let rendered = render_figure(handle, figure_clone)
+            .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
+        Ok(format!("Figure {} updated: {rendered}", handle.as_u32()))
+    }
+}
+
+pub fn append_active_plot<F>(
+    builtin: &'static str,
+    opts: PlotRenderOptions<'_>,
+    mut apply: F,
+) -> BuiltinResult<String>
+where
+    F: FnMut(&mut Figure, usize) -> BuiltinResult<()>,
+{
+    let rendering_disabled = interactive_rendering_disabled();
+    let host_managed_rendering = host_managed_rendering_enabled();
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let axes_index = { get_state_mut(&mut reg, handle).active_axes };
+        {
+            let state = get_state_mut(&mut reg, handle);
+            state.figure.set_active_axes_index(axes_index);
+            if !opts.title.is_empty() {
+                state.figure.set_axes_title(axes_index, opts.title);
+            }
+            if !opts.x_label.is_empty() || !opts.y_label.is_empty() {
+                state
+                    .figure
+                    .set_axes_labels(axes_index, opts.x_label, opts.y_label);
+            }
+            state.figure.set_grid(opts.grid);
+            state.figure.set_axis_equal(opts.axis_equal);
+
+            let _axes_context = AxesContextGuard::install(state, axes_index);
+            apply(&mut state.figure, axes_index)
+                .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
+            state.revision = state.revision.wrapping_add(1);
+        }
+        let figure_clone = reg
+            .figures
+            .get(&handle)
+            .expect("figure exists")
+            .figure
+            .clone();
+        (handle, figure_clone)
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+
+    if rendering_disabled {
+        if host_managed_rendering {
+            return Ok(format!("Figure {} updated", handle.as_u32()));
+        }
+        return Err(plotting_error(builtin, ERR_PLOTTING_UNAVAILABLE));
+    }
+
+    if host_managed_rendering {
+        return Ok(format!("Figure {} updated", handle.as_u32()));
+    }
+
     #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
     {
         let _ = figure_clone;

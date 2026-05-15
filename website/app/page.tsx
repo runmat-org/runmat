@@ -89,6 +89,7 @@ const jsonLd = {
         "Real-time type and shape tracking with dimension error detection",
         "Execution tracing and diagnostic logging",
         "Built-in agent with runtime execution and workspace inspection",
+        "Compatibility-guided script adaptation with reviewable diffs",
         "OS-level sandboxed agent execution",
         "Deterministic session replay and audit journal"
       ],
@@ -111,12 +112,12 @@ const jsonLd = {
     {
       "@type": "VideoObject",
       "@id": "https://runmat.com/#hero-video",
-      "name": "RunMat wave interference simulation",
-      "description": "GPU-accelerated wave interference simulation rendered in real time using RunMat's surf() function.",
-      "thumbnailUrl": "https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp",
-      "contentUrl": "https://web.runmatstatic.com/video/runmat-wave-simulation.mp4",
-      "uploadDate": "2026-03-03T00:00:00Z",
-      "duration": "PT10S"
+      "name": "RunMat agent extending a clamped plate vibration simulation",
+      "description": "RunMat's built-in agent adds a second strike to a clamped-plate vibration simulation and renders the combined interference pattern in real time.",
+      "thumbnailUrl": "https://web.runmatstatic.com/video/posters/clamp-agent-runmat.webp",
+      "contentUrl": "https://web.runmatstatic.com/video/clamp-agent-runmat.mp4",
+      "uploadDate": "2026-05-14T00:00:00Z",
+      "duration": "PT47S"
     }
   ]
 };
@@ -176,7 +177,7 @@ export const metadata: Metadata = {
     type: "website",
     videos: [
       {
-        url: "https://web.runmatstatic.com/video/runmat-wave-simulation.mp4",
+        url: "https://web.runmatstatic.com/video/clamp-agent-runmat.mp4",
         type: "video/mp4",
       },
     ],
@@ -195,16 +196,8 @@ export default function HomePage() {
       <link
         rel="preload"
         as="image"
-        href="https://web.runmatstatic.com/video/posters/runmat-wave-simulation-720.webp"
+        href="https://web.runmatstatic.com/video/posters/clamp-agent-runmat.webp"
         fetchPriority="high"
-        media="(max-width: 768px)"
-      />
-      <link
-        rel="preload"
-        as="image"
-        href="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp"
-        fetchPriority="high"
-        media="(min-width: 769px)"
       />
       <script
         type="application/ld+json"
@@ -269,10 +262,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-bold tracking-tight text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
-              An agent built into the runtime, not on top of your files
+              An engineering team, working alongside you
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-7">
-              The agent runs your code, inspects workspace variables, and reads 3D plot data. You review every change as a diff before it lands.
+              The agent runs your scenarios, reviews the code, and searches the project for what you need. You explore problems that used to take a team.
             </p>
           </div>
           <div className="mx-auto max-w-3xl mb-8">
@@ -447,7 +440,7 @@ export default function HomePage() {
               <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <Users className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-foreground">Cloud project sharing</h3>
+              <h3 className="text-lg font-semibold text-foreground">App project sharing</h3>
               <p className="text-[0.938rem] text-foreground mt-1">Share projects with colleagues instantly. No shared drives, no emailing files.</p>
             </div>
           </div>
@@ -590,7 +583,7 @@ export default function HomePage() {
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">SOC 2 ready</p>
-                    <p className="text-[0.938rem] text-foreground">Built to SOC 2 standards. Audit planned for Q2 2026.</p>
+                    <p className="text-[0.938rem] text-foreground">Built to SOC 2 standards. Audit planned for Q4 2026.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
@@ -599,7 +592,7 @@ export default function HomePage() {
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">Sandboxed agent execution</p>
-                    <p className="text-[0.938rem] text-foreground">In default deployments, agent commands run inside OS-level sandboxes (Seatbelt on macOS, bubblewrap on Linux), with network denied by default, filesystem scoped to your project, and known secret patterns stripped from the child process environment. Behavior is profile-driven and configurable per deployment.</p>
+                    <p className="text-[0.938rem] text-foreground">Agent commands run inside OS-level sandboxes (Seatbelt on macOS, bubblewrap on Linux), with network denied by default, filesystem scoped to your project, and known secret patterns stripped.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
@@ -608,7 +601,7 @@ export default function HomePage() {
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">Replayable agent sessions</p>
-                    <p className="text-[0.938rem] text-foreground">When durable persistence is enabled, agent actions are journaled in append-only order, and artifacts are content-addressed by hash. Replay a session to reconstruct what the agent did, step by step. Designed for environments that need audit trails.</p>
+                    <p className="text-[0.938rem] text-foreground">Durable sessions journal each agent step, so teams can replay work for audit and review.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">

@@ -4,7 +4,7 @@ This document serves as the evolving roadmap for **RunMat** to track the progres
 
 ## Vision
 
-RunMat is a fast, local-first MATLAB-compatible runtime. Same syntax engineers have used for decades, with a modern stack underneath: Rust, a JIT compiler, and automatic GPU acceleration. RunMat runs as a CLI, in the browser via WebAssembly, and (soon) as a native desktop app. We're building the foundation first—a runtime engineers can adopt without workflow changes or procurement headaches—with richer tooling and assistance for math and physics work to follow.
+RunMat is a fast MATLAB-compatible runtime with an open-source core. Same syntax engineers have used for decades, with a modern stack underneath: Rust, a JIT compiler, and automatic GPU acceleration. RunMat runs as a CLI, in the browser via WebAssembly, and (soon) as a native desktop app. We're building the foundation first — a runtime engineers can adopt without workflow changes or procurement headaches — with richer tooling and assistance for math and physics work to follow.
 
 ## Current Shape
 
@@ -18,7 +18,7 @@ The core language and runtime are complete. The major remaining items are:
 
 - The package manager needs to be implemented.
 - The JIT currently optimizes a subset of the language, with an interpreter fallback for operations that are currently not implemented in the JIT. Full JIT coverage will be implemented before the 1.0 release.
-- Continued expansion of built-in function coverage. RunMat ships 330+ built-in functions across arrays, linear algebra, FFT/signal processing, statistics, plotting, strings, and I/O. Additional functions continue to be added based on user needs.
+- Continued expansion of built-in function coverage. RunMat ships 400+ built-in functions across arrays, linear algebra, FFT/signal processing, statistics, plotting, strings, and I/O. Additional functions continue to be added based on user needs.
 
 The below tracks the progress of the project towards the 1.0 release to date.
 
@@ -58,13 +58,13 @@ The below tracks the progress of the project towards the 1.0 release to date.
 - [x] Finish plotting library integration.
 - [ ] Implement package manager.
 
-### Milestone P4 - Browser, Cloud & Sandbox
+### Milestone P4 - Browser, App & Sandbox
 
 - [x] Compile runtime to WebAssembly with WebGPU acceleration.
 - [x] Deploy sandbox web app with full IDE experience.
 - [x] Service worker plotting with GPU-accelerated rendering.
 - [x] Cloud infrastructure (GCP, Terraform, Docker Compose).
 - [x] Organizations, projects, and memberships.
-- [ ] Notebook editor with markdown and code cells.
-- [ ] RunMat Agent v1 with streaming and persistence.
+- [x] Notebook editor with markdown and code cells.
+- [x] RunMat Agent v1 — built-in agent with streaming and persisted/replayable sessions. Executes code in the runtime, inspects workspace variables and plot output, proposes reviewable diffs for script adaptation (unsupported builtins, command-form cleanup, compatibility-mode prep), and operates under policy-gated tool controls. Provider-agnostic model routing.
 - [ ] Desktop app with native experience and local project management.

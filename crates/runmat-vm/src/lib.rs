@@ -30,7 +30,8 @@ pub use interpreter::runner::{
 };
 pub use interpreter::state::{InterpreterOutcome, InterpreterState};
 pub use runtime::workspace::{
-    push_pending_workspace, take_updated_workspace_state, PendingWorkspaceGuard,
+    push_pending_workspace, take_updated_workspace_assigned_report, take_updated_workspace_state,
+    PendingWorkspaceGuard, WorkspaceAssignedReport,
 };
 
 use runmat_builtins::Value;

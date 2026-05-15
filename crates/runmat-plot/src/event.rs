@@ -2,7 +2,8 @@ use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
     AreaPlot, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar, Figure,
     LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, PlotElement, PlotType, QuiverPlot,
-    Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot, StemPlot, SurfacePlot, TextStyle,
+    ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot,
+    StemPlot, SurfacePlot, TextStyle,
 };
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,19 @@ pub enum ScenePlot {
         line_style: String,
         axes_index: u32,
         label: Option<String>,
+        visible: bool,
+    },
+    ReferenceLine {
+        orientation: String,
+        #[serde(deserialize_with = "deserialize_f64_lossy")]
+        value: f64,
+        color_rgba: [f32; 4],
+        line_width: f32,
+        line_style: String,
+        label: Option<String>,
+        display_name: Option<String>,
+        label_orientation: String,
+        axes_index: u32,
         visible: bool,
     },
     Scatter {
@@ -731,6 +745,22 @@ impl ScenePlot {
                 label: line.label.clone(),
                 visible: line.visible,
             },
+            PlotElement::ReferenceLine(line) => Self::ReferenceLine {
+                orientation: match line.orientation {
+                    ReferenceLineOrientation::Vertical => "vertical",
+                    ReferenceLineOrientation::Horizontal => "horizontal",
+                }
+                .into(),
+                value: line.value,
+                color_rgba: vec4_to_rgba(line.color),
+                line_width: line.line_width,
+                line_style: format!("{:?}", line.line_style),
+                label: line.label.clone(),
+                display_name: line.display_name.clone(),
+                label_orientation: line.label_orientation.clone(),
+                axes_index,
+                visible: line.visible,
+            },
             PlotElement::Scatter(scatter) => Self::Scatter {
                 x: scatter.x_data.clone(),
                 y: scatter.y_data.clone(),
@@ -941,6 +971,30 @@ impl ScenePlot {
                 line.label = label;
                 line.set_visible(visible);
                 figure.add_line_plot_on_axes(line, axes_index as usize);
+            }
+            ScenePlot::ReferenceLine {
+                orientation,
+                value,
+                color_rgba,
+                line_width,
+                line_style,
+                label,
+                display_name,
+                label_orientation,
+                axes_index,
+                visible,
+            } => {
+                let orientation = parse_reference_line_orientation(&orientation)?;
+                let mut line = ReferenceLine::new(orientation, value)?.with_style(
+                    rgba_to_vec4(color_rgba),
+                    line_width,
+                    parse_line_style(&line_style),
+                );
+                line.label = label;
+                line.display_name = display_name;
+                line.label_orientation = label_orientation;
+                line.visible = visible;
+                figure.add_reference_line_on_axes(line, axes_index as usize);
             }
             ScenePlot::Scatter {
                 x,
@@ -1291,6 +1345,16 @@ fn parse_bar_orientation(value: &str) -> crate::plots::bar::Orientation {
     }
 }
 
+fn parse_reference_line_orientation(value: &str) -> Result<ReferenceLineOrientation, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "horizontal" => Ok(ReferenceLineOrientation::Horizontal),
+        "vertical" => Ok(ReferenceLineOrientation::Vertical),
+        _ => Err(format!(
+            "unknown reference line orientation '{value}'; expected 'horizontal' or 'vertical'"
+        )),
+    }
+}
+
 fn parse_marker_style(value: &str) -> MarkerStyle {
     match value {
         "Square" => MarkerStyle::Square,
@@ -1423,6 +1487,7 @@ pub enum PlotKind {
     Scatter3,
     Contour,
     ContourFill,
+    ReferenceLine,
 }
 
 impl From<PlotType> for PlotKind {
@@ -1442,6 +1507,7 @@ impl From<PlotType> for PlotKind {
             PlotType::Scatter3 => Self::Scatter3,
             PlotType::Contour => Self::Contour,
             PlotType::ContourFill => Self::ContourFill,
+            PlotType::ReferenceLine => Self::ReferenceLine,
         }
     }
 }
@@ -1644,6 +1710,42 @@ mod tests {
         assert_eq!(rebuilt.axes_grid(), (1, 2));
         assert_eq!(rebuilt.plots().count(), 2);
         assert_eq!(rebuilt.title.as_deref(), Some("Replay"));
+    }
+
+    #[test]
+    fn figure_scene_rejects_unknown_reference_line_orientation() {
+        let mut scene = FigureScene::capture(&Figure::new());
+        scene.plots.push(ScenePlot::ReferenceLine {
+            orientation: "VERTICAL".into(),
+            value: 2.0,
+            color_rgba: [0.1, 0.2, 0.3, 1.0],
+            line_width: 1.0,
+            line_style: "Solid".into(),
+            label: None,
+            display_name: None,
+            label_orientation: "horizontal".into(),
+            axes_index: 0,
+            visible: true,
+        });
+
+        let rebuilt = scene.clone().into_figure().expect("valid orientation");
+        let PlotElement::ReferenceLine(line) = rebuilt.plots().next().unwrap() else {
+            panic!("expected reference line")
+        };
+        assert!(matches!(
+            line.orientation,
+            ReferenceLineOrientation::Vertical
+        ));
+
+        let ScenePlot::ReferenceLine { orientation, .. } = &mut scene.plots[0] else {
+            panic!("expected reference line scene plot")
+        };
+        *orientation = "diagonal".into();
+
+        let err = scene
+            .into_figure()
+            .expect_err("unknown orientation must fail");
+        assert!(err.contains("unknown reference line orientation 'diagonal'"));
     }
 
     #[test]

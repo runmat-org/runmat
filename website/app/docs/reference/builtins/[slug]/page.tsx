@@ -327,12 +327,13 @@ function renderValidation(validation: BuiltinDocValidation, title: string): Buil
 }
 
 function renderFaqs(faqs: BuiltinDocFAQ[]): BuiltinDocBlock[] {
-  const blocks: BuiltinDocBlock[] = [];
-  for (const faq of faqs) {
-    blocks.push(createHeading(3, parseInline(faq.question)));
-    blocks.push(...parseMarkdownBlocks(faq.answer));
-  }
-  return blocks;
+  return [{
+    type: 'faq',
+    items: faqs.map(faq => ({
+      question: parseInline(faq.question),
+      answerBlocks: parseMarkdownBlocks(faq.answer),
+    })),
+  }];
 }
 
 function renderSourceSection(source: BuiltinDocLink, title?: string): BuiltinDocBlock | null {
@@ -543,15 +544,15 @@ const PLOTTING_SUBGROUPS: Record<string, string> = {
   plot: '2D Charts', bar: '2D Charts', scatter: '2D Charts', histogram: '2D Charts',
   hist: '2D Charts', pie: '2D Charts', stairs: '2D Charts', stem: '2D Charts',
   area: '2D Charts', errorbar: '2D Charts', loglog: '2D Charts',
-  semilogx: '2D Charts', semilogy: '2D Charts',
+  semilogx: '2D Charts', semilogy: '2D Charts', heatmap: '2D Charts',
   surf: '3D & Surface', surfc: '3D & Surface', mesh: '3D & Surface',
   meshc: '3D & Surface', plot3: '3D & Surface', scatter3: '3D & Surface',
   contour: '3D & Surface', contourf: '3D & Surface', quiver: '3D & Surface',
-  image: 'Images', imagesc: 'Images',
-  axis: 'Axes & Layout', subplot: 'Axes & Layout', grid: 'Axes & Layout',
+  image: 'Images', imagesc: 'Images', imshow: 'Images',
+  title: 'Axes & Layout', axis: 'Axes & Layout', subplot: 'Axes & Layout', grid: 'Axes & Layout',
   box: 'Axes & Layout', view: 'Axes & Layout', sgtitle: 'Axes & Layout', zlabel: 'Axes & Layout',
   colormap: 'Appearance', colorbar: 'Appearance', shading: 'Appearance', legend: 'Appearance',
-  get: 'Handle Access', set: 'Handle Access',
+  get: 'Handle Access', set: 'Handle Access', gca: 'Handle Access', gcf: 'Handle Access',
 };
 
 type RelatedGroup = { label: string | null; fns: { name: string; slug: string }[] };

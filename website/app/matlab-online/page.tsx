@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SandboxCta } from "@/components/SandboxCta";
+import { FAQAccordion, type FAQItem } from "@/components/FAQAccordion";
 import LazyVideo from "@/components/LazyVideo";
 import dynamic from "next/dynamic";
 
@@ -75,25 +76,28 @@ export const metadata: Metadata = {
   },
 };
 
-const heroVideoSrc = "https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4";
-const heroPosterSrc = "https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.webp";
+const heroVideoSrc = "https://web.runmatstatic.com/video/clamp-agent-runmat.mp4";
+const heroPosterSrc = "https://web.runmatstatic.com/video/posters/clamp-agent-runmat.webp";
 
 const agentVideoSrc = "https://web.runmatstatic.com/video/runmat-agent-demo-speaker.mp4";
 const agentPosterSrc = "https://web.runmatstatic.com/video/posters/runmat-agent-demo-speaker.webp";
 
-const faqItems: { question: string; answer: string; answerContent?: React.ReactNode }[] = [
+const faqItems: FAQItem[] = [
   {
+    id: "mo-same-as-matlab",
     question: "Is RunMat the same as MATLAB?",
     answer:
       "No. RunMat is an independent project with an open-source runtime that executes MATLAB-syntax code. It is not affiliated with or endorsed by MathWorks, the makers of MATLAB.",
   },
   {
+    id: "mo-ai-assistant",
     question: "Does RunMat have an AI assistant?",
     answer:
       "Yes. RunMat ships with a built-in agent in the sandbox. You describe what you want to compute; the agent writes MATLAB-syntax code, runs it on the same GPU-accelerated runtime, reads workspace variables and 2D/3D plot scenes, and iterates. Every change comes back as a diff you can accept or reject.",
   },
   // Reviewer tag: legal/product. MathWorks license and product claims are source-linked in answerContent.
   {
+    id: "mo-mathworks-ai",
     question: "Does MathWorks have an AI assistant?",
     answer:
       "As of May 2026, MathWorks publishes the MATLAB Agentic Toolkit for Claude Code, GitHub Copilot, OpenAI Codex, Gemini CLI, and Sourcegraph Amp. MathWorks lists MATLAB R2020b or later, a supported AI coding agent, and Git as prerequisites, and its product page says the toolkit requires a local MATLAB installation and an AI service subscription. MathWorks' README says MCP servers must be used with MATLAB under the MathWorks Software License Agreement and must not be shared by multiple users; the repository license also limits the software to use with MathWorks products and service offerings.",
@@ -104,6 +108,7 @@ const faqItems: { question: string; answer: string; answerContent?: React.ReactN
     ),
   },
   {
+    id: "mo-agent-vs-toolkit",
     question: "How is RunMat's agent different from the MATLAB Agentic Toolkit?",
     answer:
       "RunMat's runtime is open source under MIT and runs without a MATLAB license. MathWorks documents the Agentic Toolkit as skills plus a MATLAB MCP Core Server connection to a local MATLAB installation and a supported third-party agent. The MCP Core Server exposes five built-in tools for static analysis, code evaluation, file execution, test execution, and toolbox detection; MathWorks also says MCP servers must not be shared by multiple users. RunMat ships the agent and runtime together in the browser, so the agent can inspect RunMat workspace variables, tensor shapes, and plot scenes directly.",
@@ -114,54 +119,64 @@ const faqItems: { question: string; answer: string; answerContent?: React.ReactN
     ),
   },
   {
+    id: "mo-existing-scripts",
     question: "Can I run my existing MATLAB scripts in RunMat?",
     answer:
-      "Many MATLAB scripts run without modification, especially those using core language features and common built-in functions. For scripts that depend on toolboxes or builtins RunMat doesn't yet ship, the built-in agent can rewrite the code to use what's supported — usually preserving the intent. Try your script in the sandbox; if something doesn't run, ask the agent to adapt it.",
+      "Many MATLAB scripts run without modification, especially those using core language features and common built-in functions. For scripts that use functions RunMat doesn't ship yet, the built-in agent can help adapt the code — running your script, reading the diagnostics, and proposing reviewable edits that replace unsupported calls with supported equivalents. Try your script in the sandbox; if something doesn't run, ask the agent to help adapt it.",
   },
   {
+    id: "mo-free",
     question: "Is RunMat really free?",
     answer:
-      "The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. Cloud features like storage, versioning, and project sharing start on the Hobby tier (100 MB). Paid plans add more storage and team features -- see pricing.",
-    answerContent: <>The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. Cloud features like storage, versioning, and project sharing start on the Hobby tier (100 MB). Paid plans add more storage and team features -- see <Link href="/pricing" className="underline hover:text-foreground">pricing</Link>.</>,
+      "The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. App features like storage, versioning, and project sharing start on the Hobby tier (100 MB). Paid plans add more storage and team features -- see pricing.",
+    answerContent: <>The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. App features like storage, versioning, and project sharing start on the Hobby tier (100 MB). Paid plans add more storage and team features -- see <Link href="/pricing" className="underline hover:text-foreground">pricing</Link>.</>,
   },
   {
+    id: "mo-account",
     question: "Do I need to create an account?",
     answer:
       "No. The browser sandbox works immediately without sign-up. Creating a free account unlocks cloud storage (100 MB), file versioning, and project sharing.",
   },
   {
+    id: "mo-offline",
     question: "Does RunMat work offline?",
     answer:
       "Yes. Once the sandbox page loads, it can run code without an internet connection. For full offline use with local file access, use the RunMat CLI today. The desktop app with a full IDE experience is coming soon.",
     answerContent: <>Yes. Once the sandbox page loads, it can run code without an internet connection. For full offline use with local file access, use the <Link href="/docs/cli" className="underline hover:text-foreground">RunMat CLI</Link> today. The desktop app with a full IDE experience is coming soon.</>,
   },
   {
+    id: "mo-browser-how",
     question: "How does RunMat run code in the browser?",
     answer:
       "RunMat compiles to WebAssembly, which runs natively in your browser at near-native speed. For GPU-accelerated operations, it uses WebGPU (available in Chrome, Edge, Safari 18+, and Firefox 139+).",
   },
   {
+    id: "mo-code-private",
     question: "Is my code private?",
     answer:
-      "Yes. Your code runs entirely on your device. Nothing is sent to a server unless you explicitly choose to save files to the cloud.",
+      "Yes. Code execution happens entirely on your device. Nothing is uploaded to run your script. If you sign in for cloud storage, files sync to RunMat's servers. Using the built-in agent sends context to the configured LLM provider.",
   },
   {
+    id: "mo-gpu",
     question: "Can RunMat use my GPU?",
     answer:
       "Yes, in browsers that support WebGPU (Chrome, Edge, Safari 18+, and Firefox 139+). RunMat automatically offloads eligible operations to the GPU for faster execution.",
   },
   {
+    id: "mo-vs-octave",
     question: "What’s the difference between RunMat and GNU Octave?",
     answer:
       "Both run MATLAB-style syntax, but RunMat is designed for performance (JIT compilation, GPU acceleration) and runs natively in the browser. Octave is a mature desktop application with broader toolbox compatibility but no browser-native execution.",
   },
   {
+    id: "mo-desktop",
     question: "Is there a desktop version?",
     answer:
       "The RunMat desktop app is coming very soon. It will provide the same interface as the browser sandbox with full local file system access. In the meantime, the CLI is available today for local script execution.",
     answerContent: <>The RunMat desktop app is coming very soon. It will provide the same interface as the browser sandbox with full local file system access. In the meantime, the <Link href="/docs/cli" className="underline hover:text-foreground">CLI</Link> is available today for local script execution.</>,
   },
   {
+    id: "mo-plotting",
     question: "Does RunMat support plotting?",
     answer:
       "Yes. RunMat supports 20+ interactive plot types including plot, scatter, hist, histogram, surf, mesh, contour, contourf, imagesc, bar, pie, stem, quiver, area, errorbar, plot3, semilogx, semilogy, and loglog, all GPU-accelerated. 3D surface plots can be rotated, zoomed, and panned directly in the browser.",
@@ -228,13 +243,13 @@ const jsonLd = {
     {
       "@type": "VideoObject",
       "@id": "https://runmat.com/matlab-online#hero-video",
-      name: "RunMat MATLAB-style code in the browser",
+      name: "RunMat agent extending a clamped plate vibration simulation",
       description:
-        "Short demo of RunMat running MATLAB-syntax code in the browser with GPU acceleration.",
+        "RunMat's built-in agent adds a second strike to a clamped-plate vibration simulation and renders the combined interference pattern in the browser.",
       thumbnailUrl: heroPosterSrc,
       contentUrl: heroVideoSrc,
-      uploadDate: "2026-02-03T00:00:00Z",
-      duration: "PT15S",
+      uploadDate: "2026-05-14T00:00:00Z",
+      duration: "PT47S",
     },
     {
       "@type": "BreadcrumbList",
@@ -323,7 +338,8 @@ export default function MatlabOnlinePage() {
       <link
         rel="preload"
         as="image"
-        href="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.webp"
+        href={heroPosterSrc}
+        fetchPriority="high"
       />
       <script
         type="application/ld+json"
@@ -389,7 +405,7 @@ export default function MatlabOnlinePage() {
                   playsInline
                   preload="none"
                   poster={heroPosterSrc}
-                  aria-label="RunMat MATLAB-style code example demo"
+                  aria-label="RunMat agent extending a clamped plate vibration simulation"
                 >
                   <source src={heroVideoSrc} type="video/mp4" />
                 </video>
@@ -543,15 +559,15 @@ export default function MatlabOnlinePage() {
         </div>
       </section>
 
-      {/* Agent: built into the runtime */}
+      {/* Agent: engineering team alongside you */}
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">
-              An agent built into the runtime, not on top of your files
+              An engineering team, working alongside you
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              The agent runs your code, inspects workspace variables, and reads 3D plot data. You review every change as a diff before it lands.
+              The agent runs your scenarios, reviews the code, and searches the project for what you need. You explore problems that used to take a team.
             </p>
           </div>
           <div className="mx-auto max-w-3xl mb-8">
@@ -657,7 +673,7 @@ export default function MatlabOnlinePage() {
             <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Every change versioned. No git required.</h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               Every save creates a version automatically. Per-file history and full project snapshots are included on all{" "}
-              <Link href="/pricing" className="underline hover:text-foreground/80">Cloud tiers</Link>, starting at $0 with 100 MB on the Hobby tier. Paid plans add project sharing with your team -- no git setup or merge conflicts.
+              <Link href="/pricing" className="underline hover:text-foreground/80">App tiers</Link>, starting at $0 with 100 MB on the Hobby tier. Paid plans add project sharing with your team -- no git setup or merge conflicts.
             </p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-3">
@@ -681,7 +697,7 @@ export default function MatlabOnlinePage() {
               <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-foreground/10 text-foreground mb-3">
                 <Users className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-foreground">Cloud project sharing</h3>
+              <h3 className="text-lg font-semibold text-foreground">App project sharing</h3>
               <p className="text-[0.938rem] text-foreground mt-1">Share projects with colleagues instantly. No shared drives, no emailing files back and forth.</p>
               <Link href="/blog/from-ad-hoc-checkpoints-to-reliable-large-data-persistence" className="text-xs text-muted-foreground hover:text-foreground underline mt-2 inline-block">Learn more</Link>
             </div>
@@ -778,7 +794,7 @@ export default function MatlabOnlinePage() {
                   </li>
                   <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">✓</span>
-                    Automatic file versioning &amp; snapshots (Cloud)
+                    Automatic file versioning &amp; snapshots (App)
                   </li>
                   <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
                     <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">✓</span>
@@ -1026,7 +1042,7 @@ export default function MatlabOnlinePage() {
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">SOC 2 ready</p>
-                    <p className="text-[0.938rem] text-foreground">Built to SOC 2 standards. Audit planned for Q2 2026.</p>
+                    <p className="text-[0.938rem] text-foreground">Built to SOC 2 standards. Audit planned for Q4 2026.</p>
                   </div>
                 </div>
               </div>
@@ -1049,24 +1065,7 @@ export default function MatlabOnlinePage() {
               Common questions about RunMat and MATLAB compatibility.
             </p>
           </div>
-          <div className="mx-auto grid max-w-5xl gap-4 md:grid-cols-2">
-            {faqItems.map(item => (
-              <details
-                key={item.question}
-                className="group self-start rounded-xl border border-border/60 bg-card shadow-sm"
-              >
-                <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-4 text-foreground">
-                  <span className="text-sm font-medium">{item.question}</span>
-                  <span className="text-muted-foreground transition-transform duration-200 group-open:rotate-180">
-                    ⌄
-                  </span>
-                </summary>
-                <div className="px-6 pb-4 text-sm text-foreground">
-                  {item.answerContent ?? item.answer}
-                </div>
-              </details>
-            ))}
-          </div>
+          <FAQAccordion items={faqItems} />
         </div>
       </section>
 

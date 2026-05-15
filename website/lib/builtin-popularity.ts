@@ -12,7 +12,7 @@ const POPULAR_FUNCTIONS: Record<string, string[]> = {
   'array/indexing': ['end', 'find', 'ind2sub', 'sub2ind'],
   'array/sorting_sets': ['sort', 'sortrows', 'unique', 'ismember', 'diff'],
   'math/elementwise': ['abs', 'sqrt', 'exp', 'log', 'sin', 'cos', 'tan'],
-  'math/reduction': ['sum', 'mean', 'std', 'min', 'max', 'any', 'all'],
+  'math/reduction': ['sum', 'mean', 'std', 'min', 'max', 'any', 'all', 'gradient', 'trapz', 'cumtrapz'],
   'math/trigonometry': ['sin', 'cos', 'tan', 'asin', 'acos', 'atan'],
   'math/linalg/ops': ['dot', 'cross', 'norm'],
   'math/linalg/solve': ['inv', 'mldivide', 'mrdivide'],
@@ -28,7 +28,12 @@ const POPULAR_FUNCTIONS: Record<string, string[]> = {
   'diagnostics': ['assert', 'error', 'warning'],
   'timing': ['tic', 'toc'],
   'image/filters': ['filter2', 'fspecial', 'imfilter'],
-  'image/color': ['rgb2gray', 'im2double', 'im2uint8', 'rgb2hsv', 'hsv2rgb'],
+  'image/color': ['rgb2gray', 'gray2rgb', 'im2double', 'im2uint8', 'im2uint16', 'rgb2hsv', 'hsv2rgb', 'rgb2lab', 'lab2rgb', 'ind2rgb'],
+  'image/io': ['imread', 'imwrite'],
+  'math/ode': ['ode45', 'ode23', 'ode15s'],
+  'math/interpolation': ['interp1', 'interp2', 'spline', 'pchip', 'ppval'],
+  'math/optim': ['fzero', 'fsolve', 'optimset'],
+  'stats/random': ['rand', 'randn', 'randi', 'normrnd', 'unifrnd', 'exprnd'],
 };
 
 // Get popular functions for a category

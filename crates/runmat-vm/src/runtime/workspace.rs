@@ -6,6 +6,9 @@ use std::collections::{HashMap, HashSet};
 struct WorkspaceState {
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
+    assigned_names_this_execution: HashSet<String>,
+    assigned_ids_this_execution: HashSet<usize>,
+    removed_this_execution: HashMap<String, usize>,
     idx_to_name: HashMap<usize, String>,
     data_ptr: *const Value,
     len: usize,
@@ -13,10 +16,19 @@ struct WorkspaceState {
 
 pub type WorkspaceSnapshot = (HashMap<String, usize>, HashSet<String>);
 
+#[derive(Debug, Clone)]
+pub struct WorkspaceAssignedReport {
+    pub ids: HashSet<usize>,
+    pub names: HashSet<String>,
+    pub removed_ids: HashSet<usize>,
+    pub removed_names: HashSet<String>,
+}
+
 runmat_thread_local! {
     static WORKSPACE_STATE: RefCell<Option<WorkspaceState>> = const { RefCell::new(None) };
     static PENDING_WORKSPACE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
     static LAST_WORKSPACE_STATE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
+    static LAST_WORKSPACE_ASSIGNED_REPORT: RefCell<Option<WorkspaceAssignedReport>> = const { RefCell::new(None) };
     static WORKSPACE_VARS: RefCell<Option<*mut Vec<Value>>> = const { RefCell::new(None) };
 }
 
@@ -27,6 +39,16 @@ impl Drop for WorkspaceStateGuard {
         WORKSPACE_STATE.with(|state| {
             let mut state_mut = state.borrow_mut();
             if let Some(ws) = state_mut.take() {
+                let removed_ids = ws.removed_this_execution.values().copied().collect();
+                let removed_names = ws.removed_this_execution.keys().cloned().collect();
+                LAST_WORKSPACE_ASSIGNED_REPORT.with(|slot| {
+                    *slot.borrow_mut() = Some(WorkspaceAssignedReport {
+                        ids: ws.assigned_ids_this_execution,
+                        names: ws.assigned_names_this_execution,
+                        removed_ids,
+                        removed_names,
+                    });
+                });
                 LAST_WORKSPACE_STATE.with(|slot| {
                     *slot.borrow_mut() = Some((ws.names, ws.assigned));
                 });
@@ -62,8 +84,22 @@ pub fn take_pending_workspace_state() -> Option<WorkspaceSnapshot> {
     PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take())
 }
 
+pub fn clone_pending_workspace_state() -> Option<WorkspaceSnapshot> {
+    PENDING_WORKSPACE.with(|slot| slot.borrow().clone())
+}
+
+pub fn restore_pending_workspace_state(snapshot: WorkspaceSnapshot) {
+    PENDING_WORKSPACE.with(|slot| {
+        *slot.borrow_mut() = Some(snapshot);
+    });
+}
+
 pub fn take_updated_workspace_state() -> Option<WorkspaceSnapshot> {
     LAST_WORKSPACE_STATE.with(|slot| slot.borrow_mut().take())
+}
+
+pub fn take_updated_workspace_assigned_report() -> Option<WorkspaceAssignedReport> {
+    LAST_WORKSPACE_ASSIGNED_REPORT.with(|slot| slot.borrow_mut().take())
 }
 
 pub fn set_workspace_state(
@@ -76,6 +112,9 @@ pub fn set_workspace_state(
         *state.borrow_mut() = Some(WorkspaceState {
             names,
             assigned,
+            assigned_names_this_execution: HashSet::new(),
+            assigned_ids_this_execution: HashSet::new(),
+            removed_this_execution: HashMap::new(),
             idx_to_name,
             data_ptr: vars.as_ptr(),
             len: vars.len(),
@@ -150,6 +189,11 @@ pub fn workspace_clear() -> Result<(), String> {
             return Err("clear: workspace state unavailable".to_string());
         };
         vars.clear();
+        for (name, idx) in &ws.names {
+            if ws.assigned.contains(name) {
+                ws.removed_this_execution.insert(name.clone(), *idx);
+            }
+        }
         ws.names.clear();
         ws.assigned.clear();
         ws.idx_to_name.clear();
@@ -174,6 +218,9 @@ pub fn workspace_remove(name: &str) -> Result<(), String> {
         if let Some(idx) = ws.names.remove(name) {
             if idx < vars.len() {
                 vars[idx] = Value::Num(0.0);
+            }
+            if ws.assigned.contains(name) {
+                ws.removed_this_execution.insert(name.to_string(), idx);
             }
             ws.assigned.remove(name);
             ws.idx_to_name.remove(&idx);
@@ -236,6 +283,9 @@ pub fn set_workspace_variable(
                 ws.data_ptr = vars.as_ptr();
                 ws.len = vars.len();
                 ws.assigned.insert(name.to_string());
+                ws.assigned_names_this_execution.insert(name.to_string());
+                ws.assigned_ids_this_execution.insert(idx);
+                ws.removed_this_execution.remove(name);
             }
             None => {
                 result = Err("load: workspace state unavailable".to_string());
@@ -260,8 +310,68 @@ pub fn mark_workspace_assigned(index: usize) {
     WORKSPACE_STATE.with(|state| {
         if let Some(ws) = state.borrow_mut().as_mut() {
             if let Some(name) = ws.idx_to_name.get(&index).cloned() {
-                ws.assigned.insert(name);
+                ws.assigned.insert(name.clone());
+                ws.assigned_names_this_execution.insert(name.clone());
+                ws.assigned_ids_this_execution.insert(index);
+                ws.removed_this_execution.remove(&name);
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn take_report_after(f: impl FnOnce(&mut Vec<Value>)) -> WorkspaceAssignedReport {
+        let _ = take_updated_workspace_assigned_report();
+        let _ = take_updated_workspace_state();
+
+        let mut vars = Vec::new();
+        {
+            let _guard = set_workspace_state(HashMap::new(), HashSet::new(), &mut vars);
+            f(&mut vars);
+        }
+
+        take_updated_workspace_assigned_report().expect("workspace report should be recorded")
+    }
+
+    #[test]
+    fn remove_preserves_assignment_report_and_records_removal() {
+        let report = take_report_after(|vars| {
+            set_workspace_variable("x", Value::Num(1.0), vars).unwrap();
+            workspace_remove("x").unwrap();
+        });
+
+        assert!(report.names.contains("x"));
+        assert!(report.ids.contains(&0));
+        assert!(report.removed_names.contains("x"));
+        assert!(report.removed_ids.contains(&0));
+    }
+
+    #[test]
+    fn clear_preserves_assignment_report_and_records_removal() {
+        let report = take_report_after(|vars| {
+            set_workspace_variable("x", Value::Num(1.0), vars).unwrap();
+            workspace_clear().unwrap();
+        });
+
+        assert!(report.names.contains("x"));
+        assert!(report.ids.contains(&0));
+        assert!(report.removed_names.contains("x"));
+        assert!(report.removed_ids.contains(&0));
+    }
+
+    #[test]
+    fn assignment_after_clear_clears_final_removal_marker() {
+        let report = take_report_after(|vars| {
+            set_workspace_variable("x", Value::Num(1.0), vars).unwrap();
+            workspace_clear().unwrap();
+            set_workspace_variable("x", Value::Num(2.0), vars).unwrap();
+        });
+
+        assert!(report.names.contains("x"));
+        assert!(report.removed_names.is_empty());
+        assert!(report.removed_ids.is_empty());
+    }
 }

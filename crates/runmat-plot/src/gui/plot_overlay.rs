@@ -2200,7 +2200,8 @@ impl PlotOverlay {
             match e.plot_type {
                 crate::plots::figure::PlotType::Line
                 | crate::plots::figure::PlotType::Line3
-                | crate::plots::figure::PlotType::Contour => {
+                | crate::plots::figure::PlotType::Contour
+                | crate::plots::figure::PlotType::ReferenceLine => {
                     let ymid = swatch_rect.center().y;
                     ui.painter().line_segment(
                         [

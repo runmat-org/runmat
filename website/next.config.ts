@@ -123,6 +123,16 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       {
+        source: '/matlab',
+        destination: '/matlab-online',
+        permanent: true,
+      },
+      {
+        source: '/mat',
+        destination: '/matlab-online',
+        permanent: true,
+      },
+      {
         source: '/blog/matlab-alternatives-runmat-vs-octave-julia-python',
         destination: '/blog/free-matlab-alternatives',
         permanent: true,

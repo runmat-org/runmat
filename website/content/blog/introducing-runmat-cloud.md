@@ -1,6 +1,6 @@
 ---
-title: "Durable Project State: Introducing RunMat Cloud"
-description: "RunMat launched last August as a CLI. In November we added GPU acceleration with Accelerate. Now the sandbox puts the full runtime in your browser, and RunMat Cloud makes it persistent: projects, run history, version snapshots, and collaboration."
+title: "Durable Project State: Introducing RunMat App"
+description: "RunMat launched last August as a CLI. In November we added GPU acceleration with Accelerate. Now the sandbox puts the full runtime in your browser, and RunMat App makes it persistent: projects, run history, version snapshots, and collaboration."
 date: "2026-03-25"
 authors:
   - name: "Nabeel Allana"
@@ -8,16 +8,16 @@ authors:
 readTime: "9 min read"
 slug: "introducing-runmat-cloud"
 visibility: public
-tags: ["RunMat Cloud", "sandbox", "scientific computing", "GPU computing", "WebAssembly", "WebGPU", "collaboration"]
-keywords: "RunMat Cloud, RunMat sandbox, MATLAB online alternative, browser GPU computing, WebAssembly scientific computing, WebGPU math, engineering collaboration tool, version control scientific computing, MATLAB cloud alternative, durable project state, run history, version snapshots"
-excerpt: "RunMat launched as a CLI last August. Accelerate added GPU acceleration in November. Now the sandbox runs the same engine in your browser, and RunMat Cloud turns each run into durable project state you can keep, inspect, compare, and share."
+tags: ["RunMat App", "sandbox", "scientific computing", "GPU computing", "WebAssembly", "WebGPU", "collaboration"]
+keywords: "RunMat App, RunMat sandbox, MATLAB online alternative, browser GPU computing, WebAssembly scientific computing, WebGPU math, engineering collaboration tool, version control scientific computing, MATLAB cloud alternative, durable project state, run history, version snapshots"
+excerpt: "RunMat launched as a CLI last August. Accelerate added GPU acceleration in November. Now the sandbox runs the same engine in your browser, and RunMat App turns each run into durable project state you can keep, inspect, compare, and share."
 image: "https://web.runmatstatic.com/blog-images/introducing-runmat-cloud.png"
-imageAlt: "RunMat Cloud project environment with run history"
+imageAlt: "RunMat App project environment with run history"
 ogType: "article"
-ogTitle: "Durable Project State: Introducing RunMat Cloud"
-ogDescription: "The RunMat sandbox runs GPU-accelerated math in your browser. RunMat Cloud makes it persistent: durable project state with run history, version snapshots, and team collaboration."
+ogTitle: "Durable Project State: Introducing RunMat App"
+ogDescription: "The RunMat sandbox runs GPU-accelerated math in your browser. RunMat App makes it persistent: durable project state with run history, version snapshots, and team collaboration."
 twitterCard: "summary_large_image"
-twitterTitle: "Durable Project State: Introducing RunMat Cloud"
+twitterTitle: "Durable Project State: Introducing RunMat App"
 twitterDescription: "GPU-accelerated math in your browser. Durable project state with automatic run history, version snapshots, and team collaboration. Free tier available."
 canonical: "https://runmat.com/blog/introducing-runmat-cloud"
 jsonLd:
@@ -35,14 +35,14 @@ jsonLd:
           item: "https://runmat.com/blog"
         - "@type": "ListItem"
           position: 3
-          name: "Introducing RunMat Cloud"
+          name: "Introducing RunMat App"
           item: "https://runmat.com/blog/introducing-runmat-cloud"
 
     - "@type": "BlogPosting"
       "@id": "https://runmat.com/blog/introducing-runmat-cloud#article"
-      headline: "Durable Project State: Introducing RunMat Cloud"
+      headline: "Durable Project State: Introducing RunMat App"
       alternativeHeadline: "GPU-Accelerated Math in Your Browser, Now with Persistent Projects"
-      description: "RunMat launched as a CLI last August. Accelerate added GPU acceleration in November. Now the sandbox runs in your browser, and RunMat Cloud turns each run into durable project state: run history, version snapshots, and collaboration."
+      description: "RunMat launched as a CLI last August. Accelerate added GPU acceleration in November. Now the sandbox runs in your browser, and RunMat App turns each run into durable project state: run history, version snapshots, and collaboration."
       image: "https://web.runmatstatic.com/blog-images/introducing-runmat-cloud.png"
       datePublished: "2026-03-25T00:00:00Z"
       dateModified: "2026-03-25T00:00:00Z"
@@ -70,15 +70,15 @@ jsonLd:
     - "@type": "FAQPage"
       mainEntity:
         - "@type": "Question"
-          name: "Does RunMat Cloud run on my GPU?"
+          name: "Does RunMat App run on my GPU?"
           acceptedAnswer:
             "@type": "Answer"
-            text: "Yes. The browser sandbox uses WebGPU to access your local GPU for acceleration. Your code and data stay on your machine. RunMat Cloud stores project files and run metadata, not your GPU computations."
+            text: "Yes. The browser sandbox uses WebGPU to access your local GPU for acceleration. Your code and data stay on your machine. RunMat App stores project files and run metadata, not your GPU computations."
         - "@type": "Question"
-          name: "How does RunMat Cloud make large datasets practical?"
+          name: "How does RunMat App make large datasets practical?"
           acceptedAnswer:
             "@type": "Answer"
-            text: "RunMat Cloud uses sharded storage and manifest-based versioning, so large datasets do not require full-file rewrites or whole-project duplication to preserve history. This makes it practical to keep long experiment sequences, restore historical state, and inspect results without treating every checkpoint like a brand-new full copy."
+            text: "RunMat App uses sharded storage and manifest-based versioning, so large datasets do not require full-file rewrites or whole-project duplication to preserve history. This makes it practical to keep long experiment sequences, restore historical state, and inspect results without treating every checkpoint like a brand-new full copy."
         - "@type": "Question"
           name: "Can I restore a run someone else did?"
           acceptedAnswer:
@@ -116,7 +116,7 @@ We wanted mathematical computing to use the hardware engineers already have, wit
 
 Now we are taking the next step: putting that same engine in your browser and turning each run into durable project state you can keep, inspect, compare, and share.
 
-![RunMat Cloud project environment with run history](https://web.runmatstatic.com/blog-images/introducing-runmat-cloud.png)
+![RunMat App project environment with run history](https://web.runmatstatic.com/blog-images/introducing-runmat-cloud.png)
 
 ## The sandbox: immediate compute, zero setup
 
@@ -128,15 +128,15 @@ You still get the things a real working environment needs: a built-in editor wit
 
 Browsers do still impose limits. On very large workloads, peak throughput will be lower than the native CLI because browsers throttle GPU access and operate inside a sandbox. An upcoming native desktop application removes that tradeoff: the same environment and project model, but with full use of your machine's hardware and native-performance I/O.
 
-## RunMat Cloud: from ephemeral work to durable engineering state
+## RunMat App: from ephemeral work to durable engineering state
 
 The default pattern when doing an engineering computation is usually: run something, get a result, maybe save a few outputs, maybe keep a few values as csv's or screenshots, and hope enough context survives to revisit it later. The work is real, but the state around it is fragile.
 
-RunMat Cloud changes that. Code, datasets, run history, workspace variables, figures, and snapshots become durable project state tied to a shared project instead of one machine, one local directory, or one person's memory.
+RunMat App changes that. Code, datasets, run history, workspace variables, figures, and snapshots become durable project state tied to a shared project instead of one machine, one local directory, or one person's memory.
 
 The hard part of serious numerical work is often not producing one result once. It is keeping the result, revisiting it later, comparing it to the next run, handing it to someone else, and preserving enough context that nobody has to reconstruct what happened from screenshots, copied files, or memory.
 
-RunMat Cloud is designed for that reality. You can point to a specific run, restore a project to any prior state, and let a dataset evolve without forcing a full rewrite every time it changes.
+RunMat App is designed for that reality. You can point to a specific run, restore a project to any prior state, and let a dataset evolve without forcing a full rewrite every time it changes.
 
 <div className="flex justify-center my-6">
   <video autoPlay controls loop muted playsInline preload="metadata" className="w-3/4 max-w-[540px] rounded-lg aspect-square">
@@ -152,7 +152,7 @@ This becomes especially important once outputs stop fitting comfortably in one e
 
 If each experiment produces 10 GB or 100 GB of data, a team cannot realistically work by fully materializing every version, keeping full copies on individual laptops, and duplicating the entire dataset every time one region changes. That is not just expensive — in many workflows it makes persistence and comparison practically impossible.
 
-RunMat Cloud avoids that trap.
+RunMat App avoids that trap.
 
 The RunMat filesystem is built around sharded datasets and manifest-based versioning. That means large artifacts do not have to be treated like monolithic blobs that must be loaded, copied, and rewritten in full every time you want to save, version, restore, or compare them.
 
@@ -190,7 +190,7 @@ Without durable project state, review and debugging usually degrade into some co
 
 That works for small scripts. It breaks down for expensive numerical work.
 
-With RunMat Cloud, a teammate does not need to ask you to rerun the job just to inspect the output. They can open the historical run directly, inspect the same variables, the same figures, and the same project state you saw. They do not need to reconstruct context from exported checkpoint files or hope that rerunning today reproduces what happened yesterday.
+With RunMat App, a teammate does not need to ask you to rerun the job just to inspect the output. They can open the historical run directly, inspect the same variables, the same figures, and the same project state you saw. They do not need to reconstruct context from exported checkpoint files or hope that rerunning today reproduces what happened yesterday.
 
 That changes review, handoff, and debugging in the same direction.
 
@@ -203,7 +203,7 @@ For an individual, this means clear history and state inspection. For a team, it
 
 ## Snapshots, baselines, and project history
 
-RunMat Cloud also gives teams a natural way to mark important states in a project.
+RunMat App also gives teams a natural way to mark important states in a project.
 
 Before a risky migration, before a model change, before a test campaign, or at a milestone, you can snapshot the project. That snapshot gives you a durable project state for rollback, review, comparison, or audit without requiring a full manual export or duplicate copy of every large artifact.
 
@@ -219,7 +219,7 @@ Snapshots, historical runs, and shared access are what make this practical — t
   </video>
 </div>
 
-## What else shipped into the sandbox and cloud
+## What else shipped into the sandbox and app
 
 Between the Accelerate launch in November and now, we also shipped:
 
@@ -231,7 +231,7 @@ Between the Accelerate launch in November and now, we also shipped:
 
 ## Plans and pricing
 
-RunMat Cloud launches with three tiers:
+RunMat App launches with three tiers:
 
 **Hobby (free)** — 100 MB of storage. Unlimited projects. Sign in and start working.
 
@@ -247,7 +247,7 @@ The full breakdown is on the [pricing page](/pricing).
 
 ## What has not changed
 
-The sandbox is still free, anonymous, and instant. The CLI is still available for local execution and CI/CD. The fusion engine, automatic CPU/GPU acceleration, and interactive plotting are the same across all three surfaces: CLI, sandbox, and cloud.
+The sandbox is still free, anonymous, and instant. The CLI is still available for local execution and CI/CD. The fusion engine, automatic CPU/GPU acceleration, and interactive plotting are the same across all three surfaces: CLI, sandbox, and app.
 
 Anyone with a browser can use the same runtime as a team with an enterprise deployment.
 
@@ -259,7 +259,7 @@ The [full runtime is open source](https://github.com/runmat-org/runmat) and MIT 
 
 The NPM package ships the complete runtime — execution, GPU acceleration, and plotting — so you can embed RunMat inside your own web tools. There is also a Jupyter kernel if notebooks are your workflow.
 
-Everything that powers the sandbox and RunMat Cloud starts in this repo.
+Everything that powers the sandbox and RunMat App starts in this repo.
 
 ## What is next
 
@@ -271,16 +271,16 @@ For now: open [runmat.com/sandbox](https://runmat.com/sandbox), sign in, and sav
 
 ## FAQ
 
-**Does RunMat Cloud run on my GPU?**
-Yes. The browser uses WebGPU to access your local GPU for acceleration. All computation happens locally in your browser. RunMat Cloud stores project files and run metadata for persistence, but your math is not executed on our infrastructure.
+**Does RunMat App run on my GPU?**
+Yes. The browser uses WebGPU to access your local GPU for acceleration. All computation happens locally in your browser. RunMat App stores project files and run metadata for persistence, but your math is not executed on our infrastructure.
 
 **How is this different from MATLAB Online?**
-MATLAB Online runs your code on MathWorks' servers and requires a paid license. RunMat executes computation locally in your browser via WebAssembly, uses your local GPU for acceleration when available, and requires no account to start. RunMat Cloud adds persistence, versioning, run history, and collaboration without moving the math execution itself onto our servers. We wrote a [full comparison](/matlab-online) for those evaluating the switch.
+MATLAB Online runs your code on MathWorks' servers and requires a paid license. RunMat executes computation locally in your browser via WebAssembly, uses your local GPU for acceleration when available, and requires no account to start. RunMat App adds persistence, versioning, run history, and collaboration without moving the math execution itself onto our servers. We wrote a [full comparison](/matlab-online) for those evaluating the switch.
 
-**How does RunMat Cloud make large datasets practical?**
+**How does RunMat App make large datasets practical?**
 Because it does not require full-file rewrites or whole-project duplication to preserve history. Large datasets are handled through sharded storage and manifest-based versioning, which makes it practical to keep long experiment sequences, restore historical state, and inspect results without treating every checkpoint like a brand-new full copy.
 
-**Can I use RunMat Cloud for large simulations?**
+**Can I use RunMat App for large simulations?**
 Yes. The storage model is designed so large numerical outputs can be retained, versioned, and revisited efficiently. The exact limits depend on your plan, but the core idea is the same across tiers: preserve useful history without forcing whole-dataset duplication every time a result changes.
 
 **What browsers support WebGPU?**

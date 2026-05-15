@@ -48,3 +48,20 @@ fn find_variants() {
     let _ = runmat_runtime::call_builtin("find", std::slice::from_ref(&v)).unwrap();
     let _ = runmat_runtime::call_builtin("find", &[v.clone(), Value::Num(1.0)]).unwrap();
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn degree_radian_conversion_builtins_dispatch() {
+    let radians = runmat_runtime::call_builtin("deg2rad", &[Value::Num(90.0)]).unwrap();
+    match radians {
+        Value::Num(value) => assert!((value - std::f64::consts::FRAC_PI_2).abs() < 1e-12),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+
+    let degrees =
+        runmat_runtime::call_builtin("rad2deg", &[Value::Num(std::f64::consts::PI)]).unwrap();
+    match degrees {
+        Value::Num(value) => assert!((value - 180.0).abs() < 1e-12),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+}
