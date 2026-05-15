@@ -26,6 +26,7 @@ use std::cell::Cell;
 use std::env;
 use std::ffi::CStr;
 use std::future::Future;
+use std::hash::{Hash, Hasher};
 use std::pin::Pin;
 use std::task::Context;
 
@@ -599,10 +600,24 @@ impl TurbineEngine {
         info!("Turbine engine reset - all compiled functions and profiling data cleared");
     }
 
+    fn hash_named_function_call<H: Hasher>(
+        hasher: &mut H,
+        discriminator: &str,
+        name: &str,
+        argc: usize,
+        out_count: Option<usize>,
+    ) {
+        discriminator.hash(hasher);
+        name.hash(hasher);
+        argc.hash(hasher);
+        if let Some(out_count) = out_count {
+            out_count.hash(hasher);
+        }
+    }
+
     /// Calculate a hash for bytecode instructions
     pub fn calculate_bytecode_hash(&self, bytecode: &Bytecode) -> u64 {
         use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
 
@@ -728,15 +743,16 @@ impl TurbineEngine {
                 }
                 Instr::Return => "Return".hash(&mut hasher),
                 Instr::CallFunction(name, argc) => {
-                    "CallFunction".hash(&mut hasher);
-                    name.hash(&mut hasher);
-                    argc.hash(&mut hasher);
+                    Self::hash_named_function_call(&mut hasher, "CallFunction", name, *argc, None);
                 }
                 Instr::CallFunctionMulti(name, argc, out_count) => {
-                    "CallFunctionMulti".hash(&mut hasher);
-                    name.hash(&mut hasher);
-                    argc.hash(&mut hasher);
-                    out_count.hash(&mut hasher);
+                    Self::hash_named_function_call(
+                        &mut hasher,
+                        "CallFunctionMulti",
+                        name,
+                        *argc,
+                        Some(*out_count),
+                    );
                 }
                 Instr::CallSemanticFunction(function, argc) => {
                     "CallSemanticFunction".hash(&mut hasher);
@@ -1284,5 +1300,24 @@ pub extern "C" fn runtime_create_matrix(
             log::error!("Matrix creation failed: {e}");
             0
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn named_function_hashing_stays_centralized() {
+        let source = include_str!("lib.rs");
+        let call_function_hash = ["\"CallFunction\"", ".hash"].concat();
+        let call_function_multi_hash = ["\"CallFunctionMulti\"", ".hash"].concat();
+
+        assert_eq!(source.matches(&call_function_hash).count(), 0);
+        assert_eq!(source.matches(&call_function_multi_hash).count(), 0);
+        assert_eq!(
+            source
+                .matches(&["Self::", "hash_named_function_call("].concat())
+                .count(),
+            2
+        );
     }
 }
