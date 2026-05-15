@@ -558,9 +558,9 @@ fn semantic_function_handle_index_call_executes() {
         "semantic function handle index calls should carry semantic identity"
     );
 
-    runmat_vm::reset_legacy_user_dispatch_fallback_count();
+    runmat_vm::legacy::reset_legacy_user_dispatch_fallback_count();
     let vars = interpret(&bytecode).expect("semantic handle index call should execute");
-    assert_eq!(runmat_vm::legacy_user_dispatch_fallback_count(), 0);
+    assert_eq!(runmat_vm::legacy::legacy_user_dispatch_fallback_count(), 0);
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-12)));

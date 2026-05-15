@@ -23,9 +23,6 @@ pub use compiler::CompileError;
 pub use interpreter::api::{
     set_call_stack_limit, set_error_namespace, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
-pub use interpreter::dispatch::{
-    legacy_user_dispatch_fallback_count, reset_legacy_user_dispatch_fallback_count,
-};
 pub use interpreter::runner::{
     interpret, interpret_function, interpret_function_with_counts, interpret_with_vars,
     invoke_semantic_function_value,
@@ -40,5 +37,8 @@ pub use runtime::workspace::{
 
 pub mod legacy {
     pub use crate::bytecode::LegacyUserFunction;
+    pub use crate::interpreter::dispatch::{
+        legacy_user_dispatch_fallback_count, reset_legacy_user_dispatch_fallback_count,
+    };
     pub use crate::interpreter::runner::execute_legacy_user_function_isolated;
 }
