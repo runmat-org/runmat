@@ -2116,34 +2116,28 @@ fn test_jit_function_error_handling() {
     // Should get an error about undefined function
     assert!(result.is_err(), "Undefined function should cause error");
 
-    // Test compilation that might fail and fallback to interpreter
-    let mut functions = HashMap::new();
-    functions.insert(
-        "simple".to_string(),
-        runmat_vm::legacy::LegacyUserFunction {
-            name: "simple".to_string(),
-            params: vec![runmat_hir::VarId(0)],
-            outputs: vec![runmat_hir::VarId(1)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(1),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false, // Assignment suppression flag for test
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 2,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
+    let function = runmat_hir::FunctionId(1);
+    let mut semantic_functions = HashMap::new();
+    semantic_functions.insert(
+        function,
+        SemanticFunctionBytecode {
+            function,
+            display_name: "simple".to_string(),
             source_id: None,
+            instructions: vec![Instr::LoadVar(0), Instr::StoreVar(1)],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 2,
+            input_slots: vec![0],
+            varargin_slot: None,
+            output_slots: vec![1],
+            varargout_slot: None,
+            capture_slots: Vec::new(),
         },
     );
 
     let bytecode_simple = Bytecode {
-        functions,
+        semantic_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(42.0),
