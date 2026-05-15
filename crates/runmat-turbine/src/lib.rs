@@ -416,21 +416,21 @@ impl TurbineEngine {
 
     /// Execute compiled function
     pub fn execute_compiled(&mut self, hash: u64, vars: &mut [Value]) -> Result<i32> {
-        self.execute_compiled_with_functions(hash, vars, &std::collections::HashMap::new())
+        self.execute_compiled_with_registry(hash, vars, &SemanticFunctionRegistry::default())
     }
 
-    /// Execute compiled function with access to function definitions for user function calls
-    pub fn execute_compiled_with_functions(
+    /// Execute compiled function with access to semantic function identities for user calls.
+    pub fn execute_compiled_with_registry(
         &mut self,
         hash: u64,
         vars: &mut [Value],
-        functions: &std::collections::HashMap<String, LegacyUserFunction>,
+        semantic_registry: &SemanticFunctionRegistry,
     ) -> Result<i32> {
         self.execute_compiled_with_function_products(
             hash,
             vars,
-            functions,
-            &SemanticFunctionRegistry::default(),
+            &std::collections::HashMap::new(),
+            semantic_registry,
         )
     }
 
