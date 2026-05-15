@@ -195,10 +195,10 @@ impl ControlFlowGraph {
 }
 
 /// Compiles bytecode instructions to Cranelift IR
-pub struct BytecodeCompiler;
+pub(crate) struct BytecodeCompiler;
 
 impl BytecodeCompiler {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 
