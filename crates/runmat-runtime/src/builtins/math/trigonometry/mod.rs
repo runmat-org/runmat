@@ -8,6 +8,8 @@ pub(crate) mod atan2;
 pub(crate) mod atanh;
 pub(crate) mod cos;
 pub(crate) mod cosh;
+pub(crate) mod deg2rad;
+pub(crate) mod rad2deg;
 pub(crate) mod sin;
 pub(crate) mod sinh;
 pub(crate) mod tan;
