@@ -237,6 +237,7 @@ Observed older-HIR artifacts worth collapsing:
 
 - `LegacyHirProgram`, `LegacyHirStmt`, and `LegacyHirExpr` remain in crate-private VM compiler modules and many tests.
 - The legacy-shaped user-function record and fallback counters are now exposed only under `runmat_vm::legacy::*`; the older root-level `runmat_vm::LegacyUserFunction`, root fallback-counter exports, and `runmat_vm::functions` compatibility surfaces have been removed, and downstream callers should move to semantic function bytecode/registry APIs.
+- VM execution internals such as `CallFrame` and `ExecutionContext` are no longer root-level `runmat_vm` exports; call-stack diagnostics use runtime call-frame types instead.
 - Legacy bytecode compilation is no longer exposed through VM public modules; production unresolved callbacks go through crate-private dynamic callback fallback helpers.
 - `RunMatSession` keeps `workspace_bindings` to seed workspace variables across REPL inputs, but those bindings are still plain VM slot indices rather than durable semantic workspace binding IDs.
 - `LoweringResult` still carries both `assembly` and legacy `hir`, `variables`, `functions`, `var_types`, and legacy inference placeholders.
