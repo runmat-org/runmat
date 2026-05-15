@@ -226,6 +226,7 @@ Classification:
 - External compatibility boundary: Turbine callbacks whose host context still owns only `LegacyUserFunction` records for unresolved/external exported functions.
 - Dead/duplicate raw fallback call sites: none found; the remaining four VM raw fallback calls all sit behind semantic-first checks or the Turbine external boundary.
 - VM prepared user-call dispatch now has a source-level ratchet that semantic registry lookup stays before the named legacy fallback compiler.
+- VM value user-call dispatch, used by expanded end-expression paths, now has a source-level ratchet that semantic registry lookup stays before the named legacy fallback compiler.
 
 Completed implementation slices:
 

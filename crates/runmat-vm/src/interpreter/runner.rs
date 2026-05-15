@@ -197,6 +197,29 @@ fn ensure_wasm_builtins_registered() {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn value_user_call_resolves_semantic_before_legacy_fallback() {
+        let source = include_str!("runner.rs");
+        let handler_start = source
+            .find("async fn invoke_user_function_value")
+            .expect("value user function handler");
+        let handler = &source[handler_start..];
+        let semantic_lookup = handler
+            .find("semantic_registry.resolve_name")
+            .expect("semantic lookup in value user function handler");
+        let legacy_fallback = handler
+            .find("compile_legacy_named_user_dispatch_fallback")
+            .expect("legacy fallback in value user function handler");
+
+        assert!(
+            semantic_lookup < legacy_fallback,
+            "value user-call dispatch must resolve semantic names before legacy fallback"
+        );
+    }
+}
+
 #[cfg(feature = "native-accel")]
 fn clear_residency(value: &Value) {
     accel_residency::clear_value(value);
