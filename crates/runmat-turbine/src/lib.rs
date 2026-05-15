@@ -472,8 +472,20 @@ impl TurbineEngine {
         functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
     ) -> Result<i32> {
         let mut f64_vars = Self::f64_vars_from_values(vars.as_slice())?;
-        let _workspace_guard = runmat_vm::interpreter::engine::prepare_workspace_guard(vars);
-        let result = self.execute_compiled_f64_vars(hash, &mut f64_vars, functions)?;
+        let pending_workspace = runmat_vm::runtime::workspace::clone_pending_workspace_state();
+        let workspace_guard = runmat_vm::interpreter::engine::prepare_workspace_guard(vars);
+        let result = match self.execute_compiled_f64_vars(hash, &mut f64_vars, functions) {
+            Ok(result) => result,
+            Err(err) => {
+                drop(workspace_guard);
+                let _ = runmat_vm::take_updated_workspace_state();
+                let _ = runmat_vm::take_updated_workspace_assigned_report();
+                if let Some(snapshot) = pending_workspace {
+                    runmat_vm::runtime::workspace::restore_pending_workspace_state(snapshot);
+                }
+                return Err(err);
+            }
+        };
         Self::write_f64_vars_back(vars.as_mut_slice(), &f64_vars);
         Ok(result)
     }

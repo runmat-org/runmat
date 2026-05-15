@@ -1078,7 +1078,8 @@ impl Figure {
                     }
                 }
             } else {
-                let (x_range, y_range) = Self::reference_line_ranges(None, None, &line);
+                let (x_range, y_range) =
+                    Self::reference_line_ranges(self.x_limits, self.y_limits, None, None, &line);
                 point_bounds.min.x = x_range.0 as f32;
                 point_bounds.max.x = x_range.1 as f32;
                 point_bounds.min.y = y_range.0 as f32;
@@ -1222,6 +1223,8 @@ impl Figure {
                 )),
                 PlotElement::ReferenceLine(plot) => {
                     let (x_range, y_range) = Self::reference_line_ranges(
+                        self.x_limits,
+                        self.y_limits,
                         self.axes_metadata.get(axes_index),
                         reference_base_bounds.get(axes_index).copied().flatten(),
                         plot,
@@ -1266,19 +1269,21 @@ impl Figure {
     }
 
     fn reference_line_ranges(
+        x_limits: Option<(f64, f64)>,
+        y_limits: Option<(f64, f64)>,
         meta: Option<&AxesMetadata>,
         base: Option<BoundingBox>,
         line: &ReferenceLine,
     ) -> ((f64, f64), (f64, f64)) {
-        let x_range = meta
-            .and_then(|m| m.x_limits)
+        let x_range = x_limits
+            .or_else(|| meta.and_then(|m| m.x_limits))
             .or_else(|| base.map(|b| (b.min.x as f64, b.max.x as f64)))
             .unwrap_or(match line.orientation {
                 ReferenceLineOrientation::Vertical => (line.value - 0.5, line.value + 0.5),
                 ReferenceLineOrientation::Horizontal => (0.0, 1.0),
             });
-        let y_range = meta
-            .and_then(|m| m.y_limits)
+        let y_range = y_limits
+            .or_else(|| meta.and_then(|m| m.y_limits))
             .or_else(|| base.map(|b| (b.min.y as f64, b.max.y as f64)))
             .unwrap_or(match line.orientation {
                 ReferenceLineOrientation::Vertical => (0.0, 1.0),
@@ -1944,6 +1949,33 @@ mod tests {
         assert_eq!(horizontal_bounds.max.x, 1.0);
         assert_eq!(horizontal_bounds.min.y, 2.5);
         assert_eq!(horizontal_bounds.max.y, 3.5);
+    }
+
+    #[test]
+    fn test_reference_line_render_data_prefers_figure_limits() {
+        let mut horizontal_figure = Figure::new().with_limits((-2.0, 8.0), (-10.0, 10.0));
+        horizontal_figure.axes_metadata[0].x_limits = Some((0.0, 1.0));
+        horizontal_figure.add_reference_line_on_axes(
+            ReferenceLine::new(ReferenceLineOrientation::Horizontal, 3.0).unwrap(),
+            0,
+        );
+        let horizontal_bounds = horizontal_figure.render_data()[0].bounds.unwrap();
+        assert_eq!(horizontal_bounds.min.x, -2.0);
+        assert_eq!(horizontal_bounds.max.x, 8.0);
+        assert_eq!(horizontal_bounds.min.y, 3.0);
+        assert_eq!(horizontal_bounds.max.y, 3.0);
+
+        let mut vertical_figure = Figure::new().with_limits((-2.0, 8.0), (-10.0, 10.0));
+        vertical_figure.axes_metadata[0].y_limits = Some((0.0, 1.0));
+        vertical_figure.add_reference_line_on_axes(
+            ReferenceLine::new(ReferenceLineOrientation::Vertical, 4.0).unwrap(),
+            0,
+        );
+        let vertical_bounds = vertical_figure.render_data()[0].bounds.unwrap();
+        assert_eq!(vertical_bounds.min.x, 4.0);
+        assert_eq!(vertical_bounds.max.x, 4.0);
+        assert_eq!(vertical_bounds.min.y, -10.0);
+        assert_eq!(vertical_bounds.max.y, 10.0);
     }
 
     #[test]

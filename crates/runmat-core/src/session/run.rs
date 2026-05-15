@@ -243,6 +243,7 @@ impl RunMatSession {
             .map(|(var_id, name)| (var_id.0, name.clone()))
             .collect();
         let mut assigned_this_execution: HashSet<String> = HashSet::new();
+        let mut removed_this_execution: HashSet<String> = HashSet::new();
         let assigned_snapshot: HashSet<String> = updated_vars
             .keys()
             .filter(|name| self.workspace_values.contains_key(name.as_str()))
@@ -583,6 +584,13 @@ impl RunMatSession {
                             .filter_map(|var_id| id_to_name.get(var_id).cloned()),
                     );
                     assigned_this_execution.extend(assigned_report.names);
+                    removed_this_execution.extend(
+                        assigned_report
+                            .removed_ids
+                            .iter()
+                            .filter_map(|var_id| id_to_name.get(var_id).cloned()),
+                    );
+                    removed_this_execution.extend(assigned_report.removed_names);
                 }
                 if debug_trace {
                     debug!(
@@ -604,11 +612,16 @@ impl RunMatSession {
                     })
                     .cloned()
                     .collect();
-                let removed_names: HashSet<String> = previous_workspace
+                let mut removed_names: HashSet<String> = previous_workspace
                     .keys()
                     .filter(|name| !current_names.contains(*name))
                     .cloned()
                     .collect();
+                removed_names.extend(
+                    removed_this_execution
+                        .into_iter()
+                        .filter(|name| !current_names.contains(name)),
+                );
                 let mut rebuilt_workspace = HashMap::new();
                 let mut changed_names: HashSet<String> = assigned
                     .difference(&prev_assigned_snapshot)
