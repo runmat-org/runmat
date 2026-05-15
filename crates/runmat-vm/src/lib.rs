@@ -16,7 +16,7 @@ pub(crate) mod runtime;
 
 pub use bytecode::compile;
 pub use bytecode::{
-    ArgSpec, Bytecode, CallFrame, EmitLabel, EndExpr, ExecutionContext, Instr, LegacyUserFunction,
+    ArgSpec, Bytecode, CallFrame, EmitLabel, EndExpr, ExecutionContext, Instr,
     SemanticFunctionBytecode, SemanticFunctionRegistry, StackEffect,
 };
 pub use compiler::CompileError;
@@ -27,8 +27,8 @@ pub use interpreter::dispatch::{
     legacy_user_dispatch_fallback_count, reset_legacy_user_dispatch_fallback_count,
 };
 pub use interpreter::runner::{
-    execute_legacy_user_function_isolated, interpret, interpret_function,
-    interpret_function_with_counts, interpret_with_vars, invoke_semantic_function_value,
+    interpret, interpret_function, interpret_function_with_counts, interpret_with_vars,
+    invoke_semantic_function_value,
 };
 pub use interpreter::state::{InterpreterOutcome, InterpreterState};
 pub use layout::{
@@ -37,3 +37,8 @@ pub use layout::{
 pub use runtime::workspace::{
     push_pending_workspace, take_updated_workspace_state, PendingWorkspaceGuard,
 };
+
+pub mod legacy {
+    pub use crate::bytecode::LegacyUserFunction;
+    pub use crate::interpreter::runner::execute_legacy_user_function_isolated;
+}

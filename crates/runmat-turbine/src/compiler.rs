@@ -8,13 +8,14 @@ use cranelift::prelude::*;
 use cranelift_codegen::ir::ValueDef;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
+use runmat_vm::legacy::LegacyUserFunction;
 use runmat_vm::{Instr, SemanticFunctionRegistry};
 use std::collections::{BTreeSet, HashMap};
 
 /// Context for compilation containing related parameters
 struct CompileContext<'a> {
     vars_ptr: Value,
-    function_definitions: &'a HashMap<String, runmat_vm::LegacyUserFunction>,
+    function_definitions: &'a HashMap<String, LegacyUserFunction>,
     semantic_registry: &'a SemanticFunctionRegistry,
     module: &'a mut JITModule,
     runmat_call_user_function_id: FuncId,
@@ -208,7 +209,7 @@ impl BytecodeCompiler {
         instructions: &[Instr],
         func: &mut codegen::ir::Function,
         _var_count: usize,
-        function_definitions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
+        function_definitions: &std::collections::HashMap<String, LegacyUserFunction>,
         semantic_registry: &SemanticFunctionRegistry,
         module: &mut JITModule,
         runmat_call_user_function_id: FuncId,
@@ -821,7 +822,7 @@ impl BytecodeCompiler {
         runmat_call_user_function_id: FuncId,
         func_name: &str,
         args: &[Value],
-        function_definitions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
+        function_definitions: &std::collections::HashMap<String, LegacyUserFunction>,
     ) -> Result<Value> {
         let function_def = function_definitions
             .get(func_name)

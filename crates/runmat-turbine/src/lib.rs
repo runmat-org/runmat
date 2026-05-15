@@ -20,6 +20,7 @@ use futures::task::noop_waker;
 use log::{debug, error, info, warn};
 use runmat_builtins::Value;
 use runmat_runtime::{build_runtime_error, RuntimeError};
+use runmat_vm::legacy::LegacyUserFunction;
 use runmat_vm::{Bytecode, Instr, InterpreterOutcome, SemanticFunctionRegistry};
 use std::cell::Cell;
 use std::env;
@@ -69,13 +70,13 @@ fn run_immediate<F: Future>(mut future: Pin<Box<F>>) -> Result<F::Output> {
 }
 
 struct RuntimeContext {
-    functions: std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
+    functions: std::collections::HashMap<String, LegacyUserFunction>,
     semantic_registry: SemanticFunctionRegistry,
 }
 
 impl RuntimeContext {
     fn new(
-        functions: std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
+        functions: std::collections::HashMap<String, LegacyUserFunction>,
         semantic_registry: SemanticFunctionRegistry,
     ) -> Self {
         Self {
@@ -423,7 +424,7 @@ impl TurbineEngine {
         &mut self,
         hash: u64,
         vars: &mut [Value],
-        functions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
+        functions: &std::collections::HashMap<String, LegacyUserFunction>,
     ) -> Result<i32> {
         self.execute_compiled_with_function_products(
             hash,
@@ -437,7 +438,7 @@ impl TurbineEngine {
         &mut self,
         hash: u64,
         vars: &mut [Value],
-        functions: &std::collections::HashMap<String, runmat_vm::LegacyUserFunction>,
+        functions: &std::collections::HashMap<String, LegacyUserFunction>,
         semantic_registry: &SemanticFunctionRegistry,
     ) -> Result<i32> {
         let func = self
@@ -887,11 +888,13 @@ pub extern "C" fn runmat_call_user_function(
         )))
         .and_then(|result| result.map_err(TurbineError::ExecutionError))
     } else if let Some(function_def) = context.functions.get(&name) {
-        run_immediate(Box::pin(runmat_vm::execute_legacy_user_function_isolated(
-            function_def,
-            &args,
-            &context.functions,
-        )))
+        run_immediate(Box::pin(
+            runmat_vm::legacy::execute_legacy_user_function_isolated(
+                function_def,
+                &args,
+                &context.functions,
+            ),
+        ))
         .and_then(|result| result.map_err(TurbineError::ExecutionError))
     } else {
         error!("Unknown user function requested: {name}");
