@@ -390,12 +390,23 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         .replace(/\}/g, '&#125;');
     }
 
+    function escapeJsxOutsideCodeBlocks(s: string): string {
+      let inCodeBlock = false;
+      return s.split('\n').map(line => {
+        if (/^```/.test(line)) {
+          inCodeBlock = !inCodeBlock;
+          return line;
+        }
+        return inCodeBlock ? line : escapeJsx(line);
+      }).join('\n');
+    }
+
     const detailsClass = 'group self-start rounded-xl border border-border/60 bg-card shadow-sm';
     const summaryClass = 'flex cursor-pointer list-none items-center justify-between px-6 py-4 text-foreground';
     const chevronClass = 'text-muted-foreground transition-transform duration-200 group-open:rotate-180 ml-2 shrink-0';
 
     const htmlItems = pairs.map(p => {
-      const escapedAnswer = escapeJsx(p.answerLines.join('\n').trim());
+      const escapedAnswer = escapeJsxOutsideCodeBlocks(p.answerLines.join('\n').trim());
       return [
         `<details className="${detailsClass}">`,
         `<summary className="${summaryClass}"><span className="text-sm font-medium">${escapeJsx(p.question)}</span><span className="${chevronClass}">⌄</span></summary>`,
@@ -480,4 +491,3 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     />
   );
 }
-

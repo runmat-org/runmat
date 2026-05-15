@@ -116,6 +116,19 @@ fn declare_host_call_in_module(module: &mut JITModule) -> FuncId {
         .expect("Failed to declare runmat_call_user_function")
 }
 
+fn declare_workspace_assignment_call_in_module(module: &mut JITModule) -> FuncId {
+    let mut sig = module.make_signature();
+    sig.params.push(AbiParam::new(types::I64)); // variable index
+
+    module
+        .declare_function("runmat_mark_workspace_assigned", Linkage::Import, &sig)
+        .expect("Failed to declare runmat_mark_workspace_assigned")
+}
+
+pub extern "C" fn runmat_mark_workspace_assigned(index: u64) {
+    runmat_vm::runtime::workspace::mark_workspace_assigned(index as usize);
+}
+
 /// Execute a user-defined function with access to global variables using the VM interpreter
 fn execute_user_function_isolated(
     function_def: &runmat_vm::UserFunction,
@@ -195,7 +208,7 @@ pub struct TurbineEngine {
     profiler: HotspotProfiler,
     target_isa: codegen::isa::OwnedTargetIsa,
     compiler: BytecodeCompiler,
-    runmat_call_user_function_id: FuncId,
+    host_function_ids: compiler::HostFunctionIds,
 }
 
 /// A compiled function ready for execution
@@ -313,12 +326,22 @@ impl TurbineEngine {
             "runmat_call_user_function",
             runmat_call_user_function as *const u8,
         );
+        builder.symbol(
+            "runmat_mark_workspace_assigned",
+            runmat_mark_workspace_assigned as *const u8,
+        );
 
         // Create the JIT module
         let mut module = JITModule::new(builder);
 
         // Declare the external function on the module using the expert's pattern
         let runmat_call_user_function_id = declare_host_call_in_module(&mut module);
+        let runmat_mark_workspace_assigned_id =
+            declare_workspace_assignment_call_in_module(&mut module);
+        let host_function_ids = compiler::HostFunctionIds {
+            call_user_function: runmat_call_user_function_id,
+            mark_workspace_assigned: runmat_mark_workspace_assigned_id,
+        };
 
         let ctx = module.make_context();
 
@@ -329,7 +352,7 @@ impl TurbineEngine {
             profiler: HotspotProfiler::new(),
             target_isa,
             compiler: BytecodeCompiler::new(),
-            runmat_call_user_function_id,
+            host_function_ids,
         };
 
         info!("Turbine JIT engine initialized successfully for {target_triple}");
@@ -399,7 +422,7 @@ impl TurbineEngine {
             bytecode.var_count,
             &bytecode.functions,
             &mut self.module,
-            self.runmat_call_user_function_id,
+            self.host_function_ids,
         )?;
 
         // Compile to machine code
@@ -439,16 +462,36 @@ impl TurbineEngine {
         vars: &mut [Value],
         functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
     ) -> Result<i32> {
-        let func = self
-            .cache
-            .get(hash)
-            .ok_or(TurbineError::FunctionNotFound(hash))?;
+        self.execute_compiled_with_functions_inner(hash, vars, functions)
+    }
 
-        debug!("Executing compiled function {hash}");
+    fn execute_compiled_with_functions_tracking_workspace(
+        &mut self,
+        hash: u64,
+        vars: &mut Vec<Value>,
+        functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
+    ) -> Result<i32> {
+        let mut f64_vars = Self::f64_vars_from_values(vars.as_slice())?;
+        let _workspace_guard = runmat_vm::interpreter::engine::prepare_workspace_guard(vars);
+        let result = self.execute_compiled_f64_vars(hash, &mut f64_vars, functions)?;
+        Self::write_f64_vars_back(vars.as_mut_slice(), &f64_vars);
+        Ok(result)
+    }
 
-        // Convert Value array to f64 array for JIT function
-        // Ensure f64_vars has at least vars.len() elements to preserve all variables
-        let mut f64_vars: Vec<f64> = Vec::with_capacity(vars.len());
+    fn execute_compiled_with_functions_inner(
+        &mut self,
+        hash: u64,
+        vars: &mut [Value],
+        functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
+    ) -> Result<i32> {
+        let mut f64_vars = Self::f64_vars_from_values(vars)?;
+        let result = self.execute_compiled_f64_vars(hash, &mut f64_vars, functions)?;
+        Self::write_f64_vars_back(vars, &f64_vars);
+        Ok(result)
+    }
+
+    fn f64_vars_from_values(vars: &[Value]) -> Result<Vec<f64>> {
+        let mut f64_vars = Vec::with_capacity(vars.len());
         for value in vars.iter() {
             match value {
                 Value::Int(i) => f64_vars.push(i.to_f64()),
@@ -460,6 +503,29 @@ impl TurbineEngine {
                 }
             }
         }
+        Ok(f64_vars)
+    }
+
+    fn write_f64_vars_back(vars: &mut [Value], f64_vars: &[f64]) {
+        for (i, &f64_val) in f64_vars.iter().enumerate() {
+            if i < vars.len() {
+                vars[i] = Value::Num(f64_val);
+            }
+        }
+    }
+
+    fn execute_compiled_f64_vars(
+        &mut self,
+        hash: u64,
+        f64_vars: &mut [f64],
+        functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
+    ) -> Result<i32> {
+        let func = self
+            .cache
+            .get(hash)
+            .ok_or(TurbineError::FunctionNotFound(hash))?;
+
+        debug!("Executing compiled function {hash}");
 
         // Set up runtime context for user function calls
         let runtime_context = RuntimeContext::new(functions.clone());
@@ -487,20 +553,72 @@ impl TurbineEngine {
             exec_result
         };
 
-        // Convert results back to Value array
-        for (i, &f64_val) in f64_vars.iter().enumerate() {
-            if i < vars.len() {
-                vars[i] = Value::Num(f64_val);
-            }
-        }
-
         debug!("JIT function execution completed with result: {result}");
         Ok(result)
     }
 
-    /// Try to execute bytecode using JIT if available, fallback to interpreter
-    /// Returns (result, used_jit) to indicate whether JIT was actually used
     pub fn execute_or_compile(
+        &mut self,
+        bytecode: &Bytecode,
+        vars: &mut [Value],
+    ) -> Result<(i32, bool)> {
+        self.execute_or_compile_inner(bytecode, vars)
+    }
+
+    /// Try to execute bytecode using JIT if available, fallback to interpreter,
+    /// reporting compiled stores through the VM workspace assignment state.
+    /// Returns (result, used_jit) to indicate whether JIT was actually used.
+    pub fn execute_or_compile_with_workspace(
+        &mut self,
+        bytecode: &Bytecode,
+        vars: &mut Vec<Value>,
+    ) -> Result<(i32, bool)> {
+        let hash = self.calculate_bytecode_hash(bytecode);
+        let _span = info_span!(
+            "turbine.execute_or_compile",
+            hash = hash,
+            instrs = bytecode.instructions.len()
+        )
+        .entered();
+
+        if self.cache.contains(hash) {
+            return self
+                .execute_compiled_with_functions_tracking_workspace(hash, vars, &bytecode.functions)
+                .map(|result| (result, true));
+        }
+
+        if self.should_compile(hash) {
+            match self.compile_bytecode(bytecode) {
+                Ok(_) => {
+                    info!("Bytecode compiled successfully, executing JIT version");
+                    return self
+                        .execute_compiled_with_functions_tracking_workspace(
+                            hash,
+                            vars,
+                            &bytecode.functions,
+                        )
+                        .map(|result| (result, true));
+                }
+                Err(e) => {
+                    warn!("JIT compilation failed, falling back to interpreter: {e}");
+                }
+            }
+        }
+
+        self.profiler.record_execution(hash);
+        debug!("Executing bytecode in VM interpreter mode (supports user functions)");
+
+        match run_immediate(Box::pin(runmat_vm::interpret_with_vars(
+            bytecode,
+            vars,
+            Some("<main>"),
+        )))? {
+            Ok(InterpreterOutcome::Completed(_)) => Ok((0, false)),
+            Err(e) => Err(TurbineError::ExecutionError(e)),
+        }
+    }
+
+    fn execute_or_compile_inner(
         &mut self,
         bytecode: &Bytecode,
         vars: &mut [Value],

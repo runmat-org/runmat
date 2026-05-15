@@ -1077,6 +1077,12 @@ impl Figure {
                         point_bounds.max.x = existing.max.x;
                     }
                 }
+            } else {
+                let (x_range, y_range) = Self::reference_line_ranges(None, None, &line);
+                point_bounds.min.x = x_range.0 as f32;
+                point_bounds.max.x = x_range.1 as f32;
+                point_bounds.min.y = y_range.0 as f32;
+                point_bounds.max.y = y_range.1 as f32;
             }
             combined_bounds = match combined_bounds {
                 None => Some(point_bounds),
@@ -1913,6 +1919,31 @@ mod tests {
         assert!(bounds.max.x >= 4.0);
         assert!(bounds.min.y <= -2.0);
         assert!(bounds.max.y >= 5.0);
+    }
+
+    #[test]
+    fn test_reference_line_only_bounds_use_default_span() {
+        let mut vertical_figure = Figure::new();
+        vertical_figure.add_reference_line_on_axes(
+            ReferenceLine::new(ReferenceLineOrientation::Vertical, 2.0).unwrap(),
+            0,
+        );
+        let vertical_bounds = vertical_figure.bounds();
+        assert_eq!(vertical_bounds.min.x, 1.5);
+        assert_eq!(vertical_bounds.max.x, 2.5);
+        assert_eq!(vertical_bounds.min.y, 0.0);
+        assert_eq!(vertical_bounds.max.y, 1.0);
+
+        let mut horizontal_figure = Figure::new();
+        horizontal_figure.add_reference_line_on_axes(
+            ReferenceLine::new(ReferenceLineOrientation::Horizontal, 3.0).unwrap(),
+            0,
+        );
+        let horizontal_bounds = horizontal_figure.bounds();
+        assert_eq!(horizontal_bounds.min.x, 0.0);
+        assert_eq!(horizontal_bounds.max.x, 1.0);
+        assert_eq!(horizontal_bounds.min.y, 2.5);
+        assert_eq!(horizontal_bounds.max.y, 3.5);
     }
 
     #[test]

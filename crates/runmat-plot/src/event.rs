@@ -984,11 +984,7 @@ impl ScenePlot {
                 axes_index,
                 visible,
             } => {
-                let orientation = if orientation.eq_ignore_ascii_case("horizontal") {
-                    ReferenceLineOrientation::Horizontal
-                } else {
-                    ReferenceLineOrientation::Vertical
-                };
+                let orientation = parse_reference_line_orientation(&orientation)?;
                 let mut line = ReferenceLine::new(orientation, value)?.with_style(
                     rgba_to_vec4(color_rgba),
                     line_width,
@@ -1349,6 +1345,16 @@ fn parse_bar_orientation(value: &str) -> crate::plots::bar::Orientation {
     }
 }
 
+fn parse_reference_line_orientation(value: &str) -> Result<ReferenceLineOrientation, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "horizontal" => Ok(ReferenceLineOrientation::Horizontal),
+        "vertical" => Ok(ReferenceLineOrientation::Vertical),
+        _ => Err(format!(
+            "unknown reference line orientation '{value}'; expected 'horizontal' or 'vertical'"
+        )),
+    }
+}
+
 fn parse_marker_style(value: &str) -> MarkerStyle {
     match value {
         "Square" => MarkerStyle::Square,
@@ -1704,6 +1710,42 @@ mod tests {
         assert_eq!(rebuilt.axes_grid(), (1, 2));
         assert_eq!(rebuilt.plots().count(), 2);
         assert_eq!(rebuilt.title.as_deref(), Some("Replay"));
+    }
+
+    #[test]
+    fn figure_scene_rejects_unknown_reference_line_orientation() {
+        let mut scene = FigureScene::capture(&Figure::new());
+        scene.plots.push(ScenePlot::ReferenceLine {
+            orientation: "VERTICAL".into(),
+            value: 2.0,
+            color_rgba: [0.1, 0.2, 0.3, 1.0],
+            line_width: 1.0,
+            line_style: "Solid".into(),
+            label: None,
+            display_name: None,
+            label_orientation: "horizontal".into(),
+            axes_index: 0,
+            visible: true,
+        });
+
+        let rebuilt = scene.clone().into_figure().expect("valid orientation");
+        let PlotElement::ReferenceLine(line) = rebuilt.plots().next().unwrap() else {
+            panic!("expected reference line")
+        };
+        assert!(matches!(
+            line.orientation,
+            ReferenceLineOrientation::Vertical
+        ));
+
+        let ScenePlot::ReferenceLine { orientation, .. } = &mut scene.plots[0] else {
+            panic!("expected reference line scene plot")
+        };
+        *orientation = "diagonal".into();
+
+        let err = scene
+            .into_figure()
+            .expect_err("unknown orientation must fail");
+        assert!(err.contains("unknown reference line orientation 'diagonal'"));
     }
 
     #[test]

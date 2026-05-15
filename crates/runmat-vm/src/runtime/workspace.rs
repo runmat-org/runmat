@@ -6,6 +6,8 @@ use std::collections::{HashMap, HashSet};
 struct WorkspaceState {
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
+    assigned_names_this_execution: HashSet<String>,
+    assigned_ids_this_execution: HashSet<usize>,
     idx_to_name: HashMap<usize, String>,
     data_ptr: *const Value,
     len: usize,
@@ -13,10 +15,17 @@ struct WorkspaceState {
 
 pub type WorkspaceSnapshot = (HashMap<String, usize>, HashSet<String>);
 
+#[derive(Debug, Clone)]
+pub struct WorkspaceAssignedReport {
+    pub ids: HashSet<usize>,
+    pub names: HashSet<String>,
+}
+
 runmat_thread_local! {
     static WORKSPACE_STATE: RefCell<Option<WorkspaceState>> = const { RefCell::new(None) };
     static PENDING_WORKSPACE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
     static LAST_WORKSPACE_STATE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
+    static LAST_WORKSPACE_ASSIGNED_REPORT: RefCell<Option<WorkspaceAssignedReport>> = const { RefCell::new(None) };
     static WORKSPACE_VARS: RefCell<Option<*mut Vec<Value>>> = const { RefCell::new(None) };
 }
 
@@ -27,6 +36,12 @@ impl Drop for WorkspaceStateGuard {
         WORKSPACE_STATE.with(|state| {
             let mut state_mut = state.borrow_mut();
             if let Some(ws) = state_mut.take() {
+                LAST_WORKSPACE_ASSIGNED_REPORT.with(|slot| {
+                    *slot.borrow_mut() = Some(WorkspaceAssignedReport {
+                        ids: ws.assigned_ids_this_execution,
+                        names: ws.assigned_names_this_execution,
+                    });
+                });
                 LAST_WORKSPACE_STATE.with(|slot| {
                     *slot.borrow_mut() = Some((ws.names, ws.assigned));
                 });
@@ -66,6 +81,10 @@ pub fn take_updated_workspace_state() -> Option<WorkspaceSnapshot> {
     LAST_WORKSPACE_STATE.with(|slot| slot.borrow_mut().take())
 }
 
+pub fn take_updated_workspace_assigned_report() -> Option<WorkspaceAssignedReport> {
+    LAST_WORKSPACE_ASSIGNED_REPORT.with(|slot| slot.borrow_mut().take())
+}
+
 pub fn set_workspace_state(
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
@@ -76,6 +95,8 @@ pub fn set_workspace_state(
         *state.borrow_mut() = Some(WorkspaceState {
             names,
             assigned,
+            assigned_names_this_execution: HashSet::new(),
+            assigned_ids_this_execution: HashSet::new(),
             idx_to_name,
             data_ptr: vars.as_ptr(),
             len: vars.len(),
@@ -152,6 +173,8 @@ pub fn workspace_clear() -> Result<(), String> {
         vars.clear();
         ws.names.clear();
         ws.assigned.clear();
+        ws.assigned_names_this_execution.clear();
+        ws.assigned_ids_this_execution.clear();
         ws.idx_to_name.clear();
         ws.data_ptr = vars.as_ptr();
         ws.len = vars.len();
@@ -176,7 +199,9 @@ pub fn workspace_remove(name: &str) -> Result<(), String> {
                 vars[idx] = Value::Num(0.0);
             }
             ws.assigned.remove(name);
+            ws.assigned_names_this_execution.remove(name);
             ws.idx_to_name.remove(&idx);
+            ws.assigned_ids_this_execution.remove(&idx);
             ws.data_ptr = vars.as_ptr();
             ws.len = vars.len();
         }
@@ -236,6 +261,8 @@ pub fn set_workspace_variable(
                 ws.data_ptr = vars.as_ptr();
                 ws.len = vars.len();
                 ws.assigned.insert(name.to_string());
+                ws.assigned_names_this_execution.insert(name.to_string());
+                ws.assigned_ids_this_execution.insert(idx);
             }
             None => {
                 result = Err("load: workspace state unavailable".to_string());
@@ -260,7 +287,9 @@ pub fn mark_workspace_assigned(index: usize) {
     WORKSPACE_STATE.with(|state| {
         if let Some(ws) = state.borrow_mut().as_mut() {
             if let Some(name) = ws.idx_to_name.get(&index).cloned() {
-                ws.assigned.insert(name);
+                ws.assigned.insert(name.clone());
+                ws.assigned_names_this_execution.insert(name);
+                ws.assigned_ids_this_execution.insert(index);
             }
         }
     });

@@ -16,7 +16,13 @@ struct CompileContext<'a> {
     vars_ptr: Value,
     function_definitions: &'a HashMap<String, runmat_vm::UserFunction>,
     module: &'a mut JITModule,
-    runmat_call_user_function_id: FuncId,
+    host_functions: HostFunctionIds,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct HostFunctionIds {
+    pub(crate) call_user_function: FuncId,
+    pub(crate) mark_workspace_assigned: FuncId,
 }
 
 /// Stack simulation for tracking values during compilation  
@@ -200,14 +206,14 @@ impl BytecodeCompiler {
 
     /// Compile a sequence of bytecode instructions to Cranelift IR
     /// Function signature: fn(*mut Value, usize) -> i32
-    pub fn compile_instructions(
+    pub(crate) fn compile_instructions(
         &mut self,
         instructions: &[Instr],
         func: &mut codegen::ir::Function,
         _var_count: usize,
         function_definitions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
         module: &mut JITModule,
-        runmat_call_user_function_id: FuncId,
+        host_functions: HostFunctionIds,
     ) -> Result<()> {
         let mut builder_context = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_context);
@@ -240,7 +246,7 @@ impl BytecodeCompiler {
             vars_ptr,
             function_definitions,
             module,
-            runmat_call_user_function_id,
+            host_functions,
         };
 
         Self::compile_with_cfg(&mut builder, &mut stack, instructions, &cfg, &mut ctx)?;
@@ -328,6 +334,11 @@ impl BytecodeCompiler {
                         let offset = builder.ins().imul(idx_val, element_size);
                         let var_addr = builder.ins().iadd(ctx.vars_ptr, offset);
                         builder.ins().store(MemFlags::new(), val, var_addr, 0);
+                        let mark_fn = ctx.module.declare_func_in_func(
+                            ctx.host_functions.mark_workspace_assigned,
+                            builder.func,
+                        );
+                        builder.ins().call(mark_fn, &[idx_val]);
                     }
                     Instr::Add => {
                         let (a, b) = local_stack.pop_two()?;
@@ -568,7 +579,7 @@ impl BytecodeCompiler {
                         let result = Self::call_user_function_jit(
                             builder,
                             ctx.module,
-                            ctx.runmat_call_user_function_id,
+                            ctx.host_functions.call_user_function,
                             func_name,
                             &args,
                             ctx.function_definitions,

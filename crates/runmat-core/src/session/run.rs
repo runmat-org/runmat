@@ -366,7 +366,9 @@ impl RunMatSession {
                     }
 
                     // Use JIT for assignments
-                    match jit_engine.execute_or_compile(&bytecode, &mut self.variable_array) {
+                    match jit_engine
+                        .execute_or_compile_with_workspace(&bytecode, &mut self.variable_array)
+                    {
                         Ok((_, actual_used_jit)) => {
                             used_jit = actual_used_jit;
                             execution_completed = true;
@@ -375,17 +377,7 @@ impl RunMatSession {
                             } else {
                                 self.stats.interpreter_fallback += 1;
                             }
-                            for instr in &bytecode.instructions {
-                                if let runmat_vm::Instr::StoreVar(var_id) = instr {
-                                    if let Some(name) = id_to_name.get(var_id) {
-                                        assigned_this_execution.insert(name.clone());
-                                    }
-                                }
-                            }
                             if let Some(var_id) = single_assign_var {
-                                if let Some(name) = id_to_name.get(&var_id) {
-                                    assigned_this_execution.insert(name.clone());
-                                }
                                 if var_id < self.variable_array.len() {
                                     let assignment_value = self.variable_array[var_id].clone();
                                     if !is_semicolon_suppressed {
@@ -476,9 +468,6 @@ impl RunMatSession {
                     // Handle assignment statements (x = 42 should show the assigned value unless suppressed)
                     if hir.body.len() == 1 {
                         if let runmat_hir::HirStmt::Assign(var_id, _, _, _) = &hir.body[0] {
-                            if let Some(name) = id_to_name.get(&var_id.0) {
-                                assigned_this_execution.insert(name.clone());
-                            }
                             // For assignments, capture the assigned value for both display and type info
                             if var_id.0 < self.variable_array.len() {
                                 let assignment_value = self.variable_array[var_id.0].clone();
@@ -586,10 +575,20 @@ impl RunMatSession {
         // Update variable names mapping and function definitions if execution was successful
         if error.is_none() {
             if let Some((mutated_names, assigned)) = runmat_vm::take_updated_workspace_state() {
+                if let Some(assigned_report) = runmat_vm::take_updated_workspace_assigned_report() {
+                    assigned_this_execution.extend(
+                        assigned_report
+                            .ids
+                            .iter()
+                            .filter_map(|var_id| id_to_name.get(var_id).cloned()),
+                    );
+                    assigned_this_execution.extend(assigned_report.names);
+                }
                 if debug_trace {
                     debug!(
                         ?mutated_names,
                         ?assigned,
+                        ?assigned_this_execution,
                         "[repl] mutated names and assigned return values"
                     );
                 }

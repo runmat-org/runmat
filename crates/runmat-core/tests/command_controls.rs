@@ -114,6 +114,59 @@ fn clear_followed_by_assignments_shows_vars_in_workspace() {
 }
 
 #[test]
+fn untaken_branch_assignments_do_not_emit_workspace_updates() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    block_on(engine.execute("untaken = 1;")).unwrap();
+
+    let result = block_on(engine.execute("if 0; untaken = 2; else; taken = 3; end;")).unwrap();
+    assert!(result.error.is_none());
+
+    let names: Vec<&str> = result
+        .workspace
+        .values
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert!(
+        names.contains(&"taken"),
+        "taken branch assignment should be emitted; got: {names:?}"
+    );
+    assert!(
+        !names.contains(&"untaken"),
+        "untaken branch assignment should not be emitted as a workspace update; got: {names:?}"
+    );
+}
+
+#[test]
+fn jit_fallback_preserves_workspace_tracking_after_preflight_failure() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    block_on(engine.execute("textValue = \"hello\";")).unwrap();
+    for _ in 0..12 {
+        let result = block_on(engine.execute("jitFallbackTarget = 1;")).unwrap();
+        assert!(result.error.is_none());
+    }
+
+    let clear_result = block_on(engine.execute("clear jitFallbackTarget;")).unwrap();
+    assert!(clear_result.error.is_none());
+
+    let result = block_on(engine.execute("jitFallbackTarget = 2;")).unwrap();
+    assert!(result.error.is_none());
+
+    let names: Vec<&str> = result
+        .workspace
+        .values
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert!(
+        names.contains(&"jitFallbackTarget"),
+        "interpreter fallback after JIT preflight failure should still publish assignments; got: {names:?}"
+    );
+}
+
+#[test]
 fn clearvars_command_clears_workspace_state() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
