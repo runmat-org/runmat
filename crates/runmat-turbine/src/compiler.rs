@@ -204,7 +204,7 @@ impl BytecodeCompiler {
 
     /// Compile a sequence of bytecode instructions to Cranelift IR
     /// Function signature: fn(*mut Value, usize) -> i32
-    pub fn compile_instructions(
+    pub(crate) fn compile_instructions(
         &mut self,
         instructions: &[Instr],
         func: &mut codegen::ir::Function,
