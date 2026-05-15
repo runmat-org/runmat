@@ -863,6 +863,29 @@ where
     Ok(BuiltinHandling::Completed)
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn prepared_user_call_resolves_semantic_before_legacy_fallback() {
+        let source = include_str!("calls.rs");
+        let prepared_start = source
+            .find("pub async fn handle_prepared_user_function_call")
+            .expect("prepared user call handler");
+        let prepared = &source[prepared_start..];
+        let semantic_lookup = prepared
+            .find("semantic_registry.resolve_name")
+            .expect("semantic lookup in prepared user call handler");
+        let legacy_fallback = prepared
+            .find("compile_legacy_named_user_dispatch_fallback")
+            .expect("legacy fallback in prepared user call handler");
+
+        assert!(
+            semantic_lookup < legacy_fallback,
+            "prepared user-call dispatch must resolve semantic names before legacy fallback"
+        );
+    }
+}
+
 pub async fn handle_builtin_expand_at_call<F, Fut>(
     stack: &mut Vec<Value>,
     name: &str,

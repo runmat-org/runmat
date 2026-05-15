@@ -225,6 +225,7 @@ Classification:
 - Semantic-first, blocked by callable identity shape: runtime-created strings and plain `Value::FunctionHandle(name)` values where no active semantic resolver is installed or the resolver cannot map the name to a stable semantic identity; compiler/session-produced handles now carry `Value::SemanticFunctionHandle` identity.
 - External compatibility boundary: Turbine callbacks whose host context still owns only `LegacyUserFunction` records for unresolved/external exported functions.
 - Dead/duplicate raw fallback call sites: none found; the remaining four VM raw fallback calls all sit behind semantic-first checks or the Turbine external boundary.
+- VM prepared user-call dispatch now has a source-level ratchet that semantic registry lookup stays before the named legacy fallback compiler.
 
 Completed implementation slices:
 
