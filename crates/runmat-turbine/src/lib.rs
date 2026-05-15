@@ -38,11 +38,13 @@ pub mod cache;
 pub mod compiler;
 pub mod jit_memory;
 pub mod profiler;
+pub mod value_abi;
 
 pub use cache::*;
 pub use compiler::*;
 pub use jit_memory::*;
 pub use profiler::HotspotProfiler;
+pub use value_abi::{TurbineValue, TurbineValueTag};
 
 const JIT_FALLBACK_STACK_BYTES: usize = 16 * 1024 * 1024;
 const JIT_FALLBACK_STACK_ENV: &str = "RUNMAT_TURBINE_STACK_MB";
