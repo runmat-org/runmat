@@ -673,6 +673,17 @@ impl BytecodeCompiler {
                         builder.ins().return_(&[zero]);
                         block_terminated = true;
                     }
+                    Instr::CallBuiltinExpandLast(_, _, _)
+                    | Instr::CallBuiltinExpandAt(_, _, _, _)
+                    | Instr::CallBuiltinExpandMulti(_, _)
+                    | Instr::CallFunctionExpandMulti(_, _)
+                    | Instr::CallSemanticFunctionExpandMulti(_, _)
+                    | Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
+                    | Instr::CallFunctionExpandAt(_, _, _, _)
+                    | Instr::CallFevalExpandMulti(_)
+                    | Instr::CallFevalExpandMultiOutput(_, _) => {
+                        return Self::unsupported_expanded_call_jit();
+                    }
                     // Not yet supported in JIT; require interpreter
                     Instr::IndexSlice(_, _, _, _)
                     | Instr::CreateCell2D(_, _)
@@ -708,21 +719,12 @@ impl BytecodeCompiler {
                     | Instr::StoreIndexCell(_)
                     | Instr::LoadMethod(_)
                     | Instr::RegisterClass { .. }
-                    | Instr::CallBuiltinExpandLast(_, _, _)
-                    | Instr::CallBuiltinExpandAt(_, _, _, _)
-                    | Instr::CallBuiltinExpandMulti(_, _)
-                    | Instr::CallFunctionExpandMulti(_, _)
-                    | Instr::CallSemanticFunctionExpandMulti(_, _)
-                    | Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
-                    | Instr::CallFunctionExpandAt(_, _, _, _)
                     | Instr::Swap
                     | Instr::RegisterImport { .. }
                     | Instr::DeclareGlobal(_)
                     | Instr::DeclarePersistent(_)
                     | Instr::CallFeval(_)
-                    | Instr::CallFevalMulti(_, _)
-                    | Instr::CallFevalExpandMulti(_)
-                    | Instr::CallFevalExpandMultiOutput(_, _) => {
+                    | Instr::CallFevalMulti(_, _) => {
                         return Err(execution_error(
                             "Unsupported instruction in JIT; use interpreter".to_string(),
                         ));
@@ -766,6 +768,12 @@ impl BytecodeCompiler {
 
     fn call_runtime_add_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
         builder.ins().fadd(a, b)
+    }
+
+    fn unsupported_expanded_call_jit<T>() -> Result<T> {
+        Err(execution_error(
+            "Expanded calls require Turbine non-scalar/cell/comma-list ABI; use interpreter",
+        ))
     }
 
     fn pop_call_args(stack: &mut StackSimulator, arg_count: usize) -> Result<Vec<Value>> {
@@ -1977,6 +1985,30 @@ mod tests {
                 .count(),
             1,
             "legacy host callback should only be reachable through semantic-first named call lowering"
+        );
+    }
+
+    #[test]
+    fn expanded_call_abi_blocker_stays_explicit() {
+        let source = include_str!("compiler.rs");
+
+        assert_eq!(
+            source
+                .matches(&["return Self::", "unsupported_expanded_call_jit();"].concat())
+                .count(),
+            1
+        );
+        assert_eq!(
+            source
+                .matches(
+                    &[
+                        "Expanded calls require Turbine ",
+                        "non-scalar/cell/comma-list ABI",
+                    ]
+                    .concat(),
+                )
+                .count(),
+            1
         );
     }
 }
