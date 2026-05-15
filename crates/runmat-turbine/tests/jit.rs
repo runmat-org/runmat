@@ -9,6 +9,24 @@ use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
 
+#[test]
+fn test_turbine_legacy_function_fixtures_are_intentional() {
+    let source = include_str!("jit.rs");
+    let legacy_fixture = ["runmat_vm::legacy::", "LegacyUserFunction"].concat();
+    let fixture_note = ["Intentional ", "legacy fixture:"].concat();
+
+    assert_eq!(
+        source.matches(&legacy_fixture).count(),
+        4,
+        "Turbine tests should only keep the documented legacy fallback fixtures"
+    );
+    assert_eq!(
+        source.matches(&fixture_note).count(),
+        4,
+        "Each remaining legacy fixture should document its fallback-boundary purpose"
+    );
+}
+
 mod runmat_hir {
     pub use ::runmat_hir::{
         FunctionId, LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind,
