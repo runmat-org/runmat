@@ -4,6 +4,39 @@ _What's new across the RunMat runtime, app, and sandbox. For technical runtime d
 
 ---
 
+## [v0.4.8](https://github.com/runmat-org/runmat/compare/v0.4.6...v0.4.8)
+
+_May 15, 2026_
+
+### Runtime
+
+#### Added
+- Add `tf` — scalar-input scalar-output transfer-function objects now support numeric, logical, integer, complex, row-vector, and column-vector coefficient inputs, continuous and discrete sample-time defaults, `Variable`, `Ts`/`SampleTime`, `Numerator`, `Denominator`, `InputDelay`, and `OutputDelay` properties, and `class(H) == "tf"`
+- Add angle conversion builtins — `deg2rad` and `rad2deg` now operate element-wise on scalars, vectors, matrices, N-D tensors, complex values, integer/logical inputs, and GPU-resident inputs, with fusion support for compatible element-wise expressions
+- Add reference-line plotting — `xline` and `yline` now draw vertical and horizontal reference lines with scalar or vector coordinates, line-style strings, labels, `LineWidth`, `Color`, `LabelOrientation`, `Visible`, returned graphics handles, and `get`/`set`/dot-property integration
+
+#### Changed
+- Track workspace assignments through the VM and Turbine JIT so interpreter fallback, compiled stores, `clear`, and `clearvars` publish only the variables assigned or removed by the current execution
+- Route browser-backed file handles through async open and flush paths so `fopen`, `fclose`, `fread`, `fwrite`, `feof`, `fgets`, `fprintf`, and `frewind` share consistent registry and provider behavior across native and WASM hosts
+- Expand plotting metadata and property handling for reference-line handles, including reference-line render data, legend labels, `Value`, style properties, and preservation of existing axis labels when reference lines are appended
+
+#### Fixed
+- Fix native session result handling for repeated multi-statement execution so final assignment values and workspace previews stay numeric after JIT compilation and fallback
+- Fix parser diagnostic locations for malformed calls, expected identifiers, and member access after `.`, reporting the offending token instead of a stale source position
+- Fix WGPU fused-kernel preflight checks to reject storage-buffer, bind-group, and arithmetic binding-count overflows before creating invalid WebGPU layouts
+- Fix browser/WASM file close behavior so async flush failures keep the file registered, concurrent `fclose` calls close a file only once, and dirty buffers are restored if async write-back fails
+- Fix `plot(x, y)` compatibility for matching row-vector and column-vector pairs with the same number of elements
+- Fix `fft` default-dimension output for row vectors so row orientation is preserved
+- Fix single-point `hann`, `hamming`, and `blackman` windows by using the host path instead of provider paths that expect longer window lengths
+
+### Sandbox
+
+#### Changed
+- Move the browser filesystem provider to async JavaScript filesystem operations for open, read, write, metadata, directory, rename, removal, and permission updates
+- Avoid unnecessary initial file reads for write-create-truncate opens while preserving `create_new`, read, and append semantics
+
+---
+
 ## [v0.4.6](https://github.com/runmat-org/runmat/compare/v0.4.5...v0.4.6)
 
 _May 8, 2026_
