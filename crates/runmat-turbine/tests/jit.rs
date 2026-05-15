@@ -1706,109 +1706,60 @@ fn test_jit_nested_function_calls_compilation() {
 
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Create two functions: add(a,b) = a + b, multiply_and_add(x) = add(x*2, x*3)
-    let mut functions = HashMap::new();
-
-    functions.insert(
-        "add".to_string(),
-        runmat_vm::legacy::LegacyUserFunction {
-            name: "add".to_string(),
-            params: vec![runmat_hir::VarId(0), runmat_hir::VarId(1)],
-            outputs: vec![runmat_hir::VarId(2)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(2),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Binary(
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                        runmat_parser::BinOp::Add,
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(1)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false, // Assignment suppression flag for test
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 3,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
+    let add = runmat_hir::FunctionId(1);
+    let multiply_and_add = runmat_hir::FunctionId(2);
+    let mut semantic_functions = HashMap::new();
+    semantic_functions.insert(
+        add,
+        SemanticFunctionBytecode {
+            function: add,
+            display_name: "add".to_string(),
             source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadVar(1),
+                Instr::Add,
+                Instr::StoreVar(2),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0, 1],
+            varargin_slot: None,
+            output_slots: vec![2],
+            varargout_slot: None,
+            capture_slots: Vec::new(),
         },
     );
-
-    functions.insert(
-        "multiply_and_add".to_string(),
-        runmat_vm::legacy::LegacyUserFunction {
-            name: "multiply_and_add".to_string(),
-            params: vec![runmat_hir::VarId(3)],
-            outputs: vec![runmat_hir::VarId(4)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(4),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::FuncCall(
-                        "add".to_string(),
-                        vec![
-                            runmat_hir::HirExpr {
-                                kind: runmat_hir::HirExprKind::Binary(
-                                    Box::new(runmat_hir::HirExpr {
-                                        kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(3)),
-                                        ty: Type::Num,
-                                        span: runmat_hir::Span::default(),
-                                    }),
-                                    runmat_parser::BinOp::Mul,
-                                    Box::new(runmat_hir::HirExpr {
-                                        kind: runmat_hir::HirExprKind::Number("2".to_string()),
-                                        ty: Type::Num,
-                                        span: runmat_hir::Span::default(),
-                                    }),
-                                ),
-                                ty: Type::Num,
-                                span: runmat_hir::Span::default(),
-                            },
-                            runmat_hir::HirExpr {
-                                kind: runmat_hir::HirExprKind::Binary(
-                                    Box::new(runmat_hir::HirExpr {
-                                        kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(3)),
-                                        ty: Type::Num,
-                                        span: runmat_hir::Span::default(),
-                                    }),
-                                    runmat_parser::BinOp::Mul,
-                                    Box::new(runmat_hir::HirExpr {
-                                        kind: runmat_hir::HirExprKind::Number("3".to_string()),
-                                        ty: Type::Num,
-                                        span: runmat_hir::Span::default(),
-                                    }),
-                                ),
-                                ty: Type::Num,
-                                span: runmat_hir::Span::default(),
-                            },
-                        ],
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false, // Assignment suppression flag for test
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 5,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
+    semantic_functions.insert(
+        multiply_and_add,
+        SemanticFunctionBytecode {
+            function: multiply_and_add,
+            display_name: "multiply_and_add".to_string(),
             source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(2.0),
+                Instr::Mul,
+                Instr::LoadVar(0),
+                Instr::LoadConst(3.0),
+                Instr::Mul,
+                Instr::CallSemanticFunction(add, 2),
+                Instr::StoreVar(1),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 2,
+            input_slots: vec![0],
+            varargin_slot: None,
+            output_slots: vec![1],
+            varargout_slot: None,
+            capture_slots: Vec::new(),
         },
     );
 
     let bytecode = Bytecode {
-        functions,
+        semantic_functions,
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(4.0),
