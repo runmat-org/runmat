@@ -190,7 +190,7 @@ Current state:
 - The VM legacy user fallback compiler path has been removed; `compile_legacy_named_user_dispatch_fallback`, `compile_legacy_user_dispatch_fallback`, `PreparedLegacyUserCall`, and `CompiledLegacyUserDispatch` no longer exist.
 - `LegacyUserFunction`, `Bytecode.functions`, and `ExecutionContext.functions` have been removed from VM bytecode/runtime metadata; callable behavior now goes through semantic function registries or explicit unresolved-call errors.
 - The old VM legacy HIR compiler modules have been deleted; production bytecode compilation is semantic HIR/MIR/layout driven.
-- VM callable execution now has an initial `CallableDescriptor` ABI that carries callee identity, prepared arguments, requested output count, and fallback policy for `feval`, direct semantic bytecode calls, expanded semantic calls, and registry-resolved named calls.
+- VM callable execution now has an initial `CallableDescriptor` ABI that carries callee identity, prepared arguments, requested output count, and fallback policy for `feval`, direct semantic bytecode calls, expanded semantic calls, registry-resolved named calls, and semantic user-function calls inside `end` expressions.
 
 Target state:
 
@@ -214,7 +214,7 @@ Current unresolved-call inventory:
 - Raw fallback compiler boundary: removed. There is no VM path that rebuilds `LegacyHirProgram` and recompiles it during dispatch.
 - Multi-output `feval`: `handle_feval_user_multi_output` asks `SemanticFunctionRegistry` / `runmat_runtime::user_functions::try_call_semantic_function`; unresolved names now raise `UndefinedFunction`.
 - Named/expanded user calls: `handle_prepared_user_function_call` checks the semantic registry, then builtin dispatch, then raises `UndefinedFunction`. Primary MIR lowering emits `CallSemanticFunction*` for semantic function callees.
-- End-expression callbacks: local/session user-function calls carry `EndExpr::SemanticCall`; unresolved names or values without semantic identity now fail instead of entering legacy recompilation.
+- End-expression callbacks: local/session user-function calls carry `EndExpr::SemanticCall` and execute through `CallableDescriptor`; unresolved names or values without semantic identity now fail instead of entering legacy recompilation.
 - Turbine external callback behavior: direct semantic calls and semantic-known named calls lower by `FunctionId`; unresolved named callbacks now remain outside JIT semantic execution and no longer invoke isolated or VM legacy user-function fallback.
 - Runtime callback builtins: `feval`, `cellfun`, and `arrayfun` invoke embedded semantic closures or semantic function handles directly, and runtime string/name-only callback values ask the active VM semantic resolver before builtin/name fallback.
 

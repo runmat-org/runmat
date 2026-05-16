@@ -182,3 +182,47 @@ pub(crate) async fn execute_callable_descriptor(
         }
     }
 }
+
+pub(crate) async fn try_execute_callable_descriptor(
+    descriptor: CallableDescriptor,
+) -> Result<Option<Value>, RuntimeError> {
+    match descriptor.target {
+        CallableTarget::Semantic {
+            function,
+            name,
+            name_fallback,
+        } => {
+            if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
+                function,
+                &descriptor.args,
+                descriptor.requested_outputs,
+            )
+            .await
+            {
+                return result.map(Some);
+            }
+            if name_fallback {
+                if let Some(name) = name {
+                    return forward_builtin_feval(Value::FunctionHandle(name), descriptor.args)
+                        .await
+                        .map(Some);
+                }
+            }
+            Ok(None)
+        }
+        CallableTarget::NameOnlyBuiltinFallback(name) => {
+            if let Some(result) = try_closure_builtin_fallback(&name, &descriptor.args).await? {
+                return Ok(Some(result));
+            }
+            Err(crate::interpreter::errors::mex(
+                "UndefinedFunction",
+                &format!("Undefined function: {name}"),
+            ))
+        }
+        CallableTarget::FevalForward(func_value) => {
+            forward_builtin_feval(func_value, descriptor.args)
+                .await
+                .map(Some)
+        }
+    }
+}

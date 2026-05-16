@@ -1,4 +1,5 @@
 use crate::bytecode::EndExpr;
+use crate::call::descriptor::{try_execute_callable_descriptor, CallableDescriptor};
 use crate::call::shared::{
     call_object_index_method, object_protocol_index_cell, ObjectIndexKind, ObjectIndexOp,
 };
@@ -256,12 +257,14 @@ where
                         let val = eval_end_expr_value(a, end_value, vars, call_user).await?;
                         argv.push(Value::Num(val));
                     }
-                    let v = match runmat_runtime::user_functions::try_call_semantic_function(
-                        function.0, &argv, 1,
-                    )
-                    .await
-                    {
-                        Some(result) => result?,
+                    let descriptor = CallableDescriptor::semantic_named(
+                        *function,
+                        name.clone(),
+                        argv.clone(),
+                        1,
+                    );
+                    let v = match try_execute_callable_descriptor(descriptor).await? {
+                        Some(value) => value,
                         None => call_user(name, argv, vars).await?,
                     };
                     idx_end_expr::value_to_f64(&v).map_err(|_| {
