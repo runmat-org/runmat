@@ -14,9 +14,10 @@ impl RunMatSession {
         let lowering = {
             let _span = info_span!("runtime.lower").entered();
             let semantic_function_names = self.semantic_function_registry.names.clone();
+            let workspace_bindings = self.lowering_workspace_bindings();
             runmat_hir::lower(
                 &ast,
-                &LoweringContext::new(&self.workspace_bindings, &HashMap::new())
+                &LoweringContext::new(&workspace_bindings, &HashMap::new())
                     .with_semantic_functions(&semantic_function_names),
             )?
         };

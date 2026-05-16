@@ -1,6 +1,26 @@
 use super::*;
 
 impl RunMatSession {
+    pub(crate) fn workspace_binding_key(&self, name: &str) -> crate::abi::WorkspaceBindingKey {
+        crate::abi::WorkspaceBindingKey::Interactive {
+            session: self.abi_workspace_handle.0,
+            name: runmat_hir::BindingName(name.to_string()),
+        }
+    }
+
+    pub(crate) fn bind_workspace_slot(&mut self, name: String, slot: usize) {
+        let key = self.workspace_binding_key(&name);
+        self.workspace_bindings
+            .insert(name, SessionWorkspaceBinding { key, slot });
+    }
+
+    pub(crate) fn lowering_workspace_bindings(&self) -> HashMap<String, usize> {
+        self.workspace_bindings
+            .iter()
+            .map(|(name, binding)| (name.clone(), binding.slot))
+            .collect()
+    }
+
     pub fn clear_variables(&mut self) {
         self.variable_array.clear();
         self.workspace_bindings.clear();
@@ -42,7 +62,7 @@ impl RunMatSession {
         self.clear_variables();
 
         for (index, (name, value)) in entries.into_iter().enumerate() {
-            self.workspace_bindings.insert(name.clone(), index);
+            self.bind_workspace_slot(name.clone(), index);
             self.variable_array.push(value.clone());
             self.workspace_values.insert(name, value);
         }

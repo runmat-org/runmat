@@ -63,8 +63,8 @@ pub struct RunMatSession {
     stats: ExecutionStats,
     /// Current variable array for bytecode execution
     variable_array: Vec<Value>,
-    /// Current workspace variable names mapped to VM variable-array slots.
-    workspace_bindings: HashMap<String, usize>,
+    /// Current workspace bindings with stable ABI identity and current VM slot.
+    workspace_bindings: HashMap<String, SessionWorkspaceBinding>,
     /// Persistent workspace values keyed by variable name
     workspace_values: HashMap<String, Value>,
     /// Stable ABI identity for this interactive workspace.
@@ -109,6 +109,12 @@ pub(crate) struct PreparedExecution {
     pub(crate) bytecode: runmat_vm::Bytecode,
     semantic_function_registry_after_success: runmat_vm::SemanticFunctionRegistry,
     next_semantic_function_id_after_success: usize,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SessionWorkspaceBinding {
+    pub(crate) key: crate::abi::WorkspaceBindingKey,
+    pub(crate) slot: usize,
 }
 
 #[derive(Debug, Clone)]

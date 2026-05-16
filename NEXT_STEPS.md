@@ -242,7 +242,7 @@ Observed older-HIR artifacts worth collapsing:
 - The legacy-shaped user-function record and fallback counters are now exposed only under `runmat_vm::legacy::*`; the older root-level `runmat_vm::LegacyUserFunction`, root fallback-counter exports, `runmat_vm::functions`, Turbine public legacy-function execution surfaces, and Turbine public bytecode compiler entrypoints have been removed, and downstream callers should move to semantic function bytecode/registry APIs.
 - VM execution internals such as `CallFrame` and `ExecutionContext` are no longer root-level `runmat_vm` exports or bytecode prelude exports; call-stack diagnostics use runtime call-frame types instead.
 - Legacy bytecode compilation is no longer exposed through VM public modules; production unresolved callbacks go through crate-private dynamic callback fallback helpers.
-- `RunMatSession` keeps `workspace_bindings` to seed workspace variables across REPL inputs, but those bindings are still plain VM slot indices rather than durable semantic workspace binding IDs.
+- `RunMatSession` now persists workspace bindings as stable ABI keys plus current VM slots; HIR lowering receives a derived slot map only at compile time.
 - `LoweringResult` still carries both `assembly` and legacy `hir`, `variables`, `functions`, `var_types`, and legacy inference placeholders.
 - LSP analysis still consults legacy variable maps and legacy type helpers.
 - `CompatibilityMode::RunMatExtended` is still mapped through parser compatibility as MATLAB mode in some places, which obscures the intended distinction between compatibility policy and parser syntax mode.
@@ -250,7 +250,7 @@ Observed older-HIR artifacts worth collapsing:
 Target cleanup direction:
 
 - Keep source compatibility behavior, but represent it through semantic assembly, analysis facts, and workspace ABI records.
-- Replace session `workspace_bindings` VM slot mapping with a semantic workspace binding table keyed by stable names plus semantic binding/session IDs.
+- Continue using the session workspace binding table as the durable workspace ABI source, deriving transient VM slot maps only for compiler/runtime execution boundaries.
 - Continue replacing remaining legacy function fallback sites with the semantic registry.
 - Move tests that only need compiler behavior from hand-built legacy HIR to semantic source fixtures or semantic MIR fixtures.
 - Keep remaining legacy dispatch helpers private to unresolved/external callback fallback plumbing until those identities are registry-backed.

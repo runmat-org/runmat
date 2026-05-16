@@ -663,7 +663,10 @@ impl RunMatSession {
                         "[repl] mutated names and assigned return values"
                     );
                 }
-                self.workspace_bindings = mutated_names.clone();
+                self.workspace_bindings.clear();
+                for (name, slot) in &mutated_names {
+                    self.bind_workspace_slot(name.clone(), *slot);
+                }
                 let previous_workspace = self.workspace_values.clone();
                 let current_names: HashSet<String> = assigned
                     .iter()
@@ -738,7 +741,7 @@ impl RunMatSession {
             self.next_semantic_function_id = next_semantic_function_id_after_success;
             // Apply 'ans' update if applicable (persisting expression result)
             if let Some((var_id, value)) = ans_update {
-                self.workspace_bindings.insert("ans".to_string(), var_id);
+                self.bind_workspace_slot("ans".to_string(), var_id);
                 self.workspace_values.insert("ans".to_string(), value);
                 if debug_trace {
                     println!("Updated 'ans' to var_id {}", var_id);
@@ -958,13 +961,12 @@ impl RunMatSession {
             .filter_map(|name| {
                 let value = self.workspace_values.get(&name)?.clone();
                 let binding = runmat_hir::BindingName(name);
-                Some(crate::abi::WorkspaceBindingValue {
-                    key: crate::abi::WorkspaceBindingKey::Interactive {
-                        session: self.abi_workspace_handle.0,
-                        name: binding,
-                    },
-                    value,
-                })
+                let key = self
+                    .workspace_bindings
+                    .get(&binding.0)
+                    .map(|binding| binding.key.clone())
+                    .unwrap_or_else(|| self.workspace_binding_key(&binding.0));
+                Some(crate::abi::WorkspaceBindingValue { key, value })
             })
             .collect()
     }
@@ -980,10 +982,7 @@ impl RunMatSession {
         removed_names.sort();
         removed_names
             .into_iter()
-            .map(|name| crate::abi::WorkspaceBindingKey::Interactive {
-                session: self.abi_workspace_handle.0,
-                name: runmat_hir::BindingName(name),
-            })
+            .map(|name| self.workspace_binding_key(&name))
             .collect()
     }
 }
