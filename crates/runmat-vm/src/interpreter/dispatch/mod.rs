@@ -9,7 +9,10 @@ mod stack;
 
 use crate::bytecode::Instr;
 use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
-use crate::call::shared::{call_object_index_method, ObjectIndexKind, ObjectIndexOp};
+use crate::call::shared::{
+    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexKind, ObjectIndexOp,
+    ObjectIndexSelector,
+};
 use crate::interpreter::debug;
 use crate::runtime::workspace::refresh_workspace_state;
 use runmat_builtins::Value;
@@ -642,13 +645,13 @@ pub async fn dispatch_instruction(
                         _ => unreachable!(),
                     };
                     let cell = crate::call::shared::subsref_paren_index_cell(&indices)?;
-                    let v = call_object_index_method(
-                        Value::Object(obj),
-                        ObjectIndexOp::Subsref,
-                        ObjectIndexKind::Paren,
-                        cell,
-                        None,
-                    )
+                    let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
+                        base: Value::Object(obj),
+                        op: ObjectIndexOp::Subsref,
+                        kind: ObjectIndexKind::Paren,
+                        selector: ObjectIndexSelector::Indices(cell),
+                        rhs: None,
+                    })
                     .await?;
                     Ok(vec![v])
                 },
@@ -672,13 +675,13 @@ pub async fn dispatch_instruction(
                         _ => unreachable!(),
                     };
                     let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
-                    let v = call_object_index_method(
-                        Value::Object(obj),
-                        ObjectIndexOp::Subsref,
-                        ObjectIndexKind::Brace,
-                        cell,
-                        None,
-                    )
+                    let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
+                        base: Value::Object(obj),
+                        op: ObjectIndexOp::Subsref,
+                        kind: ObjectIndexKind::Brace,
+                        selector: ObjectIndexSelector::Indices(cell),
+                        rhs: None,
+                    })
                     .await?;
                     Ok(vec![v])
                 },
@@ -707,13 +710,13 @@ pub async fn dispatch_instruction(
                         _ => unreachable!(),
                     };
                     let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
-                    let v = call_object_index_method(
-                        Value::Object(obj),
-                        ObjectIndexOp::Subsref,
-                        ObjectIndexKind::Brace,
-                        cell,
-                        None,
-                    )
+                    let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
+                        base: Value::Object(obj),
+                        op: ObjectIndexOp::Subsref,
+                        kind: ObjectIndexKind::Brace,
+                        selector: ObjectIndexSelector::Indices(cell),
+                        rhs: None,
+                    })
                     .await?;
                     Ok(vec![v])
                 },
