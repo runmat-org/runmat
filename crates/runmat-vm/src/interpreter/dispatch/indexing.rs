@@ -528,8 +528,8 @@ where
                             base: Value::Object(obj),
                             op: ObjectIndexOp::Subsref,
                             kind: ObjectIndexKind::Brace,
-                            selector: ObjectIndexSelector::IndexValues {
-                                values: indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                            selector: ObjectIndexSelector::ScalarIndices {
+                                indices,
                                 context: "subsref build error",
                             },
                             rhs: None,
@@ -544,8 +544,8 @@ where
                             base: Value::HandleObject(handle),
                             op: ObjectIndexOp::Subsref,
                             kind: ObjectIndexKind::Brace,
-                            selector: ObjectIndexSelector::IndexValues {
-                                values: indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                            selector: ObjectIndexSelector::ScalarIndices {
+                                indices,
                                 context: "subsref build error",
                             },
                             rhs: None,
@@ -733,8 +733,8 @@ where
                             base: Value::Object(obj),
                             op: ObjectIndexOp::Subsasgn,
                             kind: ObjectIndexKind::Brace,
-                            selector: ObjectIndexSelector::IndexValues {
-                                values: indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                            selector: ObjectIndexSelector::ScalarIndices {
+                                indices,
                                 context: "subsasgn build error",
                             },
                             rhs: Some(rhs),
@@ -749,8 +749,8 @@ where
                             base: Value::HandleObject(handle),
                             op: ObjectIndexOp::Subsasgn,
                             kind: ObjectIndexKind::Brace,
-                            selector: ObjectIndexSelector::IndexValues {
-                                values: indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                            selector: ObjectIndexSelector::ScalarIndices {
+                                indices,
                                 context: "subsasgn build error",
                             },
                             rhs: Some(rhs),
@@ -807,8 +807,8 @@ where
                             base: Value::Object(obj),
                             op: ObjectIndexOp::Subsasgn,
                             kind: ObjectIndexKind::Paren,
-                            selector: ObjectIndexSelector::IndexValues {
-                                values: indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                            selector: ObjectIndexSelector::ScalarIndices {
+                                indices,
                                 context: "subsasgn build error",
                             },
                             rhs: Some(rhs),
@@ -822,8 +822,8 @@ where
                             base: Value::HandleObject(handle),
                             op: ObjectIndexOp::Subsasgn,
                             kind: ObjectIndexKind::Paren,
-                            selector: ObjectIndexSelector::IndexValues {
-                                values: indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                            selector: ObjectIndexSelector::ScalarIndices {
+                                indices,
                                 context: "subsasgn build error",
                             },
                             rhs: Some(rhs),

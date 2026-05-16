@@ -237,8 +237,7 @@ pub async fn build_builtin_expand_multi_args(
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::IndexValues {
-                            values: Vec::new(),
+                        selector: ObjectIndexSelector::Empty {
                             context: "subsref build error",
                         },
                         rhs: None,
@@ -297,8 +296,7 @@ pub async fn build_feval_expand_multi_args(
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::IndexValues {
-                            values: Vec::new(),
+                        selector: ObjectIndexSelector::Empty {
                             context: "subsref build error",
                         },
                         rhs: None,
@@ -358,8 +356,7 @@ pub async fn build_user_function_expand_multi_args(
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::IndexValues {
-                            values: Vec::new(),
+                        selector: ObjectIndexSelector::Empty {
                             context: "subsref build error",
                         },
                         rhs: None,

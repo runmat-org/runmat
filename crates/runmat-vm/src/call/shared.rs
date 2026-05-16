@@ -48,6 +48,13 @@ impl ObjectIndexKind {
 }
 
 pub enum ObjectIndexSelector {
+    Empty {
+        context: &'static str,
+    },
+    ScalarIndices {
+        indices: Vec<usize>,
+        context: &'static str,
+    },
     IndexValues {
         values: Vec<Value>,
         context: &'static str,
@@ -66,11 +73,18 @@ pub struct ObjectIndexDescriptor {
 impl ObjectIndexDescriptor {
     fn into_runtime_method_args(self) -> Result<Vec<Value>, RuntimeError> {
         let selector = match self.selector {
+            ObjectIndexSelector::Empty { context } => {
+                build_protocol_index_cell(Vec::new(), context)?
+            }
+            ObjectIndexSelector::ScalarIndices { indices, context } => {
+                let values = indices
+                    .into_iter()
+                    .map(|index| Value::Num(index as f64))
+                    .collect();
+                build_protocol_index_cell(values, context)?
+            }
             ObjectIndexSelector::IndexValues { values, context } => {
-                let cols = values.len();
-                let cell = runmat_builtins::CellArray::new(values, 1, cols)
-                    .map_err(|e| format!("{context}: {e}"))?;
-                Value::Cell(cell)
+                build_protocol_index_cell(values, context)?
             }
             ObjectIndexSelector::Member(field) => Value::String(field),
         };
@@ -85,6 +99,13 @@ impl ObjectIndexDescriptor {
         }
         Ok(args)
     }
+}
+
+fn build_protocol_index_cell(values: Vec<Value>, context: &str) -> Result<Value, RuntimeError> {
+    let cols = values.len();
+    let cell =
+        runmat_builtins::CellArray::new(values, 1, cols).map_err(|e| format!("{context}: {e}"))?;
+    Ok(Value::Cell(cell))
 }
 
 pub async fn call_runtime_method(args: &[Value]) -> Result<Value, RuntimeError> {
