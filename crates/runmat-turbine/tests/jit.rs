@@ -1,5 +1,5 @@
 use cranelift::prelude::isa::CallConv;
-use runmat_builtins::{Type, Value};
+use runmat_builtins::{CellArray, Type, Value};
 use runmat_turbine::{
     CompilerConfig, FunctionCache, HotspotProfiler, OptimizationLevel, ThreadSafeFunctionCache,
     TurbineEngine,
@@ -1508,6 +1508,68 @@ fn test_jit_semantic_expand_multi_output_uses_value_abi_for_scalar_args() {
     );
     assert_eq!(result.unwrap(), (0, true));
     assert_eq!(vars[0], Value::Num(6.0));
+    assert_eq!(vars[1], Value::Num(12.0));
+}
+
+#[test]
+fn test_jit_semantic_expand_multi_expands_cell_args_through_value_abi() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let function = runmat_hir::FunctionId(1);
+    let semantic_function = SemanticFunctionBytecode {
+        function,
+        display_name: "add2".to_string(),
+        source_id: None,
+        instructions: vec![
+            Instr::LoadVar(0),
+            Instr::LoadVar(1),
+            Instr::Add,
+            Instr::StoreVar(2),
+        ],
+        instr_spans: Vec::new(),
+        call_arg_spans: Vec::new(),
+        var_count: 3,
+        input_slots: vec![0, 1],
+        varargin_slot: None,
+        output_slots: vec![2],
+        varargout_slot: None,
+        capture_slots: Vec::new(),
+    };
+
+    let mut semantic_functions = HashMap::new();
+    semantic_functions.insert(function, semantic_function);
+    let bytecode = Bytecode {
+        semantic_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadVar(0),
+                Instr::CallSemanticFunctionExpandMulti(
+                    function,
+                    vec![ArgSpec {
+                        is_expand: true,
+                        num_indices: 0,
+                        expand_all: true,
+                    }],
+                ),
+                Instr::StoreVar(1),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let cell = CellArray::new(vec![Value::Num(5.0), Value::Num(7.0)], 1, 2).unwrap();
+    let mut vars = vec![Value::Cell(cell), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(result.is_ok(), "semantic cell expansion should JIT");
+    assert_eq!(result.unwrap(), (0, true));
     assert_eq!(vars[1], Value::Num(12.0));
 }
 

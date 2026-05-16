@@ -32,6 +32,26 @@ pub struct TurbineValue {
     pub payload: u64,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TurbineArgSpec {
+    pub is_expand: u32,
+    pub num_indices: u32,
+    pub expand_all: u32,
+    pub reserved: u32,
+}
+
+impl TurbineArgSpec {
+    pub const fn new(is_expand: bool, num_indices: usize, expand_all: bool) -> Self {
+        Self {
+            is_expand: is_expand as u32,
+            num_indices: num_indices as u32,
+            expand_all: expand_all as u32,
+            reserved: 0,
+        }
+    }
+}
+
 impl TurbineValue {
     pub const fn empty() -> Self {
         Self {

@@ -21,7 +21,7 @@ use log::{debug, error, info, warn};
 use runmat_builtins::Value;
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_vm::legacy::LegacyUserFunction;
-use runmat_vm::{Bytecode, Instr, InterpreterOutcome, SemanticFunctionRegistry};
+use runmat_vm::{ArgSpec, Bytecode, Instr, InterpreterOutcome, SemanticFunctionRegistry};
 use std::cell::Cell;
 use std::env;
 use std::ffi::CStr;
@@ -44,7 +44,7 @@ pub use cache::*;
 pub use compiler::*;
 pub use jit_memory::*;
 pub use profiler::HotspotProfiler;
-pub use value_abi::{TurbineValue, TurbineValueTag};
+pub use value_abi::{TurbineArgSpec, TurbineValue, TurbineValueTag};
 
 const JIT_FALLBACK_STACK_BYTES: usize = 16 * 1024 * 1024;
 const JIT_FALLBACK_STACK_ENV: &str = "RUNMAT_TURBINE_STACK_MB";
@@ -192,6 +192,47 @@ fn declare_host_semantic_value_outputs_in_module(module: &mut JITModule) -> Func
         .expect("Failed to declare runmat_call_semantic_function_values")
 }
 
+fn declare_host_semantic_expanded_value_call_in_module(module: &mut JITModule) -> FuncId {
+    let mut sig = module.make_signature();
+    let pointer_type = module.isa().pointer_type();
+    sig.params.push(AbiParam::new(types::I64)); // function id
+    sig.params.push(AbiParam::new(pointer_type)); // args_ptr: TurbineValue[]
+    sig.params.push(AbiParam::new(types::I32)); // args_len
+    sig.params.push(AbiParam::new(pointer_type)); // specs_ptr: TurbineArgSpec[]
+    sig.params.push(AbiParam::new(types::I32)); // specs_len
+    sig.params.push(AbiParam::new(pointer_type)); // result_ptr: TurbineValue*
+    sig.returns.push(AbiParam::new(types::I32)); // status
+
+    module
+        .declare_function(
+            "runmat_call_semantic_function_expanded_value",
+            Linkage::Import,
+            &sig,
+        )
+        .expect("Failed to declare runmat_call_semantic_function_expanded_value")
+}
+
+fn declare_host_semantic_expanded_value_outputs_in_module(module: &mut JITModule) -> FuncId {
+    let mut sig = module.make_signature();
+    let pointer_type = module.isa().pointer_type();
+    sig.params.push(AbiParam::new(types::I64)); // function id
+    sig.params.push(AbiParam::new(pointer_type)); // args_ptr: TurbineValue[]
+    sig.params.push(AbiParam::new(types::I32)); // args_len
+    sig.params.push(AbiParam::new(pointer_type)); // specs_ptr: TurbineArgSpec[]
+    sig.params.push(AbiParam::new(types::I32)); // specs_len
+    sig.params.push(AbiParam::new(types::I32)); // out_count
+    sig.params.push(AbiParam::new(pointer_type)); // results_ptr: TurbineValue[]
+    sig.returns.push(AbiParam::new(types::I32)); // status
+
+    module
+        .declare_function(
+            "runmat_call_semantic_function_expanded_values",
+            Linkage::Import,
+            &sig,
+        )
+        .expect("Failed to declare runmat_call_semantic_function_expanded_values")
+}
+
 /// The main JIT compilation engine
 pub struct TurbineEngine {
     module: JITModule,
@@ -205,6 +246,8 @@ pub struct TurbineEngine {
     runmat_call_semantic_function_outputs_id: FuncId,
     runmat_call_semantic_function_value_id: FuncId,
     runmat_call_semantic_function_values_id: FuncId,
+    runmat_call_semantic_function_expanded_value_id: FuncId,
+    runmat_call_semantic_function_expanded_values_id: FuncId,
 }
 
 /// A compiled function ready for execution
@@ -338,6 +381,14 @@ impl TurbineEngine {
             "runmat_call_semantic_function_values",
             runmat_call_semantic_function_values as *const u8,
         );
+        builder.symbol(
+            "runmat_call_semantic_function_expanded_value",
+            runmat_call_semantic_function_expanded_value as *const u8,
+        );
+        builder.symbol(
+            "runmat_call_semantic_function_expanded_values",
+            runmat_call_semantic_function_expanded_values as *const u8,
+        );
 
         // Create the JIT module
         let mut module = JITModule::new(builder);
@@ -351,6 +402,10 @@ impl TurbineEngine {
             declare_host_semantic_value_call_in_module(&mut module);
         let runmat_call_semantic_function_values_id =
             declare_host_semantic_value_outputs_in_module(&mut module);
+        let runmat_call_semantic_function_expanded_value_id =
+            declare_host_semantic_expanded_value_call_in_module(&mut module);
+        let runmat_call_semantic_function_expanded_values_id =
+            declare_host_semantic_expanded_value_outputs_in_module(&mut module);
 
         let ctx = module.make_context();
 
@@ -366,6 +421,8 @@ impl TurbineEngine {
             runmat_call_semantic_function_outputs_id,
             runmat_call_semantic_function_value_id,
             runmat_call_semantic_function_values_id,
+            runmat_call_semantic_function_expanded_value_id,
+            runmat_call_semantic_function_expanded_values_id,
         };
 
         info!("Turbine JIT engine initialized successfully for {target_triple}");
@@ -441,6 +498,8 @@ impl TurbineEngine {
             self.runmat_call_semantic_function_outputs_id,
             self.runmat_call_semantic_function_value_id,
             self.runmat_call_semantic_function_values_id,
+            self.runmat_call_semantic_function_expanded_value_id,
+            self.runmat_call_semantic_function_expanded_values_id,
         )?;
 
         // Compile to machine code
@@ -502,20 +561,11 @@ impl TurbineEngine {
 
         debug!("Executing compiled function {hash}");
 
-        // Convert Value array to f64 array for JIT function
-        // Ensure f64_vars has at least vars.len() elements to preserve all variables
-        let mut f64_vars: Vec<f64> = Vec::with_capacity(vars.len());
-        for value in vars.iter() {
-            match value {
-                Value::Int(i) => f64_vars.push(i.to_f64()),
-                Value::Num(n) => f64_vars.push(*n),
-                Value::Bool(b) => f64_vars.push(if *b { 1.0 } else { 0.0 }),
-                _ => {
-                    error!("Unsupported value type for JIT execution: {value:?}");
-                    return Err(execution_error("Unsupported value type"));
-                }
-            }
-        }
+        let mut turbine_vars: Vec<TurbineValue> = vars
+            .iter()
+            .cloned()
+            .map(TurbineValue::from_runtime_value)
+            .collect::<Result<Vec<_>>>()?;
 
         // Set up runtime context for user function calls
         let runtime_context = RuntimeContext::new(functions.clone(), semantic_registry.clone());
@@ -532,10 +582,11 @@ impl TurbineEngine {
             // Set runtime context for JIT function calls
             set_runtime_context(static_context);
 
-            // Cast function pointer to correct signature: fn(*mut f64, usize) -> i32
-            let jit_fn: extern "C" fn(*mut f64, usize) -> i32 = std::mem::transmute(func.ptr);
+            // Cast function pointer to correct signature: fn(*mut TurbineValue, usize) -> i32
+            let jit_fn: extern "C" fn(*mut TurbineValue, usize) -> i32 =
+                std::mem::transmute(func.ptr);
 
-            let exec_result = jit_fn(f64_vars.as_mut_ptr(), f64_vars.len());
+            let exec_result = jit_fn(turbine_vars.as_mut_ptr(), turbine_vars.len());
 
             // Clear runtime context after execution
             clear_runtime_context();
@@ -543,10 +594,9 @@ impl TurbineEngine {
             exec_result
         };
 
-        // Convert results back to Value array
-        for (i, &f64_val) in f64_vars.iter().enumerate() {
+        for (i, turbine_value) in turbine_vars.iter().copied().enumerate() {
             if i < vars.len() {
-                vars[i] = Value::Num(f64_val);
+                vars[i] = turbine_value.to_runtime_value()?;
             }
         }
 
@@ -665,6 +715,15 @@ impl TurbineEngine {
         argc.hash(hasher);
         if let Some(out_count) = out_count {
             out_count.hash(hasher);
+        }
+    }
+
+    fn hash_arg_specs<H: Hasher>(hasher: &mut H, specs: &[ArgSpec]) {
+        specs.len().hash(hasher);
+        for spec in specs {
+            spec.is_expand.hash(hasher);
+            spec.num_indices.hash(hasher);
+            spec.expand_all.hash(hasher);
         }
     }
 
@@ -816,6 +875,17 @@ impl TurbineEngine {
                     "CallSemanticFunctionMulti".hash(&mut hasher);
                     function.0.hash(&mut hasher);
                     argc.hash(&mut hasher);
+                    out_count.hash(&mut hasher);
+                }
+                Instr::CallSemanticFunctionExpandMulti(function, specs) => {
+                    "CallSemanticFunctionExpandMulti".hash(&mut hasher);
+                    function.0.hash(&mut hasher);
+                    Self::hash_arg_specs(&mut hasher, specs);
+                }
+                Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
+                    "CallSemanticFunctionExpandMultiOutput".hash(&mut hasher);
+                    function.0.hash(&mut hasher);
+                    Self::hash_arg_specs(&mut hasher, specs);
                     out_count.hash(&mut hasher);
                 }
                 Instr::Unpack(count) => {
@@ -1181,6 +1251,157 @@ fn read_turbine_value_args(args_ptr: *const TurbineValue, args_len: i32) -> Resu
         .collect()
 }
 
+fn read_turbine_arg_specs(
+    specs_ptr: *const TurbineArgSpec,
+    specs_len: i32,
+) -> Result<Vec<ArgSpec>> {
+    if specs_len < 0 {
+        return Err(execution_error("negative TurbineArgSpec count"));
+    }
+    if specs_len == 0 {
+        return Ok(Vec::new());
+    }
+    if specs_ptr.is_null() {
+        return Err(execution_error("null TurbineArgSpec pointer"));
+    }
+
+    unsafe { std::slice::from_raw_parts(specs_ptr, specs_len as usize) }
+        .iter()
+        .map(|spec| {
+            Ok(ArgSpec {
+                is_expand: spec.is_expand != 0,
+                num_indices: spec.num_indices as usize,
+                expand_all: spec.expand_all != 0,
+            })
+        })
+        .collect()
+}
+
+fn row_major_pos_from_linear(cell: &runmat_builtins::CellArray, idx: usize) -> Result<usize> {
+    if idx == 0 || idx > cell.data.len() {
+        return Err(execution_error("Cell index out of bounds"));
+    }
+    if cell.rows <= 1 || cell.cols <= 1 {
+        return Ok(idx - 1);
+    }
+    let zero = idx - 1;
+    let row = zero % cell.rows;
+    let col = zero / cell.rows;
+    Ok(row * cell.cols + col)
+}
+
+fn turbine_index_cell_value(cell: &runmat_builtins::CellArray, indices: &[usize]) -> Result<Value> {
+    match indices.len() {
+        1 => Ok((*cell.data[row_major_pos_from_linear(cell, indices[0])?]).clone()),
+        2 => {
+            let row = indices[0];
+            let col = indices[1];
+            if row == 0 || row > cell.rows || col == 0 || col > cell.cols {
+                return Err(execution_error("Cell subscript out of bounds"));
+            }
+            Ok((*cell.data[(row - 1) * cell.cols + (col - 1)]).clone())
+        }
+        _ => Err(execution_error("Unsupported number of cell indices")),
+    }
+}
+
+fn turbine_expand_cell_indices(
+    cell: &runmat_builtins::CellArray,
+    indices: &[Value],
+) -> Result<Vec<Value>> {
+    match indices.len() {
+        1 => match &indices[0] {
+            Value::Num(n) if *n == 0.0 && n.is_sign_negative() => {
+                Ok(vec![turbine_index_cell_value(cell, &[cell.data.len()])?])
+            }
+            Value::Num(n) if *n < 0.0 => {
+                let idx = cell.data.len() as isize + *n as isize;
+                if idx < 1 || idx as usize > cell.data.len() {
+                    return Err(execution_error("Cell index out of bounds"));
+                }
+                Ok(vec![turbine_index_cell_value(cell, &[idx as usize])?])
+            }
+            Value::Num(n) => Ok(vec![turbine_index_cell_value(cell, &[*n as usize])?]),
+            Value::Int(i) => Ok(vec![turbine_index_cell_value(
+                cell,
+                &[i.to_i64() as usize],
+            )?]),
+            Value::Tensor(t) => t
+                .data
+                .iter()
+                .map(|&value| turbine_index_cell_value(cell, &[value as usize]))
+                .collect(),
+            _ => Err(execution_error("Unsupported cell index type")),
+        },
+        2 => {
+            let row = value_to_usize_index(&indices[0])?;
+            let col = value_to_usize_index(&indices[1])?;
+            Ok(vec![turbine_index_cell_value(cell, &[row, col])?])
+        }
+        _ => Err(execution_error("Unsupported cell index type")),
+    }
+}
+
+fn value_to_usize_index(value: &Value) -> Result<usize> {
+    match value {
+        Value::Num(value) => Ok(*value as usize),
+        Value::Int(value) => Ok(value.to_i64() as usize),
+        other => Err(execution_error(format!(
+            "Unsupported cell index value: {other:?}"
+        ))),
+    }
+}
+
+fn expand_turbine_args(args: Vec<Value>, specs: &[ArgSpec]) -> Result<Vec<Value>> {
+    let expected_args = specs.iter().fold(0usize, |count, spec| {
+        count + 1 + if spec.is_expand { spec.num_indices } else { 0 }
+    });
+    if expected_args != args.len() {
+        return Err(execution_error(format!(
+            "expanded Turbine argument count mismatch: expected {expected_args}, got {}",
+            args.len()
+        )));
+    }
+
+    let mut cursor = 0;
+    let mut expanded = Vec::new();
+    for spec in specs {
+        let value = args[cursor].clone();
+        cursor += 1;
+        if !spec.is_expand {
+            expanded.push(value);
+            continue;
+        }
+
+        let indices = args[cursor..cursor + spec.num_indices].to_vec();
+        cursor += spec.num_indices;
+        let values = if spec.expand_all {
+            match value {
+                Value::OutputList(values) => values,
+                Value::Cell(cell) => (1..=cell.data.len())
+                    .map(|idx| turbine_index_cell_value(&cell, &[idx]))
+                    .collect::<Result<Vec<_>>>()?,
+                other => {
+                    return Err(execution_error(format!(
+                        "expanded Turbine call requires cell or output list for expand_all, got {other:?}"
+                    )))
+                }
+            }
+        } else {
+            match value {
+                Value::Cell(cell) => turbine_expand_cell_indices(&cell, &indices)?,
+                other => {
+                    return Err(execution_error(format!(
+                        "expanded Turbine call requires cell for indexed expansion, got {other:?}"
+                    )))
+                }
+            }
+        };
+        expanded.extend(values);
+    }
+    Ok(expanded)
+}
+
 fn write_turbine_value(result_ptr: *mut TurbineValue, value: Value) -> Result<()> {
     if result_ptr.is_null() {
         return Err(execution_error("null TurbineValue result pointer"));
@@ -1271,6 +1492,102 @@ pub extern "C" fn runmat_call_semantic_function_values(
         let value = outputs.get(index).cloned().unwrap_or(Value::Num(0.0));
         if let Err(err) = write_turbine_value(unsafe { results_ptr.add(index) }, value) {
             error!("TurbineValue semantic output write failed: {err}");
+            return 1;
+        }
+    }
+    0
+}
+
+#[no_mangle]
+pub extern "C" fn runmat_call_semantic_function_expanded_value(
+    function_id: i64,
+    args_ptr: *const TurbineValue,
+    args_len: i32,
+    specs_ptr: *const TurbineArgSpec,
+    specs_len: i32,
+    result_ptr: *mut TurbineValue,
+) -> i32 {
+    let output = (|| -> Result<Value> {
+        let context = get_runtime_context().ok_or_else(|| {
+            execution_error("No runtime context available for expanded TurbineValue semantic call")
+        })?;
+        let function_id = usize::try_from(function_id)
+            .map_err(|_| execution_error(format!("Invalid semantic function id: {function_id}")))?;
+        let args = read_turbine_value_args(args_ptr, args_len)?;
+        let specs = read_turbine_arg_specs(specs_ptr, specs_len)?;
+        let expanded_args = expand_turbine_args(args, &specs)?;
+        run_immediate(Box::pin(runmat_vm::invoke_semantic_function_value(
+            function_id,
+            &expanded_args,
+            1,
+            &context.semantic_registry,
+        )))?
+        .map_err(TurbineError::ExecutionError)
+    })();
+
+    match output.and_then(|value| write_turbine_value(result_ptr, value)) {
+        Ok(()) => 0,
+        Err(err) => {
+            error!("Expanded TurbineValue semantic function call failed: {err}");
+            1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn runmat_call_semantic_function_expanded_values(
+    function_id: i64,
+    args_ptr: *const TurbineValue,
+    args_len: i32,
+    specs_ptr: *const TurbineArgSpec,
+    specs_len: i32,
+    out_count: i32,
+    results_ptr: *mut TurbineValue,
+) -> i32 {
+    let requested_out_count = out_count;
+    let output = (|| -> Result<Vec<Value>> {
+        if out_count < 0 {
+            return Err(execution_error("negative TurbineValue output count"));
+        }
+        if out_count > 0 && results_ptr.is_null() {
+            return Err(execution_error("null TurbineValue results pointer"));
+        }
+        let context = get_runtime_context().ok_or_else(|| {
+            execution_error(
+                "No runtime context available for expanded TurbineValue semantic outputs call",
+            )
+        })?;
+        let function_id = usize::try_from(function_id)
+            .map_err(|_| execution_error(format!("Invalid semantic function id: {function_id}")))?;
+        let args = read_turbine_value_args(args_ptr, args_len)?;
+        let specs = read_turbine_arg_specs(specs_ptr, specs_len)?;
+        let expanded_args = expand_turbine_args(args, &specs)?;
+        let out_count = out_count as usize;
+        let output = run_immediate(Box::pin(runmat_vm::invoke_semantic_function_value(
+            function_id,
+            &expanded_args,
+            out_count,
+            &context.semantic_registry,
+        )))?
+        .map_err(TurbineError::ExecutionError)?;
+        Ok(match output {
+            Value::OutputList(values) => values,
+            value => vec![value],
+        })
+    })();
+
+    let outputs = match output {
+        Ok(outputs) => outputs,
+        Err(err) => {
+            error!("Expanded TurbineValue semantic function outputs call failed: {err}");
+            return 1;
+        }
+    };
+
+    for index in 0..requested_out_count as usize {
+        let value = outputs.get(index).cloned().unwrap_or(Value::Num(0.0));
+        if let Err(err) = write_turbine_value(unsafe { results_ptr.add(index) }, value) {
+            error!("Expanded TurbineValue semantic output write failed: {err}");
             return 1;
         }
     }
