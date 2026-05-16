@@ -1,44 +1,20 @@
-#[cfg(feature = "native-accel")]
-use crate::accel::graph::build_accel_graph;
-#[cfg(feature = "native-accel")]
-use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
 use crate::bytecode::program::LegacyUserFunction;
-use crate::bytecode::{ArgSpec, Bytecode, Instr, SemanticFunctionRegistry};
+use crate::bytecode::{ArgSpec, Instr, SemanticFunctionRegistry};
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
 use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
-    build_expanded_args_from_specs, call_object_index_method, collect_legacy_multi_outputs,
-    expand_cell_indices, lookup_legacy_user_function, prepare_legacy_user_call,
-    subsref_empty_brace_cell, validate_legacy_user_function_arity, ObjectIndexKind, ObjectIndexOp,
-    PreparedLegacyUserCall,
+    build_expanded_args_from_specs, call_object_index_method, expand_cell_indices,
+    subsref_empty_brace_cell, ObjectIndexKind, ObjectIndexOp,
 };
-use crate::compiler::{CompileError, Compiler};
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
 use crate::object::resolve as obj_resolve;
 use runmat_builtins::{MException, Value};
 use runmat_runtime::RuntimeError;
-use std::cell::Cell;
 use std::future::Future;
-
-thread_local! {
-    static LEGACY_USER_DISPATCH_FALLBACK_COUNT: Cell<usize> = const { Cell::new(0) };
-}
-
-pub fn legacy_user_dispatch_fallback_count() -> usize {
-    LEGACY_USER_DISPATCH_FALLBACK_COUNT.with(Cell::get)
-}
-
-pub fn reset_legacy_user_dispatch_fallback_count() {
-    LEGACY_USER_DISPATCH_FALLBACK_COUNT.with(|count| count.set(0));
-}
-
-fn note_legacy_user_dispatch_fallback() {
-    LEGACY_USER_DISPATCH_FALLBACK_COUNT.with(|count| count.set(count.get() + 1));
-}
 
 pub enum FevalHandling {
     Completed,
@@ -47,87 +23,6 @@ pub enum FevalHandling {
         args: Vec<Value>,
         functions: std::collections::HashMap<String, crate::bytecode::program::LegacyUserFunction>,
     },
-}
-
-struct PreparedLegacyUserDispatch {
-    pub func: LegacyUserFunction,
-    pub var_map: std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
-    pub func_program: runmat_hir::LegacyHirProgram,
-    pub func_vars: Vec<Value>,
-}
-
-pub(crate) struct CompiledLegacyUserDispatch {
-    pub func: LegacyUserFunction,
-    pub var_map: std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
-    pub bytecode: crate::bytecode::Bytecode,
-    pub func_vars: Vec<Value>,
-}
-
-fn compile_legacy_fallback_bytecode(
-    prog: &runmat_hir::LegacyHirProgram,
-    existing_functions: &std::collections::HashMap<String, LegacyUserFunction>,
-) -> Result<Bytecode, CompileError> {
-    let mut compiler = Compiler::new_legacy(prog);
-    compiler.functions = existing_functions.clone();
-    compiler.compile_program_legacy(prog)?;
-    #[cfg(feature = "native-accel")]
-    let accel_graph = build_accel_graph(&compiler.instructions, &compiler.var_types);
-    #[cfg(feature = "native-accel")]
-    let mut fusion_groups = accel_graph.detect_fusion_groups();
-    #[cfg(feature = "native-accel")]
-    annotate_fusion_groups_with_stack_layout(
-        &compiler.instructions,
-        &accel_graph,
-        &mut fusion_groups,
-    );
-    Ok(Bytecode {
-        instructions: compiler.instructions,
-        instr_spans: compiler.instr_spans,
-        call_arg_spans: compiler.call_arg_spans,
-        source_id: None,
-        var_count: compiler.var_count,
-        functions: compiler.functions,
-        semantic_functions: std::collections::HashMap::new(),
-        semantic_function_registry: SemanticFunctionRegistry::default(),
-        var_types: compiler.var_types,
-        var_names: std::collections::HashMap::new(),
-        layout: None,
-        #[cfg(feature = "native-accel")]
-        accel_graph: Some(accel_graph),
-        #[cfg(feature = "native-accel")]
-        fusion_groups,
-    })
-}
-
-fn compile_legacy_user_dispatch_fallback(
-    prepared: PreparedLegacyUserDispatch,
-    functions: &std::collections::HashMap<String, LegacyUserFunction>,
-) -> Result<CompiledLegacyUserDispatch, crate::compiler::CompileError> {
-    note_legacy_user_dispatch_fallback();
-    let PreparedLegacyUserDispatch {
-        func,
-        var_map,
-        func_program,
-        func_vars,
-    } = prepared;
-    let mut bytecode = compile_legacy_fallback_bytecode(&func_program, functions)?;
-    bytecode.source_id = func.source_id;
-    Ok(CompiledLegacyUserDispatch {
-        func,
-        var_map,
-        bytecode,
-        func_vars,
-    })
-}
-
-pub(crate) fn compile_legacy_named_user_dispatch_fallback(
-    name: &str,
-    functions: &std::collections::HashMap<String, LegacyUserFunction>,
-    args: &[Value],
-    vars: &[Value],
-) -> Result<CompiledLegacyUserDispatch, RuntimeError> {
-    let prepared = prepare_named_user_dispatch(name, functions, args, vars)?;
-    Ok(compile_legacy_user_dispatch_fallback(prepared, functions)?)
 }
 
 pub enum BuiltinHandling {
@@ -169,9 +64,7 @@ pub struct UserCallContext<'a> {
     pub stack: &'a mut Vec<Value>,
     pub name: &'a str,
     pub out_count: usize,
-    pub bytecode_functions: &'a std::collections::HashMap<String, LegacyUserFunction>,
     pub semantic_registry: &'a SemanticFunctionRegistry,
-    pub caller_functions: &'a mut std::collections::HashMap<String, LegacyUserFunction>,
     pub exception: ExceptionRouteContext<'a>,
 }
 
@@ -229,20 +122,19 @@ pub fn handle_feval_dispatch(
 
 pub async fn handle_feval_user_multi_output<IF, IFFut>(
     stack: &mut Vec<Value>,
-    caller_functions: &mut std::collections::HashMap<String, LegacyUserFunction>,
-    vars: &[Value],
+    _caller_functions: &mut std::collections::HashMap<String, LegacyUserFunction>,
+    _vars: &[Value],
     name: String,
     args: Vec<Value>,
-    functions: std::collections::HashMap<String, LegacyUserFunction>,
+    _functions: std::collections::HashMap<String, LegacyUserFunction>,
     semantic_registry: &SemanticFunctionRegistry,
     out_count: usize,
-    interpret_counts: IF,
+    _interpret_counts: IF,
 ) -> Result<(), RuntimeError>
 where
     IF: FnOnce(crate::bytecode::Bytecode, Vec<Value>, String, usize, usize) -> IFFut,
     IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
 {
-    let arg_count = args.len();
     if let Some(function) = semantic_registry.resolve_name(&name) {
         if let Some(result) =
             runmat_runtime::user_functions::try_call_semantic_function(function.0, &args, out_count)
@@ -252,80 +144,10 @@ where
             return Ok(());
         }
     }
-
-    let compiled = compile_legacy_named_user_dispatch_fallback(&name, &functions, &args, vars)?;
-    let CompiledLegacyUserDispatch {
-        func,
-        var_map,
-        bytecode: func_bytecode,
-        func_vars,
-    } = compiled;
-    for (k, v) in func_bytecode.functions.iter() {
-        caller_functions.insert(k.clone(), v.clone());
-    }
-    let func_result_vars =
-        interpret_counts(func_bytecode, func_vars, name.clone(), out_count, arg_count).await?;
-    stack.push(output_list_for_user_call(
-        &name,
-        &func,
-        &var_map,
-        &func_result_vars,
-        out_count,
-    )?);
-    Ok(())
-}
-
-fn unpack_prepared_user_call(prepared: PreparedLegacyUserCall) -> PreparedLegacyUserDispatch {
-    let PreparedLegacyUserCall {
-        func,
-        var_map,
-        func_program,
-        func_vars,
-    } = prepared;
-    PreparedLegacyUserDispatch {
-        func,
-        var_map,
-        func_program,
-        func_vars,
-    }
-}
-
-fn prepare_named_user_dispatch(
-    name: &str,
-    functions: &std::collections::HashMap<String, LegacyUserFunction>,
-    args: &[Value],
-    vars: &[Value],
-) -> Result<PreparedLegacyUserDispatch, RuntimeError> {
-    let func = lookup_legacy_user_function(name, functions)?;
-    validate_legacy_user_function_arity(name, &func, args.len())?;
-    let prepared = prepare_legacy_user_call(func, args, vars)?;
-    Ok(unpack_prepared_user_call(prepared))
-}
-
-fn push_user_call_outputs(
-    stack: &mut Vec<Value>,
-    name: &str,
-    func: &LegacyUserFunction,
-    var_map: &std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
-    func_result_vars: &[Value],
-    out_count: usize,
-) -> Result<(), RuntimeError> {
-    let outputs = collect_legacy_multi_outputs(name, func, var_map, func_result_vars, out_count)?;
-    for value in outputs {
-        stack.push(value);
-    }
-    Ok(())
-}
-
-fn output_list_for_user_call(
-    name: &str,
-    func: &LegacyUserFunction,
-    var_map: &std::collections::HashMap<runmat_hir::VarId, runmat_hir::VarId>,
-    func_result_vars: &[Value],
-    out_count: usize,
-) -> Result<Value, RuntimeError> {
-    let outputs = collect_legacy_multi_outputs(name, func, var_map, func_result_vars, out_count)?;
-    Ok(Value::OutputList(outputs))
+    Err(crate::interpreter::errors::mex(
+        "UndefinedFunction",
+        &format!("Undefined function: {name}"),
+    ))
 }
 
 fn push_single_result(stack: &mut Vec<Value>, result: Value) {
@@ -731,7 +553,7 @@ pub async fn handle_prepared_user_function_call<BF, BFFut, IF, IFFut>(
     args: Vec<Value>,
     refresh_vars: impl Fn(&[Value]),
     builtin_fallback: BF,
-    interpret_counts: IF,
+    _interpret_counts: IF,
 ) -> Result<UserCallHandling, RuntimeError>
 where
     BF: FnOnce(String, Vec<Value>, usize) -> BFFut,
@@ -743,9 +565,7 @@ where
         stack,
         name,
         out_count,
-        bytecode_functions,
         semantic_registry,
-        caller_functions,
         exception,
     } = ctx;
     let ExceptionRouteContext {
@@ -754,7 +574,6 @@ where
         last_exception,
         pc,
     } = exception;
-    let arg_count = args.len();
     if let Some(function) = semantic_registry.resolve_name(name) {
         if let Some(result) =
             runmat_runtime::user_functions::try_call_semantic_function(function.0, &args, out_count)
@@ -770,53 +589,16 @@ where
         return Ok(UserCallHandling::Completed);
     }
 
-    let compiled =
-        compile_legacy_named_user_dispatch_fallback(name, bytecode_functions, &args, vars)?;
-    let CompiledLegacyUserDispatch {
-        func,
-        var_map,
-        bytecode: func_bytecode,
-        func_vars,
-    } = compiled;
-    for (k, v) in func_bytecode.functions.iter() {
-        caller_functions.insert(k.clone(), v.clone());
-    }
-
-    let func_result_vars = match interpret_counts(
-        func_bytecode,
-        func_vars,
-        name.to_string(),
-        out_count,
-        arg_count,
+    let err = crate::interpreter::errors::mex(
+        "UndefinedFunction",
+        &format!("Undefined function: {name}"),
+    );
+    Ok(
+        match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc, refresh_vars) {
+            ExceptionHandling::Caught => UserCallHandling::Caught,
+            ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
+        },
     )
-    .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            return Ok(
-                match redirect_exception_to_catch(
-                    e,
-                    try_stack,
-                    vars,
-                    last_exception,
-                    pc,
-                    refresh_vars,
-                ) {
-                    ExceptionHandling::Caught => UserCallHandling::Caught,
-                    ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
-                },
-            )
-        }
-    };
-
-    if out_count == 1 {
-        push_user_call_outputs(stack, name, &func, &var_map, &func_result_vars, 1)?;
-    } else {
-        let output_list =
-            output_list_for_user_call(name, &func, &var_map, &func_result_vars, out_count)?;
-        push_single_result(stack, output_list);
-    }
-    Ok(UserCallHandling::Completed)
 }
 
 pub async fn handle_user_function_call<BF, BFFut, IF, IFFut>(
@@ -861,29 +643,6 @@ where
     let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
     push_single_result(stack, call_builtin_auto(name, &args).await?);
     Ok(BuiltinHandling::Completed)
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn prepared_user_call_resolves_semantic_before_legacy_fallback() {
-        let source = include_str!("calls.rs");
-        let prepared_start = source
-            .find("pub async fn handle_prepared_user_function_call")
-            .expect("prepared user call handler");
-        let prepared = &source[prepared_start..];
-        let semantic_lookup = prepared
-            .find("semantic_registry.resolve_name")
-            .expect("semantic lookup in prepared user call handler");
-        let legacy_fallback = prepared
-            .find("compile_legacy_named_user_dispatch_fallback")
-            .expect("legacy fallback in prepared user call handler");
-
-        assert!(
-            semantic_lookup < legacy_fallback,
-            "prepared user-call dispatch must resolve semantic names before legacy fallback"
-        );
-    }
 }
 
 pub async fn handle_builtin_expand_at_call<F, Fut>(

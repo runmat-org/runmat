@@ -29,10 +29,8 @@ pub use calls::{
     handle_load_method, handle_load_static_property, handle_method_call,
     handle_method_or_member_index_call, handle_method_or_member_index_expand_multi_call,
     handle_prepared_user_function_call, handle_register_class, handle_static_method_call,
-    handle_user_function_call, legacy_user_dispatch_fallback_count,
-    reset_legacy_user_dispatch_fallback_count, BuiltinHandling, FevalHandling, UserCallHandling,
+    handle_user_function_call, BuiltinHandling, FevalHandling, UserCallHandling,
 };
-pub(crate) use calls::{compile_legacy_named_user_dispatch_fallback, CompiledLegacyUserDispatch};
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
 pub use exceptions::{redirect_exception_to_catch, ExceptionHandling};
 pub use stack::{
@@ -640,9 +638,7 @@ pub async fn dispatch_instruction(
                     stack,
                     name,
                     out_count: 1,
-                    bytecode_functions,
                     semantic_registry,
-                    caller_functions: &mut context.functions,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,
@@ -710,9 +706,7 @@ pub async fn dispatch_instruction(
                     stack,
                     name,
                     out_count: *out_count,
-                    bytecode_functions,
                     semantic_registry,
-                    caller_functions: &mut context.functions,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,
@@ -844,9 +838,7 @@ pub async fn dispatch_instruction(
                     stack,
                     name,
                     out_count: 1,
-                    bytecode_functions,
                     semantic_registry,
-                    caller_functions: &mut context.functions,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,

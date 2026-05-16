@@ -102,27 +102,6 @@ runmat_thread_local! {
     static CURRENT_SEMANTIC_REGISTRY: RefCell<Option<*const SemanticFunctionRegistry>> = const { RefCell::new(None) };
 }
 
-runmat_thread_local! {
-    static DYNAMIC_LEGACY_USER_FUNCTIONS: RefCell<HashMap<String, LegacyUserFunction>> = RefCell::new(HashMap::new());
-}
-
-pub(crate) fn dynamic_legacy_user_functions_snapshot() -> HashMap<String, LegacyUserFunction> {
-    DYNAMIC_LEGACY_USER_FUNCTIONS.with(|slot| slot.borrow().clone())
-}
-
-fn clear_dynamic_legacy_user_functions() {
-    DYNAMIC_LEGACY_USER_FUNCTIONS.with(|slot| slot.borrow_mut().clear());
-}
-
-fn register_dynamic_legacy_user_functions(functions: &HashMap<String, LegacyUserFunction>) {
-    DYNAMIC_LEGACY_USER_FUNCTIONS.with(|slot| {
-        let mut map = slot.borrow_mut();
-        for (k, v) in functions {
-            map.insert(k.clone(), v.clone());
-        }
-    });
-}
-
 struct SemanticRegistryGuard {
     previous: Option<*const SemanticFunctionRegistry>,
 }
@@ -174,29 +153,6 @@ fn ensure_wasm_builtins_registered() {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn value_user_call_resolves_semantic_before_legacy_fallback() {
-        let source = include_str!("runner.rs");
-        let handler_start = source
-            .find("async fn invoke_user_function_value")
-            .expect("value user function handler");
-        let handler = &source[handler_start..];
-        let semantic_lookup = handler
-            .find("semantic_registry.resolve_name")
-            .expect("semantic lookup in value user function handler");
-        let legacy_fallback = handler
-            .find("compile_legacy_named_user_dispatch_fallback")
-            .expect("legacy fallback in value user function handler");
-
-        assert!(
-            semantic_lookup < legacy_fallback,
-            "value user-call dispatch must resolve semantic names before legacy fallback"
-        );
-    }
-}
-
 #[cfg(feature = "native-accel")]
 fn clear_residency(value: &Value) {
     accel_residency::clear_value(value);
@@ -210,30 +166,21 @@ fn same_gpu_handle(lhs: &Value, rhs: &Value) -> bool {
 async fn invoke_user_function_value(
     name: &str,
     args: &[Value],
-    functions: &HashMap<String, LegacyUserFunction>,
+    _functions: &HashMap<String, LegacyUserFunction>,
     semantic_registry: &SemanticFunctionRegistry,
-    vars: &mut [Value],
+    _vars: &mut [Value],
 ) -> Result<Value, RuntimeError> {
     if let Some(function) = semantic_registry.resolve_name(name) {
         return invoke_semantic_function_value(function.0, args, 1, semantic_registry).await;
     }
 
-    let arg_count = args.len();
-    let compiled =
-        interp_dispatch::compile_legacy_named_user_dispatch_fallback(name, functions, args, vars)?;
-    let interp_dispatch::CompiledLegacyUserDispatch {
-        func,
-        var_map,
-        bytecode: func_bytecode,
-        func_vars,
-    } = compiled;
-    register_dynamic_legacy_user_functions(&func_bytecode.functions);
-    let func_result_vars =
-        interpret_function_with_counts(&func_bytecode, func_vars, name, 1, arg_count).await?;
-    Ok(crate::call::shared::first_legacy_output_value(
-        &func,
-        &var_map,
-        &func_result_vars,
+    if let Some(result) = call_user::try_builtin_fallback_single(name, args).await? {
+        return Ok(result);
+    }
+
+    Err(mex(
+        "UndefinedFunction",
+        &format!("Undefined function: {name}"),
     ))
 }
 
@@ -393,10 +340,6 @@ pub async fn interpret_with_vars(
     initial_vars: &mut [Value],
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
-    let is_top_level = CALL_COUNTS.with(|cc| cc.borrow().is_empty());
-    if is_top_level {
-        clear_dynamic_legacy_user_functions();
-    }
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
     let state = Box::new(InterpreterState::new(
         bytecode.clone(),

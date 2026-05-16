@@ -651,8 +651,8 @@ fn test_error_handling() {
     let result = engine.execute_compiled(999, &mut []);
     assert!(result.is_err());
 
-    // Test executing with unsupported value types
-    let bytecode = Bytecode::with_instructions(vec![Instr::LoadConst(1.0)], 0);
+    // Test executing with non-numeric variables does not crash the compiled entrypoint.
+    let bytecode = Bytecode::with_instructions(vec![Instr::LoadVar(0), Instr::StoreVar(0)], 1);
 
     let hash = engine.calculate_bytecode_hash(&bytecode);
     for _ in 0..15 {
@@ -662,7 +662,7 @@ fn test_error_handling() {
 
     let mut vars = vec![Value::String("test".to_string())];
     let result = engine.execute_compiled(hash, &mut vars);
-    assert!(result.is_err());
+    assert!(result.is_ok());
 }
 
 #[test]
@@ -1001,11 +1001,11 @@ fn test_runtime_functions_available() {
 }
 
 #[test]
-fn test_jit_user_function_fallback() {
-    // Test: User-defined functions should fallback to interpreter correctly
+fn test_jit_legacy_user_function_fallback_removed() {
+    // Test: legacy-shaped user function metadata no longer triggers interpreter recompilation fallback.
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Intentional legacy fixture: this covers the unresolved/external callback fallback boundary.
+    // Intentional legacy fixture: this covers rejection of the removed unresolved callback fallback boundary.
     use std::collections::HashMap;
     let mut functions = HashMap::new();
     functions.insert(
@@ -1058,23 +1058,12 @@ fn test_jit_user_function_fallback() {
 
     let mut vars = vec![Value::Num(0.0)];
 
-    // Execute - should fallback to interpreter for function calls
+    // Execute - legacy fallback recompilation has been removed, so this must fail cleanly.
     let result = engine.execute_or_compile(&bytecode, &mut vars);
     assert!(
-        result.is_ok(),
-        "Function execution should work via interpreter fallback"
+        result.is_err(),
+        "legacy user-function fallback should not execute"
     );
-
-    let (status, used_jit) = result.unwrap();
-    assert_eq!(status, 0, "Execution should succeed");
-    assert!(!used_jit, "Should use interpreter fallback for functions");
-
-    // Check result
-    if let Value::Num(value) = &vars[0] {
-        assert_eq!(*value, 10.0, "my_double(5) should equal 10");
-    } else {
-        panic!("Result should be Num(10.0), got {:?}", vars[0]);
-    }
 }
 
 #[test]
@@ -1605,7 +1594,7 @@ fn test_jit_function_variable_preservation() {
     assert_eq!(vars[0], Value::Num(42.0));
     assert_eq!(vars[1], Value::Num(100.0));
 
-    // Intentional legacy fixture: legacy fallback can still see caller variables for unresolved external callbacks.
+    // Intentional legacy fixture: removed legacy fallback must not read caller variables for unresolved callbacks.
     let mut functions = HashMap::new();
     functions.insert(
         "add_globals".to_string(),
@@ -1657,9 +1646,9 @@ fn test_jit_function_variable_preservation() {
     // Extend vars array
     vars.push(Value::Num(0.0));
 
-    // Execute function code (should preserve existing variables)
+    // Execute function code; removed legacy fallback should fail without mutating existing variables.
     let result2 = engine.execute_or_compile(&function_bytecode, &mut vars);
-    assert!(result2.is_ok(), "Function code should execute");
+    assert!(result2.is_err(), "legacy fallback should not execute");
 
     // Verify original variables are preserved and result is computed
     assert_eq!(
@@ -1674,8 +1663,8 @@ fn test_jit_function_variable_preservation() {
     );
     assert_eq!(
         vars[2],
-        Value::Num(142.0),
-        "Function should compute 42 + 100 = 142"
+        Value::Num(0.0),
+        "failed legacy call must not write output"
     );
 }
 
@@ -1808,7 +1797,7 @@ fn test_jit_engine_statistics_with_functions() {
         let _ = engine.execute_or_compile(&jit_bytecode, &mut vars);
     }
 
-    // Intentional legacy fixture: statistics smoke coverage still exercises fallback execution.
+    // Intentional legacy fixture: statistics smoke coverage rejects removed fallback execution.
     let mut functions = HashMap::new();
     functions.insert(
         "noop".to_string(),
@@ -1830,7 +1819,9 @@ fn test_jit_engine_statistics_with_functions() {
         ..Bytecode::with_instructions(vec![Instr::CallFunction("noop".to_string(), 0)], 1)
     };
 
-    let _ = engine.execute_or_compile(&function_bytecode, &mut vars);
+    assert!(engine
+        .execute_or_compile(&function_bytecode, &mut vars)
+        .is_err());
 
     // Get statistics (should not crash)
     let stats = engine.stats();

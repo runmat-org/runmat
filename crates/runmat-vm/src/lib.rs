@@ -6,7 +6,7 @@ pub(crate) mod call;
 pub(crate) mod compiler;
 pub mod indexing;
 pub(crate) mod instr {
-    pub use crate::bytecode::instr::{ArgSpec, EmitLabel, EndExpr, Instr};
+    pub use crate::bytecode::instr::{ArgSpec, EndExpr, Instr};
 }
 pub(crate) mod interpreter;
 pub(crate) mod layout;
@@ -37,7 +37,4 @@ pub use runtime::workspace::{
 
 pub mod legacy {
     pub use crate::bytecode::program::LegacyUserFunction;
-    pub use crate::interpreter::dispatch::{
-        legacy_user_dispatch_fallback_count, reset_legacy_user_dispatch_fallback_count,
-    };
 }
