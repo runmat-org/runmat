@@ -28,13 +28,8 @@ fn compile_bytecode(lowering: &runmat_hir::LoweringResult) -> Result<runmat_vm::
         })?;
     let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)
         .map_err(|err| anyhow::anyhow!(format!("MIR lowering error: {err:?}")))?;
-    let mut bytecode = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)
+    let bytecode = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)
         .map_err(|err| anyhow::anyhow!(format!("Compile error: {err:?}")))?;
-    bytecode.var_names = lowering
-        .var_names
-        .iter()
-        .map(|(id, name)| (id.0, name.clone()))
-        .collect();
     Ok(bytecode)
 }
 

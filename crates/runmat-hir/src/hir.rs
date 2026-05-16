@@ -4,7 +4,6 @@ use crate::{
 };
 use runmat_parser as parser;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Canonical semantic HIR product for one compiled source set.
 ///
@@ -1099,21 +1098,6 @@ pub struct LoweringResult {
     pub assembly: HirAssembly,
     pub compatibility_mode: Option<CompatibilityMode>,
     pub semantic_index: SemanticIndex,
-    pub hir: LegacyHirProgram,
-    pub variables: HashMap<String, usize>,
-    pub functions: HashMap<String, LegacyHirStmt>,
-    pub var_types: Vec<Type>,
-    pub var_names: HashMap<VarId, String>,
-    /// Temporary compatibility placeholder during Plan 1 migration.
-    ///
-    /// Lowering no longer computes legacy analysis products. Tests and temporary
-    /// consumers that still need these facts should call the legacy inference
-    /// helpers explicitly until Plan 2 replaces them with semantic analysis.
-    pub inferred_globals: HashMap<VarId, Type>,
-    /// See `inferred_globals`.
-    pub inferred_function_envs: HashMap<String, HashMap<VarId, Type>>,
-    /// See `inferred_globals`.
-    pub inferred_function_returns: HashMap<String, Vec<Type>>,
 }
 
 #[cfg(test)]

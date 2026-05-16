@@ -28,12 +28,6 @@ impl RunMatSession {
         bytecode.source_id = Some(source_id);
         let (semantic_function_registry_after_success, next_semantic_function_id_after_success) =
             self.prepare_session_semantic_function_registry(&mut bytecode);
-        let new_function_names: HashSet<String> = lowering.functions.keys().cloned().collect();
-        for (name, func) in bytecode.functions.iter_mut() {
-            if new_function_names.contains(name) {
-                func.source_id = Some(source_id);
-            }
-        }
         Ok(PreparedExecution {
             ast,
             lowering,

@@ -777,25 +777,7 @@ fn build_semantic_model(
     let mut function_lookup: HashMap<String, Vec<usize>> = HashMap::new();
     let mut globals = HashMap::new();
 
-    let legacy_vars_by_name = lowering.variables.clone();
     let binding_shapes = runmat_static_analysis::infer_binding_shapes(&lowering);
-
-    for (name, var_id) in &lowering.variables {
-        let ty = lowering
-            .inferred_globals
-            .get(&runmat_hir::VarId(*var_id))
-            .cloned()
-            .or_else(|| lowering.var_types.get(*var_id).cloned())
-            .unwrap_or(Type::Unknown);
-        globals.insert(
-            name.clone(),
-            VariableSymbol {
-                name: name.clone(),
-                ty,
-                kind: VariableKind::Global,
-            },
-        );
-    }
 
     for binding in &lowering.assembly.bindings {
         if matches!(
@@ -824,16 +806,15 @@ fn build_semantic_model(
         let func_name = function.name.0.clone();
 
         let mut variables = HashMap::new();
-        let inferred_env = lowering.inferred_function_envs.get(&func_name);
         for param in &function.params {
             let Some(binding) = lowering.assembly.bindings.get(param.0) else {
                 continue;
             };
             let name = binding.name.0.clone();
-            let ty = inferred_env
-                .and_then(|env| legacy_type_for_name_in_env(env, &legacy_vars_by_name, &name))
-                .or_else(|| binding_shapes.get(param).cloned().map(type_from_shape))
-                .or_else(|| legacy_type_for_name(&lowering, &legacy_vars_by_name, &name))
+            let ty = binding_shapes
+                .get(param)
+                .cloned()
+                .map(type_from_shape)
                 .unwrap_or(Type::Unknown);
             variables.insert(
                 name.clone(),
@@ -849,10 +830,10 @@ fn build_semantic_model(
                 continue;
             };
             let name = binding.name.0.clone();
-            let ty = inferred_env
-                .and_then(|env| legacy_type_for_name_in_env(env, &legacy_vars_by_name, &name))
-                .or_else(|| binding_shapes.get(out).cloned().map(type_from_shape))
-                .or_else(|| legacy_type_for_name(&lowering, &legacy_vars_by_name, &name))
+            let ty = binding_shapes
+                .get(out)
+                .cloned()
+                .map(type_from_shape)
                 .unwrap_or(Type::Unknown);
             variables.insert(
                 name.clone(),
@@ -917,28 +898,6 @@ fn build_semantic_model(
         status_message: String::new(),
         diagnostics,
     }
-}
-
-fn legacy_type_for_name(
-    lowering: &LoweringResult,
-    legacy_vars_by_name: &HashMap<String, usize>,
-    name: &str,
-) -> Option<Type> {
-    let var_id = *legacy_vars_by_name.get(name)?;
-    lowering
-        .inferred_globals
-        .get(&runmat_hir::VarId(var_id))
-        .cloned()
-        .or_else(|| lowering.var_types.get(var_id).cloned())
-}
-
-fn legacy_type_for_name_in_env(
-    env: &HashMap<runmat_hir::VarId, Type>,
-    legacy_vars_by_name: &HashMap<String, usize>,
-    name: &str,
-) -> Option<Type> {
-    let var_id = *legacy_vars_by_name.get(name)?;
-    env.get(&runmat_hir::VarId(var_id)).cloned()
 }
 
 fn type_from_shape(shape: Vec<Option<usize>>) -> Type {

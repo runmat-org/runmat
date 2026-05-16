@@ -87,17 +87,6 @@ pub fn lower(
     let hir = HirProgram { body, var_types };
     validate_classdefs(&hir)?;
 
-    let mut variables: HashMap<String, usize> = HashMap::new();
-    for (name, var_id) in &ctx.scopes[0].bindings {
-        variables.insert(name.clone(), var_id.0);
-    }
-    let mut var_names = HashMap::new();
-    for (idx, name_opt) in ctx.var_names.iter().enumerate() {
-        if let Some(name) = name_opt {
-            var_names.insert(VarId(idx), name.clone());
-        }
-    }
-
     let (mut assembly, semantic_index) = SemanticCtx::lower_program(prog, context)?;
     assembly.compatibility_mode = context.compatibility_mode.clone();
 
@@ -105,14 +94,6 @@ pub fn lower(
         assembly,
         compatibility_mode: context.compatibility_mode.clone(),
         semantic_index,
-        hir,
-        variables,
-        functions: ctx.functions,
-        var_types: ctx.var_types,
-        var_names,
-        inferred_globals: HashMap::new(),
-        inferred_function_envs: HashMap::new(),
-        inferred_function_returns: HashMap::new(),
     })
 }
 

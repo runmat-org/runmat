@@ -235,9 +235,11 @@ impl RunMatSession {
                                 .with_identifier("RunMat:input:LowerError")
                                 .build()
                         })?;
-                        let result_idx = lowering.variables.get("__runmat_input_result__").copied();
                         let bc =
                             compile_eval_hook_bytecode(&lowering).map_err(RuntimeError::from)?;
+                        let result_idx = bc.var_names.iter().find_map(|(idx, name)| {
+                            (name == "__runmat_input_result__").then_some(*idx)
+                        });
                         let vars = runmat_vm::interpret(&bc).await?;
                         result_idx
                             .and_then(|idx| vars.get(idx).cloned())
@@ -307,7 +309,7 @@ impl RunMatSession {
         let display = execution_display_context(&lowering.assembly, bytecode.layout.as_ref());
         let display_context = display.context;
         let display_var_ids = display.display_var_ids;
-        let hir = lowering.hir;
+        let semantic_stmt_count = semantic_entry_statement_count(&lowering.assembly);
         let execution_vars = execution_workspace_mapping(&bytecode);
         let max_var_id = execution_vars.values().copied().max().unwrap_or(0);
         if debug_trace {
@@ -416,9 +418,9 @@ impl RunMatSession {
         let final_stmt_emit = display_context.final_stmt_emit;
 
         if self.verbose {
-            debug!("HIR body len: {}", hir.body.len());
-            if !hir.body.is_empty() {
-                debug!("HIR statement: {:?}", &hir.body[0]);
+            debug!("Semantic entry body len: {semantic_stmt_count}");
+            if let Some(stmt) = semantic_first_entry_statement(&lowering.assembly) {
+                debug!("Semantic HIR statement: {stmt:?}");
             }
             debug!("is_semicolon_suppressed: {is_semicolon_suppressed}");
         }
@@ -544,7 +546,7 @@ impl RunMatSession {
                     }
 
                     // Handle assignment statements (x = 42 should show the assigned value unless suppressed)
-                    if hir.body.len() == 1 {
+                    if semantic_stmt_count == 1 {
                         if let Some(var_id) = display_context.first_assign_var {
                             if let Some(name) = id_to_name.get(&var_id) {
                                 assigned_this_execution.insert(name.clone());
@@ -1009,6 +1011,26 @@ fn execution_workspace_mapping(bytecode: &runmat_vm::Bytecode) -> HashMap<String
         }
     }
     mapping
+}
+
+fn semantic_entry_function(assembly: &runmat_hir::HirAssembly) -> Option<&runmat_hir::HirFunction> {
+    let entrypoint = assembly.entrypoints.first()?;
+    assembly
+        .functions
+        .iter()
+        .find(|function| function.id == entrypoint.target)
+}
+
+fn semantic_entry_statement_count(assembly: &runmat_hir::HirAssembly) -> usize {
+    semantic_entry_function(assembly)
+        .map(|function| function.body.statements.len())
+        .unwrap_or(0)
+}
+
+fn semantic_first_entry_statement(
+    assembly: &runmat_hir::HirAssembly,
+) -> Option<&runmat_hir::HirStmt> {
+    semantic_entry_function(assembly)?.body.statements.first()
 }
 
 struct SessionExecution {
