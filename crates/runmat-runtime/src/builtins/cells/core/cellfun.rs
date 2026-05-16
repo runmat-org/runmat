@@ -498,9 +498,14 @@ impl Callable {
     async fn call(&self, args: &[Value]) -> BuiltinResult<Value> {
         match self {
             Callable::Builtin { name } => {
-                if let Some(result) =
-                    user_functions::try_call_semantic_function_by_name(name, args, 1).await
-                {
+                let request = user_functions::SemanticCallableRequest {
+                    function: None,
+                    name: Some(name.clone()),
+                    args: args.to_vec(),
+                    requested_outputs: 1,
+                    kind: user_functions::SemanticCallableKind::Cellfun,
+                };
+                if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
                     return result;
                 }
                 call_builtin_async(name, args).await
@@ -509,8 +514,15 @@ impl Callable {
                 let mut captures = c.captures.clone();
                 captures.extend_from_slice(args);
                 if let Some(function) = c.semantic_function {
+                    let request = user_functions::SemanticCallableRequest {
+                        function: Some(function),
+                        name: Some(c.function_name.clone()),
+                        args: captures.clone(),
+                        requested_outputs: 1,
+                        kind: user_functions::SemanticCallableKind::Cellfun,
+                    };
                     if let Some(result) =
-                        user_functions::try_call_semantic_function(function, &captures, 1).await
+                        user_functions::try_call_semantic_descriptor(request).await
                     {
                         return result;
                     }
