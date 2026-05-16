@@ -282,6 +282,7 @@ Current state:
 - Typed member bytecode now covers member load/store, dynamic member load/store, method/member-index calls, and expanded member-index calls.
 - Object protocol calls now route through an `ObjectIndexDescriptor` serialization boundary in the VM call layer; remaining work is to move more call sites to build descriptors directly instead of prebuilding selector cells before the helper call.
 - Object expansion paths in the main VM dispatch loop now build `ObjectIndexDescriptor` directly for paren/brace `subsref` instead of calling the legacy-shaped object index helper.
+- Builtin, `feval`, and user-function expand-multi object paths now build `ObjectIndexDescriptor` directly for brace `subsref` expansion.
 
 Target state:
 
