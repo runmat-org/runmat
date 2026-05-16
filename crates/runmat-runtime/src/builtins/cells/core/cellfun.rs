@@ -496,27 +496,12 @@ impl Callable {
     }
 
     async fn call(&self, args: &[Value]) -> BuiltinResult<Value> {
-        fn is_undefined_function(err: &RuntimeError) -> bool {
-            let identifier = err.identifier().unwrap_or("").to_ascii_lowercase();
-            let message = err.message().to_ascii_lowercase();
-            identifier.contains("undefinedfunction") || message.contains("undefined function")
-        }
         match self {
             Callable::Builtin { name } => {
                 if let Some(result) =
                     user_functions::try_call_semantic_function_by_name(name, args, 1).await
                 {
                     return result;
-                }
-                if let Some(result) = user_functions::try_call_user_function(name, args).await {
-                    match result {
-                        Ok(value) => return Ok(value),
-                        Err(err) => {
-                            if !is_undefined_function(&err) {
-                                return Err(err);
-                            }
-                        }
-                    }
                 }
                 call_builtin_async(name, args).await
             }
@@ -528,18 +513,6 @@ impl Callable {
                         user_functions::try_call_semantic_function(function, &captures, 1).await
                     {
                         return result;
-                    }
-                }
-                if let Some(result) =
-                    user_functions::try_call_user_function(&c.function_name, &captures).await
-                {
-                    match result {
-                        Ok(value) => return Ok(value),
-                        Err(err) => {
-                            if !is_undefined_function(&err) {
-                                return Err(err);
-                            }
-                        }
                     }
                 }
                 call_builtin_async(&c.function_name, &captures).await

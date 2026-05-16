@@ -79,8 +79,12 @@ mod tests {
 
     #[test]
     fn ode45_scalar_decay_returns_reasonable_final_value() {
-        let _guard = crate::user_functions::install_user_function_invoker(Some(Arc::new(
-            move |_name, args| {
+        let _resolver =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
+                Some(0)
+            })));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_function, args, _requested_outputs| {
                 let y = match &args[1] {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),
@@ -109,8 +113,14 @@ mod tests {
 
     #[test]
     fn ode45_rejects_nan_rhs() {
-        let _guard = crate::user_functions::install_user_function_invoker(Some(Arc::new(
-            move |_name, _args| Box::pin(async move { Ok(Value::Num(f64::NAN)) }),
+        let _resolver =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
+                Some(0)
+            })));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_function, _args, _requested_outputs| {
+                Box::pin(async move { Ok(Value::Num(f64::NAN)) })
+            },
         )));
 
         let err = block_on(ode45_builtin(

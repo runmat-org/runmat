@@ -878,8 +878,12 @@ mod tests {
 
     #[test]
     fn ode15s_newton_step_handles_picard_unstable_stiff_decay() {
-        let _guard = crate::user_functions::install_user_function_invoker(Some(Arc::new(
-            move |_name, args| {
+        let _resolver =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
+                Some(0)
+            })));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_function, args, _requested_outputs| {
                 let y = match &args[1] {
                     Value::Num(n) => *n,
                     other => panic!("expected scalar state, got {other:?}"),

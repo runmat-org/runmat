@@ -99,10 +99,6 @@ runmat_thread_local! {
 }
 
 runmat_thread_local! {
-    static USER_FUNCTION_VARS: RefCell<Option<*mut Vec<Value>>> = const { RefCell::new(None) };
-}
-
-runmat_thread_local! {
     static CURRENT_SEMANTIC_REGISTRY: RefCell<Option<*const SemanticFunctionRegistry>> = const { RefCell::new(None) };
 }
 
@@ -127,21 +123,8 @@ fn register_dynamic_legacy_user_functions(functions: &HashMap<String, LegacyUser
     });
 }
 
-struct UserFunctionVarsGuard {
-    previous: Option<*mut Vec<Value>>,
-}
-
 struct SemanticRegistryGuard {
     previous: Option<*const SemanticFunctionRegistry>,
-}
-
-impl Drop for UserFunctionVarsGuard {
-    fn drop(&mut self) {
-        let previous = self.previous.take();
-        USER_FUNCTION_VARS.with(|slot| {
-            *slot.borrow_mut() = previous;
-        });
-    }
 }
 
 impl Drop for SemanticRegistryGuard {
@@ -151,12 +134,6 @@ impl Drop for SemanticRegistryGuard {
             *slot.borrow_mut() = previous;
         });
     }
-}
-
-fn install_user_function_vars(vars: &mut Vec<Value>) -> UserFunctionVarsGuard {
-    let vars_ptr = vars as *mut Vec<Value>;
-    let previous = USER_FUNCTION_VARS.with(|slot| slot.borrow_mut().replace(vars_ptr));
-    UserFunctionVarsGuard { previous }
 }
 
 fn install_semantic_registry(registry: &SemanticFunctionRegistry) -> SemanticRegistryGuard {
@@ -476,30 +453,8 @@ async fn run_interpreter_inner(
             fusion_plan: _,
         bytecode,
     } = state;
-    let functions = Arc::new(context.functions.clone());
     let semantic_registry = Arc::new(bytecode.semantic_registry());
-    let semantic_registry_for_user_invoker = Arc::clone(&semantic_registry);
     let _semantic_registry_guard = install_semantic_registry(&semantic_registry);
-    let _user_function_vars_guard = install_user_function_vars(&mut vars);
-    let _user_function_guard = user_functions::install_user_function_invoker(Some(Arc::new(
-        move |name: &str, args: &[Value]| {
-            let name = name.to_string();
-            let args = args.to_vec();
-            let functions = Arc::clone(&functions);
-            let semantic_registry = Arc::clone(&semantic_registry_for_user_invoker);
-            Box::pin(async move {
-                let vars_ptr = USER_FUNCTION_VARS.with(|slot| *slot.borrow());
-                let Some(vars_ptr) = vars_ptr else {
-                    return Err(mex(
-                        "InternalStateUnavailable",
-                        "user function vars not installed",
-                    ));
-                };
-                let vars = unsafe { &mut *vars_ptr };
-                invoke_user_function_value(&name, &args, &functions, &semantic_registry, vars).await
-            })
-        },
-    )));
     let semantic_registry_for_semantic_invoker = Arc::clone(&semantic_registry);
     let _semantic_function_guard =
         user_functions::install_semantic_function_invoker(Some(Arc::new(

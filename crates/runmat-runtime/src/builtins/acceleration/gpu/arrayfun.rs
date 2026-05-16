@@ -637,9 +637,6 @@ impl Callable {
                 {
                     return result;
                 }
-                if let Some(result) = user_functions::try_call_user_function(name, args).await {
-                    return result;
-                }
                 crate::call_builtin_async(name, args).await
             }
             Callable::Closure(c) => {
@@ -651,11 +648,6 @@ impl Callable {
                     {
                         return result;
                     }
-                }
-                if let Some(result) =
-                    user_functions::try_call_user_function(&c.function_name, &merged).await
-                {
-                    return result;
                 }
                 crate::call_builtin_async(&c.function_name, &merged).await
             }

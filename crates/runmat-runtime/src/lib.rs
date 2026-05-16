@@ -1053,20 +1053,6 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         {
             return result;
         }
-        if let Some(result) = crate::user_functions::try_call_user_function(name, args).await {
-            match result {
-                Ok(value) => return Ok(value),
-                Err(err) => {
-                    let identifier = err.identifier().unwrap_or("").to_ascii_lowercase();
-                    let message = err.message().to_ascii_lowercase();
-                    let is_undefined = identifier.contains("undefinedfunction")
-                        || message.contains("undefined function");
-                    if !is_undefined {
-                        return Err(err);
-                    }
-                }
-            }
-        }
         crate::call_builtin_async(name, args).await
     }
 

@@ -298,9 +298,13 @@ mod tests {
     }
 
     #[test]
-    fn fsolve_vector_system_via_named_user_invoker() {
-        let _guard = crate::user_functions::install_user_function_invoker(Some(
-            std::sync::Arc::new(|_name, args| {
+    fn fsolve_vector_system_via_semantic_resolver() {
+        let _resolver =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
+                Some(0)
+            })));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
+            std::sync::Arc::new(|_function, args, _requested_outputs| {
                 let x = match &args[0] {
                     Value::Tensor(t) => t.data.clone(),
                     _ => panic!("expected tensor input"),
@@ -336,8 +340,12 @@ mod tests {
     fn fsolve_preserves_row_vector_shape_for_callback() {
         let seen_shapes = Arc::new(Mutex::new(Vec::new()));
         let seen_shapes_for_invoker = Arc::clone(&seen_shapes);
-        let _guard = crate::user_functions::install_user_function_invoker(Some(Arc::new(
-            move |_name, args| {
+        let _resolver =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
+                Some(0)
+            })));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_function, args, _requested_outputs| {
                 let (x, shape) = match &args[0] {
                     Value::Tensor(t) => (t.data.clone(), t.shape.clone()),
                     other => panic!("expected tensor input, got {other:?}"),
@@ -373,8 +381,12 @@ mod tests {
     fn fsolve_preserves_matrix_shape_for_callback() {
         let seen_shapes = Arc::new(Mutex::new(Vec::new()));
         let seen_shapes_for_invoker = Arc::clone(&seen_shapes);
-        let _guard = crate::user_functions::install_user_function_invoker(Some(Arc::new(
-            move |_name, args| {
+        let _resolver =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_name| {
+                Some(0)
+            })));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_function, args, _requested_outputs| {
                 let (x, shape) = match &args[0] {
                     Value::Tensor(t) => (t.data.clone(), t.shape.clone()),
                     other => panic!("expected tensor input, got {other:?}"),
