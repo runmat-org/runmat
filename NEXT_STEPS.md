@@ -178,6 +178,7 @@ Current state:
 - Multi-output `feval` dispatch now checks the semantic registry and errors on unresolved user-function names instead of invoking a named legacy fallback.
 - `feval` closure dispatch resolves closure names through the semantic registry when an embedded semantic function id is unavailable.
 - Runtime `feval` now invokes embedded `Closure.semantic_function` and `Value::SemanticFunctionHandle` identities directly before name fallback.
+- Runtime `feval` now routes semantic callback attempts through `SemanticCallableRequest`, the runtime-facing descriptor bridge for function identity/name, prepared args, requested outputs, and callback kind.
 - Runtime `feval`, `cellfun`, and `arrayfun` now ask a VM-installed semantic name resolver before name-only user-function or builtin fallback, so runtime callback strings/`FunctionHandle(name)` values can still resolve to session semantic functions when the active VM bytecode registry knows the name.
 - Local and previous-input user-function calls inside `end` expressions now carry `EndExpr::SemanticCall` identities instead of relying on name recovery.
 - Compiler-produced `feval('name', ...)` callees for local/session semantic functions now bind to `CreateSemanticFunctionHandle` before reaching runtime `feval`, including multi-output and expanded-argument forms.
@@ -216,7 +217,7 @@ Current unresolved-call inventory:
 - Named/expanded user calls: `handle_prepared_user_function_call` checks the semantic registry, then builtin dispatch, then raises `UndefinedFunction`. Primary MIR lowering emits `CallSemanticFunction*` for semantic function callees.
 - End-expression callbacks: local/session user-function calls carry `EndExpr::SemanticCall` and execute through `CallableDescriptor`; unresolved names or values without semantic identity now fail instead of entering legacy recompilation.
 - Turbine external callback behavior: direct semantic calls and semantic-known named calls lower by `FunctionId`; unresolved named callbacks now remain outside JIT semantic execution and no longer invoke isolated or VM legacy user-function fallback.
-- Runtime callback builtins: `feval`, `cellfun`, and `arrayfun` invoke embedded semantic closures or semantic function handles directly, and runtime string/name-only callback values ask the active VM semantic resolver before builtin/name fallback.
+- Runtime callback builtins: `feval` invokes semantic callbacks through `SemanticCallableRequest`; `cellfun` and `arrayfun` still invoke embedded semantic closures/handles directly and ask the active VM semantic resolver before builtin/name fallback.
 
 Classification:
 

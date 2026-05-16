@@ -11,6 +11,23 @@ pub type SemanticFunctionInvoker =
     dyn Fn(usize, &[Value], usize) -> UserFunctionFuture + Send + Sync;
 pub type SemanticFunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticCallableKind {
+    Feval,
+    Cellfun,
+    Arrayfun,
+    Other,
+}
+
+#[derive(Debug, Clone)]
+pub struct SemanticCallableRequest {
+    pub function: Option<usize>,
+    pub name: Option<String>,
+    pub args: Vec<Value>,
+    pub requested_outputs: usize,
+    pub kind: SemanticCallableKind,
+}
+
 runmat_thread_local! {
     static SEMANTIC_FUNCTION_INVOKER: RefCell<Option<Arc<SemanticFunctionInvoker>>> =
         const { RefCell::new(None) };
@@ -78,4 +95,15 @@ pub async fn try_call_semantic_function_by_name(
     let resolver = SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone())?;
     let function = resolver(name)?;
     try_call_semantic_function(function, args, requested_outputs).await
+}
+
+pub async fn try_call_semantic_descriptor(
+    request: SemanticCallableRequest,
+) -> Option<Result<Value, RuntimeError>> {
+    if let Some(function) = request.function {
+        return try_call_semantic_function(function, &request.args, request.requested_outputs)
+            .await;
+    }
+    let name = request.name.as_deref()?;
+    try_call_semantic_function_by_name(name, &request.args, request.requested_outputs).await
 }
