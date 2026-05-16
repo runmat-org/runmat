@@ -20,7 +20,7 @@ pub fn compile(
     let mut c = Compiler::new(hir, mir, layout, entrypoint)?;
     c.compile()?;
     let semantic_functions =
-        compile_semantic_functions(hir, mir, c.layout.as_ref().unwrap(), entrypoint)?;
+        compile_semantic_functions(hir, mir, c.layout.as_ref().unwrap(), Some(entrypoint))?;
     let semantic_function_registry = SemanticFunctionRegistry::new(semantic_functions.clone());
     let var_names = c
         .layout
@@ -47,7 +47,6 @@ pub fn compile(
         call_arg_spans: c.call_arg_spans,
         source_id: None,
         var_count: c.var_count,
-        functions: HashMap::new(),
         semantic_functions,
         semantic_function_registry,
         var_types: c.var_types,
@@ -60,15 +59,23 @@ pub fn compile(
     })
 }
 
+pub fn compile_semantic_function_registry(
+    hir: &HirAssembly,
+    mir: &MirAssembly,
+) -> Result<HashMap<FunctionId, SemanticFunctionBytecode>, CompileError> {
+    let layout = derive_layout(hir, mir)
+        .map_err(|err| CompileError::new(format!("failed to derive VM layout: {err:?}")))?;
+    compile_semantic_functions(hir, mir, &layout, None)
+}
+
 fn compile_semantic_functions(
     hir: &HirAssembly,
     mir: &MirAssembly,
     layout: &crate::layout::VmAssemblyLayout,
-    entrypoint: EntrypointId,
+    entrypoint: Option<EntrypointId>,
 ) -> Result<HashMap<FunctionId, SemanticFunctionBytecode>, CompileError> {
-    let entry_target = layout
-        .entrypoints
-        .get(&entrypoint)
+    let entry_target = entrypoint
+        .and_then(|entrypoint| layout.entrypoints.get(&entrypoint))
         .map(|entry| entry.target);
     let mut functions = HashMap::new();
     for function in &hir.functions {

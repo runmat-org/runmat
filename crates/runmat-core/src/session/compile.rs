@@ -65,12 +65,17 @@ impl RunMatSession {
         &self,
         lowering: &LoweringResult,
     ) -> std::result::Result<runmat_vm::Bytecode, RunError> {
-        let entrypoint = lowering.assembly.entrypoints.first().ok_or_else(|| {
-            RunError::Compile(runmat_vm::CompileError::new(
-                "semantic bytecode compile requires an entrypoint",
-            ))
-        })?;
         let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)?;
+        let Some(entrypoint) = lowering.assembly.entrypoints.first() else {
+            let semantic_functions =
+                runmat_vm::compile_semantic_function_registry(&lowering.assembly, &mir)?;
+            let semantic_function_registry =
+                runmat_vm::SemanticFunctionRegistry::new(semantic_functions.clone());
+            let mut bytecode = runmat_vm::Bytecode::empty();
+            bytecode.semantic_functions = semantic_functions;
+            bytecode.semantic_function_registry = semantic_function_registry;
+            return Ok(bytecode);
+        };
         Ok(runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)?)
     }
 

@@ -188,6 +188,7 @@ Current state:
 - Turbine direct and named semantic multi-output calls now compile through a semantic host callback that writes numeric outputs into JIT result slots; semantic expanded calls now compile through tagged `TurbineValue[]` variables plus `TurbineArgSpec`, including true cell `expand_all` arguments. Generic `feval`/external expansion and object expansion remain outside this semantic JIT path.
 - Multi-output `feval` no longer enters legacy user fallback after semantic resolution; unresolved names now error instead of reconstructing legacy HIR bytecode.
 - The VM legacy user fallback compiler path has been removed; `compile_legacy_named_user_dispatch_fallback`, `compile_legacy_user_dispatch_fallback`, `PreparedLegacyUserCall`, and `CompiledLegacyUserDispatch` no longer exist.
+- `LegacyUserFunction`, `Bytecode.functions`, and `ExecutionContext.functions` have been removed from VM bytecode/runtime metadata; callable behavior now goes through semantic function registries or explicit unresolved-call errors.
 - The old VM legacy HIR compiler modules have been deleted; production bytecode compilation is semantic HIR/MIR/layout driven.
 
 Target state:
@@ -204,7 +205,7 @@ Target state:
 
 Design implication:
 
-- `LegacyUserFunction` remains only as transitional bytecode metadata for compatibility fixtures and public legacy namespace compatibility; it is no longer executed through a legacy recompilation fallback.
+- Legacy user-function bytecode metadata is gone; unresolved or external function names must become semantic descriptors before execution or fail as unresolved calls.
 - The long-term replacement for remaining name-shaped call metadata is a semantic call descriptor keyed by `FunctionId`/`DefPath` plus layout/capture data.
 
 Current unresolved-call inventory:
@@ -234,7 +235,7 @@ Completed implementation slices:
 Observed older-HIR artifacts worth collapsing:
 
 - `LegacyHirProgram`, `LegacyHirStmt`, and `LegacyHirExpr` no longer appear in compiled VM source; remaining references are in HIR compatibility code and tests.
-- The legacy-shaped user-function record is still exposed only under `runmat_vm::legacy::*`; fallback counters and fallback compiler exports have been removed. Downstream callers should move to semantic function bytecode/registry APIs.
+- The legacy-shaped user-function record and `runmat_vm::legacy::*` compatibility namespace have been removed. Downstream callers should use semantic function bytecode/registry APIs.
 - VM execution internals such as `CallFrame` and `ExecutionContext` are no longer root-level `runmat_vm` exports or bytecode prelude exports; call-stack diagnostics use runtime call-frame types instead.
 - Legacy bytecode compilation is no longer exposed through VM public modules or used by VM dispatch.
 - `RunMatSession` now persists workspace bindings as stable ABI keys plus current VM slots; HIR lowering receives a derived slot map only at compile time.
@@ -246,7 +247,7 @@ Target cleanup direction:
 
 - Keep source compatibility behavior, but represent it through semantic assembly, analysis facts, and workspace ABI records.
 - Continue using the session workspace binding table as the durable workspace ABI source, deriving transient VM slot maps only for compiler/runtime execution boundaries.
-- Continue replacing remaining legacy-shaped metadata (`LegacyUserFunction`, `Bytecode.functions`) with semantic descriptors or remove it from public compatibility surfaces.
+- Keep replacing remaining HIR compatibility seams with semantic descriptors or remove them from public compatibility surfaces.
 - Move tests that only need compiler behavior from hand-built legacy HIR to semantic source fixtures or semantic MIR fixtures.
 - Do not reintroduce legacy dispatch helpers for unresolved/external callbacks; those identities need registry-backed semantic descriptors.
 
@@ -395,14 +396,14 @@ Treat current MIR bytecode gap markers as follows:
 
 ## Recommended Semantic Design Slice
 
-The next high-leverage slice is replacing remaining legacy-shaped callable metadata with semantic descriptors, not another isolated callback patch.
+The next high-leverage slice is replacing remaining name-shaped callable behavior with semantic descriptors, not another isolated callback patch.
 
 Concrete plan:
 
 1. Replace non-external dynamic callback sites with registry lookup or typed semantic lowering.
 2. Extend registry-backed lowering beyond direct calls to remaining callable shapes that still carry only dynamic names, where layout/capture information is available.
 3. Keep passing semantic callable identity through end-expression callback paths instead of rediscovering names at runtime.
-4. Remove or migrate remaining `LegacyUserFunction` / `Bytecode.functions` compatibility fixtures to semantic descriptors.
+4. Add callable descriptors for remaining dynamic-name callback shapes that can be resolved before runtime.
 5. Add coverage that unresolved external callback names fail cleanly instead of reintroducing legacy recompilation.
 
 Current ratchet status:
@@ -436,9 +437,8 @@ Current ratchet status:
 - VM indexing-property tests now run semantic bytecode for scalar/logical/range write broadcasts, end-arithmetic stores, negative-step linear indexing, roundtrip scatter, fastpath broadcasts, and simple cell expansion; advanced N-D empty/vector selector and expansion cases remain legacy-executed.
 - Remaining `functions.rs` legacy execution sites cover semantic gaps for varargout mismatch diagnostics, struct-field vector/range indexing through member reads, test-class constructor resolution, metaclass postfix member/method lowering, dependent property backing behavior, `containers.Map` package calls, and string aggregate concatenation.
 - Turbine mixed arithmetic/function-call, simple scalar function compilation, scalar callback variable-isolation, compute-intensive scalar callback, nested scalar callback, function-parameter validation, and error-handling success-path coverage now use semantic registry-backed named calls instead of hand-built legacy function metadata.
-- The remaining Turbine legacy-shaped fixtures are intentional boundary coverage: unresolved/external fallback rejection, semantic-over-legacy precedence, caller-variable preservation when fallback is rejected, and statistics smoke coverage after fallback rejection.
-- Turbine JIT tests now include a source-level check that exactly 4 `LegacyUserFunction` fixtures remain and that each one has an intentional boundary note.
-- Remaining production legacy recompilation usage is gone; remaining legacy-shaped test fixtures are tied to compatibility metadata coverage, native-accel graph construction, or semantic gaps called out above.
+- Turbine fallback-boundary tests now use unresolved-name bytecode or semantic registry fixtures; no `LegacyUserFunction` test fixtures remain.
+- Remaining production legacy recompilation usage is gone; remaining legacy HIR references are tied to HIR compatibility code/tests, native-accel graph construction, or semantic gaps called out above.
 
 ## Validation Cadence
 

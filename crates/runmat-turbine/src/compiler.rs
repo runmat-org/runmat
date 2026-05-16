@@ -232,10 +232,6 @@ impl BytecodeCompiler {
         instructions: &[Instr],
         func: &mut codegen::ir::Function,
         _var_count: usize,
-        _function_definitions: &std::collections::HashMap<
-            String,
-            runmat_vm::legacy::LegacyUserFunction,
-        >,
         semantic_registry: &SemanticFunctionRegistry,
         module: &mut JITModule,
         runmat_call_semantic_function_id: FuncId,

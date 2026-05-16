@@ -14,7 +14,7 @@ pub(crate) mod object;
 pub(crate) mod ops;
 pub(crate) mod runtime;
 
-pub use bytecode::compile;
+pub use bytecode::{compile, compile_semantic_function_registry};
 pub use bytecode::{
     ArgSpec, Bytecode, EmitLabel, EndExpr, Instr, SemanticFunctionBytecode,
     SemanticFunctionRegistry, StackEffect,
@@ -34,7 +34,3 @@ pub use layout::{
 pub use runtime::workspace::{
     push_pending_workspace, take_updated_workspace_state, PendingWorkspaceGuard,
 };
-
-pub mod legacy {
-    pub use crate::bytecode::program::LegacyUserFunction;
-}

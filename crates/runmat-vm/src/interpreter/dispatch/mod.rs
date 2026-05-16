@@ -25,11 +25,11 @@ pub use calls::{
     build_builtin_expand_at_args, build_feval_expand_multi_args,
     build_user_function_expand_multi_args, handle_builtin_call, handle_builtin_expand_at_call,
     handle_builtin_expand_last_call, handle_builtin_expand_multi_call, handle_create_closure,
-    handle_create_semantic_closure, handle_feval_dispatch, handle_feval_user_multi_output,
-    handle_load_method, handle_load_static_property, handle_method_call,
-    handle_method_or_member_index_call, handle_method_or_member_index_expand_multi_call,
-    handle_prepared_user_function_call, handle_register_class, handle_static_method_call,
-    handle_user_function_call, BuiltinHandling, FevalHandling, UserCallHandling,
+    handle_create_semantic_closure, handle_feval_dispatch, handle_load_method,
+    handle_load_static_property, handle_method_call, handle_method_or_member_index_call,
+    handle_method_or_member_index_expand_multi_call, handle_prepared_user_function_call,
+    handle_register_class, handle_static_method_call, handle_user_function_call, BuiltinHandling,
+    FevalHandling, UserCallHandling,
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
 pub use exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -47,7 +47,6 @@ pub enum DispatchHandled {
 pub type InvokeUserForEndExpr<'a> = dyn for<'b> Fn(
         &'b str,
         Vec<Value>,
-        &'b HashMap<String, crate::bytecode::program::LegacyUserFunction>,
         &'b [Value],
     ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>>
     + 'a;
@@ -71,7 +70,6 @@ pub type InterpretFunctionCounts<'a> = dyn Fn(
 pub struct DispatchMeta<'a> {
     pub instr: &'a Instr,
     pub var_names: &'a HashMap<usize, String>,
-    pub bytecode_functions: &'a HashMap<String, crate::bytecode::program::LegacyUserFunction>,
     pub semantic_registry: &'a crate::bytecode::SemanticFunctionRegistry,
     pub source_id: Option<runmat_hir::SourceId>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
@@ -146,7 +144,6 @@ pub async fn dispatch_instruction(
     let DispatchMeta {
         instr,
         var_names,
-        bytecode_functions,
         semantic_registry,
         source_id,
         call_arg_spans,
@@ -181,7 +178,6 @@ pub async fn dispatch_instruction(
             instr,
             stack,
             vars,
-            &context.functions,
             semantic_registry,
             *pc,
             &mut *clear_value_residency,
@@ -496,26 +492,10 @@ pub async fn dispatch_instruction(
             let args = crate::call::builtins::collect_call_args(stack, *argc)?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
             match handle_feval_dispatch(
-                crate::call::feval::execute_feval(
-                    func_val,
-                    args,
-                    1,
-                    &context.functions,
-                    bytecode_functions,
-                    semantic_registry,
-                )
-                .await,
+                crate::call::feval::execute_feval(func_val, args, 1, semantic_registry).await,
                 stack,
             )? {
                 FevalHandling::Completed => {}
-                FevalHandling::InvokeUser {
-                    name,
-                    args,
-                    functions,
-                } => {
-                    let value = invoke_user_for_end_expr(&name, args, &functions, vars).await?;
-                    stack.push(value);
-                }
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -524,38 +504,11 @@ pub async fn dispatch_instruction(
         Instr::CallFevalMulti(argc, out_count) => {
             let args = crate::call::builtins::collect_call_args(stack, *argc)?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
-            match crate::call::feval::execute_feval(
-                func_val,
-                args,
-                *out_count,
-                &context.functions,
-                bytecode_functions,
-                semantic_registry,
-            )
-            .await?
+            match crate::call::feval::execute_feval(func_val, args, *out_count, semantic_registry)
+                .await?
             {
                 crate::call::feval::FevalDispatch::Completed(result) => {
                     stack.push(result);
-                }
-                crate::call::feval::FevalDispatch::InvokeUser {
-                    name,
-                    args,
-                    functions,
-                } => {
-                    handle_feval_user_multi_output(
-                        stack,
-                        &mut context.functions,
-                        vars,
-                        name,
-                        args,
-                        functions,
-                        semantic_registry,
-                        *out_count,
-                        |bc, vars, name, out_count, in_count| {
-                            interpret_function_counts(bc, vars, name, out_count, in_count)
-                        },
-                    )
-                    .await?;
                 }
             }
             Ok(Some(DispatchHandled::Generic(
@@ -566,26 +519,10 @@ pub async fn dispatch_instruction(
             let args = build_feval_expand_multi_args(stack, specs).await?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
             match handle_feval_dispatch(
-                crate::call::feval::execute_feval(
-                    func_val,
-                    args,
-                    1,
-                    &context.functions,
-                    bytecode_functions,
-                    semantic_registry,
-                )
-                .await,
+                crate::call::feval::execute_feval(func_val, args, 1, semantic_registry).await,
                 stack,
             )? {
                 FevalHandling::Completed => {}
-                FevalHandling::InvokeUser {
-                    name,
-                    args,
-                    functions,
-                } => {
-                    let value = invoke_user_for_end_expr(&name, args, &functions, vars).await?;
-                    stack.push(value);
-                }
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -594,38 +531,11 @@ pub async fn dispatch_instruction(
         Instr::CallFevalExpandMultiOutput(specs, out_count) => {
             let args = build_feval_expand_multi_args(stack, specs).await?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
-            match crate::call::feval::execute_feval(
-                func_val,
-                args,
-                *out_count,
-                &context.functions,
-                bytecode_functions,
-                semantic_registry,
-            )
-            .await?
+            match crate::call::feval::execute_feval(func_val, args, *out_count, semantic_registry)
+                .await?
             {
                 crate::call::feval::FevalDispatch::Completed(result) => {
                     stack.push(result);
-                }
-                crate::call::feval::FevalDispatch::InvokeUser {
-                    name,
-                    args,
-                    functions,
-                } => {
-                    handle_feval_user_multi_output(
-                        stack,
-                        &mut context.functions,
-                        vars,
-                        name,
-                        args,
-                        functions,
-                        semantic_registry,
-                        *out_count,
-                        |bc, vars, name, out_count, in_count| {
-                            interpret_function_counts(bc, vars, name, out_count, in_count)
-                        },
-                    )
-                    .await?;
                 }
             }
             Ok(Some(DispatchHandled::Generic(
@@ -825,7 +735,7 @@ pub async fn dispatch_instruction(
                 },
             )
             .await?;
-            let value = invoke_user_for_end_expr(name, args, bytecode_functions, vars).await?;
+            let value = invoke_user_for_end_expr(name, args, vars).await?;
             stack.push(value);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,

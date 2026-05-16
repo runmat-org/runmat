@@ -460,7 +460,6 @@ impl TurbineEngine {
             &bytecode.instructions,
             &mut func,
             bytecode.var_count,
-            &bytecode.functions,
             &bytecode.semantic_registry(),
             &mut self.module,
             self.runmat_call_semantic_function_id,
@@ -508,19 +507,13 @@ impl TurbineEngine {
         vars: &mut [Value],
         semantic_registry: &SemanticFunctionRegistry,
     ) -> Result<i32> {
-        self.execute_compiled_with_function_products(
-            hash,
-            vars,
-            &std::collections::HashMap::new(),
-            semantic_registry,
-        )
+        self.execute_compiled_with_function_products(hash, vars, semantic_registry)
     }
 
     fn execute_compiled_with_function_products(
         &mut self,
         hash: u64,
         vars: &mut [Value],
-        _functions: &std::collections::HashMap<String, runmat_vm::legacy::LegacyUserFunction>,
         semantic_registry: &SemanticFunctionRegistry,
     ) -> Result<i32> {
         let func = self
@@ -592,12 +585,7 @@ impl TurbineEngine {
         // If function is compiled, execute it with function definitions
         if self.cache.contains(hash) {
             return self
-                .execute_compiled_with_function_products(
-                    hash,
-                    vars,
-                    &bytecode.functions,
-                    &semantic_registry,
-                )
+                .execute_compiled_with_function_products(hash, vars, &semantic_registry)
                 .map(|result| (result, true));
         }
 
@@ -607,12 +595,7 @@ impl TurbineEngine {
                 Ok(_) => {
                     info!("Bytecode compiled successfully, executing JIT version");
                     return self
-                        .execute_compiled_with_function_products(
-                            hash,
-                            vars,
-                            &bytecode.functions,
-                            &semantic_registry,
-                        )
+                        .execute_compiled_with_function_products(hash, vars, &semantic_registry)
                         .map(|result| (result, true));
                 }
                 Err(e) => {

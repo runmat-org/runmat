@@ -1831,10 +1831,6 @@ fn cellfun_named_local_function_uses_semantic_callback() {
         )),
         "local string callback should be bound to a semantic function handle"
     );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "semantic compile should not require legacy user-function bytecode entries"
-    );
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
@@ -1931,10 +1927,6 @@ fn arrayfun_named_local_function_uses_semantic_callback() {
         )),
         "local arrayfun string callback should be bound to a semantic function handle"
     );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "semantic arrayfun callback should not require legacy user-function bytecode entries"
-    );
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
@@ -1959,10 +1951,6 @@ fn arrayfun_session_function_uses_semantic_registry() {
         )),
         "session arrayfun string callback should be bound to a semantic function handle"
     );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "session semantic arrayfun callback should not require legacy bytecode functions"
-    );
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
@@ -1984,10 +1972,6 @@ fn arrayfun_runtime_string_callback_uses_semantic_resolver() {
             runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
         )),
         "runtime arrayfun string callback variables should not be compile-time literal rewrites"
-    );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "runtime arrayfun semantic callback should not require legacy bytecode functions"
     );
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -2012,10 +1996,6 @@ fn direct_session_function_call_uses_semantic_registry() {
             .iter()
             .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunction(_, 1))),
         "direct call should lower to semantic function bytecode"
-    );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "direct session semantic call should not require legacy bytecode functions"
     );
     let outcome = block_on(session.execute_outcome("y = inc(2);")).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -2044,10 +2024,6 @@ fn direct_session_function_multi_output_uses_semantic_registry() {
             .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 1, 2))),
         "direct multi-output call should lower to semantic function bytecode"
     );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "direct session semantic multi-output call should not require legacy bytecode functions"
-    );
     let outcome = block_on(session.execute_outcome("[a, b] = pair(2);")).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
         matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
@@ -2075,10 +2051,6 @@ fn direct_session_function_cell_expansion_uses_semantic_registry() {
         )),
         "direct expansion call should lower to semantic function bytecode"
     );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "direct session semantic expansion call should not require legacy bytecode functions"
-    );
     let outcome =
         block_on(session.execute_outcome("C = {2}; y = inc(C{:});")).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -2105,10 +2077,6 @@ fn direct_session_function_expansion_multi_output_uses_semantic_registry() {
             runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, _, 2)
         )),
         "direct expansion multi-output call should lower to semantic function bytecode"
-    );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "direct session semantic expansion multi-output call should not require legacy bytecode functions"
     );
     let outcome =
         block_on(session.execute_outcome("C = {2}; [a, b] = pair(C{:});")).expect("exec succeeds");
@@ -2153,10 +2121,6 @@ fn session_function_handle_uses_semantic_registry() {
         )),
         "session function handles should not remain name-only handles"
     );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "function handle session semantic call should not require legacy bytecode functions"
-    );
     let outcome = block_on(session.execute_outcome("f = @inc; y = f(2);"))
         .expect("function handle call succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -2184,10 +2148,6 @@ fn session_function_handle_feval_multi_output_uses_semantic_registry() {
             .iter()
             .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(_, 2))),
         "function handle feval multi-output call should use typed feval bytecode"
-    );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "function handle feval session semantic call should not require legacy bytecode functions"
     );
     let outcome = block_on(session.execute_outcome("f = @pair; [a, b] = feval(f, 2);"))
         .expect("exec succeeds");
@@ -2228,10 +2188,6 @@ fn session_feval_string_multi_output_uses_semantic_registry() {
             .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(_, 2))),
         "session feval string multi-output call should use typed feval bytecode"
     );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "session feval string semantic call should not require legacy bytecode functions"
-    );
     let outcome =
         block_on(session.execute_outcome("[a, b] = feval('pair', 2);")).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -2260,10 +2216,6 @@ fn session_function_handle_feval_expansion_uses_semantic_registry() {
             .iter()
             .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMulti(_))),
         "function handle feval expansion call should use typed feval expansion bytecode"
-    );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "function handle feval expansion session semantic call should not require legacy bytecode functions"
     );
     let outcome = block_on(session.execute_outcome("f = @add2; C = {2, 3}; y = feval(f, C{:});"))
         .expect("exec succeeds");
@@ -2297,10 +2249,6 @@ fn session_feval_string_expansion_uses_semantic_registry() {
             .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMulti(_))),
         "session feval string expansion call should use typed feval expansion bytecode"
     );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "session feval string expansion semantic call should not require legacy bytecode functions"
-    );
     let outcome = block_on(session.execute_outcome("C = {2, 3}; y = feval('add2', C{:});"))
         .expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
@@ -2327,10 +2275,6 @@ fn session_function_handle_feval_expansion_multi_output_uses_semantic_registry()
             runmat_vm::Instr::CallFevalExpandMultiOutput(_, 2)
         )),
         "function handle feval expansion multi-output call should use typed feval expansion bytecode"
-    );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "function handle feval expansion multi-output session semantic call should not require legacy bytecode functions"
     );
     let outcome = block_on(session.execute_outcome("f = @pair; C = {2}; [a, b] = feval(f, C{:});"))
         .expect("exec succeeds");
@@ -2369,10 +2313,6 @@ fn session_feval_string_expansion_multi_output_uses_semantic_registry() {
             runmat_vm::Instr::CallFevalExpandMultiOutput(_, 2)
         )),
         "session feval string expansion multi-output call should use typed feval expansion bytecode"
-    );
-    assert!(
-        prepared.bytecode.functions.is_empty(),
-        "session feval string expansion multi-output semantic call should not require legacy bytecode functions"
     );
     let outcome = block_on(session.execute_outcome("C = {2}; [a, b] = feval('pair', C{:});"))
         .expect("exec succeeds");

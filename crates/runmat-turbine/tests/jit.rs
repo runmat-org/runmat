@@ -1,5 +1,5 @@
 use cranelift::prelude::isa::CallConv;
-use runmat_builtins::{CellArray, Type, Value};
+use runmat_builtins::{CellArray, Value};
 use runmat_turbine::{
     CompilerConfig, FunctionCache, HotspotProfiler, OptimizationLevel, ThreadSafeFunctionCache,
     TurbineEngine,
@@ -9,35 +9,8 @@ use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
 
-#[test]
-fn test_turbine_legacy_function_fixtures_are_intentional() {
-    let source = include_str!("jit.rs");
-    let legacy_fixture = ["runmat_vm::legacy::", "LegacyUserFunction"].concat();
-    let legacy_isolated_execution = ["execute_", "legacy_user_function_isolated"].concat();
-    let fixture_note = ["Intentional ", "legacy fixture:"].concat();
-
-    assert_eq!(
-        source.matches(&legacy_fixture).count(),
-        4,
-        "Turbine tests should only keep the documented legacy fallback fixtures"
-    );
-    assert_eq!(
-        source.matches(&fixture_note).count(),
-        4,
-        "Each remaining legacy fixture should document its fallback-boundary purpose"
-    );
-    assert_eq!(
-        source.matches(&legacy_isolated_execution).count(),
-        0,
-        "Turbine tests should not depend on isolated legacy callback execution"
-    );
-}
-
 mod runmat_hir {
-    pub use ::runmat_hir::{
-        FunctionId, LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind,
-        LegacyHirStmt as HirStmt, Span, VarId,
-    };
+    pub use ::runmat_hir::FunctionId;
 }
 
 #[test]
@@ -1002,63 +975,21 @@ fn test_runtime_functions_available() {
 
 #[test]
 fn test_jit_legacy_user_function_fallback_removed() {
-    // Test: legacy-shaped user function metadata no longer triggers interpreter recompilation fallback.
+    // Test: unresolved user calls no longer trigger interpreter recompilation fallback.
     let mut engine = TurbineEngine::new().expect("Failed to create engine");
 
-    // Intentional legacy fixture: this covers rejection of the removed unresolved callback fallback boundary.
-    use std::collections::HashMap;
-    let mut functions = HashMap::new();
-    functions.insert(
-        "my_double".to_string(),
-        runmat_vm::legacy::LegacyUserFunction {
-            name: "my_double".to_string(),
-            params: vec![runmat_hir::VarId(0)],
-            outputs: vec![runmat_hir::VarId(1)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(1),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Binary(
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                        runmat_parser::BinOp::Mul,
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Number("2".to_string()),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false, // Assignment suppression flag for test
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 2,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
-            source_id: None,
-        },
+    let bytecode = Bytecode::with_instructions(
+        vec![
+            Instr::LoadConst(5.0),                           // Load argument
+            Instr::CallFunction("my_double".to_string(), 1), // Call function
+            Instr::StoreVar(0),                              // Store result
+        ],
+        1,
     );
-
-    let bytecode = Bytecode {
-        functions,
-        ..Bytecode::with_instructions(
-            vec![
-                Instr::LoadConst(5.0),                           // Load argument
-                Instr::CallFunction("my_double".to_string(), 1), // Call function
-                Instr::StoreVar(0),                              // Store result
-            ],
-            1,
-        )
-    };
 
     let mut vars = vec![Value::Num(0.0)];
 
-    // Execute - legacy fallback recompilation has been removed, so this must fail cleanly.
+    // Execute - fallback recompilation has been removed, so this must fail cleanly.
     let result = engine.execute_or_compile(&bytecode, &mut vars);
     assert!(
         result.is_err(),
@@ -1207,24 +1138,7 @@ fn test_jit_named_call_prefers_semantic_registry_over_legacy_shape() {
 
     let mut semantic_functions = HashMap::new();
     semantic_functions.insert(function, semantic_function);
-    // Intentional legacy fixture: semantic registry identity must win even if legacy-shaped metadata exists.
-    let mut functions = HashMap::new();
-    functions.insert(
-        "inc".to_string(),
-        runmat_vm::legacy::LegacyUserFunction {
-            name: "inc".to_string(),
-            params: vec![],
-            outputs: vec![runmat_hir::VarId(0)],
-            body: Vec::new(),
-            local_var_count: 1,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
-            source_id: None,
-        },
-    );
     let bytecode = Bytecode {
-        functions,
         semantic_functions,
         ..Bytecode::with_instructions(
             vec![
@@ -1245,7 +1159,7 @@ fn test_jit_named_call_prefers_semantic_registry_over_legacy_shape() {
     let result = engine.execute_or_compile(&bytecode, &mut vars);
     assert!(
         result.is_ok(),
-        "semantic registry identity should win over legacy-shaped metadata"
+        "semantic registry identity should resolve named user calls"
     );
     assert_eq!(result.unwrap(), (0, true));
     assert_eq!(vars[0], Value::Num(10.0));
@@ -1594,54 +1508,13 @@ fn test_jit_function_variable_preservation() {
     assert_eq!(vars[0], Value::Num(42.0));
     assert_eq!(vars[1], Value::Num(100.0));
 
-    // Intentional legacy fixture: removed legacy fallback must not read caller variables for unresolved callbacks.
-    let mut functions = HashMap::new();
-    functions.insert(
-        "add_globals".to_string(),
-        runmat_vm::legacy::LegacyUserFunction {
-            name: "add_globals".to_string(),
-            params: vec![],
-            outputs: vec![runmat_hir::VarId(2)],
-            body: vec![runmat_hir::HirStmt::Assign(
-                runmat_hir::VarId(2),
-                runmat_hir::HirExpr {
-                    kind: runmat_hir::HirExprKind::Binary(
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(0)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                        runmat_parser::BinOp::Add,
-                        Box::new(runmat_hir::HirExpr {
-                            kind: runmat_hir::HirExprKind::Var(runmat_hir::VarId(1)),
-                            ty: Type::Num,
-                            span: runmat_hir::Span::default(),
-                        }),
-                    ),
-                    ty: Type::Num,
-                    span: runmat_hir::Span::default(),
-                },
-                false,
-                runmat_hir::Span::default(),
-            )],
-            local_var_count: 3,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
-            source_id: None,
-        },
+    let function_bytecode = Bytecode::with_instructions(
+        vec![
+            Instr::CallFunction("add_globals".to_string(), 0),
+            Instr::StoreVar(2),
+        ],
+        3,
     );
-
-    let function_bytecode = Bytecode {
-        functions,
-        ..Bytecode::with_instructions(
-            vec![
-                Instr::CallFunction("add_globals".to_string(), 0),
-                Instr::StoreVar(2),
-            ],
-            3,
-        )
-    };
 
     // Extend vars array
     vars.push(Value::Num(0.0));
@@ -1797,27 +1670,8 @@ fn test_jit_engine_statistics_with_functions() {
         let _ = engine.execute_or_compile(&jit_bytecode, &mut vars);
     }
 
-    // Intentional legacy fixture: statistics smoke coverage rejects removed fallback execution.
-    let mut functions = HashMap::new();
-    functions.insert(
-        "noop".to_string(),
-        runmat_vm::legacy::LegacyUserFunction {
-            name: "noop".to_string(),
-            params: vec![],
-            outputs: vec![],
-            body: vec![],
-            local_var_count: 0,
-            has_varargin: false,
-            has_varargout: false,
-            var_types: Vec::new(),
-            source_id: None,
-        },
-    );
-
-    let function_bytecode = Bytecode {
-        functions,
-        ..Bytecode::with_instructions(vec![Instr::CallFunction("noop".to_string(), 0)], 1)
-    };
+    let function_bytecode =
+        Bytecode::with_instructions(vec![Instr::CallFunction("noop".to_string(), 0)], 1);
 
     assert!(engine
         .execute_or_compile(&function_bytecode, &mut vars)

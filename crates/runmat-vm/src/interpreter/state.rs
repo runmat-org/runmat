@@ -47,7 +47,6 @@ impl InterpreterState {
                 call_stack: Vec::new(),
                 locals: Vec::new(),
                 instruction_pointer: 0,
-                functions: bytecode.functions.clone(),
             },
             try_stack: Vec::new(),
             last_exception: None,

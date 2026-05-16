@@ -1,6 +1,5 @@
 use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
-use crate::bytecode::program::LegacyUserFunction;
 use crate::bytecode::{Bytecode, Instr, SemanticFunctionRegistry};
 use crate::call::user as call_user;
 use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
@@ -22,7 +21,6 @@ use runmat_runtime::{
 };
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -49,7 +47,6 @@ type VmResult<T> = Result<T, RuntimeError>;
 fn invoke_user_for_end_expr_adapter<'a>(
     name: &'a str,
     argv: Vec<Value>,
-    functions: &'a HashMap<String, LegacyUserFunction>,
     vars_ref: &'a [Value],
 ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
     Box::pin(async move {
@@ -58,12 +55,10 @@ fn invoke_user_for_end_expr_adapter<'a>(
         if let Some(registry_ptr) = registry_ptr {
             // The guard installed for the active interpreter frame owns this pointer lifetime.
             let semantic_registry = unsafe { &*registry_ptr };
-            invoke_user_function_value(name, &argv, functions, semantic_registry, &mut local_vars)
-                .await
+            invoke_user_function_value(name, &argv, semantic_registry, &mut local_vars).await
         } else {
             let semantic_registry = SemanticFunctionRegistry::default();
-            invoke_user_function_value(name, &argv, functions, &semantic_registry, &mut local_vars)
-                .await
+            invoke_user_function_value(name, &argv, &semantic_registry, &mut local_vars).await
         }
     })
 }
@@ -166,7 +161,6 @@ fn same_gpu_handle(lhs: &Value, rhs: &Value) -> bool {
 async fn invoke_user_function_value(
     name: &str,
     args: &[Value],
-    _functions: &HashMap<String, LegacyUserFunction>,
     semantic_registry: &SemanticFunctionRegistry,
     _vars: &mut [Value],
 ) -> Result<Value, RuntimeError> {
@@ -543,7 +537,6 @@ async fn run_interpreter_inner(
             interp_dispatch::DispatchMeta {
                 instr: &bytecode.instructions[pc],
                 var_names: &bytecode.var_names,
-                bytecode_functions: &bytecode.functions,
                 semantic_registry: &semantic_registry,
                 source_id: bytecode.source_id,
                 call_arg_spans: bytecode.call_arg_spans.get(pc).cloned().flatten(),

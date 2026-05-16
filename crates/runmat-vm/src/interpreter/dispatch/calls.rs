@@ -1,4 +1,3 @@
-use crate::bytecode::program::LegacyUserFunction;
 use crate::bytecode::{ArgSpec, Instr, SemanticFunctionRegistry};
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
@@ -18,11 +17,6 @@ use std::future::Future;
 
 pub enum FevalHandling {
     Completed,
-    InvokeUser {
-        name: String,
-        args: Vec<Value>,
-        functions: std::collections::HashMap<String, crate::bytecode::program::LegacyUserFunction>,
-    },
 }
 
 pub enum BuiltinHandling {
@@ -108,46 +102,7 @@ pub fn handle_feval_dispatch(
             stack.push(result);
             Ok(FevalHandling::Completed)
         }
-        FevalDispatch::InvokeUser {
-            name,
-            args,
-            functions,
-        } => Ok(FevalHandling::InvokeUser {
-            name,
-            args,
-            functions,
-        }),
     }
-}
-
-pub async fn handle_feval_user_multi_output<IF, IFFut>(
-    stack: &mut Vec<Value>,
-    _caller_functions: &mut std::collections::HashMap<String, LegacyUserFunction>,
-    _vars: &[Value],
-    name: String,
-    args: Vec<Value>,
-    _functions: std::collections::HashMap<String, LegacyUserFunction>,
-    semantic_registry: &SemanticFunctionRegistry,
-    out_count: usize,
-    _interpret_counts: IF,
-) -> Result<(), RuntimeError>
-where
-    IF: FnOnce(crate::bytecode::Bytecode, Vec<Value>, String, usize, usize) -> IFFut,
-    IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
-    if let Some(function) = semantic_registry.resolve_name(&name) {
-        if let Some(result) =
-            runmat_runtime::user_functions::try_call_semantic_function(function.0, &args, out_count)
-                .await
-        {
-            stack.push(result?);
-            return Ok(());
-        }
-    }
-    Err(crate::interpreter::errors::mex(
-        "UndefinedFunction",
-        &format!("Undefined function: {name}"),
-    ))
 }
 
 fn push_single_result(stack: &mut Vec<Value>, result: Value) {

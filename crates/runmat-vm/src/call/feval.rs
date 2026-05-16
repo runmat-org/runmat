@@ -1,9 +1,7 @@
-use crate::bytecode::program::LegacyUserFunction;
 use crate::bytecode::SemanticFunctionRegistry;
 use crate::call::user::try_builtin_fallback_single;
 use runmat_builtins::{Closure, Value};
 use runmat_runtime::RuntimeError;
-use std::collections::HashMap;
 
 pub fn closure_call_args(closure: &Closure, args: Vec<Value>) -> (String, Vec<Value>) {
     let name = closure.function_name.clone();
@@ -35,19 +33,12 @@ pub async fn try_closure_builtin_fallback(
 
 pub enum FevalDispatch {
     Completed(Value),
-    InvokeUser {
-        name: String,
-        args: Vec<Value>,
-        functions: HashMap<String, LegacyUserFunction>,
-    },
 }
 
 pub async fn execute_feval(
     func_val: Value,
     args: Vec<Value>,
     requested_outputs: usize,
-    context_functions: &HashMap<String, LegacyUserFunction>,
-    bytecode_functions: &HashMap<String, LegacyUserFunction>,
     semantic_registry: &SemanticFunctionRegistry,
 ) -> Result<FevalDispatch, RuntimeError> {
     match func_val {
@@ -78,15 +69,10 @@ pub async fn execute_feval(
             if let Some(result) = try_closure_builtin_fallback(&name, &call_args).await? {
                 return Ok(FevalDispatch::Completed(result));
             }
-            let mut functions = bytecode_functions.clone();
-            for (k, v) in context_functions {
-                functions.insert(k.clone(), v.clone());
-            }
-            Ok(FevalDispatch::InvokeUser {
-                name,
-                args: call_args,
-                functions,
-            })
+            Err(crate::interpreter::errors::mex(
+                "UndefinedFunction",
+                &format!("Undefined function: {name}"),
+            ))
         }
         Value::FunctionHandle(name) => {
             if let Some(function) = semantic_registry.resolve_name(&name) {

@@ -679,7 +679,7 @@ impl SnapshotBuilder {
                         let mut stats = self.stats.write();
                         *stats
                             .items_processed
-                            .entry("bytecode_functions".to_string())
+                            .entry("semantic_bytecode_functions".to_string())
                             .or_insert(0) += 1;
                     }
                 }

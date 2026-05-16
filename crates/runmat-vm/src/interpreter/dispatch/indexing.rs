@@ -1,4 +1,3 @@
-use crate::bytecode::program::LegacyUserFunction;
 use crate::bytecode::EndExpr;
 use crate::call::shared::{
     call_object_index_method, object_protocol_index_cell, ObjectIndexKind, ObjectIndexOp,
@@ -15,7 +14,6 @@ use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
-use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -165,14 +163,12 @@ fn apply_end_offsets_to_numeric<'a, F>(
     ctx: IndexContext<'a>,
     end_offsets: &'a [(usize, EndExpr)],
     vars: &'a mut [Value],
-    functions: &'a HashMap<String, LegacyUserFunction>,
     call_user: F,
 ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, RuntimeError>> + 'a>>
 where
     F: Fn(
             &'a str,
             Vec<Value>,
-            &'a HashMap<String, LegacyUserFunction>,
             &'a [Value],
         ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
         + Copy
@@ -183,8 +179,7 @@ where
         for (position, end_expr) in end_offsets {
             if let Some(value) = adjusted.get_mut(*position) {
                 let dim_len = ctx.dim_len_for_numeric_position(*position);
-                let idx_val =
-                    resolve_range_end_index(dim_len, end_expr, vars, functions, call_user).await?;
+                let idx_val = resolve_range_end_index(dim_len, end_expr, vars, call_user).await?;
                 *value = Value::Num(idx_val as f64);
             }
         }
@@ -196,14 +191,12 @@ async fn resolve_range_end_index<'a, F>(
     dim_len: usize,
     end_expr: &'a EndExpr,
     vars: &'a [Value],
-    functions: &'a HashMap<String, LegacyUserFunction>,
     call_user: F,
 ) -> Result<i64, RuntimeError>
 where
     F: Fn(
             &'a str,
             Vec<Value>,
-            &'a HashMap<String, LegacyUserFunction>,
             &'a [Value],
         ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
         + Copy
@@ -213,14 +206,12 @@ where
         expr: &'a EndExpr,
         end_value: f64,
         vars: &'a [Value],
-        functions: &'a HashMap<String, LegacyUserFunction>,
         call_user: F,
     ) -> Pin<Box<dyn Future<Output = Result<f64, RuntimeError>> + 'a>>
     where
         F: Fn(
                 &'a str,
                 Vec<Value>,
-                &'a HashMap<String, LegacyUserFunction>,
                 &'a [Value],
             ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
             + Copy
@@ -245,13 +236,12 @@ where
                 EndExpr::Call(name, args) => {
                     let mut argv: Vec<Value> = Vec::with_capacity(args.len());
                     for a in args {
-                        let val =
-                            eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
+                        let val = eval_end_expr_value(a, end_value, vars, call_user).await?;
                         argv.push(Value::Num(val));
                     }
                     let v = match runmat_runtime::call_builtin_async(name, &argv).await {
                         Ok(v) => v,
-                        Err(_) => call_user(name, argv, functions, vars).await?,
+                        Err(_) => call_user(name, argv, vars).await?,
                     };
                     idx_end_expr::value_to_f64(&v).map_err(|_| {
                         crate::interpreter::errors::mex(
@@ -263,8 +253,7 @@ where
                 EndExpr::SemanticCall(function, name, args) => {
                     let mut argv: Vec<Value> = Vec::with_capacity(args.len());
                     for a in args {
-                        let val =
-                            eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
+                        let val = eval_end_expr_value(a, end_value, vars, call_user).await?;
                         argv.push(Value::Num(val));
                     }
                     let v = match runmat_runtime::user_functions::try_call_semantic_function(
@@ -273,7 +262,7 @@ where
                     .await
                     {
                         Some(result) => result?,
-                        None => call_user(name, argv, functions, vars).await?,
+                        None => call_user(name, argv, vars).await?,
                     };
                     idx_end_expr::value_to_f64(&v).map_err(|_| {
                         crate::interpreter::errors::mex(
@@ -282,77 +271,51 @@ where
                         )
                     })
                 }
-                EndExpr::Add(a, b) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                    + eval_end_expr_value(b, end_value, vars, functions, call_user).await?),
-                EndExpr::Sub(a, b) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                    - eval_end_expr_value(b, end_value, vars, functions, call_user).await?),
-                EndExpr::Mul(a, b) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                    * eval_end_expr_value(b, end_value, vars, functions, call_user).await?),
+                EndExpr::Add(a, b) => Ok(eval_end_expr_value(a, end_value, vars, call_user)
+                    .await?
+                    + eval_end_expr_value(b, end_value, vars, call_user).await?),
+                EndExpr::Sub(a, b) => Ok(eval_end_expr_value(a, end_value, vars, call_user)
+                    .await?
+                    - eval_end_expr_value(b, end_value, vars, call_user).await?),
+                EndExpr::Mul(a, b) => Ok(eval_end_expr_value(a, end_value, vars, call_user)
+                    .await?
+                    * eval_end_expr_value(b, end_value, vars, call_user).await?),
                 EndExpr::Div(a, b) => {
-                    let denom =
-                        eval_end_expr_value(b, end_value, vars, functions, call_user).await?;
+                    let denom = eval_end_expr_value(b, end_value, vars, call_user).await?;
                     if denom == 0.0 {
                         return Err(crate::interpreter::errors::mex(
                             "IndexOutOfBounds",
                             "Index out of bounds",
                         ));
                     }
-                    Ok(
-                        eval_end_expr_value(a, end_value, vars, functions, call_user).await?
-                            / denom,
-                    )
+                    Ok(eval_end_expr_value(a, end_value, vars, call_user).await? / denom)
                 }
                 EndExpr::LeftDiv(a, b) => {
-                    let denom =
-                        eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
+                    let denom = eval_end_expr_value(a, end_value, vars, call_user).await?;
                     if denom == 0.0 {
                         return Err(crate::interpreter::errors::mex(
                             "IndexOutOfBounds",
                             "Index out of bounds",
                         ));
                     }
-                    Ok(
-                        eval_end_expr_value(b, end_value, vars, functions, call_user).await?
-                            / denom,
-                    )
+                    Ok(eval_end_expr_value(b, end_value, vars, call_user).await? / denom)
                 }
-                EndExpr::Pow(a, b) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                .powf(eval_end_expr_value(b, end_value, vars, functions, call_user).await?)),
-                EndExpr::Neg(a) => {
-                    Ok(-eval_end_expr_value(a, end_value, vars, functions, call_user).await?)
-                }
-                EndExpr::Pos(a) => {
-                    Ok(eval_end_expr_value(a, end_value, vars, functions, call_user).await?)
-                }
-                EndExpr::Floor(a) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                .floor()),
-                EndExpr::Ceil(a) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                .ceil()),
-                EndExpr::Round(a) => Ok(eval_end_expr_value(
-                    a, end_value, vars, functions, call_user,
-                )
-                .await?
-                .round()),
+                EndExpr::Pow(a, b) => Ok(eval_end_expr_value(a, end_value, vars, call_user)
+                    .await?
+                    .powf(eval_end_expr_value(b, end_value, vars, call_user).await?)),
+                EndExpr::Neg(a) => Ok(-eval_end_expr_value(a, end_value, vars, call_user).await?),
+                EndExpr::Pos(a) => Ok(eval_end_expr_value(a, end_value, vars, call_user).await?),
+                EndExpr::Floor(a) => Ok(eval_end_expr_value(a, end_value, vars, call_user)
+                    .await?
+                    .floor()),
+                EndExpr::Ceil(a) => Ok(eval_end_expr_value(a, end_value, vars, call_user)
+                    .await?
+                    .ceil()),
+                EndExpr::Round(a) => Ok(eval_end_expr_value(a, end_value, vars, call_user)
+                    .await?
+                    .round()),
                 EndExpr::Fix(a) => {
-                    let v = eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
+                    let v = eval_end_expr_value(a, end_value, vars, call_user).await?;
                     Ok(if v >= 0.0 { v.floor() } else { v.ceil() })
                 }
             }
@@ -360,7 +323,7 @@ where
     }
 
     Ok(
-        eval_end_expr_value(end_expr, dim_len as f64, vars, functions, call_user)
+        eval_end_expr_value(end_expr, dim_len as f64, vars, call_user)
             .await?
             .floor() as i64,
     )
@@ -469,7 +432,6 @@ pub async fn dispatch_indexing<F>(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
     vars: &mut Vec<Value>,
-    functions: &HashMap<String, LegacyUserFunction>,
     semantic_registry: &crate::bytecode::SemanticFunctionRegistry,
     pc: usize,
     mut clear_value_residency: impl FnMut(&Value),
@@ -479,7 +441,6 @@ where
     F: for<'b> Fn(
             &'b str,
             Vec<Value>,
-            &'b HashMap<String, LegacyUserFunction>,
             &'b [Value],
         ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>>
         + Copy,
@@ -518,25 +479,10 @@ where
                 | Value::Closure(_) => {
                     let numeric = linear_index_values_to_f64(&raw_indices).await?;
                     let args = numeric.into_iter().map(Value::Num).collect::<Vec<_>>();
-                    match crate::call::feval::execute_feval(
-                        base,
-                        args,
-                        1,
-                        functions,
-                        functions,
-                        semantic_registry,
-                    )
-                    .await?
+                    match crate::call::feval::execute_feval(base, args, 1, semantic_registry)
+                        .await?
                     {
                         crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),
-                        crate::call::feval::FevalDispatch::InvokeUser {
-                            name,
-                            args,
-                            functions,
-                        } => {
-                            let value = call_user(&name, args, &functions, vars).await?;
-                            stack.push(value);
-                        }
                     }
                 }
                 Value::Tensor(t)
@@ -1279,7 +1225,6 @@ where
                             IndexContext::new(*dims, *colon_mask, *end_mask, &handle.shape),
                             end_numeric_exprs,
                             vars,
-                            functions,
                             call_user,
                         )
                         .await?
@@ -1290,7 +1235,6 @@ where
                             IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
                             end_numeric_exprs,
                             vars,
-                            functions,
                             call_user,
                         )
                         .await?
@@ -1301,7 +1245,6 @@ where
                             IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
                             end_numeric_exprs,
                             vars,
-                            functions,
                             call_user,
                         )
                         .await?
@@ -1346,14 +1289,14 @@ where
                             let (raw_st, raw_sp) = range_params[rp_iter];
                             let dim_len = *full_shape.get(d).unwrap_or(&1);
                             let st = if let Some(expr) = &range_start_exprs[rp_iter] {
-                                resolve_range_end_index(dim_len, expr, &*vars, functions, call_user)
-                                    .await? as f64
+                                resolve_range_end_index(dim_len, expr, &*vars, call_user).await?
+                                    as f64
                             } else {
                                 raw_st
                             };
                             let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
-                                resolve_range_end_index(dim_len, expr, &*vars, functions, call_user)
-                                    .await? as f64
+                                resolve_range_end_index(dim_len, expr, &*vars, call_user).await?
+                                    as f64
                             } else {
                                 raw_sp
                             };
@@ -1442,7 +1385,6 @@ where
                                     dim_len as usize,
                                     end_off,
                                     &*vars,
-                                    functions,
                                     call_user,
                                 )
                                 .await?;
@@ -1571,17 +1513,10 @@ where
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;
-                            let functions_ref = functions;
                             let call_user_ref = call_user;
                             async move {
-                                resolve_range_end_index(
-                                    dim_len,
-                                    &expr,
-                                    vars_ref,
-                                    functions_ref,
-                                    call_user_ref,
-                                )
-                                .await
+                                resolve_range_end_index(dim_len, &expr, vars_ref, call_user_ref)
+                                    .await
                             }
                         },
                     )
@@ -1608,17 +1543,10 @@ where
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;
-                            let functions_ref = functions;
                             let call_user_ref = call_user;
                             async move {
-                                resolve_range_end_index(
-                                    dim_len,
-                                    &expr,
-                                    vars_ref,
-                                    functions_ref,
-                                    call_user_ref,
-                                )
-                                .await
+                                resolve_range_end_index(dim_len, &expr, vars_ref, call_user_ref)
+                                    .await
                             }
                         },
                     )
@@ -1722,7 +1650,6 @@ where
                             IndexContext::new(*dims, *colon_mask, *end_mask, &handle.shape),
                             end_numeric_exprs,
                             vars,
-                            functions,
                             call_user,
                         )
                         .await?
@@ -1733,7 +1660,6 @@ where
                             IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
                             end_numeric_exprs,
                             vars,
-                            functions,
                             call_user,
                         )
                         .await?
@@ -1744,7 +1670,6 @@ where
                             IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
                             end_numeric_exprs,
                             vars,
-                            functions,
                             call_user,
                         )
                         .await?
@@ -1770,16 +1695,8 @@ where
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;
-                            let functions_ref = functions;
                             async move {
-                                resolve_range_end_index(
-                                    dim_len,
-                                    &expr,
-                                    vars_ref,
-                                    functions_ref,
-                                    call_user,
-                                )
-                                .await
+                                resolve_range_end_index(dim_len, &expr, vars_ref, call_user).await
                             }
                         },
                     )
@@ -1812,16 +1729,8 @@ where
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;
-                            let functions_ref = functions;
                             async move {
-                                resolve_range_end_index(
-                                    dim_len,
-                                    &expr,
-                                    vars_ref,
-                                    functions_ref,
-                                    call_user,
-                                )
-                                .await
+                                resolve_range_end_index(dim_len, &expr, vars_ref, call_user).await
                             }
                         },
                     )
@@ -1845,16 +1754,8 @@ where
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;
-                            let functions_ref = functions;
                             async move {
-                                resolve_range_end_index(
-                                    dim_len,
-                                    &expr,
-                                    vars_ref,
-                                    functions_ref,
-                                    call_user,
-                                )
-                                .await
+                                resolve_range_end_index(dim_len, &expr, vars_ref, call_user).await
                             }
                         },
                     )
