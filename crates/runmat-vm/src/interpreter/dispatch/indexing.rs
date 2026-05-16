@@ -1,5 +1,7 @@
 use crate::bytecode::EndExpr;
-use crate::call::descriptor::{try_execute_callable_descriptor, CallableDescriptor};
+use crate::call::descriptor::{
+    try_execute_callable_descriptor, CallableCallKind, CallableDescriptor,
+};
 use crate::call::shared::{
     call_object_index_method, object_protocol_index_cell, ObjectIndexKind, ObjectIndexOp,
 };
@@ -262,7 +264,8 @@ where
                         name.clone(),
                         argv.clone(),
                         1,
-                    );
+                    )
+                    .with_call_kind(CallableCallKind::EndExpr);
                     let v = match try_execute_callable_descriptor(descriptor).await? {
                         Some(value) => value,
                         None => call_user(name, argv, vars).await?,
