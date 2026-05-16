@@ -320,6 +320,38 @@ impl ObjectIndexKind {
     }
 }
 
+pub enum ObjectIndexSelector {
+    Indices(Value),
+    Member(String),
+}
+
+pub struct ObjectIndexDescriptor {
+    pub base: Value,
+    pub op: ObjectIndexOp,
+    pub kind: ObjectIndexKind,
+    pub selector: ObjectIndexSelector,
+    pub rhs: Option<Value>,
+}
+
+impl ObjectIndexDescriptor {
+    fn into_runtime_method_args(self) -> Vec<Value> {
+        let selector = match self.selector {
+            ObjectIndexSelector::Indices(value) => value,
+            ObjectIndexSelector::Member(field) => Value::String(field),
+        };
+        let mut args = vec![
+            self.base,
+            Value::String(self.op.protocol_name().to_string()),
+            Value::String(self.kind.protocol_name().to_string()),
+            selector,
+        ];
+        if let Some(rhs) = self.rhs {
+            args.push(rhs);
+        }
+        args
+    }
+}
+
 pub fn object_protocol_index_cell(
     values: Vec<Value>,
     context: &str,
@@ -341,16 +373,14 @@ pub async fn call_object_index_method(
     cell: Value,
     rhs: Option<Value>,
 ) -> Result<Value, RuntimeError> {
-    let mut args = vec![
+    call_object_index_descriptor_method(ObjectIndexDescriptor {
         base,
-        Value::String(op.protocol_name().to_string()),
-        Value::String(kind.protocol_name().to_string()),
-        cell,
-    ];
-    if let Some(rhs) = rhs {
-        args.push(rhs);
-    }
-    call_runtime_method(&args).await
+        op,
+        kind,
+        selector: ObjectIndexSelector::Indices(cell),
+        rhs,
+    })
+    .await
 }
 
 pub async fn call_object_member_method(
@@ -359,16 +389,20 @@ pub async fn call_object_member_method(
     field: String,
     rhs: Option<Value>,
 ) -> Result<Value, RuntimeError> {
-    let mut args = vec![
+    call_object_index_descriptor_method(ObjectIndexDescriptor {
         base,
-        Value::String(op.protocol_name().to_string()),
-        Value::String(ObjectIndexKind::Member.protocol_name().to_string()),
-        Value::String(field),
-    ];
-    if let Some(rhs) = rhs {
-        args.push(rhs);
-    }
-    call_runtime_method(&args).await
+        op,
+        kind: ObjectIndexKind::Member,
+        selector: ObjectIndexSelector::Member(field),
+        rhs,
+    })
+    .await
+}
+
+pub async fn call_object_index_descriptor_method(
+    descriptor: ObjectIndexDescriptor,
+) -> Result<Value, RuntimeError> {
+    call_runtime_method(&descriptor.into_runtime_method_args()).await
 }
 
 pub async fn build_expanded_args_from_specs<ExpandObjectAll, ExpandObjectIndices, FutAll, FutIdx>(
@@ -434,4 +468,43 @@ where
     }
     temp.reverse();
     Ok(temp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ObjectIndexDescriptor, ObjectIndexKind, ObjectIndexOp, ObjectIndexSelector};
+    use runmat_builtins::Value;
+
+    #[test]
+    fn object_index_descriptor_serializes_protocol_args_once() {
+        let descriptor = ObjectIndexDescriptor {
+            base: Value::Num(1.0),
+            op: ObjectIndexOp::Subsref,
+            kind: ObjectIndexKind::Brace,
+            selector: ObjectIndexSelector::Indices(Value::Num(2.0)),
+            rhs: None,
+        };
+
+        let args = descriptor.into_runtime_method_args();
+        assert_eq!(args[1], Value::String("subsref".to_string()));
+        assert_eq!(args[2], Value::String("{}".to_string()));
+        assert_eq!(args[3], Value::Num(2.0));
+    }
+
+    #[test]
+    fn object_member_descriptor_carries_rhs() {
+        let descriptor = ObjectIndexDescriptor {
+            base: Value::Num(1.0),
+            op: ObjectIndexOp::Subsasgn,
+            kind: ObjectIndexKind::Member,
+            selector: ObjectIndexSelector::Member("field".to_string()),
+            rhs: Some(Value::Num(9.0)),
+        };
+
+        let args = descriptor.into_runtime_method_args();
+        assert_eq!(args[1], Value::String("subsasgn".to_string()));
+        assert_eq!(args[2], Value::String(".".to_string()));
+        assert_eq!(args[3], Value::String("field".to_string()));
+        assert_eq!(args[4], Value::Num(9.0));
+    }
 }

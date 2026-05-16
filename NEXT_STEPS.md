@@ -145,7 +145,7 @@ Concrete next targets:
 
 - Continue widening Turbine value-lane coverage beyond semantic cell expansion; semantic expanded calls can now cross the JIT boundary with tagged variables and `TurbineArgSpec`, while generic `feval`/external expansion and object expansion still need semantic descriptor work.
 - Keep the centralized legacy fallback only for unresolved/external callback identities that are not present in a semantic registry.
-- Start object/index descriptor design before replacing the remaining `subsref` / `subsasgn` protocol assembly paths.
+- Continue moving object/index call sites to structured descriptors; VM object protocol dispatch now has an `ObjectIndexDescriptor` serialization boundary instead of ad hoc method argument assembly in the public helper functions.
 
 Avoid spending more time on scalar/range assignment band-aids: semantic MIR/bytecode now lowers common range, vector, logical, cell, and member store-back cases through typed slice/index instructions, and `StoreIndex` is narrowed to scalar indices.
 
@@ -282,7 +282,7 @@ Old-HIR cleanup opportunity:
 Current state:
 
 - Typed member bytecode now covers member load/store, dynamic member load/store, method/member-index calls, and expanded member-index calls.
-- Object protocol calls still assemble `subsref`/`subsasgn` style data in VM/runtime helper paths.
+- Object protocol calls now route through an `ObjectIndexDescriptor` serialization boundary in the VM call layer; remaining work is to move more call sites to build descriptors directly instead of prebuilding selector cells before the helper call.
 
 Target state:
 
