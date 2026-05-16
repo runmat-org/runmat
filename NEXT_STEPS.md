@@ -283,6 +283,7 @@ Current state:
 - Object protocol calls now route through an `ObjectIndexDescriptor` serialization boundary in the VM call layer; remaining work is to move more call sites to build descriptors directly instead of prebuilding selector cells before the helper call.
 - Object expansion paths in the main VM dispatch loop now build `ObjectIndexDescriptor` directly for paren/brace `subsref` instead of calling the legacy-shaped object index helper.
 - Builtin, `feval`, and user-function expand-multi object paths now build `ObjectIndexDescriptor` directly for brace `subsref` expansion.
+- VM indexing dispatch and slice read/write object paths now construct `ObjectIndexDescriptor` directly; the legacy-shaped `call_object_index_method` wrapper has been removed.
 
 Target state:
 

@@ -115,23 +115,6 @@ pub async fn call_runtime_method(args: &[Value]) -> Result<Value, RuntimeError> 
     runmat_runtime::call_method_async(args).await
 }
 
-pub async fn call_object_index_method(
-    base: Value,
-    op: ObjectIndexOp,
-    kind: ObjectIndexKind,
-    cell: Value,
-    rhs: Option<Value>,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor {
-        base,
-        op,
-        kind,
-        selector: ObjectIndexSelector::Indices(cell),
-        rhs,
-    })
-    .await
-}
-
 pub async fn call_object_member_method(
     base: Value,
     op: ObjectIndexOp,

@@ -1,4 +1,7 @@
-use crate::call::shared::{call_object_index_method, ObjectIndexKind, ObjectIndexOp};
+use crate::call::shared::{
+    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexKind, ObjectIndexOp,
+    ObjectIndexSelector,
+};
 use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::selectors::{
     build_slice_selectors, index_scalar_from_value, materialize_index_value, SliceSelector,
@@ -16,13 +19,13 @@ pub async fn object_subsref_paren(base: Value, numeric: &[Value]) -> Result<Valu
     let cell = build_numeric_subsref_cell(numeric)?;
     match base {
         Value::Object(_) | Value::HandleObject(_) => {
-            call_object_index_method(
+            call_object_index_descriptor_method(ObjectIndexDescriptor {
                 base,
-                ObjectIndexOp::Subsref,
-                ObjectIndexKind::Paren,
-                cell,
-                None,
-            )
+                op: ObjectIndexOp::Subsref,
+                kind: ObjectIndexKind::Paren,
+                selector: ObjectIndexSelector::Indices(cell),
+                rhs: None,
+            })
             .await
         }
         other => Err(format!("slice subsref requires object/handle, got {other:?}").into()),

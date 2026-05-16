@@ -1,4 +1,7 @@
-use crate::call::shared::{call_object_index_method, ObjectIndexKind, ObjectIndexOp};
+use crate::call::shared::{
+    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexKind, ObjectIndexOp,
+    ObjectIndexSelector,
+};
 use crate::indexing::plan::IndexPlan;
 use crate::interpreter::errors::mex;
 use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
@@ -18,13 +21,13 @@ pub async fn object_subsasgn_paren(
     let cell = build_subsasgn_paren_cell(numeric)?;
     match base {
         Value::Object(_) | Value::HandleObject(_) => {
-            call_object_index_method(
+            call_object_index_descriptor_method(ObjectIndexDescriptor {
                 base,
-                ObjectIndexOp::Subsasgn,
-                ObjectIndexKind::Paren,
-                cell,
-                Some(rhs),
-            )
+                op: ObjectIndexOp::Subsasgn,
+                kind: ObjectIndexKind::Paren,
+                selector: ObjectIndexSelector::Indices(cell),
+                rhs: Some(rhs),
+            })
             .await
         }
         other => Err(format!("slice subsasgn requires object/handle, got {other:?}").into()),
