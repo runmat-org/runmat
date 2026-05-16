@@ -159,6 +159,39 @@ fn declare_host_semantic_call_outputs_in_module(module: &mut JITModule) -> FuncI
         .expect("Failed to declare runmat_call_semantic_function_outputs")
 }
 
+fn declare_host_semantic_value_call_in_module(module: &mut JITModule) -> FuncId {
+    let mut sig = module.make_signature();
+    let pointer_type = module.isa().pointer_type();
+    sig.params.push(AbiParam::new(types::I64)); // function id
+    sig.params.push(AbiParam::new(pointer_type)); // args_ptr: TurbineValue[]
+    sig.params.push(AbiParam::new(types::I32)); // args_len
+    sig.params.push(AbiParam::new(pointer_type)); // result_ptr: TurbineValue*
+    sig.returns.push(AbiParam::new(types::I32)); // status
+
+    module
+        .declare_function("runmat_call_semantic_function_value", Linkage::Import, &sig)
+        .expect("Failed to declare runmat_call_semantic_function_value")
+}
+
+fn declare_host_semantic_value_outputs_in_module(module: &mut JITModule) -> FuncId {
+    let mut sig = module.make_signature();
+    let pointer_type = module.isa().pointer_type();
+    sig.params.push(AbiParam::new(types::I64)); // function id
+    sig.params.push(AbiParam::new(pointer_type)); // args_ptr: TurbineValue[]
+    sig.params.push(AbiParam::new(types::I32)); // args_len
+    sig.params.push(AbiParam::new(types::I32)); // out_count
+    sig.params.push(AbiParam::new(pointer_type)); // results_ptr: TurbineValue[]
+    sig.returns.push(AbiParam::new(types::I32)); // status
+
+    module
+        .declare_function(
+            "runmat_call_semantic_function_values",
+            Linkage::Import,
+            &sig,
+        )
+        .expect("Failed to declare runmat_call_semantic_function_values")
+}
+
 /// The main JIT compilation engine
 pub struct TurbineEngine {
     module: JITModule,
@@ -170,6 +203,8 @@ pub struct TurbineEngine {
     runmat_call_user_function_id: FuncId,
     runmat_call_semantic_function_id: FuncId,
     runmat_call_semantic_function_outputs_id: FuncId,
+    runmat_call_semantic_function_value_id: FuncId,
+    runmat_call_semantic_function_values_id: FuncId,
 }
 
 /// A compiled function ready for execution
@@ -295,6 +330,14 @@ impl TurbineEngine {
             "runmat_call_semantic_function_outputs",
             runmat_call_semantic_function_outputs as *const u8,
         );
+        builder.symbol(
+            "runmat_call_semantic_function_value",
+            runmat_call_semantic_function_value as *const u8,
+        );
+        builder.symbol(
+            "runmat_call_semantic_function_values",
+            runmat_call_semantic_function_values as *const u8,
+        );
 
         // Create the JIT module
         let mut module = JITModule::new(builder);
@@ -304,6 +347,10 @@ impl TurbineEngine {
         let runmat_call_semantic_function_id = declare_host_semantic_call_in_module(&mut module);
         let runmat_call_semantic_function_outputs_id =
             declare_host_semantic_call_outputs_in_module(&mut module);
+        let runmat_call_semantic_function_value_id =
+            declare_host_semantic_value_call_in_module(&mut module);
+        let runmat_call_semantic_function_values_id =
+            declare_host_semantic_value_outputs_in_module(&mut module);
 
         let ctx = module.make_context();
 
@@ -317,6 +364,8 @@ impl TurbineEngine {
             runmat_call_user_function_id,
             runmat_call_semantic_function_id,
             runmat_call_semantic_function_outputs_id,
+            runmat_call_semantic_function_value_id,
+            runmat_call_semantic_function_values_id,
         };
 
         info!("Turbine JIT engine initialized successfully for {target_triple}");
@@ -390,6 +439,8 @@ impl TurbineEngine {
             self.runmat_call_user_function_id,
             self.runmat_call_semantic_function_id,
             self.runmat_call_semantic_function_outputs_id,
+            self.runmat_call_semantic_function_value_id,
+            self.runmat_call_semantic_function_values_id,
         )?;
 
         // Compile to machine code

@@ -4,7 +4,7 @@ use runmat_turbine::{
     CompilerConfig, FunctionCache, HotspotProfiler, OptimizationLevel, ThreadSafeFunctionCache,
     TurbineEngine,
 };
-use runmat_vm::{Bytecode, Instr, SemanticFunctionBytecode};
+use runmat_vm::{ArgSpec, Bytecode, Instr, SemanticFunctionBytecode};
 use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
@@ -1375,6 +1375,140 @@ fn test_jit_named_semantic_multi_output_call() {
     assert_eq!(result.unwrap(), (0, true));
     assert_eq!(vars[0], Value::Num(5.0));
     assert_eq!(vars[1], Value::Num(15.0));
+}
+
+#[test]
+fn test_jit_semantic_expand_multi_uses_value_abi_for_scalar_args() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let function = runmat_hir::FunctionId(1);
+    let semantic_function = SemanticFunctionBytecode {
+        function,
+        display_name: "inc".to_string(),
+        source_id: None,
+        instructions: vec![
+            Instr::LoadVar(0),
+            Instr::LoadConst(1.0),
+            Instr::Add,
+            Instr::StoreVar(1),
+        ],
+        instr_spans: Vec::new(),
+        call_arg_spans: Vec::new(),
+        var_count: 2,
+        input_slots: vec![0],
+        varargin_slot: None,
+        output_slots: vec![1],
+        varargout_slot: None,
+        capture_slots: Vec::new(),
+    };
+
+    let mut semantic_functions = HashMap::new();
+    semantic_functions.insert(function, semantic_function);
+    let bytecode = Bytecode {
+        semantic_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(11.0),
+                Instr::CallSemanticFunctionExpandMulti(
+                    function,
+                    vec![ArgSpec {
+                        is_expand: false,
+                        num_indices: 0,
+                        expand_all: false,
+                    }],
+                ),
+                Instr::StoreVar(0),
+            ],
+            1,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "semantic expanded value ABI call should JIT"
+    );
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[0], Value::Num(12.0));
+}
+
+#[test]
+fn test_jit_semantic_expand_multi_output_uses_value_abi_for_scalar_args() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let function = runmat_hir::FunctionId(1);
+    let semantic_function = SemanticFunctionBytecode {
+        function,
+        display_name: "pair".to_string(),
+        source_id: None,
+        instructions: vec![
+            Instr::LoadVar(0),
+            Instr::StoreVar(1),
+            Instr::LoadVar(0),
+            Instr::LoadConst(2.0),
+            Instr::Mul,
+            Instr::StoreVar(2),
+        ],
+        instr_spans: Vec::new(),
+        call_arg_spans: Vec::new(),
+        var_count: 3,
+        input_slots: vec![0],
+        varargin_slot: None,
+        output_slots: vec![1, 2],
+        varargout_slot: None,
+        capture_slots: Vec::new(),
+    };
+
+    let mut semantic_functions = HashMap::new();
+    semantic_functions.insert(function, semantic_function);
+    let bytecode = Bytecode {
+        semantic_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(6.0),
+                Instr::CallSemanticFunctionExpandMultiOutput(
+                    function,
+                    vec![ArgSpec {
+                        is_expand: false,
+                        num_indices: 0,
+                        expand_all: false,
+                    }],
+                    2,
+                ),
+                Instr::Unpack(2),
+                Instr::StoreVar(1),
+                Instr::StoreVar(0),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "semantic expanded multi-output value ABI call should JIT"
+    );
+    assert_eq!(result.unwrap(), (0, true));
+    assert_eq!(vars[0], Value::Num(6.0));
+    assert_eq!(vars[1], Value::Num(12.0));
 }
 
 #[test]
