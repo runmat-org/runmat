@@ -8,6 +8,7 @@ mod object;
 mod stack;
 
 use crate::bytecode::Instr;
+use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
 use crate::call::shared::{call_object_index_method, ObjectIndexKind, ObjectIndexOp};
 use crate::interpreter::debug;
 use crate::runtime::workspace::refresh_workspace_state;
@@ -579,33 +580,16 @@ pub async fn dispatch_instruction(
         }
         Instr::CallSemanticFunction(function, arg_count) => {
             let args = crate::interpreter::stack::pop_args(stack, *arg_count)?;
-            let Some(result) =
-                runmat_runtime::user_functions::try_call_semantic_function(function.0, &args, 1)
-                    .await
-            else {
-                return Err(RuntimeError::from(format!(
-                    "semantic function invoker unavailable for {:?}",
-                    function
-                )));
-            };
-            stack.push(result?);
+            let descriptor = CallableDescriptor::semantic(*function, args, 1);
+            stack.push(execute_callable_descriptor(descriptor).await?);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => {
             let args = crate::interpreter::stack::pop_args(stack, *arg_count)?;
-            let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
-                function.0, &args, *out_count,
-            )
-            .await
-            else {
-                return Err(RuntimeError::from(format!(
-                    "semantic function invoker unavailable for {:?}",
-                    function
-                )));
-            };
-            stack.push(result?);
+            let descriptor = CallableDescriptor::semantic(*function, args, *out_count);
+            stack.push(execute_callable_descriptor(descriptor).await?);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -779,35 +763,16 @@ pub async fn dispatch_instruction(
         }
         Instr::CallSemanticFunctionExpandMulti(function, specs) => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
-            let Some(result) =
-                runmat_runtime::user_functions::try_call_semantic_function(function.0, &args, 1)
-                    .await
-            else {
-                return Err(RuntimeError::from(format!(
-                    "semantic function invoker unavailable for {:?}",
-                    function
-                )));
-            };
-            stack.push(result?);
+            let descriptor = CallableDescriptor::semantic(*function, args, 1);
+            stack.push(execute_callable_descriptor(descriptor).await?);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
-            let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
-                function.0,
-                args.as_slice(),
-                *out_count,
-            )
-            .await
-            else {
-                return Err(RuntimeError::from(format!(
-                    "semantic function invoker unavailable for {:?}",
-                    function
-                )));
-            };
-            stack.push(result?);
+            let descriptor = CallableDescriptor::semantic(*function, args, *out_count);
+            stack.push(execute_callable_descriptor(descriptor).await?);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

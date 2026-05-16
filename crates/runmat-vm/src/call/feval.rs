@@ -1,14 +1,8 @@
 use crate::bytecode::SemanticFunctionRegistry;
+use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
 use crate::call::user::try_builtin_fallback_single;
-use runmat_builtins::{Closure, Value};
+use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
-
-pub fn closure_call_args(closure: &Closure, args: Vec<Value>) -> (String, Vec<Value>) {
-    let name = closure.function_name.clone();
-    let mut call_args = closure.captures.clone();
-    call_args.extend(args);
-    (name, call_args)
-}
 
 pub async fn forward_builtin_feval(
     func_value: Value,
@@ -41,71 +35,9 @@ pub async fn execute_feval(
     requested_outputs: usize,
     semantic_registry: &SemanticFunctionRegistry,
 ) -> Result<FevalDispatch, RuntimeError> {
-    match func_val {
-        Value::Closure(c) => {
-            let (name, call_args) = closure_call_args(&c, args);
-            if let Some(function) = c.semantic_function {
-                if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
-                    function,
-                    &call_args,
-                    requested_outputs,
-                )
-                .await
-                {
-                    return Ok(FevalDispatch::Completed(result?));
-                }
-            }
-            if let Some(function) = semantic_registry.resolve_name(&name) {
-                if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
-                    function.0,
-                    &call_args,
-                    requested_outputs,
-                )
-                .await
-                {
-                    return Ok(FevalDispatch::Completed(result?));
-                }
-            }
-            if let Some(result) = try_closure_builtin_fallback(&name, &call_args).await? {
-                return Ok(FevalDispatch::Completed(result));
-            }
-            Err(crate::interpreter::errors::mex(
-                "UndefinedFunction",
-                &format!("Undefined function: {name}"),
-            ))
-        }
-        Value::FunctionHandle(name) => {
-            if let Some(function) = semantic_registry.resolve_name(&name) {
-                if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
-                    function.0,
-                    &args,
-                    requested_outputs,
-                )
-                .await
-                {
-                    return Ok(FevalDispatch::Completed(result?));
-                }
-            }
-            Ok(FevalDispatch::Completed(
-                forward_builtin_feval(Value::FunctionHandle(name), args).await?,
-            ))
-        }
-        Value::SemanticFunctionHandle { name, function } => {
-            if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
-                function,
-                &args,
-                requested_outputs,
-            )
-            .await
-            {
-                return Ok(FevalDispatch::Completed(result?));
-            }
-            Ok(FevalDispatch::Completed(
-                forward_builtin_feval(Value::FunctionHandle(name), args).await?,
-            ))
-        }
-        other => Ok(FevalDispatch::Completed(
-            forward_builtin_feval(other, args).await?,
-        )),
-    }
+    let descriptor =
+        CallableDescriptor::from_feval_value(func_val, args, requested_outputs, semantic_registry);
+    Ok(FevalDispatch::Completed(
+        execute_callable_descriptor(descriptor).await?,
+    ))
 }

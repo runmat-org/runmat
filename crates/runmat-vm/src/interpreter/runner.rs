@@ -1,6 +1,7 @@
 use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
 use crate::bytecode::{Bytecode, Instr, SemanticFunctionRegistry};
+use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
 use crate::call::user as call_user;
 use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
 use crate::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
@@ -165,7 +166,13 @@ async fn invoke_user_function_value(
     _vars: &mut [Value],
 ) -> Result<Value, RuntimeError> {
     if let Some(function) = semantic_registry.resolve_name(name) {
-        return invoke_semantic_function_value(function.0, args, 1, semantic_registry).await;
+        return execute_callable_descriptor(CallableDescriptor::semantic_named(
+            function,
+            name.to_string(),
+            args.to_vec(),
+            1,
+        ))
+        .await;
     }
 
     if let Some(result) = call_user::try_builtin_fallback_single(name, args).await? {

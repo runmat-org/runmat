@@ -2,6 +2,7 @@ use crate::bytecode::{ArgSpec, Instr, SemanticFunctionRegistry};
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
+use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
 use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
     build_expanded_args_from_specs, call_object_index_method, expand_cell_indices,
@@ -530,13 +531,10 @@ where
         pc,
     } = exception;
     if let Some(function) = semantic_registry.resolve_name(name) {
-        if let Some(result) =
-            runmat_runtime::user_functions::try_call_semantic_function(function.0, &args, out_count)
-                .await
-        {
-            push_single_result(stack, result?);
-            return Ok(UserCallHandling::Completed);
-        }
+        let descriptor =
+            CallableDescriptor::semantic_named(function, name.to_string(), args.clone(), out_count);
+        push_single_result(stack, execute_callable_descriptor(descriptor).await?);
+        return Ok(UserCallHandling::Completed);
     }
 
     if let Some(result) = builtin_fallback(name.to_string(), args.clone(), out_count).await? {

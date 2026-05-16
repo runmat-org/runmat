@@ -190,6 +190,7 @@ Current state:
 - The VM legacy user fallback compiler path has been removed; `compile_legacy_named_user_dispatch_fallback`, `compile_legacy_user_dispatch_fallback`, `PreparedLegacyUserCall`, and `CompiledLegacyUserDispatch` no longer exist.
 - `LegacyUserFunction`, `Bytecode.functions`, and `ExecutionContext.functions` have been removed from VM bytecode/runtime metadata; callable behavior now goes through semantic function registries or explicit unresolved-call errors.
 - The old VM legacy HIR compiler modules have been deleted; production bytecode compilation is semantic HIR/MIR/layout driven.
+- VM callable execution now has an initial `CallableDescriptor` ABI that carries callee identity, prepared arguments, requested output count, and fallback policy for `feval`, direct semantic bytecode calls, expanded semantic calls, and registry-resolved named calls.
 
 Target state:
 
@@ -206,7 +207,7 @@ Target state:
 Design implication:
 
 - Legacy user-function bytecode metadata is gone; unresolved or external function names must become semantic descriptors before execution or fail as unresolved calls.
-- The long-term replacement for remaining name-shaped call metadata is a semantic call descriptor keyed by `FunctionId`/`DefPath` plus layout/capture data.
+- The current `CallableDescriptor` is the first runtime boundary for replacing remaining name-shaped call metadata; the long-term descriptor should grow callsite/source metadata plus `FunctionId`/`DefPath` and layout/capture data where available.
 
 Current unresolved-call inventory:
 
