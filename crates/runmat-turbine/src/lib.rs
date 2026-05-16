@@ -20,11 +20,9 @@ use futures::task::noop_waker;
 use log::{debug, error, info, warn};
 use runmat_builtins::Value;
 use runmat_runtime::{build_runtime_error, RuntimeError};
-use runmat_vm::legacy::LegacyUserFunction;
 use runmat_vm::{ArgSpec, Bytecode, Instr, InterpreterOutcome, SemanticFunctionRegistry};
 use std::cell::Cell;
 use std::env;
-use std::ffi::CStr;
 use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::pin::Pin;
@@ -73,19 +71,12 @@ fn run_immediate<F: Future>(mut future: Pin<Box<F>>) -> Result<F::Output> {
 }
 
 struct RuntimeContext {
-    functions: std::collections::HashMap<String, LegacyUserFunction>,
     semantic_registry: SemanticFunctionRegistry,
 }
 
 impl RuntimeContext {
-    fn new(
-        functions: std::collections::HashMap<String, LegacyUserFunction>,
-        semantic_registry: SemanticFunctionRegistry,
-    ) -> Self {
-        Self {
-            functions,
-            semantic_registry,
-        }
+    fn new(semantic_registry: SemanticFunctionRegistry) -> Self {
+        Self { semantic_registry }
     }
 }
 
@@ -110,20 +101,6 @@ fn get_runtime_context() -> Option<&'static RuntimeContext> {
             Some(unsafe { &*ptr })
         }
     })
-}
-
-fn declare_host_call_in_module(module: &mut JITModule) -> FuncId {
-    let mut sig = module.make_signature();
-    let pointer_type = module.isa().pointer_type();
-    sig.params.push(AbiParam::new(pointer_type)); // name_ptr
-    sig.params.push(AbiParam::new(pointer_type)); // args_ptr
-    sig.params.push(AbiParam::new(types::I32)); // args_len
-    sig.params.push(AbiParam::new(pointer_type)); // result_ptr
-    sig.returns.push(AbiParam::new(types::I32)); // status
-
-    module
-        .declare_function("runmat_call_user_function", Linkage::Import, &sig)
-        .expect("Failed to declare runmat_call_user_function")
 }
 
 fn declare_host_semantic_call_in_module(module: &mut JITModule) -> FuncId {
@@ -241,7 +218,6 @@ pub struct TurbineEngine {
     profiler: HotspotProfiler,
     target_isa: codegen::isa::OwnedTargetIsa,
     compiler: BytecodeCompiler,
-    runmat_call_user_function_id: FuncId,
     runmat_call_semantic_function_id: FuncId,
     runmat_call_semantic_function_outputs_id: FuncId,
     runmat_call_semantic_function_value_id: FuncId,
@@ -362,10 +338,6 @@ impl TurbineEngine {
 
         // Register symbols using the expert's recommended approach
         builder.symbol(
-            "runmat_call_user_function",
-            runmat_call_user_function as *const u8,
-        );
-        builder.symbol(
             "runmat_call_semantic_function",
             runmat_call_semantic_function as *const u8,
         );
@@ -394,7 +366,6 @@ impl TurbineEngine {
         let mut module = JITModule::new(builder);
 
         // Declare the external function on the module using the expert's pattern
-        let runmat_call_user_function_id = declare_host_call_in_module(&mut module);
         let runmat_call_semantic_function_id = declare_host_semantic_call_in_module(&mut module);
         let runmat_call_semantic_function_outputs_id =
             declare_host_semantic_call_outputs_in_module(&mut module);
@@ -416,7 +387,6 @@ impl TurbineEngine {
             profiler: HotspotProfiler::new(),
             target_isa,
             compiler: BytecodeCompiler::new(),
-            runmat_call_user_function_id,
             runmat_call_semantic_function_id,
             runmat_call_semantic_function_outputs_id,
             runmat_call_semantic_function_value_id,
@@ -493,7 +463,6 @@ impl TurbineEngine {
             &bytecode.functions,
             &bytecode.semantic_registry(),
             &mut self.module,
-            self.runmat_call_user_function_id,
             self.runmat_call_semantic_function_id,
             self.runmat_call_semantic_function_outputs_id,
             self.runmat_call_semantic_function_value_id,
@@ -551,7 +520,7 @@ impl TurbineEngine {
         &mut self,
         hash: u64,
         vars: &mut [Value],
-        functions: &std::collections::HashMap<String, LegacyUserFunction>,
+        _functions: &std::collections::HashMap<String, runmat_vm::legacy::LegacyUserFunction>,
         semantic_registry: &SemanticFunctionRegistry,
     ) -> Result<i32> {
         let func = self
@@ -568,7 +537,7 @@ impl TurbineEngine {
             .collect::<Result<Vec<_>>>()?;
 
         // Set up runtime context for user function calls
-        let runtime_context = RuntimeContext::new(functions.clone(), semantic_registry.clone());
+        let runtime_context = RuntimeContext::new(semantic_registry.clone());
         // Note: Using Box::leak to create a 'static reference - this is safe for our use case
         // but in production we'd want a more sophisticated lifetime management
         let static_context = Box::leak(Box::new(runtime_context));
@@ -980,97 +949,8 @@ pub struct TurbineStats {
 unsafe impl Send for CompiledFunction {}
 unsafe impl Sync for CompiledFunction {}
 
-/// Runtime function implementations for JIT-compiled code
-/// These functions provide the bridge between JIT-compiled code and the RunMat runtime
-#[no_mangle]
-pub extern "C" fn runmat_call_user_function(
-    name_ptr: *const u8,
-    args_ptr: *const f64,
-    args_len: i32,
-    result_ptr: *mut f64,
-) -> i32 {
-    if name_ptr.is_null() || result_ptr.is_null() {
-        error!("Null pointer passed to runmat_call_user_function");
-        return 1;
-    }
-
-    let name = unsafe { CStr::from_ptr(name_ptr as *const i8) }
-        .to_string_lossy()
-        .to_string();
-
-    let args_slice = if args_len > 0 {
-        if args_ptr.is_null() {
-            error!("Null args pointer passed to runmat_call_user_function");
-            return 1;
-        }
-        unsafe { std::slice::from_raw_parts(args_ptr, args_len as usize) }
-    } else {
-        &[]
-    };
-
-    let context = match get_runtime_context() {
-        Some(ctx) => ctx,
-        None => {
-            error!("No runtime context available for user function call");
-            return 1;
-        }
-    };
-
-    let args: Vec<Value> = args_slice.iter().map(|value| Value::Num(*value)).collect();
-
-    let output = if let Some(function_id) = context.semantic_registry.resolve_name(&name) {
-        run_immediate(Box::pin(runmat_vm::invoke_semantic_function_value(
-            function_id.0,
-            &args,
-            1,
-            &context.semantic_registry,
-        )))
-        .and_then(|result| result.map_err(TurbineError::ExecutionError))
-    } else if let Some(function_def) = context.functions.get(&name) {
-        run_immediate(Box::pin(
-            runmat_vm::legacy::execute_legacy_user_function_isolated(
-                function_def,
-                &args,
-                &context.functions,
-            ),
-        ))
-        .and_then(|result| result.map_err(TurbineError::ExecutionError))
-    } else {
-        error!("Unknown user function requested: {name}");
-        return 1;
-    };
-
-    let output = match output {
-        Ok(result) => result,
-        Err(err) => {
-            error!("User function execution failed: {err}");
-            return 1;
-        }
-    };
-
-    let output_value = match output {
-        Value::Num(val) => val,
-        Value::Int(val) => val.to_f64(),
-        Value::Bool(val) => {
-            if val {
-                1.0
-            } else {
-                0.0
-            }
-        }
-        _ => {
-            error!("User function returned unsupported value: {output:?}");
-            return 1;
-        }
-    };
-
-    unsafe {
-        *result_ptr = output_value;
-    }
-
-    0
-}
-
+/// Runtime function implementations for JIT-compiled code.
+/// These functions bridge semantic bytecode identities into the RunMat runtime.
 #[no_mangle]
 pub extern "C" fn runmat_call_semantic_function(
     function_id: i64,
@@ -1799,7 +1679,7 @@ mod tests {
             semantic_functions.insert(function.function, function);
         }
         let registry = SemanticFunctionRegistry::new(semantic_functions);
-        let context = Box::leak(Box::new(RuntimeContext::new(HashMap::new(), registry)));
+        let context = Box::leak(Box::new(RuntimeContext::new(registry)));
         set_runtime_context(context);
     }
 

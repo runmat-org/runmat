@@ -260,36 +260,6 @@ async fn invoke_user_function_value(
     ))
 }
 
-pub async fn execute_legacy_user_function_isolated(
-    function_def: &LegacyUserFunction,
-    args: &[Value],
-    all_functions: &HashMap<String, LegacyUserFunction>,
-) -> Result<Value, RuntimeError> {
-    let mut functions = all_functions.clone();
-    functions.insert(function_def.name.clone(), function_def.clone());
-    let arg_count = args.len();
-    let compiled = interp_dispatch::compile_legacy_named_user_dispatch_fallback(
-        &function_def.name,
-        &functions,
-        args,
-        &[],
-    )?;
-    let interp_dispatch::CompiledLegacyUserDispatch {
-        func,
-        var_map,
-        bytecode: func_bytecode,
-        func_vars,
-    } = compiled;
-    let func_result_vars =
-        interpret_function_with_counts(&func_bytecode, func_vars, func.name.as_str(), 1, arg_count)
-            .await?;
-    Ok(crate::call::shared::first_legacy_output_value(
-        &func,
-        &var_map,
-        &func_result_vars,
-    ))
-}
-
 pub async fn invoke_semantic_function_value(
     function: usize,
     args: &[Value],

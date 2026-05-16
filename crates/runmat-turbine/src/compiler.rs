@@ -8,7 +8,6 @@ use cranelift::prelude::*;
 use cranelift_codegen::ir::ValueDef;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
-use runmat_vm::legacy::LegacyUserFunction;
 use runmat_vm::ArgSpec;
 use runmat_vm::{Instr, SemanticFunctionRegistry};
 use std::collections::{BTreeSet, HashMap};
@@ -16,10 +15,8 @@ use std::collections::{BTreeSet, HashMap};
 /// Context for compilation containing related parameters
 struct CompileContext<'a> {
     vars_ptr: Value,
-    function_definitions: &'a HashMap<String, LegacyUserFunction>,
     semantic_registry: &'a SemanticFunctionRegistry,
     module: &'a mut JITModule,
-    runmat_call_user_function_id: FuncId,
     runmat_call_semantic_function_id: FuncId,
     runmat_call_semantic_function_outputs_id: FuncId,
     runmat_call_semantic_function_value_id: FuncId,
@@ -235,10 +232,12 @@ impl BytecodeCompiler {
         instructions: &[Instr],
         func: &mut codegen::ir::Function,
         _var_count: usize,
-        function_definitions: &std::collections::HashMap<String, LegacyUserFunction>,
+        _function_definitions: &std::collections::HashMap<
+            String,
+            runmat_vm::legacy::LegacyUserFunction,
+        >,
         semantic_registry: &SemanticFunctionRegistry,
         module: &mut JITModule,
-        runmat_call_user_function_id: FuncId,
         runmat_call_semantic_function_id: FuncId,
         runmat_call_semantic_function_outputs_id: FuncId,
         runmat_call_semantic_function_value_id: FuncId,
@@ -275,10 +274,8 @@ impl BytecodeCompiler {
         // Compile with control flow graph
         let mut ctx = CompileContext {
             vars_ptr,
-            function_definitions,
             semantic_registry,
             module,
-            runmat_call_user_function_id,
             runmat_call_semantic_function_id,
             runmat_call_semantic_function_outputs_id,
             runmat_call_semantic_function_value_id,
@@ -943,14 +940,10 @@ impl BytecodeCompiler {
             );
         }
 
-        Self::call_user_function_jit(
-            builder,
-            ctx.module,
-            ctx.runmat_call_user_function_id,
-            func_name,
-            args,
-            ctx.function_definitions,
-        )
+        let _ = (builder, args);
+        Err(execution_error(format!(
+            "Named function '{func_name}' is not available as a semantic function in Turbine JIT"
+        )))
     }
 
     fn compile_named_function_multi_call_jit(
@@ -974,143 +967,6 @@ impl BytecodeCompiler {
             args,
             out_count,
         )
-    }
-
-    /// Compile user-defined function call to native machine code
-    /// Uses recursive compilation: each function is compiled separately and called
-    fn call_user_function_jit(
-        builder: &mut FunctionBuilder,
-        module: &mut JITModule,
-        runmat_call_user_function_id: FuncId,
-        func_name: &str,
-        args: &[Value],
-        function_definitions: &std::collections::HashMap<String, LegacyUserFunction>,
-    ) -> Result<Value> {
-        let function_def = function_definitions
-            .get(func_name)
-            .ok_or_else(|| execution_error(format!("Unknown function: {func_name}")))?;
-
-        if args.len() != function_def.params.len() {
-            return Err(execution_error(format!(
-                "Function {} expects {} arguments, got {}",
-                func_name,
-                function_def.params.len(),
-                args.len()
-            )));
-        }
-
-        // For JIT compilation of user-defined functions, we need to call a runtime function
-        // that can handle the recursive compilation and execution of the specific function.
-        // This provides proper isolation and allows for nested function calls.
-
-        // Prepare arguments array
-        let args_slot = if !args.is_empty() {
-            let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                StackSlotKind::ExplicitSlot,
-                (args.len() * 8) as u32,
-                8, // alignment for f64
-            ));
-            let args_ptr = builder.ins().stack_addr(types::I64, slot, 0);
-
-            // Store arguments
-            for (i, &arg) in args.iter().enumerate() {
-                let offset = builder.ins().iconst(types::I64, (i * 8) as i64);
-                let arg_addr = builder.ins().iadd(args_ptr, offset);
-                builder.ins().store(MemFlags::new(), arg, arg_addr, 0);
-            }
-
-            Some((args_ptr, slot))
-        } else {
-            None
-        };
-
-        // Prepare function name as C string
-        let func_name_bytes = func_name.as_bytes();
-        let name_slot = builder.create_sized_stack_slot(StackSlotData::new(
-            StackSlotKind::ExplicitSlot,
-            (func_name_bytes.len() + 1) as u32, // +1 for null terminator
-            1,
-        ));
-        let name_ptr = builder.ins().stack_addr(types::I64, name_slot, 0);
-
-        // Store function name with null terminator
-        for (i, &byte) in func_name_bytes.iter().enumerate() {
-            let offset = builder.ins().iconst(types::I64, i as i64);
-            let byte_addr = builder.ins().iadd(name_ptr, offset);
-            let byte_val = builder.ins().iconst(types::I8, byte as i64);
-            builder.ins().store(MemFlags::new(), byte_val, byte_addr, 0);
-        }
-        // Null terminator
-        let null_offset = builder
-            .ins()
-            .iconst(types::I64, func_name_bytes.len() as i64);
-        let null_addr = builder.ins().iadd(name_ptr, null_offset);
-        let null_val = builder.ins().iconst(types::I8, 0);
-        builder.ins().store(MemFlags::new(), null_val, null_addr, 0);
-
-        // Use the expert's pattern: declare_func_in_func to get a valid FuncRef
-        let runtime_fn = module.declare_func_in_func(runmat_call_user_function_id, builder.func);
-
-        // Allocate space for the result (f64)
-        let result_slot =
-            builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
-        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
-
-        let call_args = if let Some((args_ptr, _)) = args_slot {
-            vec![
-                name_ptr,
-                args_ptr,
-                builder.ins().iconst(types::I32, args.len() as i64), // i32 for arg_count
-                result_ptr,
-            ]
-        } else {
-            vec![
-                name_ptr,
-                builder.ins().iconst(types::I64, 0), // null args ptr
-                builder.ins().iconst(types::I32, 0), // args count (i32)
-                result_ptr,
-            ]
-        };
-
-        let call = builder.ins().call(runtime_fn, &call_args);
-        let status = builder.inst_results(call)[0]; // i32 status code
-
-        // Check status for error handling - if non-zero, we have an error
-        let zero = builder.ins().iconst(types::I32, 0);
-        let is_error = builder.ins().icmp(IntCC::NotEqual, status, zero);
-
-        // Create blocks for error and success paths
-        let error_block = builder.create_block();
-        let success_block = builder.create_block();
-        let after_block = builder.create_block();
-
-        builder
-            .ins()
-            .brif(is_error, error_block, &[], success_block, &[]);
-
-        // Error block: return 0.0 to indicate error (keeps variable unchanged)
-        builder.switch_to_block(error_block);
-        let error_result = builder.ins().f64const(0.0);
-        builder.ins().jump(after_block, &[error_result]);
-
-        // Success block: load the actual result
-        builder.switch_to_block(success_block);
-        let success_result = builder
-            .ins()
-            .load(types::F64, MemFlags::new(), result_ptr, 0);
-        builder.ins().jump(after_block, &[success_result]);
-
-        // After block: get the final result
-        builder.switch_to_block(after_block);
-        builder.append_block_param(after_block, types::F64);
-        let result = builder.block_params(after_block)[0];
-
-        // Seal all blocks
-        builder.seal_block(error_block);
-        builder.seal_block(success_block);
-        builder.seal_block(after_block);
-
-        Ok(result)
     }
 
     fn call_semantic_function_jit(

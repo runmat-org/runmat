@@ -40,5 +40,4 @@ pub mod legacy {
     pub use crate::interpreter::dispatch::{
         legacy_user_dispatch_fallback_count, reset_legacy_user_dispatch_fallback_count,
     };
-    pub use crate::interpreter::runner::execute_legacy_user_function_isolated;
 }

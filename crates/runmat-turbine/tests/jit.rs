@@ -13,6 +13,7 @@ use std::time::Duration;
 fn test_turbine_legacy_function_fixtures_are_intentional() {
     let source = include_str!("jit.rs");
     let legacy_fixture = ["runmat_vm::legacy::", "LegacyUserFunction"].concat();
+    let legacy_isolated_execution = ["execute_", "legacy_user_function_isolated"].concat();
     let fixture_note = ["Intentional ", "legacy fixture:"].concat();
 
     assert_eq!(
@@ -24,6 +25,11 @@ fn test_turbine_legacy_function_fixtures_are_intentional() {
         source.matches(&fixture_note).count(),
         4,
         "Each remaining legacy fixture should document its fallback-boundary purpose"
+    );
+    assert_eq!(
+        source.matches(&legacy_isolated_execution).count(),
+        0,
+        "Turbine tests should not depend on isolated legacy callback execution"
     );
 }
 
