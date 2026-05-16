@@ -18,14 +18,16 @@ pub async fn object_subsasgn_paren(
     numeric: &[Value],
     rhs: Value,
 ) -> Result<Value, RuntimeError> {
-    let cell = build_subsasgn_paren_cell(numeric)?;
     match base {
         Value::Object(_) | Value::HandleObject(_) => {
             call_object_index_descriptor_method(ObjectIndexDescriptor {
                 base,
                 op: ObjectIndexOp::Subsasgn,
                 kind: ObjectIndexKind::Paren,
-                selector: ObjectIndexSelector::Indices(cell),
+                selector: ObjectIndexSelector::IndexValues {
+                    values: numeric.to_vec(),
+                    context: "subsasgn build error",
+                },
                 rhs: Some(rhs),
             })
             .await

@@ -3,8 +3,8 @@ use crate::call::descriptor::{
     try_execute_callable_descriptor, CallableCallKind, CallableDescriptor,
 };
 use crate::call::shared::{
-    call_object_index_descriptor_method, object_protocol_index_cell, ObjectIndexDescriptor,
-    ObjectIndexKind, ObjectIndexOp, ObjectIndexSelector,
+    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexKind, ObjectIndexOp,
+    ObjectIndexSelector,
 };
 use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan as idx_plan;
@@ -468,14 +468,15 @@ where
             ))?;
             match &base {
                 Value::Object(_) | Value::HandleObject(_) => {
-                    let cell =
-                        object_protocol_index_cell(raw_indices.clone(), "subsref build error")?;
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor {
                             base,
                             op: ObjectIndexOp::Subsref,
                             kind: ObjectIndexKind::Paren,
-                            selector: ObjectIndexSelector::Indices(cell),
+                            selector: ObjectIndexSelector::IndexValues {
+                                values: raw_indices.clone(),
+                                context: "subsref build error",
+                            },
                             rhs: None,
                         })
                         .await?,
@@ -522,16 +523,15 @@ where
             match base {
                 Value::Object(obj) => {
                     let indices = numeric_indices_from_values(&raw_indices)?;
-                    let cell = object_protocol_index_cell(
-                        indices.iter().map(|n| Value::Num(*n as f64)).collect(),
-                        "subsref build error",
-                    )?;
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor {
                             base: Value::Object(obj),
                             op: ObjectIndexOp::Subsref,
                             kind: ObjectIndexKind::Brace,
-                            selector: ObjectIndexSelector::Indices(cell),
+                            selector: ObjectIndexSelector::IndexValues {
+                                values: indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                                context: "subsref build error",
+                            },
                             rhs: None,
                         })
                         .await?,
@@ -539,16 +539,15 @@ where
                 }
                 Value::HandleObject(handle) => {
                     let indices = numeric_indices_from_values(&raw_indices)?;
-                    let cell = object_protocol_index_cell(
-                        indices.iter().map(|n| Value::Num(*n as f64)).collect(),
-                        "subsref build error",
-                    )?;
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor {
                             base: Value::HandleObject(handle),
                             op: ObjectIndexOp::Subsref,
                             kind: ObjectIndexKind::Brace,
-                            selector: ObjectIndexSelector::Indices(cell),
+                            selector: ObjectIndexSelector::IndexValues {
+                                values: indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                                context: "subsref build error",
+                            },
                             rhs: None,
                         })
                         .await?,
@@ -600,12 +599,14 @@ where
                     }
                 }
                 Value::Object(obj) => {
-                    let cell = object_protocol_index_cell(indices.clone(), "subsref build error")?;
                     let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::Indices(cell),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: indices,
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;
@@ -615,12 +616,14 @@ where
                     }
                 }
                 Value::HandleObject(handle) => {
-                    let cell = object_protocol_index_cell(indices.clone(), "subsref build error")?;
                     let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::HandleObject(handle),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::Indices(cell),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: indices,
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;
@@ -668,24 +671,28 @@ where
                     }
                 }
                 Value::Object(obj) => {
-                    let cell = object_protocol_index_cell(indices.clone(), "subsref build error")?;
                     let value = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::Indices(cell),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: indices,
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;
                     stack.push(Value::OutputList(vec![value]));
                 }
                 Value::HandleObject(handle) => {
-                    let cell = object_protocol_index_cell(indices.clone(), "subsref build error")?;
                     let value = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::HandleObject(handle),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::Indices(cell),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: indices,
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;
@@ -721,18 +728,15 @@ where
             match base {
                 Value::Object(obj) => {
                     let indices = numeric_indices_from_values(&raw_indices)?;
-                    let cell = runmat_builtins::CellArray::new(
-                        indices.iter().map(|n| Value::Num(*n as f64)).collect(),
-                        1,
-                        indices.len(),
-                    )
-                    .map_err(|e| format!("subsasgn build error: {e}"))?;
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor {
                             base: Value::Object(obj),
                             op: ObjectIndexOp::Subsasgn,
                             kind: ObjectIndexKind::Brace,
-                            selector: ObjectIndexSelector::Indices(Value::Cell(cell)),
+                            selector: ObjectIndexSelector::IndexValues {
+                                values: indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                                context: "subsasgn build error",
+                            },
                             rhs: Some(rhs),
                         })
                         .await?,
@@ -740,18 +744,15 @@ where
                 }
                 Value::HandleObject(handle) => {
                     let indices = numeric_indices_from_values(&raw_indices)?;
-                    let cell = runmat_builtins::CellArray::new(
-                        indices.iter().map(|n| Value::Num(*n as f64)).collect(),
-                        1,
-                        indices.len(),
-                    )
-                    .map_err(|e| format!("subsasgn build error: {e}"))?;
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor {
                             base: Value::HandleObject(handle),
                             op: ObjectIndexOp::Subsasgn,
                             kind: ObjectIndexKind::Brace,
-                            selector: ObjectIndexSelector::Indices(Value::Cell(cell)),
+                            selector: ObjectIndexSelector::IndexValues {
+                                values: indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                                context: "subsasgn build error",
+                            },
                             rhs: Some(rhs),
                         })
                         .await?,
@@ -801,32 +802,30 @@ where
             clear_value_residency(&base);
             match base {
                 Value::Object(obj) => {
-                    let cell = object_protocol_index_cell(
-                        indices.iter().map(|n| Value::Num(*n as f64)).collect(),
-                        "subsasgn build error",
-                    )?;
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor {
                             base: Value::Object(obj),
                             op: ObjectIndexOp::Subsasgn,
                             kind: ObjectIndexKind::Paren,
-                            selector: ObjectIndexSelector::Indices(cell),
+                            selector: ObjectIndexSelector::IndexValues {
+                                values: indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                                context: "subsasgn build error",
+                            },
                             rhs: Some(rhs),
                         })
                         .await?,
                     );
                 }
                 Value::HandleObject(handle) => {
-                    let cell = object_protocol_index_cell(
-                        indices.iter().map(|n| Value::Num(*n as f64)).collect(),
-                        "subsasgn build error",
-                    )?;
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor {
                             base: Value::HandleObject(handle),
                             op: ObjectIndexOp::Subsasgn,
                             kind: ObjectIndexKind::Paren,
-                            selector: ObjectIndexSelector::Indices(cell),
+                            selector: ObjectIndexSelector::IndexValues {
+                                values: indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                                context: "subsasgn build error",
+                            },
                             rhs: Some(rhs),
                         })
                         .await?,
@@ -1823,13 +1822,15 @@ where
                             }
                         }
                     }
-                    let cell = object_protocol_index_cell(idx_values, "subsasgn build error")?;
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor {
                             base: Value::Object(obj),
                             op: ObjectIndexOp::Subsasgn,
                             kind: ObjectIndexKind::Paren,
-                            selector: ObjectIndexSelector::Indices(cell),
+                            selector: ObjectIndexSelector::IndexValues {
+                                values: idx_values,
+                                context: "subsasgn build error",
+                            },
                             rhs: Some(rhs),
                         })
                         .await?,

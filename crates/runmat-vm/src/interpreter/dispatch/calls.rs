@@ -6,8 +6,7 @@ use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
 use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
     build_expanded_args_from_specs, call_object_index_descriptor_method, expand_cell_indices,
-    subsref_empty_brace_cell, ObjectIndexDescriptor, ObjectIndexKind, ObjectIndexOp,
-    ObjectIndexSelector,
+    ObjectIndexDescriptor, ObjectIndexKind, ObjectIndexOp, ObjectIndexSelector,
 };
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -234,12 +233,14 @@ pub async fn build_builtin_expand_multi_args(
         |base| async move {
             match base {
                 Value::Object(obj) => {
-                    let empty = subsref_empty_brace_cell()?;
                     let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::Indices(empty),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: Vec::new(),
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;
@@ -257,12 +258,14 @@ pub async fn build_builtin_expand_multi_args(
         |base, indices| async move {
             match base {
                 Value::Object(obj) => {
-                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
                     let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::Indices(cell),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: indices,
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;
@@ -290,12 +293,14 @@ pub async fn build_feval_expand_multi_args(
         |base| async move {
             match base {
                 Value::Object(obj) => {
-                    let empty = subsref_empty_brace_cell()?;
                     let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::Indices(empty),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: Vec::new(),
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;
@@ -313,12 +318,14 @@ pub async fn build_feval_expand_multi_args(
         |base, indices| async move {
             match base {
                 Value::Object(obj) => {
-                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
                     let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::Indices(cell),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: indices,
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;
@@ -347,12 +354,14 @@ pub async fn build_user_function_expand_multi_args(
             match base {
                 Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                 Value::Object(obj) => {
-                    let empty = subsref_empty_brace_cell()?;
                     let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::Indices(empty),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: Vec::new(),
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;
@@ -371,12 +380,14 @@ pub async fn build_user_function_expand_multi_args(
             match (base, indices.len()) {
                 (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices),
                 (Value::Object(obj), _) => {
-                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
                     let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::Indices(cell),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: indices,
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;

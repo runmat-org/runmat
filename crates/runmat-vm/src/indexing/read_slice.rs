@@ -6,24 +6,20 @@ use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::selectors::{
     build_slice_selectors, index_scalar_from_value, materialize_index_value, SliceSelector,
 };
-use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
-pub fn build_numeric_subsref_cell(numeric: &[Value]) -> Result<Value, RuntimeError> {
-    let cell = CellArray::new(numeric.to_vec(), 1, numeric.len())
-        .map_err(|e| format!("subsref build error: {e}"))?;
-    Ok(Value::Cell(cell))
-}
-
 pub async fn object_subsref_paren(base: Value, numeric: &[Value]) -> Result<Value, RuntimeError> {
-    let cell = build_numeric_subsref_cell(numeric)?;
     match base {
         Value::Object(_) | Value::HandleObject(_) => {
             call_object_index_descriptor_method(ObjectIndexDescriptor {
                 base,
                 op: ObjectIndexOp::Subsref,
                 kind: ObjectIndexKind::Paren,
-                selector: ObjectIndexSelector::Indices(cell),
+                selector: ObjectIndexSelector::IndexValues {
+                    values: numeric.to_vec(),
+                    context: "subsref build error",
+                },
                 rhs: None,
             })
             .await

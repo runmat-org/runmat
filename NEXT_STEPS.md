@@ -284,6 +284,7 @@ Current state:
 - Object expansion paths in the main VM dispatch loop now build `ObjectIndexDescriptor` directly for paren/brace `subsref` instead of calling the legacy-shaped object index helper.
 - Builtin, `feval`, and user-function expand-multi object paths now build `ObjectIndexDescriptor` directly for brace `subsref` expansion.
 - VM indexing dispatch and slice read/write object paths now construct `ObjectIndexDescriptor` directly; the legacy-shaped `call_object_index_method` wrapper has been removed.
+- `ObjectIndexSelector` can now carry raw index values and serialize protocol cells at the descriptor boundary, removing the generic object selector-cell helper and the older `subsref` selector-cell builders.
 
 Target state:
 

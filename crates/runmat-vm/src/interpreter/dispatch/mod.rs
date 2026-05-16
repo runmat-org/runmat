@@ -644,12 +644,14 @@ pub async fn dispatch_instruction(
                         Value::Object(obj) => obj,
                         _ => unreachable!(),
                     };
-                    let cell = crate::call::shared::subsref_paren_index_cell(&indices)?;
                     let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Paren,
-                        selector: ObjectIndexSelector::Indices(cell),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: indices,
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;
@@ -674,12 +676,14 @@ pub async fn dispatch_instruction(
                         Value::Object(obj) => obj,
                         _ => unreachable!(),
                     };
-                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
                     let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::Indices(cell),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: indices,
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;
@@ -709,12 +713,14 @@ pub async fn dispatch_instruction(
                         Value::Object(obj) => obj,
                         _ => unreachable!(),
                     };
-                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
                     let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
                         base: Value::Object(obj),
                         op: ObjectIndexOp::Subsref,
                         kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::Indices(cell),
+                        selector: ObjectIndexSelector::IndexValues {
+                            values: indices,
+                            context: "subsref build error",
+                        },
                         rhs: None,
                     })
                     .await?;

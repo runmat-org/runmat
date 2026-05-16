@@ -1,5 +1,4 @@
 use crate::bytecode::ArgSpec;
-use crate::compiler::CompileError;
 use crate::object::{BRACE_SELECTOR_NAME, MEMBER_SELECTOR_NAME, PAREN_SELECTOR_NAME};
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
@@ -14,27 +13,6 @@ pub fn expand_cell_indices(
 
 pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Result<Vec<Value>, RuntimeError> {
     crate::ops::cells::expand_all_cell_values(cell)
-}
-
-pub fn subsref_paren_index_cell(indices: &[Value]) -> Result<Value, RuntimeError> {
-    Ok(Value::Cell(
-        runmat_builtins::CellArray::new(indices.to_vec(), 1, indices.len())
-            .map_err(|e| CompileError::new(format!("subsref build error: {e}")))?,
-    ))
-}
-
-pub fn subsref_brace_index_cell_raw(indices: &[Value]) -> Result<Value, RuntimeError> {
-    Ok(Value::Cell(
-        runmat_builtins::CellArray::new(indices.to_vec(), 1, indices.len())
-            .map_err(|e| CompileError::new(format!("subsref build error: {e}")))?,
-    ))
-}
-
-pub fn subsref_empty_brace_cell() -> Result<Value, RuntimeError> {
-    Ok(Value::Cell(
-        runmat_builtins::CellArray::new(vec![], 1, 0)
-            .map_err(|e| CompileError::new(format!("subsref build error: {e}")))?,
-    ))
 }
 
 #[derive(Clone, Copy)]
@@ -70,7 +48,10 @@ impl ObjectIndexKind {
 }
 
 pub enum ObjectIndexSelector {
-    Indices(Value),
+    IndexValues {
+        values: Vec<Value>,
+        context: &'static str,
+    },
     Member(String),
 }
 
@@ -83,9 +64,14 @@ pub struct ObjectIndexDescriptor {
 }
 
 impl ObjectIndexDescriptor {
-    fn into_runtime_method_args(self) -> Vec<Value> {
+    fn into_runtime_method_args(self) -> Result<Vec<Value>, RuntimeError> {
         let selector = match self.selector {
-            ObjectIndexSelector::Indices(value) => value,
+            ObjectIndexSelector::IndexValues { values, context } => {
+                let cols = values.len();
+                let cell = runmat_builtins::CellArray::new(values, 1, cols)
+                    .map_err(|e| format!("{context}: {e}"))?;
+                Value::Cell(cell)
+            }
             ObjectIndexSelector::Member(field) => Value::String(field),
         };
         let mut args = vec![
@@ -97,18 +83,8 @@ impl ObjectIndexDescriptor {
         if let Some(rhs) = self.rhs {
             args.push(rhs);
         }
-        args
+        Ok(args)
     }
-}
-
-pub fn object_protocol_index_cell(
-    values: Vec<Value>,
-    context: &str,
-) -> Result<Value, RuntimeError> {
-    let cols = values.len();
-    let cell =
-        runmat_builtins::CellArray::new(values, 1, cols).map_err(|e| format!("{context}: {e}"))?;
-    Ok(Value::Cell(cell))
 }
 
 pub async fn call_runtime_method(args: &[Value]) -> Result<Value, RuntimeError> {
@@ -134,7 +110,7 @@ pub async fn call_object_member_method(
 pub async fn call_object_index_descriptor_method(
     descriptor: ObjectIndexDescriptor,
 ) -> Result<Value, RuntimeError> {
-    call_runtime_method(&descriptor.into_runtime_method_args()).await
+    call_runtime_method(&descriptor.into_runtime_method_args()?).await
 }
 
 pub async fn build_expanded_args_from_specs<ExpandObjectAll, ExpandObjectIndices, FutAll, FutIdx>(
@@ -213,14 +189,22 @@ mod tests {
             base: Value::Num(1.0),
             op: ObjectIndexOp::Subsref,
             kind: ObjectIndexKind::Brace,
-            selector: ObjectIndexSelector::Indices(Value::Num(2.0)),
+            selector: ObjectIndexSelector::IndexValues {
+                values: vec![Value::Num(2.0)],
+                context: "test subsref build error",
+            },
             rhs: None,
         };
 
-        let args = descriptor.into_runtime_method_args();
+        let args = descriptor
+            .into_runtime_method_args()
+            .expect("descriptor args");
         assert_eq!(args[1], Value::String("subsref".to_string()));
         assert_eq!(args[2], Value::String("{}".to_string()));
-        assert_eq!(args[3], Value::Num(2.0));
+        match &args[3] {
+            Value::Cell(cell) => assert_eq!((*cell.data[0]).clone(), Value::Num(2.0)),
+            other => panic!("expected selector cell, got {other:?}"),
+        }
     }
 
     #[test]
@@ -233,7 +217,9 @@ mod tests {
             rhs: Some(Value::Num(9.0)),
         };
 
-        let args = descriptor.into_runtime_method_args();
+        let args = descriptor
+            .into_runtime_method_args()
+            .expect("descriptor args");
         assert_eq!(args[1], Value::String("subsasgn".to_string()));
         assert_eq!(args[2], Value::String(".".to_string()));
         assert_eq!(args[3], Value::String("field".to_string()));
