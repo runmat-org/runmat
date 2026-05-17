@@ -179,3 +179,5 @@ Progress update (2026-05-17):
     M6 baseline and validator-required metric sets now include homogeneous/heterogeneous EM source-region-coverage and boundary-anchor assertion comparators, with nonlinear schema governance requiring the corresponding threshold assertions so source/boundary-fidelity evidence gaps fail benchmark/external-reference enforcement.
 56. [x] EM release-readiness boundary-anchor gating expanded:
     `release_readiness_nonlinear.py` now evaluates homogeneous/heterogeneous EM boundary-anchor-ratio threshold assertions with profile-tuned minimum thresholds, promoting anchor-ratio regressions into explicit readiness reasons and EM breach-rate accounting.
+57. [x] EM non-core fixture external-reference/source-boundary comparator coverage expanded:
+    M6 baseline and validator-required metric sets now enforce richer sparse/fallback/overlap/boundary-kernel EM assertion comparators (assignment/source-coverage/material-alignment/boundary-anchor and boundary-kernel anchor/leakage signals), with nonlinear schema governance requiring corresponding assertions so non-core EM source/boundary-fidelity evidence gaps fail enforcement.
