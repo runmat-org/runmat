@@ -4,9 +4,9 @@ use crate::call::descriptor::{
 };
 use crate::call::shared::{
     build_object_paren_expr_selector_values, build_object_paren_selector_values,
-    call_object_subsasgn_brace_scalar_indices, call_object_subsasgn_paren_scalar_indices,
-    call_object_subsasgn_paren_values, call_object_subsref_brace_scalar_indices,
-    call_object_subsref_brace_values, call_object_subsref_paren_values,
+    call_object_subsasgn_brace_values, call_object_subsasgn_paren_scalar_indices,
+    call_object_subsasgn_paren_values, call_object_subsref_brace_values,
+    call_object_subsref_paren_values,
 };
 use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
@@ -26,14 +26,19 @@ fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
     format!("{context}: {}", err.message()).into()
 }
 
-fn numeric_indices_from_values(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
-    values
-        .iter()
-        .map(|value| {
-            let index: f64 = value.try_into()?;
-            Ok(index as usize)
-        })
-        .collect()
+const CELL_END_PLUS_TAG_MASK: u64 = 0x7ff8_0000_0000_0000;
+const CELL_END_PLUS_TAG_VALUE: u64 = 0x7ff8_c311_0000_0000;
+const CELL_END_PLUS_OFFSET_MASK: u64 = 0x0000_0000_ffff_ffff;
+
+fn decode_cell_end_plus(value: f64) -> Option<usize> {
+    if !value.is_nan() {
+        return None;
+    }
+    let bits = value.to_bits();
+    if (bits & CELL_END_PLUS_TAG_MASK) != CELL_END_PLUS_TAG_VALUE {
+        return None;
+    }
+    Some((bits & CELL_END_PLUS_OFFSET_MASK) as usize)
 }
 
 async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, RuntimeError> {
@@ -79,16 +84,7 @@ fn resolve_cell_indices(
         .iter()
         .enumerate()
         .map(|(dim, value)| match value {
-            Value::Num(index) if *index == 0.0 && index.is_sign_negative() => {
-                Ok(if values.len() == 1 {
-                    rows * cols
-                } else if dim == 0 {
-                    rows
-                } else {
-                    cols
-                })
-            }
-            Value::Num(index) if *index < 0.0 => {
+            Value::Num(index) => {
                 let len = if values.len() == 1 {
                     rows * cols
                 } else if dim == 0 {
@@ -96,14 +92,30 @@ fn resolve_cell_indices(
                 } else {
                     cols
                 };
-                let resolved = len as isize + *index as isize;
-                if resolved < 1 || resolved as usize > len {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellIndexOutOfBounds",
-                        "Cell index out of bounds",
-                    ));
+                if let Some(offset) = decode_cell_end_plus(*index) {
+                    let resolved = len + offset;
+                    if resolved < 1 || resolved > len {
+                        return Err(crate::interpreter::errors::mex(
+                            "CellIndexOutOfBounds",
+                            "Cell index out of bounds",
+                        ));
+                    }
+                    return Ok(resolved);
                 }
-                Ok(resolved as usize)
+                if *index == 0.0 && index.is_sign_negative() {
+                    return Ok(len);
+                }
+                if *index < 0.0 {
+                    let resolved = len as isize + *index as isize;
+                    if resolved < 1 || resolved as usize > len {
+                        return Err(crate::interpreter::errors::mex(
+                            "CellIndexOutOfBounds",
+                            "Cell index out of bounds",
+                        ));
+                    }
+                    return Ok(resolved as usize);
+                }
+                Ok(*index as usize)
             }
             _ => {
                 let index: f64 = value.try_into()?;
@@ -139,12 +151,11 @@ async fn execute_brace_read_single(
 ) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
-            let indices = numeric_indices_from_values(raw_indices)?;
-            call_object_subsref_brace_scalar_indices(Value::Object(obj), indices).await
+            call_object_subsref_brace_values(Value::Object(obj), raw_indices.to_vec()).await
         }
         Value::HandleObject(handle) => {
-            let indices = numeric_indices_from_values(raw_indices)?;
-            call_object_subsref_brace_scalar_indices(Value::HandleObject(handle), indices).await
+            call_object_subsref_brace_values(Value::HandleObject(handle), raw_indices.to_vec())
+                .await
         }
         Value::Cell(ca) => {
             let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;
@@ -237,13 +248,15 @@ async fn execute_brace_store(
 ) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
-            let indices = numeric_indices_from_values(raw_indices)?;
-            call_object_subsasgn_brace_scalar_indices(Value::Object(obj), indices, rhs).await
+            call_object_subsasgn_brace_values(Value::Object(obj), raw_indices.to_vec(), rhs).await
         }
         Value::HandleObject(handle) => {
-            let indices = numeric_indices_from_values(raw_indices)?;
-            call_object_subsasgn_brace_scalar_indices(Value::HandleObject(handle), indices, rhs)
-                .await
+            call_object_subsasgn_brace_values(
+                Value::HandleObject(handle),
+                raw_indices.to_vec(),
+                rhs,
+            )
+            .await
         }
         Value::Cell(ca) => {
             let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;

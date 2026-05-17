@@ -2,6 +2,42 @@ use crate::interpreter::errors::mex;
 use runmat_builtins::{CellArray, StructValue, Value};
 use runmat_runtime::RuntimeError;
 
+const CELL_END_PLUS_TAG_MASK: u64 = 0x7ff8_0000_0000_0000;
+const CELL_END_PLUS_TAG_VALUE: u64 = 0x7ff8_c311_0000_0000;
+const CELL_END_PLUS_OFFSET_MASK: u64 = 0x0000_0000_ffff_ffff;
+
+fn decode_cell_end_plus(value: f64) -> Option<usize> {
+    if !value.is_nan() {
+        return None;
+    }
+    let bits = value.to_bits();
+    if (bits & CELL_END_PLUS_TAG_MASK) != CELL_END_PLUS_TAG_VALUE {
+        return None;
+    }
+    Some((bits & CELL_END_PLUS_OFFSET_MASK) as usize)
+}
+
+fn resolve_cell_end_relative_index(value: f64, len: usize) -> Result<Option<usize>, RuntimeError> {
+    if let Some(offset) = decode_cell_end_plus(value) {
+        let idx = len + offset;
+        if idx < 1 || idx > len {
+            return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+        }
+        return Ok(Some(idx));
+    }
+    if value == 0.0 && value.is_sign_negative() {
+        return Ok(Some(len));
+    }
+    if value < 0.0 {
+        let idx = len as isize + value as isize;
+        if idx < 1 || idx as usize > len {
+            return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+        }
+        return Ok(Some(idx as usize));
+    }
+    Ok(None)
+}
+
 fn is_empty_tensor(value: &Value) -> bool {
     matches!(value, Value::Tensor(t) if t.data.is_empty() || t.rows == 0 || t.cols == 0)
 }
@@ -141,17 +177,12 @@ where
 pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Value>, RuntimeError> {
     match indices.len() {
         1 => match &indices[0] {
-            Value::Num(n) if *n == 0.0 && n.is_sign_negative() => {
-                Ok(vec![index_cell_value(ca, &[ca.data.len()])?])
-            }
-            Value::Num(n) if *n < 0.0 => {
-                let idx = ca.data.len() as isize + *n as isize;
-                if idx < 1 || idx as usize > ca.data.len() {
-                    return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+            Value::Num(n) => {
+                if let Some(idx) = resolve_cell_end_relative_index(*n, ca.data.len())? {
+                    return Ok(vec![index_cell_value(ca, &[idx])?]);
                 }
-                Ok(vec![index_cell_value(ca, &[idx as usize])?])
+                Ok(vec![index_cell_value(ca, &[*n as usize])?])
             }
-            Value::Num(n) => Ok(vec![index_cell_value(ca, &[*n as usize])?]),
             Value::Int(i) => Ok(vec![index_cell_value(ca, &[i.to_i64() as usize])?]),
             Value::Tensor(t) => t
                 .data

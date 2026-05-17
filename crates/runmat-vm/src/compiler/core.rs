@@ -81,6 +81,21 @@ struct MirStochasticEvolutionPlan {
     steps: MirOperand,
 }
 
+const CELL_END_PLUS_TAG_VALUE: u64 = 0x7ff8_c311_0000_0000;
+const CELL_END_PLUS_OFFSET_MASK: u64 = 0x0000_0000_ffff_ffff;
+
+fn encode_cell_end_offset(offset: isize) -> f64 {
+    if offset <= 0 {
+        if offset == 0 {
+            -0.0
+        } else {
+            offset as f64
+        }
+    } else {
+        f64::from_bits(CELL_END_PLUS_TAG_VALUE | ((offset as u64) & CELL_END_PLUS_OFFSET_MASK))
+    }
+}
+
 fn stochastic_evolution_disabled() -> bool {
     std::env::var("RUNMAT_DISABLE_STOCHASTIC_EVOLUTION")
         .map(|value| {
@@ -973,18 +988,9 @@ impl Compiler {
                     self.compile_mir_operand(operand)?;
                     index_count += 1;
                 }
-                MirIndexComponent::End { offset, .. } if *offset <= 0 => {
-                    self.emit(Instr::LoadConst(if *offset == 0 {
-                        -0.0
-                    } else {
-                        *offset as f64
-                    }));
-                    index_count += 1;
-                }
                 MirIndexComponent::End { offset, .. } => {
-                    return Err(self.compile_error(format!(
-                        "MIR cell selector lowering does not support end+{offset} selectors in this path"
-                    )))
+                    self.emit(Instr::LoadConst(encode_cell_end_offset(*offset)));
+                    index_count += 1;
                 }
             }
         }
@@ -1923,21 +1929,12 @@ impl Compiler {
             match component {
                 MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
                 MirIndexComponent::Logical(operand) => self.compile_mir_operand(operand)?,
-                MirIndexComponent::End { offset, .. } if *offset <= 0 => {
-                    self.emit(Instr::LoadConst(if *offset == 0 {
-                        -0.0
-                    } else {
-                        *offset as f64
-                    }));
-                }
                 MirIndexComponent::End { offset, .. } => {
-                    return Err(self.compile_error(format!(
-                    "MIR cell index lowering does not support end+{offset} selectors in this path"
-                )))
+                    self.emit(Instr::LoadConst(encode_cell_end_offset(*offset)));
                 }
                 _ => {
                     return Err(self.compile_error(
-                        "MIR cell index lowering expects expression/logical selectors or end/end-k",
+                        "MIR cell index lowering expects expression/logical selectors or end-relative selectors",
                     ))
                 }
             }
@@ -1953,21 +1950,12 @@ impl Compiler {
             match component {
                 MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
                 MirIndexComponent::Logical(operand) => self.compile_mir_operand(operand)?,
-                MirIndexComponent::End { offset, .. } if *offset <= 0 => {
-                    self.emit(Instr::LoadConst(if *offset == 0 {
-                        -0.0
-                    } else {
-                        *offset as f64
-                    }));
-                }
                 MirIndexComponent::End { offset, .. } => {
-                    return Err(self.compile_error(format!(
-                    "MIR cell index lowering does not support end+{offset} selectors in this path"
-                )))
+                    self.emit(Instr::LoadConst(encode_cell_end_offset(*offset)));
                 }
                 _ => {
                     return Err(self.compile_error(
-                        "MIR cell index lowering expects expression/logical selectors or end/end-k",
+                        "MIR cell index lowering expects expression/logical selectors or end-relative selectors",
                     ))
                 }
             }

@@ -245,17 +245,6 @@ pub(crate) async fn call_object_subsref_brace_values(
     .await
 }
 
-pub(crate) async fn call_object_subsref_brace_scalar_indices(
-    base: Value,
-    indices: Vec<usize>,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-        base,
-        ObjectIndexSelector::ScalarIndices { indices },
-    ))
-    .await
-}
-
 pub(crate) async fn call_object_subsasgn_paren_values(
     base: Value,
     values: Vec<Value>,
@@ -282,14 +271,14 @@ pub(crate) async fn call_object_subsasgn_paren_scalar_indices(
     .await
 }
 
-pub(crate) async fn call_object_subsasgn_brace_scalar_indices(
+pub(crate) async fn call_object_subsasgn_brace_values(
     base: Value,
-    indices: Vec<usize>,
+    values: Vec<Value>,
     rhs: Value,
 ) -> Result<Value, RuntimeError> {
     call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
         base,
-        ObjectIndexSelector::ScalarIndices { indices },
+        ObjectIndexSelector::IndexValues { values },
         rhs,
     ))
     .await
