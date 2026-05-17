@@ -93,6 +93,41 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "reference": 1.0,
             "pass": True,
         },
+        {
+            "name": "thermo_gradient_pathological_spread_ratio",
+            "fixture_id": "thermo_gradient_pathological_gpu_provider",
+            "observed": 1.45,
+            "reference": 1.44,
+            "pass": True,
+        },
+        {
+            "name": "thermo_shock_oscillatory_temporal_variation",
+            "fixture_id": "thermo_shock_oscillatory_gpu_provider",
+            "observed": 0.5,
+            "reference": 0.5,
+            "pass": True,
+        },
+        {
+            "name": "electro_thermal_pathological_conductivity_spread_ratio",
+            "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+            "observed": 3.27,
+            "reference": 3.27,
+            "pass": True,
+        },
+        {
+            "name": "plasticity_hardening_reference_complex_load_realization_ratio",
+            "fixture_id": "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+            "observed": 0.83,
+            "reference": 0.829,
+            "pass": True,
+        },
+        {
+            "name": "contact_frictionless_complex_load_amplification_ratio",
+            "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+            "observed": 1.41,
+            "reference": 1.413,
+            "pass": True,
+        },
     ]
 
 

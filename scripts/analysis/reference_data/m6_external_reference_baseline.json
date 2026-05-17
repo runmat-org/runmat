@@ -217,6 +217,56 @@
       "reference": 1.0,
       "tolerance_abs": 0.0,
       "tolerance_rel": 0.0
+    },
+    {
+      "name": "thermo_gradient_pathological_spread_ratio",
+      "fixture_id": "thermo_gradient_pathological_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermo_gradient_pathological_spread_ratio",
+      "reference": 1.4449056611003124,
+      "tolerance_abs": 0.25,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "thermo_shock_oscillatory_temporal_variation",
+      "fixture_id": "thermo_shock_oscillatory_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermo_shock_oscillatory_temporal_variation",
+      "reference": 0.5,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.3
+    },
+    {
+      "name": "electro_thermal_pathological_conductivity_spread_ratio",
+      "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_thermal_pathological_conductivity_spread_ratio",
+      "reference": 3.2727272727272725,
+      "tolerance_abs": 0.8,
+      "tolerance_rel": 0.3
+    },
+    {
+      "name": "plasticity_hardening_reference_complex_load_realization_ratio",
+      "fixture_id": "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_hardening_reference_complex_load_realization_ratio",
+      "reference": 0.8289772727272727,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "contact_frictionless_complex_load_amplification_ratio",
+      "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_frictionless_complex_load_amplification_ratio",
+      "reference": 1.413427561837456,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.2
     }
   ]
 }

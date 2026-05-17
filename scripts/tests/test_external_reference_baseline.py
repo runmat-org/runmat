@@ -33,6 +33,26 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ("cht_coupled_gpu_provider", "cht_reynolds_proxy"),
             ("fsi_coupled_gpu_provider", "fsi_reynolds_proxy"),
             ("fsi_coupled_gpu_provider", "fsi_structural_step_count"),
+            (
+                "thermo_gradient_pathological_gpu_provider",
+                "thermo_gradient_pathological_spread_ratio",
+            ),
+            (
+                "thermo_shock_oscillatory_gpu_provider",
+                "thermo_shock_oscillatory_temporal_variation",
+            ),
+            (
+                "electro_thermal_joule_pathological_gpu_provider",
+                "electro_thermal_pathological_conductivity_spread_ratio",
+            ),
+            (
+                "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+                "plasticity_hardening_reference_complex_load_realization_ratio",
+            ),
+            (
+                "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+                "contact_frictionless_complex_load_amplification_ratio",
+            ),
         }
         observed = {
             (metric.get("fixture_id"), metric.get("assertion_name"))
