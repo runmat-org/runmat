@@ -462,6 +462,73 @@ fn build_object_paren_selector_values(
     Ok(values)
 }
 
+fn build_object_paren_expr_selector_values(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    range_dims: &[usize],
+    range_params: &[(f64, f64)],
+    range_start_exprs: &[Option<EndExpr>],
+    range_step_exprs: &[Option<EndExpr>],
+    range_end_exprs: &[EndExpr],
+    numeric: &[Value],
+) -> Result<Vec<Value>, RuntimeError> {
+    let mut values = Vec::with_capacity(dims);
+    let mut num_iter = 0usize;
+    let mut rp_iter = 0usize;
+    for d in 0..dims {
+        let is_colon = (colon_mask & (1u32 << d)) != 0;
+        let is_end = (end_mask & (1u32 << d)) != 0;
+        if is_colon {
+            values.push(Value::String(":".to_string()));
+            continue;
+        }
+        if is_end {
+            values.push(Value::String("end".to_string()));
+            continue;
+        }
+        if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
+            let (raw_st, raw_sp) = range_params[rp_iter];
+            let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+                encode_end_expr_value(expr)?
+            } else {
+                Value::Num(raw_st)
+            };
+            let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+                encode_end_expr_value(expr)?
+            } else {
+                Value::Num(raw_sp)
+            };
+            rp_iter += 1;
+            let off = &range_end_exprs[pos];
+            values.push(build_end_range_descriptor(st, sp, off)?);
+            continue;
+        }
+        let selector = numeric
+            .get(num_iter)
+            .ok_or(crate::interpreter::errors::mex(
+                "MissingNumericIndex",
+                "missing numeric index",
+            ))?;
+        num_iter += 1;
+        match selector {
+            Value::Num(n) => values.push(Value::Num(*n)),
+            Value::Int(i) => values.push(Value::Num(i.to_f64())),
+            Value::Tensor(t) => values.push(Value::Tensor(t.clone())),
+            other => {
+                return Err(format!("Unsupported index type for object selector: {other:?}").into())
+            }
+        }
+    }
+    if num_iter != numeric.len() {
+        return Err(crate::interpreter::errors::mex(
+            "UnexpectedNumericIndex",
+            "unexpected extra numeric index values",
+        ));
+    }
+    Ok(values)
+}
+
 pub async fn dispatch_indexing<F>(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
@@ -1563,57 +1630,17 @@ where
                     stack.push(updated);
                 }
                 Value::Object(obj) => {
-                    let mut idx_values: Vec<Value> = Vec::with_capacity(*dims);
-                    let mut num_iter = 0usize;
-                    let mut rp_iter = 0usize;
-                    for d in 0..*dims {
-                        let is_colon = (*colon_mask & (1u32 << d)) != 0;
-                        let is_end = (*end_mask & (1u32 << d)) != 0;
-                        if is_colon {
-                            idx_values.push(Value::String(":".to_string()));
-                            continue;
-                        }
-                        if is_end {
-                            idx_values.push(Value::String("end".to_string()));
-                            continue;
-                        }
-                        if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-                            let (raw_st, raw_sp) = range_params[rp_iter];
-                            let st = if let Some(expr) = &range_start_exprs[rp_iter] {
-                                encode_end_expr_value(expr)?
-                            } else {
-                                Value::Num(raw_st)
-                            };
-                            let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
-                                encode_end_expr_value(expr)?
-                            } else {
-                                Value::Num(raw_sp)
-                            };
-                            rp_iter += 1;
-                            let off = range_end_exprs[pos].clone();
-                            idx_values.push(build_end_range_descriptor(st, sp, &off)?);
-                        } else {
-                            let v =
-                                numeric
-                                    .get(num_iter)
-                                    .ok_or(crate::interpreter::errors::mex(
-                                        "MissingNumericIndex",
-                                        "missing numeric index",
-                                    ))?;
-                            num_iter += 1;
-                            match v {
-                                Value::Num(n) => idx_values.push(Value::Num(*n)),
-                                Value::Int(i) => idx_values.push(Value::Num(i.to_f64())),
-                                Value::Tensor(t) => idx_values.push(Value::Tensor(t.clone())),
-                                other => {
-                                    return Err(format!(
-                                        "Unsupported index type for object: {other:?}"
-                                    )
-                                    .into())
-                                }
-                            }
-                        }
-                    }
+                    let idx_values = build_object_paren_expr_selector_values(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                    )?;
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
                             Value::Object(obj),
