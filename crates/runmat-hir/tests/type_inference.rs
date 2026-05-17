@@ -2,7 +2,7 @@ use runmat_hir::compatibility::{
     self, infer_function_output_types, infer_function_variable_types, HirExprKind, HirProgram,
     HirStmt, LoweringResult as CompatibilityLoweringResult,
 };
-use runmat_hir::*;
+use runmat_hir::{LoweringContext, Type, VarId};
 
 use runmat_runtime as _;
 
@@ -184,8 +184,8 @@ fn infer_range_shape_in_globals() {
         },
         other => panic!("unexpected statement {other:?}"),
     }
-    let x_id = runmat_hir::VarId(*result.variables.get("x").unwrap());
-    let y_id = runmat_hir::VarId(*result.variables.get("y").unwrap());
+    let x_id = VarId(*result.variables.get("x").unwrap());
+    let y_id = VarId(*result.variables.get("y").unwrap());
     let recomputed = infer_globals(&result);
     if !recomputed.contains_key(&x_id) {
         panic!("missing recomputed global for x: {:?}", recomputed);
@@ -222,7 +222,7 @@ fn infer_range_shape_in_globals() {
 #[test]
 fn infer_global_types_track_trycatch_assignments() {
     let result = lower_result("try; x = 1; catch; x = 2; end");
-    let x_id = runmat_hir::VarId(*result.variables.get("x").unwrap());
+    let x_id = VarId(*result.variables.get("x").unwrap());
     let globals = infer_globals(&result);
     assert_eq!(
         globals
@@ -236,7 +236,7 @@ fn infer_global_types_track_trycatch_assignments() {
 #[test]
 fn infer_global_types_track_struct_lvalue_assignments() {
     let result = lower_result("s.x = 1;");
-    let s_id = runmat_hir::VarId(*result.variables.get("s").unwrap());
+    let s_id = VarId(*result.variables.get("s").unwrap());
     let globals = infer_globals(&result);
     assert_eq!(
         globals
@@ -258,7 +258,7 @@ fn infer_range_shape_with_constants() {
         return;
     }
     let result = lower_result("a = 0:pi/100:2*pi;");
-    let a_id = runmat_hir::VarId(*result.variables.get("a").unwrap());
+    let a_id = VarId(*result.variables.get("a").unwrap());
     let globals = infer_globals(&result);
     let a_ty = globals
         .get(&a_id)
@@ -275,7 +275,7 @@ fn infer_range_shape_with_constants() {
 #[test]
 fn infer_range_shape_with_negative_start() {
     let result = lower_result("x = -2:0.02:2;");
-    let x_id = runmat_hir::VarId(*result.variables.get("x").unwrap());
+    let x_id = VarId(*result.variables.get("x").unwrap());
     let globals = infer_globals(&result);
     let x_ty = globals
         .get(&x_id)
@@ -292,7 +292,7 @@ fn infer_range_shape_with_negative_start() {
 #[test]
 fn infer_range_shape_two_arg_descending_is_empty() {
     let result = lower_result("r = 5:1;");
-    let r_id = runmat_hir::VarId(*result.variables.get("r").unwrap());
+    let r_id = VarId(*result.variables.get("r").unwrap());
     let globals = infer_globals(&result);
     let r_ty = globals
         .get(&r_id)
@@ -316,8 +316,8 @@ fn infer_index_shapes_for_scalar_and_range() {
     }
     let result = lower_result("a = 0:pi/100:2*pi; b = sin(a); c = a[5]; d = a[1:10];");
     let globals = infer_globals(&result);
-    let c_id = runmat_hir::VarId(*result.variables.get("c").unwrap());
-    let d_id = runmat_hir::VarId(*result.variables.get("d").unwrap());
+    let c_id = VarId(*result.variables.get("c").unwrap());
+    let d_id = VarId(*result.variables.get("d").unwrap());
     let c_ty = globals
         .get(&c_id)
         .cloned()
@@ -339,7 +339,7 @@ fn infer_index_shapes_for_scalar_and_range() {
 fn infer_matmul_shape_with_known_dims() {
     let result = lower_result("a = ones(2,3); b = ones(3,4); c = a * b;");
     let globals = infer_globals(&result);
-    let c_id = runmat_hir::VarId(*result.variables.get("c").unwrap());
+    let c_id = VarId(*result.variables.get("c").unwrap());
     let c_ty = globals
         .get(&c_id)
         .cloned()
