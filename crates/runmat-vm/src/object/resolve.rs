@@ -1,21 +1,10 @@
 use crate::call::shared::{
     call_object_member_subsasgn, call_object_member_subsref, class_defines_member_subsasgn,
-    class_defines_member_subsref,
+    class_defines_member_subsref, external_qualified_identity,
 };
 use crate::interpreter::errors::mex;
 use runmat_builtins::{self, Access, Closure, StructValue, Value};
-use runmat_hir::{CallableIdentity, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
-
-fn external_qualified_identity(base: &str, member: &str) -> CallableIdentity {
-    let mut segments: Vec<SymbolName> = base
-        .split('.')
-        .filter(|segment| !segment.is_empty())
-        .map(|segment| SymbolName(segment.to_string()))
-        .collect();
-    segments.push(SymbolName(member.to_string()));
-    CallableIdentity::ExternalName(QualifiedName(segments))
-}
 
 pub async fn load_member(
     base: Value,

@@ -2,22 +2,16 @@ use crate::accel::auto_promote::{
     accel_promote_binary, accel_promote_unary, AutoBinaryOp, AutoUnaryOp,
 };
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
+use crate::call::shared::external_qualified_identity;
 use crate::interpreter::dispatch::logical_truth_from_value;
 use crate::ops::arithmetic as arithmetic_ops;
 use crate::ops::comparison as comparison_ops;
 use runmat_builtins::Value;
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName};
+use runmat_hir::CallableFallbackPolicy;
 use runmat_runtime::RuntimeError;
 
 async fn call_operator_method(obj: Value, method: &str, arg: Value) -> Result<Value, RuntimeError> {
     crate::call::shared::call_object_operator_method(obj, method, arg).await
-}
-
-fn qualified_external_identity(class_name: &str, method: &str) -> CallableIdentity {
-    CallableIdentity::ExternalName(QualifiedName(vec![
-        SymbolName(class_name.to_string()),
-        SymbolName(method.to_string()),
-    ]))
 }
 
 pub async fn dispatch_arithmetic(
@@ -43,7 +37,7 @@ pub async fn dispatch_arithmetic(
                         Value::Object(o) => o.class_name.clone(),
                         _ => String::new(),
                     };
-                    let identity = qualified_external_identity(&class_name, "minus");
+                    let identity = external_qualified_identity(&class_name, "minus");
                     let descriptor = CallableDescriptor::resolved(
                         identity,
                         Some(format!("{class_name}.minus")),

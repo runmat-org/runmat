@@ -1,6 +1,7 @@
 use crate::bytecode::ArgSpec;
 use crate::bytecode::EndExpr;
 use runmat_builtins::Value;
+use runmat_hir::{CallableIdentity, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
@@ -13,6 +14,16 @@ pub fn expand_cell_indices(
 
 pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Result<Vec<Value>, RuntimeError> {
     crate::ops::cells::expand_all_cell_values(cell)
+}
+
+pub(crate) fn external_qualified_identity(base: &str, member: &str) -> CallableIdentity {
+    let mut segments: Vec<SymbolName> = base
+        .split('.')
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| SymbolName(segment.to_string()))
+        .collect();
+    segments.push(SymbolName(member.to_string()));
+    CallableIdentity::ExternalName(QualifiedName(segments))
 }
 
 pub(crate) async fn object_subsref_brace(

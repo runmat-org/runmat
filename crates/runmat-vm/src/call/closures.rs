@@ -2,10 +2,11 @@ use crate::call::descriptor::{
     execute_callable_descriptor, try_execute_callable_descriptor, CallableCallKind,
     CallableDescriptor,
 };
+use crate::call::shared::external_qualified_identity;
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
 use runmat_builtins::{builtin_functions, lookup_method, Access, CellArray, Closure, Value};
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, QualifiedName, SymbolName};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, SymbolName};
 use runmat_runtime::RuntimeError;
 
 fn requested_output_arity(requested_outputs: Option<usize>) -> usize {
@@ -25,16 +26,6 @@ async fn call_explicit_builtin(
 
 fn dynamic_identity(name: String) -> CallableIdentity {
     CallableIdentity::DynamicName(SymbolName(name))
-}
-
-fn external_qualified_identity(base: &str, member: &str) -> CallableIdentity {
-    let mut segments: Vec<SymbolName> = base
-        .split('.')
-        .filter(|segment| !segment.is_empty())
-        .map(|segment| SymbolName(segment.to_string()))
-        .collect();
-    segments.push(SymbolName(member.to_string()));
-    CallableIdentity::ExternalName(QualifiedName(segments))
 }
 
 fn method_identity(name: String) -> CallableIdentity {
