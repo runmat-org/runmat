@@ -46,6 +46,11 @@ def main() -> int:
                 continue
             if not isinstance(metric.get("name"), str):
                 errors.append(f"metrics[{idx}].name missing or invalid")
+            if "source" in metric and metric.get("source") not in {
+                "field",
+                "threshold_assertion",
+            }:
+                errors.append(f"metrics[{idx}].source invalid")
             if not isinstance(metric.get("observed"), (int, float)):
                 errors.append(f"metrics[{idx}].observed missing or invalid")
             if not isinstance(metric.get("reference"), (int, float)):

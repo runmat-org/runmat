@@ -37,6 +37,46 @@
       "reference": 0.4,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.35
+    },
+    {
+      "name": "em_homogeneous_sigma_omega_scale_mean",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_sigma_omega_scale_mean",
+      "reference": 1.0,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "em_homogeneous_sigma_omega_response_coverage_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_sigma_omega_response_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 0.05
+    },
+    {
+      "name": "em_heterogeneous_sigma_omega_scale_spread_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_sigma_omega_scale_spread_ratio",
+      "reference": 1.25,
+      "tolerance_abs": 0.35,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "em_heterogeneous_sigma_omega_response_coverage_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_sigma_omega_response_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 0.05
     }
   ]
 }

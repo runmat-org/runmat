@@ -12,6 +12,22 @@ def load_json(path: Path):
     return json.loads(path.read_text())
 
 
+def threshold_assertion_observed(record: dict, assertion_name: str):
+    assertions = record.get("threshold_assertions")
+    if not isinstance(assertions, list):
+        return None
+    for assertion in assertions:
+        if not isinstance(assertion, dict):
+            continue
+        if assertion.get("name") != assertion_name:
+            continue
+        observed = assertion.get("observed")
+        if isinstance(observed, (int, float)):
+            return float(observed)
+        return None
+    return None
+
+
 def metric_pass(observed: float, reference: float, tol_abs, tol_rel) -> bool:
     abs_ok = True if tol_abs is None else abs(observed - reference) <= float(tol_abs)
     rel_ok = True if tol_rel is None else abs(observed - reference) <= abs(reference) * float(tol_rel)
@@ -68,9 +84,19 @@ def main() -> int:
         fixture_id = spec.get("fixture_id")
         field = spec.get("field")
         name = spec.get("name")
+        source = spec.get("source", "field")
+        assertion_name = spec.get("assertion_name")
         reference = spec.get("reference")
         if not all(isinstance(v, str) for v in (fixture_id, field, name)):
             errors.append(f"baseline.metrics[{idx}] missing name/fixture_id/field")
+            continue
+        if source not in {"field", "threshold_assertion"}:
+            errors.append(f"baseline.metrics[{idx}] has unsupported source={source}")
+            continue
+        if source == "threshold_assertion" and assertion_name is not None and not isinstance(
+            assertion_name, str
+        ):
+            errors.append(f"baseline.metrics[{idx}] has invalid assertion_name")
             continue
         if not isinstance(reference, (int, float)):
             errors.append(f"baseline.metrics[{idx}] missing numeric reference")
@@ -80,13 +106,22 @@ def main() -> int:
         if rec is None:
             errors.append(f"missing fixture record: {fixture_id}")
             continue
-        raw_observed = rec.get(field)
-        if not isinstance(raw_observed, (int, float)):
-            errors.append(f"missing numeric observed value for {fixture_id}.{field}")
-            continue
-        observed = float(raw_observed)
+        if source == "field":
+            raw_observed = rec.get(field)
+            if not isinstance(raw_observed, (int, float)):
+                errors.append(f"missing numeric observed value for {fixture_id}.{field}")
+                continue
+            observed = float(raw_observed)
+        else:
+            assertion_key = assertion_name or field
+            observed = threshold_assertion_observed(rec, assertion_key)
+            if observed is None:
+                errors.append(
+                    f"missing threshold assertion observed value for {fixture_id}.{assertion_key}"
+                )
+                continue
         if not math.isfinite(observed):
-            errors.append(f"non-finite observed value for {fixture_id}.{field}")
+            errors.append(f"non-finite observed value for {fixture_id}.{field} (source={source})")
             continue
 
         tol_abs = spec.get("tolerance_abs")
@@ -97,6 +132,7 @@ def main() -> int:
                 "name": name,
                 "fixture_id": fixture_id,
                 "field": field,
+                "source": source,
                 "observed": observed,
                 "reference": float(reference),
                 "tolerance_abs": tol_abs,

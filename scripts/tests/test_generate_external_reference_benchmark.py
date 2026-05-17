@@ -22,6 +22,13 @@ class GenerateExternalReferenceBenchmarkTests(unittest.TestCase):
                             {
                                 "fixture_id": "fixture_a",
                                 "plastic_nonlinear_severity": 0.25,
+                                "threshold_assertions": [
+                                    {
+                                        "name": "fixture_sigma_omega_scale_mean",
+                                        "observed": 1.03,
+                                        "passed": True,
+                                    }
+                                ],
                             }
                         ]
                     }
@@ -40,6 +47,16 @@ class GenerateExternalReferenceBenchmarkTests(unittest.TestCase):
                                 "reference": 0.24,
                                 "tolerance_abs": 0.05,
                                 "tolerance_rel": 0.5,
+                            },
+                            {
+                                "name": "sigma_omega_scale",
+                                "fixture_id": "fixture_a",
+                                "field": "unused_for_threshold_source",
+                                "source": "threshold_assertion",
+                                "assertion_name": "fixture_sigma_omega_scale_mean",
+                                "reference": 1.0,
+                                "tolerance_abs": 0.05,
+                                "tolerance_rel": 0.1,
                             }
                         ],
                     }
@@ -59,8 +76,10 @@ class GenerateExternalReferenceBenchmarkTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             payload = json.loads(out.read_text())
             self.assertEqual(payload["schema_version"], "external-reference-benchmark/v1")
-            self.assertEqual(len(payload["metrics"]), 1)
+            self.assertEqual(len(payload["metrics"]), 2)
             self.assertTrue(payload["metrics"][0]["pass"])
+            self.assertEqual(payload["metrics"][1]["source"], "threshold_assertion")
+            self.assertTrue(payload["metrics"][1]["pass"])
 
 
 if __name__ == "__main__":
