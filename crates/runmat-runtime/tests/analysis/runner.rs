@@ -3009,7 +3009,8 @@ pub(super) fn run_fixture(
                                     "FEA_NONLINEAR_COST",
                                     "solve_ms",
                                 )
-                            });
+                            })
+                            .or(gpu_run_ms);
                     gpu_solver_fallback_apply_count = diagnostic_metric(
                         &gpu_envelope.data,
                         "FEA_MODAL_COST",

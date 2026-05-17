@@ -322,6 +322,38 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electro_nonlinear_severity": 0.1,
             },
             _record(
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                {
+                    "em_homogeneous_sigma_omega_scale_mean",
+                    "em_homogeneous_sigma_omega_response_coverage_ratio",
+                    "em_homogeneous_dispersive_loss_scale_mean",
+                    "em_homogeneous_flux_divergence_proxy",
+                    "em_homogeneous_boundary_energy_ratio",
+                },
+            ),
+            _record(
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                {
+                    "em_heterogeneous_sigma_omega_scale_spread_ratio",
+                    "em_heterogeneous_sigma_omega_response_coverage_ratio",
+                    "em_heterogeneous_dispersive_loss_scale_mean",
+                    "em_heterogeneous_region_contrast_index",
+                    "em_heterogeneous_source_realization_ratio",
+                },
+            ),
+            _record(
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                {
+                    "em_boundary_penalty_conditioning_contribution",
+                },
+            ),
+            _record(
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                {
+                    "em_phased_source_energy_consistency_ratio",
+                },
+            ),
+            _record(
                 "acoustic_harmonic_gpu_provider",
                 {
                     "acoustic_mode_count",

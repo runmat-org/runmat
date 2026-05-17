@@ -111,6 +111,26 @@ REQUIRED_FIXTURES = {
         "electro_thermal_pathological_transient_severity_peak",
         "electro_thermal_pathological_temporal_variation",
     },
+    "electromagnetic_reference_homogeneous_gpu_provider": {
+        "em_homogeneous_sigma_omega_scale_mean",
+        "em_homogeneous_sigma_omega_response_coverage_ratio",
+        "em_homogeneous_dispersive_loss_scale_mean",
+        "em_homogeneous_flux_divergence_proxy",
+        "em_homogeneous_boundary_energy_ratio",
+    },
+    "electromagnetic_reference_heterogeneous_gpu_provider": {
+        "em_heterogeneous_sigma_omega_scale_spread_ratio",
+        "em_heterogeneous_sigma_omega_response_coverage_ratio",
+        "em_heterogeneous_dispersive_loss_scale_mean",
+        "em_heterogeneous_region_contrast_index",
+        "em_heterogeneous_source_realization_ratio",
+    },
+    "electromagnetic_reference_boundary_penalty_stress_gpu_provider": {
+        "em_boundary_penalty_conditioning_contribution",
+    },
+    "electromagnetic_reference_multi_region_phased_source_gpu_provider": {
+        "em_phased_source_energy_consistency_ratio",
+    },
     "acoustic_harmonic_gpu_provider": {
         "acoustic_mode_count",
         "acoustic_residual_warn_threshold",
@@ -189,6 +209,22 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_solver_solve_ms",
     },
     "electro_thermal_joule_pathological_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "electromagnetic_reference_homogeneous_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "electromagnetic_reference_heterogeneous_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "electromagnetic_reference_boundary_penalty_stress_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "electromagnetic_reference_multi_region_phased_source_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
