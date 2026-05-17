@@ -1,0 +1,130 @@
+{
+  "electromagnetic_results": {
+    "electromagnetic_payload_version": "electromagnetic_results/v1",
+    "reference_frequency_hz": 0.0,
+    "applied_current_a": 0.0,
+    "vector_potential_proxy": {
+      "field_id": "field_em_vector_potential",
+      "display_name": "EM Vector Potential",
+      "units": "A_turn_per_m",
+      "reference_frame": "global",
+      "element_association": "point",
+      "components": [
+        "A"
+      ],
+      "values": {
+        "layout": [
+          0
+        ],
+        "dtype": "f64",
+        "encoding": "host",
+        "data": []
+      },
+      "provenance": {
+        "source_operation": "analysis.run_electromagnetic"
+      }
+    },
+    "flux_density_proxy": {
+      "field_id": "field_em_flux_density",
+      "display_name": "EM Flux Density Proxy",
+      "units": "tesla",
+      "reference_frame": "global",
+      "element_association": "point",
+      "components": [
+        "B"
+      ],
+      "values": {
+        "layout": [
+          0
+        ],
+        "dtype": "f64",
+        "encoding": "host",
+        "data": []
+      },
+      "provenance": {
+        "source_operation": "analysis.run_electromagnetic"
+      }
+    },
+    "placeholder_mode": null
+  },
+  "summary": {
+    "field_count": 0,
+    "total_elements": 0,
+    "mode_count": 0,
+    "available_mode_indices": [],
+    "min_frequency_hz": null,
+    "max_frequency_hz": null,
+    "max_modal_residual_norm": null,
+    "first_mode_converged": null,
+    "snapshot_count": 0,
+    "time_start_s": null,
+    "time_end_s": null,
+    "max_transient_residual_norm": null,
+    "final_step_converged": null,
+    "increment_count": 0,
+    "failed_increment_count": null,
+    "max_nonlinear_residual_norm": null,
+    "max_nonlinear_increment_norm": null,
+    "max_nonlinear_iteration_count": null,
+    "final_increment_converged": null,
+    "nonlinear_line_search_backtracks": null,
+    "nonlinear_max_backtracks_per_increment": null,
+    "nonlinear_tangent_rebuild_count": null,
+    "nonlinear_iteration_spike_count": null,
+    "nonlinear_convergence_stall_count": null,
+    "nonlinear_backtrack_burst_count": null,
+    "prep_calibration_profile": null,
+    "prep_calibration_fingerprint": null,
+    "prep_acceptance_score": null,
+    "prep_acceptance_passed": null,
+    "prep_acceptance_fingerprint": null,
+    "thermo_coupling_enabled": null,
+    "thermo_coupling_fingerprint": null,
+    "thermo_constitutive_temperature_factor": null,
+    "thermo_effective_modulus_scale": null,
+    "thermo_constitutive_material_spread_ratio": null,
+    "thermo_assignment_heterogeneity_index": null,
+    "thermo_region_delta_count": null,
+    "thermo_spatial_coverage_ratio": null,
+    "thermo_field_extrapolation_ratio": null,
+    "thermo_field_clamp_ratio": null,
+    "thermo_transient_severity": null,
+    "thermo_nonlinear_severity": null,
+    "electro_thermal_coupling_enabled": null,
+    "electro_thermal_coupling_fingerprint": null,
+    "electro_joule_heating_scale": null,
+    "electro_conductivity_spread_ratio": null,
+    "electro_transient_severity": null,
+    "electro_transient_time_scale_mean": null,
+    "electro_nonlinear_severity": null,
+    "electro_nonlinear_time_scale_mean": null,
+    "plastic_nonlinear_severity": null,
+    "plastic_nonlinear_severity_mean": null,
+    "plastic_load_realization_ratio": null,
+    "plastic_load_amplification_ratio": null,
+    "contact_nonlinear_severity": null,
+    "contact_nonlinear_severity_mean": null,
+    "contact_load_realization_ratio": null,
+    "contact_load_amplification_ratio": null,
+    "thermal_max_residual_norm": null,
+    "thermal_min_temperature_k": null,
+    "thermal_max_temperature_k": null,
+    "thermal_conductivity_spread_ratio": null,
+    "thermal_heat_capacity_spread_ratio": null,
+    "thermal_spatial_gradient_index": null,
+    "thermal_monotonic_response_fraction": null,
+    "thermal_response_realization_ratio": null,
+    "electromagnetic_enabled": null,
+    "electromagnetic_reference_frequency_hz": null,
+    "electromagnetic_applied_current_a": null,
+    "electromagnetic_placeholder_quality": null,
+    "electromagnetic_conductivity_spread_ratio": null,
+    "electromagnetic_relative_permittivity_spread_ratio": null,
+    "electromagnetic_relative_permeability_spread_ratio": null,
+    "electromagnetic_material_heterogeneity_index": null,
+    "electromagnetic_assignment_coverage_ratio": null,
+    "electromagnetic_fallback_coefficient_ratio": null,
+    "electromagnetic_region_coefficient_contrast_index": null,
+    "electromagnetic_solver_conditioning_proxy": null
+  }
+}

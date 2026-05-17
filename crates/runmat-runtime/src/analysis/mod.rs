@@ -25,8 +25,18 @@ use crate::operations::{
     operation_error, OperationContext, OperationEnvelope, OperationErrorEnvelope,
     OperationErrorSeverity, OperationErrorSpec, OperationErrorType,
 };
+use policy::{
+    breach_rate_greater_than, breach_rate_less_than, electromagnetic_thresholds_for_policy,
+    thermo_field_quality_thresholds_for_policy, thermo_gradient_thresholds_for_policy,
+    thermo_thresholds_for_policy, EM_ASSIGNMENT_COVERAGE_MIN_BALANCED,
+    EM_CONDITIONING_MAX_BALANCED, EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
+    EM_FALLBACK_COEFFICIENT_MAX_BALANCED, EM_HETEROGENEITY_THRESHOLD_BALANCED,
+    EM_REGION_CONTRAST_MAX_BALANCED, THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
+    THERMO_SPREAD_THRESHOLD_BALANCED,
+};
 
 mod contracts;
+mod policy;
 mod promotion;
 pub mod storage;
 
@@ -70,14 +80,6 @@ const ANALYSIS_RESULTS_COMPARE_OP_VERSION: &str = "analysis.results_compare/v1";
 const ANALYSIS_TRENDS_OPERATION: &str = "analysis.trends";
 const ANALYSIS_TRENDS_OP_VERSION: &str = "analysis.trends/v1";
 const TRANSIENT_RESIDUAL_WARN_THRESHOLD: f64 = 1.0e-4;
-const THERMO_SPREAD_THRESHOLD_BALANCED: f64 = 1.25;
-const THERMO_HETEROGENEITY_THRESHOLD_BALANCED: f64 = 0.2;
-const EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED: f64 = 2.0;
-const EM_HETEROGENEITY_THRESHOLD_BALANCED: f64 = 0.2;
-const EM_ASSIGNMENT_COVERAGE_MIN_BALANCED: f64 = 0.85;
-const EM_FALLBACK_COEFFICIENT_MAX_BALANCED: f64 = 0.25;
-const EM_REGION_CONTRAST_MAX_BALANCED: f64 = 0.85;
-const EM_CONDITIONING_MAX_BALANCED: f64 = 2.0e4;
 
 pub fn analysis_create_model_op(
     geometry: &GeometryAsset,
@@ -3970,17 +3972,7 @@ pub fn analysis_trends_op(
                     )
                 })
                 .collect::<Vec<_>>();
-            if values.is_empty() {
-                None
-            } else {
-                Some(
-                    values
-                        .iter()
-                        .filter(|value| **value > THERMO_SPREAD_THRESHOLD_BALANCED)
-                        .count() as f64
-                        / values.len() as f64,
-                )
-            }
+            breach_rate_greater_than(&values, THERMO_SPREAD_THRESHOLD_BALANCED)
         };
         let thermo_heterogeneity_breach_rate = {
             let values = entries
@@ -3993,17 +3985,7 @@ pub fn analysis_trends_op(
                     )
                 })
                 .collect::<Vec<_>>();
-            if values.is_empty() {
-                None
-            } else {
-                Some(
-                    values
-                        .iter()
-                        .filter(|value| **value > THERMO_HETEROGENEITY_THRESHOLD_BALANCED)
-                        .count() as f64
-                        / values.len() as f64,
-                )
-            }
+            breach_rate_greater_than(&values, THERMO_HETEROGENEITY_THRESHOLD_BALANCED)
         };
         let electro_thermal_coupling_enabled_rate = {
             let values = entries
@@ -4059,14 +4041,7 @@ pub fn analysis_trends_op(
                     )
                 })
                 .collect::<Vec<_>>();
-            if values.is_empty() {
-                None
-            } else {
-                Some(
-                    values.iter().filter(|value| **value > 2.5).count() as f64
-                        / values.len() as f64,
-                )
-            }
+            breach_rate_greater_than(&values, 2.5)
         } else {
             None
         };
@@ -4089,17 +4064,7 @@ pub fn analysis_trends_op(
                     )
                 })
                 .collect::<Vec<_>>();
-            if values.is_empty() {
-                None
-            } else {
-                Some(
-                    values
-                        .iter()
-                        .filter(|value| **value > EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED)
-                        .count() as f64
-                        / values.len() as f64,
-                )
-            }
+            breach_rate_greater_than(&values, EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED)
         } else {
             None
         };
@@ -4115,17 +4080,7 @@ pub fn analysis_trends_op(
                     )
                 })
                 .collect::<Vec<_>>();
-            if values.is_empty() {
-                None
-            } else {
-                Some(
-                    values
-                        .iter()
-                        .filter(|value| **value > EM_HETEROGENEITY_THRESHOLD_BALANCED)
-                        .count() as f64
-                        / values.len() as f64,
-                )
-            }
+            breach_rate_greater_than(&values, EM_HETEROGENEITY_THRESHOLD_BALANCED)
         } else {
             None
         };
@@ -4140,17 +4095,7 @@ pub fn analysis_trends_op(
                     )
                 })
                 .collect::<Vec<_>>();
-            if values.is_empty() {
-                None
-            } else {
-                Some(
-                    values
-                        .iter()
-                        .filter(|value| **value < EM_ASSIGNMENT_COVERAGE_MIN_BALANCED)
-                        .count() as f64
-                        / values.len() as f64,
-                )
-            }
+            breach_rate_less_than(&values, EM_ASSIGNMENT_COVERAGE_MIN_BALANCED)
         } else {
             None
         };
@@ -4165,17 +4110,7 @@ pub fn analysis_trends_op(
                     )
                 })
                 .collect::<Vec<_>>();
-            if values.is_empty() {
-                None
-            } else {
-                Some(
-                    values
-                        .iter()
-                        .filter(|value| **value > EM_FALLBACK_COEFFICIENT_MAX_BALANCED)
-                        .count() as f64
-                        / values.len() as f64,
-                )
-            }
+            breach_rate_greater_than(&values, EM_FALLBACK_COEFFICIENT_MAX_BALANCED)
         } else {
             None
         };
@@ -4190,17 +4125,7 @@ pub fn analysis_trends_op(
                     )
                 })
                 .collect::<Vec<_>>();
-            if values.is_empty() {
-                None
-            } else {
-                Some(
-                    values
-                        .iter()
-                        .filter(|value| **value > EM_REGION_CONTRAST_MAX_BALANCED)
-                        .count() as f64
-                        / values.len() as f64,
-                )
-            }
+            breach_rate_greater_than(&values, EM_REGION_CONTRAST_MAX_BALANCED)
         } else {
             None
         };
@@ -4215,17 +4140,7 @@ pub fn analysis_trends_op(
                     )
                 })
                 .collect::<Vec<_>>();
-            if values.is_empty() {
-                None
-            } else {
-                Some(
-                    values
-                        .iter()
-                        .filter(|value| **value > EM_CONDITIONING_MAX_BALANCED)
-                        .count() as f64
-                        / values.len() as f64,
-                )
-            }
+            breach_rate_greater_than(&values, EM_CONDITIONING_MAX_BALANCED)
         } else {
             None
         };
@@ -5736,48 +5651,6 @@ fn diagnostic_warning_rate(entries: &[AnalysisRunResult], code: &str) -> Option<
         None
     } else {
         Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
-    }
-}
-
-fn thermo_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
-    match policy {
-        QualityPolicy::Strict => (1.15, 0.12),
-        QualityPolicy::Balanced => (
-            THERMO_SPREAD_THRESHOLD_BALANCED,
-            THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
-        ),
-        QualityPolicy::Exploratory => (1.4, 0.35),
-    }
-}
-
-fn thermo_gradient_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
-    match policy {
-        QualityPolicy::Strict => (0.22, 0.25),
-        QualityPolicy::Balanced => (0.30, 0.35),
-        QualityPolicy::Exploratory => (0.45, 0.55),
-    }
-}
-
-fn thermo_field_quality_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
-    match policy {
-        QualityPolicy::Strict => (0.55, 0.02),
-        QualityPolicy::Balanced => (0.45, 0.08),
-        QualityPolicy::Exploratory => (0.30, 0.18),
-    }
-}
-
-fn electromagnetic_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64, f64, f64, f64, f64) {
-    match policy {
-        QualityPolicy::Strict => (1.5, 0.12, 0.95, 0.05, 0.45, 8.0e3),
-        QualityPolicy::Balanced => (
-            EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
-            EM_HETEROGENEITY_THRESHOLD_BALANCED,
-            EM_ASSIGNMENT_COVERAGE_MIN_BALANCED,
-            EM_FALLBACK_COEFFICIENT_MAX_BALANCED,
-            EM_REGION_CONTRAST_MAX_BALANCED,
-            EM_CONDITIONING_MAX_BALANCED,
-        ),
-        QualityPolicy::Exploratory => (3.0, 0.35, 0.5, 0.65, 1.8, 1.5e5),
     }
 }
 

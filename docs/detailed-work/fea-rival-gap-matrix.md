@@ -111,6 +111,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. EM readiness posture is now first-class in `analysis.results`/`analysis.trends` via coverage, fallback, contrast, and conditioning signals (plus spread/heterogeneity).
 3. EM benchmark/conformance harness now includes a four-fixture governance family (homogeneous, heterogeneous, sparse-assignment, fallback-heavy) with publishability split enforced by thresholds.
 
+## Maxwell EM Bring-Up Status (Phase 6)
+
+1. Runtime policy thresholds/helpers for thermo + EM governance were extracted into a shared internal module to reduce policy drift between operations and trends.
+2. Baseline and rolling-drift gates now include explicit EM readiness metric drift checks (coverage, fallback, contrast, conditioning) for EM reference fixtures.
+3. Contract-facing EM shape stability now includes a dedicated EM snapshot test (`electromagnetic_contract_snapshot.json`) in operation contracts.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

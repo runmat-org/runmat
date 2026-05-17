@@ -1,5 +1,16 @@
 use super::*;
 
+const EM_READINESS_TARGET_FIXTURES: &[&str] = &[
+    "electromagnetic_reference_homogeneous_gpu_provider",
+    "electromagnetic_reference_heterogeneous_gpu_provider",
+    "electromagnetic_reference_sparse_assignments_gpu_provider",
+    "electromagnetic_reference_fallback_heavy_gpu_provider",
+];
+const EM_MAX_READINESS_RELATIVE_DRIFT: f64 = 0.25;
+const EM_MAX_READINESS_ABSOLUTE_DRIFT: f64 = 0.05;
+const EM_MAX_CONDITIONING_RELATIVE_DRIFT: f64 = 0.5;
+const EM_MAX_CONDITIONING_ABSOLUTE_DRIFT: f64 = 2.0e3;
+
 pub(super) fn artifact_path() -> PathBuf {
     if let Ok(path) = std::env::var("RUNMAT_ANALYSIS_ARTIFACT_PATH") {
         return PathBuf::from(path);
@@ -243,6 +254,49 @@ pub(super) fn check_rolling_baseline_drift(
                 }
             }
         }
+
+        if EM_READINESS_TARGET_FIXTURES.contains(fixture_id) {
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_assignment_coverage_ratio",
+                history,
+                current_record.electromagnetic_assignment_coverage_ratio,
+                |record| record.electromagnetic_assignment_coverage_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_fallback_coefficient_ratio",
+                history,
+                current_record.electromagnetic_fallback_coefficient_ratio,
+                |record| record.electromagnetic_fallback_coefficient_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_region_coefficient_contrast_index",
+                history,
+                current_record.electromagnetic_region_coefficient_contrast_index,
+                |record| record.electromagnetic_region_coefficient_contrast_index,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_solver_conditioning_proxy",
+                history,
+                current_record.electromagnetic_solver_conditioning_proxy,
+                |record| record.electromagnetic_solver_conditioning_proxy,
+                EM_MAX_CONDITIONING_RELATIVE_DRIFT,
+                EM_MAX_CONDITIONING_ABSOLUTE_DRIFT,
+                failures,
+            );
+        }
     }
 }
 
@@ -277,6 +331,44 @@ pub(super) fn check_baseline_drift(
             max_slowdown_ratio,
             failures,
         );
+        if EM_READINESS_TARGET_FIXTURES.contains(&current_record.fixture_id.as_str()) {
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_assignment_coverage_ratio",
+                baseline_record.electromagnetic_assignment_coverage_ratio,
+                current_record.electromagnetic_assignment_coverage_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_fallback_coefficient_ratio",
+                baseline_record.electromagnetic_fallback_coefficient_ratio,
+                current_record.electromagnetic_fallback_coefficient_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_region_coefficient_contrast_index",
+                baseline_record.electromagnetic_region_coefficient_contrast_index,
+                current_record.electromagnetic_region_coefficient_contrast_index,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_solver_conditioning_proxy",
+                baseline_record.electromagnetic_solver_conditioning_proxy,
+                current_record.electromagnetic_solver_conditioning_proxy,
+                EM_MAX_CONDITIONING_RELATIVE_DRIFT,
+                EM_MAX_CONDITIONING_ABSOLUTE_DRIFT,
+                failures,
+            );
+        }
     }
 }
 
@@ -300,6 +392,101 @@ fn check_timing_ratio(
             "baseline slowdown exceeded for fixture={} backend={} ratio={ratio:.3} limit={max_slowdown_ratio:.3} (baseline_ms={base:.3}, current_ms={now:.3})",
             fixture_id,
             backend
+        ));
+    }
+}
+
+fn check_rolling_metric_drift(
+    fixture_id: &str,
+    metric_name: &str,
+    history: &[BenchmarkConformanceReport],
+    current: Option<f64>,
+    accessor: fn(&FixtureRunRecord) -> Option<f64>,
+    max_relative_drift: f64,
+    max_absolute_drift: f64,
+    failures: &mut Vec<String>,
+) {
+    let mut values = Vec::new();
+    for report in history {
+        if let Some(record) = report
+            .records
+            .iter()
+            .find(|value| value.fixture_id == fixture_id)
+        {
+            if let Some(value) = accessor(record) {
+                if value.is_finite() {
+                    values.push(value);
+                }
+            }
+        }
+    }
+    if values.len() < 2 {
+        return;
+    }
+    if let Some(base_median) = median(&mut values) {
+        check_metric_drift_against_reference(
+            fixture_id,
+            metric_name,
+            "rolling baseline",
+            Some(base_median),
+            current,
+            max_relative_drift,
+            max_absolute_drift,
+            failures,
+        );
+    }
+}
+
+fn check_metric_drift(
+    fixture_id: &str,
+    metric_name: &str,
+    baseline: Option<f64>,
+    current: Option<f64>,
+    max_relative_drift: f64,
+    max_absolute_drift: f64,
+    failures: &mut Vec<String>,
+) {
+    check_metric_drift_against_reference(
+        fixture_id,
+        metric_name,
+        "baseline",
+        baseline,
+        current,
+        max_relative_drift,
+        max_absolute_drift,
+        failures,
+    );
+}
+
+fn check_metric_drift_against_reference(
+    fixture_id: &str,
+    metric_name: &str,
+    context: &str,
+    reference: Option<f64>,
+    current: Option<f64>,
+    max_relative_drift: f64,
+    max_absolute_drift: f64,
+    failures: &mut Vec<String>,
+) {
+    let (Some(base), Some(now)) = (reference, current) else {
+        return;
+    };
+    if !base.is_finite() || !now.is_finite() {
+        return;
+    }
+    let abs_drift = (now - base).abs();
+    let rel_drift = if base.abs() <= 1.0e-9 {
+        0.0
+    } else {
+        abs_drift / base.abs()
+    };
+    if abs_drift > max_absolute_drift && rel_drift > max_relative_drift {
+        failures.push(format!(
+            "{context} EM readiness drift exceeded for fixture={} metric={} abs_drift={abs_drift:.6} rel_drift={rel_drift:.3} limits=({}, {}) (reference={base:.6}, current={now:.6})",
+            fixture_id,
+            metric_name,
+            max_absolute_drift,
+            max_relative_drift
         ));
     }
 }

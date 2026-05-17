@@ -851,6 +851,58 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
 }
 
 #[test]
+fn electromagnetic_contract_snapshot_matches_expected_shape() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.steps[0].kind = runmat_analysis_core::AnalysisStepKind::Electromagnetic;
+    model.electromagnetic = Some(ElectromagneticDomain {
+        enabled: true,
+        reference_frequency_hz: 60.0,
+        applied_current_a: 120.0,
+    });
+
+    let envelope = analysis_run_electromagnetic_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-em-snapshot-1".to_string()), None),
+    )
+    .expect("electromagnetic run should succeed");
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-em-snapshot-2".to_string()), None),
+    )
+    .expect("electromagnetic results should succeed");
+
+    let snapshot_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/data/electromagnetic_contract_snapshot.json");
+    let expected: Value = serde_json::from_str(
+        &fs::read_to_string(&snapshot_path).expect("read electromagnetic contract snapshot"),
+    )
+    .expect("parse electromagnetic contract snapshot");
+
+    let electromagnetic = serde_json::to_value(
+        results
+            .data
+            .electromagnetic_results
+            .as_ref()
+            .expect("electromagnetic payload expected"),
+    )
+    .expect("serialize electromagnetic payload");
+    let summary = serde_json::to_value(&results.data.summary).expect("serialize summary");
+
+    let expected_em_keys = sorted_object_keys(
+        expected
+            .get("electromagnetic_results")
+            .expect("snapshot electromagnetic_results"),
+    );
+    let expected_summary_keys =
+        sorted_object_keys(expected.get("summary").expect("snapshot summary"));
+
+    assert_eq!(sorted_object_keys(&electromagnetic), expected_em_keys);
+    assert_eq!(sorted_object_keys(&summary), expected_summary_keys);
+}
+
+#[test]
 fn nonlinear_contract_snapshot_matches_expected_shape() {
     let model = fixture_model(FixtureId::NonlinearLoadPathMix);
     let envelope = analysis_run_nonlinear_op(

@@ -194,6 +194,16 @@ Not required for this milestone:
   - sparse-assignment reference (degraded),
   - fallback-heavy reference (degraded).
 
+### Maxwell EM Phase-6 Status (2026-05-16)
+
+- Extracted shared policy thresholds/helpers into internal runtime module (`analysis/policy.rs`) for thermo + EM governance consistency.
+- Hardened baseline drift gates with explicit EM readiness metric drift checks:
+  - assignment coverage ratio,
+  - fallback coefficient ratio,
+  - region coefficient contrast index,
+  - solver conditioning proxy.
+- Added EM contract-facing snapshot shape coverage (`electromagnetic_contract_snapshot.json`) and operation-contract test validation for typed EM payload + summary key stability.
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.
