@@ -919,6 +919,11 @@ fn analysis_plan_study_returns_canonical_linear_static_sequence() {
     assert_eq!(envelope.op_version, "analysis.plan_study/v1");
     assert_eq!(envelope.data.study_id, spec.study_id);
     assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
+    assert_eq!(envelope.data.run_operation, "analysis.run_linear_static");
+    assert_eq!(
+        envelope.data.run_op_version,
+        "analysis.run_linear_static/v1"
+    );
     assert!(envelope.data.electromagnetic_run_options.is_none());
     assert_eq!(
         envelope.data.operation_sequence,
@@ -932,6 +937,30 @@ fn analysis_plan_study_returns_canonical_linear_static_sequence() {
     assert!(envelope.data.evidence_artifact_path.ends_with("plan.json"));
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_plan_study_surfaces_electromagnetic_run_operation_and_options() {
+    let _guard = analysis_test_guard();
+    let mut spec = sample_electromagnetic_study_spec();
+    spec.electromagnetic_run_options = Some(AnalysisElectromagneticRunOptions {
+        sweep_enabled: true,
+        sweep_frequency_hz: vec![40.0, 60.0, 120.0],
+        ..AnalysisElectromagneticRunOptions::default()
+    });
+
+    let envelope = analysis_plan_study_op(&spec, OperationContext::new(None, None))
+        .expect("electromagnetic study plan should succeed");
+
+    assert_eq!(envelope.data.run_operation, "analysis.run_electromagnetic");
+    assert_eq!(
+        envelope.data.run_op_version,
+        "analysis.run_electromagnetic/v1"
+    );
+    assert_eq!(
+        envelope.data.electromagnetic_run_options,
+        spec.electromagnetic_run_options
+    );
 }
 
 #[test]

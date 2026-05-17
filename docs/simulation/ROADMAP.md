@@ -145,3 +145,5 @@ Progress update (2026-05-17):
     additive `analysis.plan_study/v1` and `analysis.run_study/v1` typed payloads now include `electromagnetic_run_options`, with run-study reporting resolved EM defaults when options are omitted, improving programmatic reproducibility without requiring artifact JSON inspection.
 39. [x] Study workflow result-extraction ergonomics expanded:
     additive `analysis.run_study/v1` typed output now includes concrete run operation identity (`run_operation`, `run_op_version`) plus propagated `quality_reasons`, so programmatic callers can consume execution verdict context without an immediate follow-up `analysis.results` call.
+40. [x] Study planning typed ergonomics expanded:
+    additive `analysis.plan_study/v1` typed output now includes planned run operation identity (`run_operation`, `run_op_version`) so automation clients can select downstream run-contract handlers without parsing `operation_sequence`.

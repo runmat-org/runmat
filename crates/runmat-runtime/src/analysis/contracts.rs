@@ -1053,6 +1053,8 @@ pub struct AnalysisStudyPlanData {
     #[serde(default)]
     pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
     pub operation_sequence: Vec<String>,
+    pub run_operation: String,
+    pub run_op_version: String,
     pub study_fingerprint: String,
     pub evidence_artifact_path: String,
 }

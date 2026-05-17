@@ -762,10 +762,12 @@ pub fn analysis_plan_study_op(
     }
 
     let study_fingerprint = study_fingerprint(spec);
+    let run_operation = run_operation_for_kind(spec.run_kind).to_string();
+    let run_op_version = run_operation_version_for_kind(spec.run_kind).to_string();
     let operation_sequence = vec![
         ANALYSIS_CREATE_MODEL_OP_VERSION.to_string(),
         ANALYSIS_VALIDATE_OP_VERSION.to_string(),
-        run_operation_version_for_kind(spec.run_kind).to_string(),
+        run_op_version.clone(),
     ];
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
@@ -779,6 +781,8 @@ pub fn analysis_plan_study_op(
             "electromagnetic_run_options": spec.electromagnetic_run_options.clone(),
             "study_fingerprint": study_fingerprint.clone(),
             "operation_sequence": operation_sequence.clone(),
+            "run_operation": run_operation.clone(),
+            "run_op_version": run_op_version.clone(),
         }),
     )
     .map_err(|err| {
@@ -807,6 +811,8 @@ pub fn analysis_plan_study_op(
             backend: spec.backend,
             electromagnetic_run_options: spec.electromagnetic_run_options.clone(),
             operation_sequence,
+            run_operation,
+            run_op_version,
             study_fingerprint,
             evidence_artifact_path,
         },

@@ -406,6 +406,8 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
     assert_eq!(plan.op_version, "analysis.plan_study/v1");
     assert!(plan.data.study_fingerprint.starts_with("sha256:"));
     assert!(plan.data.electromagnetic_run_options.is_none());
+    assert_eq!(plan.data.run_operation, "analysis.run_linear_static");
+    assert_eq!(plan.data.run_op_version, "analysis.run_linear_static/v1");
     assert!(PathBuf::from(&plan.data.evidence_artifact_path).exists());
 
     let run = analysis_run_study_op(

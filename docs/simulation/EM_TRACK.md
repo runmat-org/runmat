@@ -28,6 +28,7 @@ Last updated: 2026-05-17
    Baseline increment landed: study workflow orchestration (`analysis.validate_study` / `analysis.run_study`) now validates and propagates additive EM run controls through `AnalysisStudySpec.electromagnetic_run_options`, and the EM create-model profile seeds default EM domain parameters so EM study runs execute without out-of-band model edits.
    Baseline increment landed: study workflow typed outputs now surface requested/resolved EM run options on `analysis.plan_study`/`analysis.run_study`, improving API-level reproducibility for programmatic study orchestration.
    Baseline increment landed: `analysis.run_study` typed output now includes run-operation identity and `quality_reasons`, so EM study automation can extract immediate execution verdict context without a separate results retrieval hop.
+   Baseline increment landed: `analysis.plan_study` typed output now includes planned run-operation identity, allowing EM study orchestration clients to select the electromagnetic run-contract path without introspecting operation-sequence arrays.
 
 ## Next Recommended EM Slice
 
