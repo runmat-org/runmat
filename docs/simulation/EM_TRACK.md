@@ -19,7 +19,7 @@ Last updated: 2026-05-17
 ## Remaining to EM Completion
 
 1. Frequency-dependent constitutive modeling in EM solve coefficients.
-   Baseline complete: material `sigma(omega)` interpolation from additive frequency-response points with EM governance thresholds.
+   Baseline complete: material `sigma(omega)` interpolation and dispersive-loss coupling from additive frequency-response points with EM governance thresholds.
 2. Higher-fidelity Maxwell-form implementation depth beyond current proxy approximations.
 3. Stronger external-reference EM comparators integrated into protected-branch policy.
    Baseline complete: external-reference benchmark generation can compare EM threshold-assertion metrics, including `sigma(omega)` comparator entries.

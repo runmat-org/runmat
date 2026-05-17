@@ -4181,6 +4181,34 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "em_homogeneous_dispersive_loss_scale_mean",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "dispersive_loss_scale_mean",
+                            ),
+                            Some(0.0),
+                            Some(0.08),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_dispersive_coupling_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "dispersive_conductivity_coupling_ratio",
+                            ),
+                            Some(0.0),
+                            Some(0.05),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "em_homogeneous_conductivity_spread_ratio",
                             "FEA_EM_STATIC",
                             diagnostic_metric(
@@ -4374,6 +4402,34 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.95),
                             Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_dispersive_loss_scale_mean",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "dispersive_loss_scale_mean",
+                            ),
+                            Some(0.06),
+                            Some(0.22),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_dispersive_coupling_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "dispersive_conductivity_coupling_ratio",
+                            ),
+                            Some(0.0),
+                            Some(0.35),
                         );
                         push_threshold_assertion(
                             spec.id,

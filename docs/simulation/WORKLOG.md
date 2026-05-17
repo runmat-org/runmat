@@ -12,3 +12,4 @@ Append-only concise log for significant simulation-system changes.
 - Renamed `docs/detailed-work` to `docs/simulation`.
 - Added additive EM material frequency-response schema and FEA `sigma(omega)` interpolation, plus EM conformance thresholds for frequency-response metrics; verified with `cargo test -p runmat-analysis-core`, `cargo test -p runmat-analysis-fea`, and `cargo test -p runmat-runtime`.
 - Extended M6 external-reference benchmark generation to support threshold-assertion-backed metrics and added EM `sigma(omega)` comparator entries; verified with Python governance tests plus benchmark generation+validation scripts.
+- Added EM dispersive-loss coupling from frequency-response points (`dispersive_loss_scale`) and promoted dispersive diagnostics/threshold assertions plus external-reference baseline entries; verified with FEA/runtime test suites and external-reference benchmark generation+validation.

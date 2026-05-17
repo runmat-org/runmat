@@ -59,6 +59,16 @@
       "tolerance_rel": 0.05
     },
     {
+      "name": "em_homogeneous_dispersive_loss_scale_mean",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_dispersive_loss_scale_mean",
+      "reference": 0.02,
+      "tolerance_abs": 0.04,
+      "tolerance_rel": 0.8
+    },
+    {
       "name": "em_heterogeneous_sigma_omega_scale_spread_ratio",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -77,6 +87,16 @@
       "reference": 1.0,
       "tolerance_abs": 0.05,
       "tolerance_rel": 0.05
+    },
+    {
+      "name": "em_heterogeneous_dispersive_loss_scale_mean",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_dispersive_loss_scale_mean",
+      "reference": 0.13,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.9
     }
   ]
 }

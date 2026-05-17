@@ -68,6 +68,6 @@ Exit criteria:
 Progress update (2026-05-17):
 
 1. [x] EM frequency-dependent material coefficients baseline landed:
-   additive `conductivity_frequency_response` schema, FEA `sigma(omega)` interpolation, and EM fixture governance thresholds.
+   additive `conductivity_frequency_response` schema, FEA `sigma(omega)` interpolation with dispersive loss coupling terms, and EM fixture governance thresholds.
 2. [x] EM stronger external-reference comparator metrics baseline landed:
    external-reference benchmark generation now supports threshold-assertion-backed metrics, with EM `sigma(omega)` comparator entries wired into the M6 baseline.
