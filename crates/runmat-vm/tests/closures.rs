@@ -39,6 +39,23 @@ fn feval_with_string_handle() {
 }
 
 #[test]
+fn feval_with_string_handle_resolves_local_semantic_function() {
+    let vars =
+        execute_semantic_source("function y = inc(x); y = x + 1; end; r = feval('@inc', 2);")
+            .unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+}
+
+#[test]
+fn feval_with_unresolved_string_handle_errors() {
+    let err = execute_semantic_source("r = feval('@definitely_missing_callback', 1);")
+        .expect_err("unresolved @string handle should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
 fn fzero_accepts_anonymous_function() {
     let vars = execute_semantic_source("f = @(x) cos(x) - x; r = fzero(f, 0.5);").unwrap();
     assert!(vars

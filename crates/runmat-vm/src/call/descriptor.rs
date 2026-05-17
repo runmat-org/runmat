@@ -69,6 +69,15 @@ pub(crate) struct CallableDescriptor {
 }
 
 impl CallableDescriptor {
+    fn parse_at_handle_name(text: &str) -> Option<String> {
+        let handle = text.trim().strip_prefix('@')?.trim();
+        if handle.is_empty() {
+            None
+        } else {
+            Some(handle.to_string())
+        }
+    }
+
     pub(crate) fn semantic(
         function: FunctionId,
         args: Vec<Value>,
@@ -204,6 +213,49 @@ impl CallableDescriptor {
         semantic_registry: &SemanticFunctionRegistry,
     ) -> Self {
         match func_val {
+            Value::String(text) => {
+                if let Some(name) = Self::parse_at_handle_name(&text) {
+                    if let Some(function) = semantic_registry.resolve_name(&name) {
+                        return Self::feval_semantic(
+                            function.0,
+                            name,
+                            CallableFallbackPolicy::None,
+                            args,
+                            requested_outputs,
+                        );
+                    }
+                    return Self::dynamic_named(
+                        name,
+                        args,
+                        requested_outputs,
+                        CallableFallbackPolicy::RuntimeNameResolution,
+                        CallableCallKind::Feval,
+                    );
+                }
+                Self::feval_forward(Value::String(text), args, requested_outputs)
+            }
+            Value::CharArray(ca) if ca.rows == 1 => {
+                let text: String = ca.data.iter().collect();
+                if let Some(name) = Self::parse_at_handle_name(&text) {
+                    if let Some(function) = semantic_registry.resolve_name(&name) {
+                        return Self::feval_semantic(
+                            function.0,
+                            name,
+                            CallableFallbackPolicy::None,
+                            args,
+                            requested_outputs,
+                        );
+                    }
+                    return Self::dynamic_named(
+                        name,
+                        args,
+                        requested_outputs,
+                        CallableFallbackPolicy::RuntimeNameResolution,
+                        CallableCallKind::Feval,
+                    );
+                }
+                Self::feval_forward(Value::CharArray(ca), args, requested_outputs)
+            }
             Value::Closure(closure) => {
                 Self::from_closure(closure, args, requested_outputs, semantic_registry)
             }
