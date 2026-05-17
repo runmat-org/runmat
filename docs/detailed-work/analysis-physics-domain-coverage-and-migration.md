@@ -204,6 +204,19 @@ Not required for this milestone:
   - solver conditioning proxy.
 - Added EM contract-facing snapshot shape coverage (`electromagnetic_contract_snapshot.json`) and operation-contract test validation for typed EM payload + summary key stability.
 
+### Maxwell EM Phase-7 Status (2026-05-16)
+
+- Added first EM-specific source and boundary primitives in core analysis schema:
+  - loads: `current_density`, `coil_current`,
+  - boundary conditions: `magnetic_insulation`, `vector_potential_ground`.
+- Upgraded EM FEA path to consume these primitives directly:
+  - source realization now scales EM RHS excitation deterministically,
+  - boundary anchoring/insulation now influences EM constraint/coupling posture.
+- Surfaced new EM readiness signals as first-class result/trend/governance fields:
+  - `source_realization_ratio`,
+  - `boundary_anchor_ratio`,
+  - plus quality-policy thresholding and breach-rate tracking in `analysis.results` / `analysis.trends`.
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.

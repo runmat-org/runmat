@@ -117,6 +117,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. Baseline and rolling-drift gates now include explicit EM readiness metric drift checks (coverage, fallback, contrast, conditioning) for EM reference fixtures.
 3. Contract-facing EM shape stability now includes a dedicated EM snapshot test (`electromagnetic_contract_snapshot.json`) in operation contracts.
 
+## Maxwell EM Bring-Up Status (Phase 7)
+
+1. Introduced EM-specific source and boundary schema primitives (`current_density`, `coil_current`, `magnetic_insulation`, `vector_potential_ground`) and wired them end-to-end.
+2. EM assembly/solve posture now reflects source-realization and boundary-anchoring semantics instead of only generic structural load/BC carryover.
+3. Governance/readiness now includes EM source/boundary posture signals and threshold/breach tracking (`source_realization_ratio`, `boundary_anchor_ratio`).
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

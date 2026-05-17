@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub enum BoundaryConditionKind {
     Fixed,
     PrescribedDisplacement,
+    MagneticInsulation,
+    VectorPotentialGround,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

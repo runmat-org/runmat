@@ -1,4 +1,7 @@
-use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel, EvidenceConfidence};
+use runmat_analysis_core::{
+    validate_model, AnalysisField, AnalysisModel, BoundaryConditionKind, EvidenceConfidence,
+    LoadKind,
+};
 
 use crate::{
     assembly::assemble_linear_system,
@@ -54,6 +57,47 @@ pub fn run_electromagnetic_with_options(
     let node_count = summary.dof_count.max(8);
     let coefficient_profile = electromagnetic_coefficient_profile(model);
     let material_stats = coefficient_profile.stats;
+    let total_bc_count = model.boundary_conditions.len().max(1);
+    let mut magnetic_insulation_count = 0usize;
+    let mut vector_potential_ground_count = 0usize;
+    for bc in &model.boundary_conditions {
+        match bc.kind {
+            BoundaryConditionKind::MagneticInsulation => {
+                magnetic_insulation_count += 1;
+            }
+            BoundaryConditionKind::VectorPotentialGround => {
+                vector_potential_ground_count += 1;
+            }
+            _ => {}
+        }
+    }
+    let electromagnetic_boundary_count = magnetic_insulation_count + vector_potential_ground_count;
+    let boundary_anchor_ratio = electromagnetic_boundary_count as f64 / total_bc_count as f64;
+
+    let total_load_count = model.loads.len().max(1);
+    let mut electromagnetic_source_count = 0usize;
+    let mut electromagnetic_source_strength = 0.0_f64;
+    for load in &model.loads {
+        match load.kind {
+            LoadKind::CurrentDensity { jx, jy, jz } => {
+                electromagnetic_source_count += 1;
+                electromagnetic_source_strength +=
+                    (jx * jx + jy * jy + jz * jz).sqrt().clamp(0.0, 2.5);
+            }
+            LoadKind::CoilCurrent { current_a } => {
+                electromagnetic_source_count += 1;
+                electromagnetic_source_strength +=
+                    (current_a.abs() / domain.applied_current_a.max(1.0e-9)).clamp(0.0, 2.5);
+            }
+            _ => {}
+        }
+    }
+    let source_realization_ratio = electromagnetic_source_count as f64 / total_load_count as f64;
+    let source_drive_scale = if electromagnetic_source_count == 0 {
+        0.25
+    } else {
+        (electromagnetic_source_strength / electromagnetic_source_count as f64).clamp(0.25, 2.5)
+    };
 
     let mu0 = 4.0e-7 * std::f64::consts::PI;
     let epsilon0 = 8.854_187_812_8e-12_f64;
@@ -82,6 +126,17 @@ pub fn run_electromagnetic_with_options(
         let reluctivity_edge = 1.0 / (mu0 * mu_edge);
         stiffness_upper[i] = reluctivity_edge / (h * h);
     }
+    let insulation_ratio = if electromagnetic_boundary_count == 0 {
+        0.0
+    } else {
+        magnetic_insulation_count as f64 / electromagnetic_boundary_count as f64
+    };
+    if !stiffness_upper.is_empty() {
+        let boundary_coupling_scale = (1.0 - 0.35 * insulation_ratio).clamp(0.35, 1.0);
+        stiffness_upper[0] *= boundary_coupling_scale;
+        let last = stiffness_upper.len() - 1;
+        stiffness_upper[last] *= boundary_coupling_scale;
+    }
 
     let mut stiffness_diag = vec![0.0_f64; node_count];
     let mut mass_terms = vec![0.0_f64; node_count];
@@ -100,8 +155,31 @@ pub fn run_electromagnetic_with_options(
     }
 
     let mut constrained = vec![false; node_count];
-    constrained[0] = true;
-    constrained[node_count - 1] = true;
+    let mut anchor_count = if electromagnetic_boundary_count == 0 {
+        2
+    } else {
+        ((node_count as f64) * (0.05 + 0.25 * boundary_anchor_ratio))
+            .round()
+            .clamp(2.0, (node_count as f64) * 0.6) as usize
+    };
+    if vector_potential_ground_count > 0 {
+        anchor_count = anchor_count.max(2 + vector_potential_ground_count);
+    }
+    anchor_count = anchor_count.min(node_count);
+    if anchor_count >= node_count {
+        for value in &mut constrained {
+            *value = true;
+        }
+    } else {
+        let step =
+            ((node_count - 1) as f64 / (anchor_count.saturating_sub(1).max(1)) as f64).max(1.0);
+        for idx in 0..anchor_count {
+            let dof = ((idx as f64) * step).round() as usize;
+            constrained[dof.min(node_count - 1)] = true;
+        }
+        constrained[0] = true;
+        constrained[node_count - 1] = true;
+    }
     let mut rhs = vec![0.0_f64; node_count];
     for (i, rhs_i) in rhs.iter_mut().enumerate() {
         if constrained[i] {
@@ -113,7 +191,7 @@ pub fn run_electromagnetic_with_options(
             / material_stats.conductivity_mean.max(1.0e-9))
         .clamp(0.2, 5.0);
         let effective_permittivity_i = epsilon0 * node_eps_r[i].max(1.0e-9);
-        *rhs_i = domain.applied_current_a * harmonic * conductivity_scale
+        *rhs_i = domain.applied_current_a * source_drive_scale * harmonic * conductivity_scale
             / (1.0 + omega * effective_permittivity_i);
     }
 
@@ -193,7 +271,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
+            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} boundary_anchor_ratio={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
             domain.enabled,
             domain.reference_frequency_hz,
             domain.applied_current_a,
@@ -208,6 +286,8 @@ pub fn run_electromagnetic_with_options(
             material_stats.fallback_coefficient_ratio,
             material_stats.region_coefficient_contrast_index,
             solver_conditioning_proxy,
+            source_realization_ratio,
+            boundary_anchor_ratio,
             reluctivity,
             effective_permittivity,
             max_residual_norm,

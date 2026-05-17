@@ -214,6 +214,8 @@ pub enum QualityReasonCode {
     ElectromagneticFallbackCoefficientHigh,
     ElectromagneticRegionContrastHigh,
     ElectromagneticConditioningHigh,
+    ElectromagneticSourceRealizationLow,
+    ElectromagneticBoundaryAnchoringLow,
     PlasticityNonlinearStress,
     ContactNonlinearStress,
     NonlinearResidualExceeded,
@@ -778,6 +780,8 @@ pub struct AnalysisResultsSummary {
     pub electromagnetic_fallback_coefficient_ratio: Option<f64>,
     pub electromagnetic_region_coefficient_contrast_index: Option<f64>,
     pub electromagnetic_solver_conditioning_proxy: Option<f64>,
+    pub electromagnetic_source_realization_ratio: Option<f64>,
+    pub electromagnetic_boundary_anchor_ratio: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -874,6 +878,8 @@ pub struct AnalysisTrendKindSummary {
     pub electromagnetic_fallback_breach_rate: Option<f64>,
     pub electromagnetic_contrast_breach_rate: Option<f64>,
     pub electromagnetic_conditioning_breach_rate: Option<f64>,
+    pub electromagnetic_source_realization_breach_rate: Option<f64>,
+    pub electromagnetic_boundary_anchor_breach_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

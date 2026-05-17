@@ -93,6 +93,8 @@
     "electromagnetic_assignment_coverage_ratio": null,
     "electromagnetic_fallback_coefficient_ratio": null,
     "electromagnetic_region_coefficient_contrast_index": null,
-    "electromagnetic_solver_conditioning_proxy": null
+    "electromagnetic_solver_conditioning_proxy": null,
+    "electromagnetic_source_realization_ratio": null,
+    "electromagnetic_boundary_anchor_ratio": null
   }
 }

@@ -207,6 +207,8 @@ struct FixtureRunRecord {
     electromagnetic_fallback_coefficient_ratio: Option<f64>,
     electromagnetic_region_coefficient_contrast_index: Option<f64>,
     electromagnetic_solver_conditioning_proxy: Option<f64>,
+    electromagnetic_source_realization_ratio: Option<f64>,
+    electromagnetic_boundary_anchor_ratio: Option<f64>,
     publishable: Option<bool>,
     parity: Option<ParitySummary>,
     threshold_assertions: Vec<ThresholdAssertionRecord>,

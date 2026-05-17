@@ -296,6 +296,26 @@ pub(super) fn check_rolling_baseline_drift(
                 EM_MAX_CONDITIONING_ABSOLUTE_DRIFT,
                 failures,
             );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_source_realization_ratio",
+                history,
+                current_record.electromagnetic_source_realization_ratio,
+                |record| record.electromagnetic_source_realization_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_boundary_anchor_ratio",
+                history,
+                current_record.electromagnetic_boundary_anchor_ratio,
+                |record| record.electromagnetic_boundary_anchor_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
         }
     }
 }
@@ -366,6 +386,24 @@ pub(super) fn check_baseline_drift(
                 current_record.electromagnetic_solver_conditioning_proxy,
                 EM_MAX_CONDITIONING_RELATIVE_DRIFT,
                 EM_MAX_CONDITIONING_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_source_realization_ratio",
+                baseline_record.electromagnetic_source_realization_ratio,
+                current_record.electromagnetic_source_realization_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_boundary_anchor_ratio",
+                baseline_record.electromagnetic_boundary_anchor_ratio,
+                current_record.electromagnetic_boundary_anchor_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
                 failures,
             );
         }

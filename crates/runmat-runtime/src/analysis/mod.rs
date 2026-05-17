@@ -29,9 +29,10 @@ use policy::{
     breach_rate_greater_than, breach_rate_less_than, electromagnetic_thresholds_for_policy,
     thermo_field_quality_thresholds_for_policy, thermo_gradient_thresholds_for_policy,
     thermo_thresholds_for_policy, EM_ASSIGNMENT_COVERAGE_MIN_BALANCED,
-    EM_CONDITIONING_MAX_BALANCED, EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
-    EM_FALLBACK_COEFFICIENT_MAX_BALANCED, EM_HETEROGENEITY_THRESHOLD_BALANCED,
-    EM_REGION_CONTRAST_MAX_BALANCED, THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
+    EM_BOUNDARY_ANCHOR_MIN_BALANCED, EM_CONDITIONING_MAX_BALANCED,
+    EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED, EM_FALLBACK_COEFFICIENT_MAX_BALANCED,
+    EM_HETEROGENEITY_THRESHOLD_BALANCED, EM_REGION_CONTRAST_MAX_BALANCED,
+    EM_SOURCE_REALIZATION_MIN_BALANCED, THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
     THERMO_SPREAD_THRESHOLD_BALANCED,
 };
 
@@ -2654,6 +2655,13 @@ pub fn analysis_run_electromagnetic_with_options_op(
         "FEA_EM_STATIC",
         "solver_conditioning_proxy",
     );
+    let em_source_realization_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "source_realization_ratio",
+    );
+    let em_boundary_anchor_ratio =
+        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "boundary_anchor_ratio");
     let (
         em_spread_threshold,
         em_heterogeneity_threshold,
@@ -2661,6 +2669,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
         em_fallback_max_threshold,
         em_contrast_max_threshold,
         em_conditioning_max_threshold,
+        em_source_realization_min_threshold,
+        em_boundary_anchor_min_threshold,
     ) = electromagnetic_thresholds_for_policy(options.quality_policy);
     let em_spread_breach = em_conductivity_spread_ratio
         .map(|value| value > em_spread_threshold)
@@ -2680,12 +2690,20 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let em_conditioning_breach = em_solver_conditioning_proxy
         .map(|value| value > em_conditioning_max_threshold)
         .unwrap_or(false);
+    let em_source_realization_breach = em_source_realization_ratio
+        .map(|value| value < em_source_realization_min_threshold)
+        .unwrap_or(false);
+    let em_boundary_anchor_breach = em_boundary_anchor_ratio
+        .map(|value| value < em_boundary_anchor_min_threshold)
+        .unwrap_or(false);
     if (em_spread_breach
         || em_heterogeneity_breach
         || em_coverage_breach
         || em_fallback_breach
         || em_contrast_breach
-        || em_conditioning_breach)
+        || em_conditioning_breach
+        || em_source_realization_breach
+        || em_boundary_anchor_breach)
         && result_quality == QualityGate::Pass
     {
         result_quality = QualityGate::Warn;
@@ -2759,6 +2777,26 @@ pub fn analysis_run_electromagnetic_with_options_op(
                 "electromagnetic solver conditioning proxy {} exceeds threshold {}",
                 em_solver_conditioning_proxy.unwrap_or(0.0),
                 em_conditioning_max_threshold
+            ),
+        });
+    }
+    if em_source_realization_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticSourceRealizationLow,
+            detail: format!(
+                "electromagnetic source realization ratio {} is below threshold {}",
+                em_source_realization_ratio.unwrap_or(0.0),
+                em_source_realization_min_threshold
+            ),
+        });
+    }
+    if em_boundary_anchor_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticBoundaryAnchoringLow,
+            detail: format!(
+                "electromagnetic boundary anchor ratio {} is below threshold {}",
+                em_boundary_anchor_ratio.unwrap_or(0.0),
+                em_boundary_anchor_min_threshold
             ),
         });
     }
@@ -3322,6 +3360,16 @@ pub fn analysis_results_op(
         "FEA_EM_STATIC",
         "solver_conditioning_proxy",
     );
+    let electromagnetic_source_realization_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "source_realization_ratio",
+    );
+    let electromagnetic_boundary_anchor_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "boundary_anchor_ratio",
+    );
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -3402,6 +3450,8 @@ pub fn analysis_results_op(
         electromagnetic_fallback_coefficient_ratio,
         electromagnetic_region_coefficient_contrast_index,
         electromagnetic_solver_conditioning_proxy,
+        electromagnetic_source_realization_ratio,
+        electromagnetic_boundary_anchor_ratio,
     };
 
     let modal_results = if query.include_modal_results {
@@ -4144,6 +4194,38 @@ pub fn analysis_trends_op(
         } else {
             None
         };
+        let electromagnetic_source_realization_breach_rate =
+            if kind == AnalysisRunKind::Electromagnetic {
+                let values = entries
+                    .iter()
+                    .filter_map(|run| {
+                        diagnostic_metric(
+                            &run.run.diagnostics,
+                            "FEA_EM_STATIC",
+                            "source_realization_ratio",
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                breach_rate_less_than(&values, EM_SOURCE_REALIZATION_MIN_BALANCED)
+            } else {
+                None
+            };
+        let electromagnetic_boundary_anchor_breach_rate =
+            if kind == AnalysisRunKind::Electromagnetic {
+                let values = entries
+                    .iter()
+                    .filter_map(|run| {
+                        diagnostic_metric(
+                            &run.run.diagnostics,
+                            "FEA_EM_STATIC",
+                            "boundary_anchor_ratio",
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                breach_rate_less_than(&values, EM_BOUNDARY_ANCHOR_MIN_BALANCED)
+            } else {
+                None
+            };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -4178,6 +4260,8 @@ pub fn analysis_trends_op(
             electromagnetic_fallback_breach_rate,
             electromagnetic_contrast_breach_rate,
             electromagnetic_conditioning_breach_rate,
+            electromagnetic_source_realization_breach_rate,
+            electromagnetic_boundary_anchor_breach_rate,
         });
     }
 

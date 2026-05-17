@@ -257,6 +257,18 @@ pub fn assemble_linear_system(
                     rhs[base + 2] += *gz;
                 }
             }
+            runmat_analysis_core::LoadKind::CurrentDensity { jx, jy, jz } => {
+                rhs[base] += *jx * 1.0e-3;
+                if base + 1 < dof_count {
+                    rhs[base + 1] += *jy * 1.0e-3;
+                }
+                if base + 2 < dof_count {
+                    rhs[base + 2] += *jz * 1.0e-3;
+                }
+            }
+            runmat_analysis_core::LoadKind::CoilCurrent { current_a } => {
+                rhs[base] += *current_a * 1.0e-2;
+            }
         }
     }
 

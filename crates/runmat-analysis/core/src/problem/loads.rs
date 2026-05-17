@@ -6,6 +6,8 @@ pub enum LoadKind {
     Force { fx: f64, fy: f64, fz: f64 },
     Pressure { magnitude_pa: f64 },
     BodyForce { gx: f64, gy: f64, gz: f64 },
+    CurrentDensity { jx: f64, jy: f64, jz: f64 },
+    CoilCurrent { current_a: f64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

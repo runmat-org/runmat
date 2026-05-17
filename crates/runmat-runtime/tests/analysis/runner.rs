@@ -772,6 +772,239 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             }
         }
 
+        match profile.kind {
+            ElectromagneticFixtureKind::Homogeneous => {
+                model.boundary_conditions = vec![
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_ground_0".to_string(),
+                        region_id: "em_region_homogeneous".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_ground_1".to_string(),
+                        region_id: "em_region_homogeneous".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_insulation_0".to_string(),
+                        region_id: "em_region_homogeneous".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_insulation_1".to_string(),
+                        region_id: "em_region_homogeneous".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
+                    },
+                ];
+                model.loads = vec![
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_coil_0".to_string(),
+                        region_id: "em_region_homogeneous".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
+                            current_a: profile.applied_current_a,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_current_density_0".to_string(),
+                        region_id: "em_region_homogeneous".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
+                            jx: 1.0,
+                            jy: 0.0,
+                            jz: 0.0,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_current_density_1".to_string(),
+                        region_id: "em_region_homogeneous".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
+                            jx: 0.0,
+                            jy: 1.0,
+                            jz: 0.0,
+                        },
+                    },
+                ];
+            }
+            ElectromagneticFixtureKind::Heterogeneous => {
+                model.boundary_conditions = vec![
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_ground_hetero".to_string(),
+                        region_id: "em_region_0".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_insulation_hetero_0".to_string(),
+                        region_id: "em_region_1".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_insulation_hetero_1".to_string(),
+                        region_id: "em_region_2".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_structural_fallback".to_string(),
+                        region_id: "em_region_2".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
+                    },
+                ];
+                model.loads = vec![
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_coil_hetero".to_string(),
+                        region_id: "em_region_0".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
+                            current_a: profile.applied_current_a * 0.85,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_current_density_hetero".to_string(),
+                        region_id: "em_region_1".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
+                            jx: 0.8,
+                            jy: 0.3,
+                            jz: 0.1,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_structural_mixed".to_string(),
+                        region_id: "em_region_2".to_string(),
+                        kind: runmat_analysis_core::LoadKind::Force {
+                            fx: 0.0,
+                            fy: -50.0,
+                            fz: 0.0,
+                        },
+                    },
+                ];
+            }
+            ElectromagneticFixtureKind::SparseAssignments => {
+                model.boundary_conditions = vec![
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_sparse_ground".to_string(),
+                        region_id: "em_sparse_region_0".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_sparse_struct_0".to_string(),
+                        region_id: "em_sparse_region_1".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_sparse_struct_1".to_string(),
+                        region_id: "em_sparse_region_2".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_sparse_struct_2".to_string(),
+                        region_id: "em_sparse_region_3".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::PrescribedDisplacement,
+                    },
+                ];
+                model.loads = vec![
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_sparse_coil".to_string(),
+                        region_id: "em_sparse_region_0".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
+                            current_a: profile.applied_current_a * 0.4,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_sparse_force_0".to_string(),
+                        region_id: "em_sparse_region_1".to_string(),
+                        kind: runmat_analysis_core::LoadKind::Force {
+                            fx: 0.0,
+                            fy: -80.0,
+                            fz: 0.0,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_sparse_force_1".to_string(),
+                        region_id: "em_sparse_region_2".to_string(),
+                        kind: runmat_analysis_core::LoadKind::BodyForce {
+                            gx: 0.0,
+                            gy: -9.81,
+                            gz: 0.0,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_sparse_pressure".to_string(),
+                        region_id: "em_sparse_region_3".to_string(),
+                        kind: runmat_analysis_core::LoadKind::Pressure {
+                            magnitude_pa: 2.0e4,
+                        },
+                    },
+                ];
+            }
+            ElectromagneticFixtureKind::FallbackHeavy => {
+                model.boundary_conditions = vec![
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_fallback_ground".to_string(),
+                        region_id: "em_fallback_region_0".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_fallback_struct_0".to_string(),
+                        region_id: "em_fallback_region_1".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_fallback_struct_1".to_string(),
+                        region_id: "em_fallback_region_2".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::Fixed,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_fallback_struct_2".to_string(),
+                        region_id: "em_fallback_region_3".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::PrescribedDisplacement,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_fallback_struct_3".to_string(),
+                        region_id: "em_fallback_region_4".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::PrescribedDisplacement,
+                    },
+                ];
+                model.loads = vec![
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_fallback_coil".to_string(),
+                        region_id: "em_fallback_region_0".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
+                            current_a: profile.applied_current_a * 0.25,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_fallback_force_0".to_string(),
+                        region_id: "em_fallback_region_1".to_string(),
+                        kind: runmat_analysis_core::LoadKind::Force {
+                            fx: 0.0,
+                            fy: -120.0,
+                            fz: 0.0,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_fallback_force_1".to_string(),
+                        region_id: "em_fallback_region_2".to_string(),
+                        kind: runmat_analysis_core::LoadKind::BodyForce {
+                            gx: 0.0,
+                            gy: -9.81,
+                            gz: 0.0,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_fallback_pressure_0".to_string(),
+                        region_id: "em_fallback_region_3".to_string(),
+                        kind: runmat_analysis_core::LoadKind::Pressure {
+                            magnitude_pa: 3.2e4,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_fallback_pressure_1".to_string(),
+                        region_id: "em_fallback_region_4".to_string(),
+                        kind: runmat_analysis_core::LoadKind::Pressure {
+                            magnitude_pa: 2.4e4,
+                        },
+                    },
+                ];
+            }
+        }
+
         model.electromagnetic = Some(runmat_analysis_core::ElectromagneticDomain {
             enabled: true,
             reference_frequency_hz: profile.reference_frequency_hz,
@@ -1422,6 +1655,8 @@ pub(super) fn run_fixture(
     let mut electromagnetic_fallback_coefficient_ratio = None;
     let mut electromagnetic_region_coefficient_contrast_index = None;
     let mut electromagnetic_solver_conditioning_proxy = None;
+    let mut electromagnetic_source_realization_ratio = None;
+    let mut electromagnetic_boundary_anchor_ratio = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -1515,6 +1750,8 @@ pub(super) fn run_fixture(
                     electromagnetic_fallback_coefficient_ratio,
                     electromagnetic_region_coefficient_contrast_index,
                     electromagnetic_solver_conditioning_proxy,
+                    electromagnetic_source_realization_ratio,
+                    electromagnetic_boundary_anchor_ratio,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -3420,6 +3657,34 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.05),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_source_realization_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_realization_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_boundary_anchor_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "boundary_anchor_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
                     }
                     if spec.id == "electromagnetic_reference_heterogeneous_gpu_provider" {
                         push_threshold_assertion(
@@ -3478,6 +3743,34 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_source_realization_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_realization_ratio",
+                            ),
+                            Some(0.6),
+                            Some(0.8),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_boundary_anchor_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "boundary_anchor_ratio",
+                            ),
+                            Some(0.7),
+                            Some(0.85),
+                        );
                     }
                     if spec.id == "electromagnetic_reference_sparse_assignments_gpu_provider" {
                         push_threshold_assertion(
@@ -3508,6 +3801,34 @@ pub(super) fn run_fixture(
                             Some(0.45),
                             Some(1.0),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_sparse_source_realization_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_realization_ratio",
+                            ),
+                            Some(0.2),
+                            Some(0.35),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_sparse_boundary_anchor_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "boundary_anchor_ratio",
+                            ),
+                            Some(0.2),
+                            Some(0.35),
+                        );
                     }
                     if spec.id == "electromagnetic_reference_fallback_heavy_gpu_provider" {
                         push_threshold_assertion(
@@ -3537,6 +3858,34 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.95),
                             Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_fallback_heavy_source_realization_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_realization_ratio",
+                            ),
+                            Some(0.15),
+                            Some(0.3),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_fallback_heavy_boundary_anchor_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "boundary_anchor_ratio",
+                            ),
+                            Some(0.15),
+                            Some(0.3),
                         );
                     }
 
@@ -3641,6 +3990,8 @@ pub(super) fn run_fixture(
                                 electromagnetic_fallback_coefficient_ratio,
                                 electromagnetic_region_coefficient_contrast_index,
                                 electromagnetic_solver_conditioning_proxy,
+                                electromagnetic_source_realization_ratio,
+                                electromagnetic_boundary_anchor_ratio,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -3775,6 +4126,14 @@ pub(super) fn run_fixture(
                         .data
                         .summary
                         .electromagnetic_solver_conditioning_proxy;
+                    electromagnetic_source_realization_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_source_realization_ratio;
+                    electromagnetic_boundary_anchor_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_boundary_anchor_ratio;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -3972,6 +4331,8 @@ pub(super) fn run_fixture(
                                     electromagnetic_fallback_coefficient_ratio,
                                     electromagnetic_region_coefficient_contrast_index,
                                     electromagnetic_solver_conditioning_proxy,
+                                    electromagnetic_source_realization_ratio,
+                                    electromagnetic_boundary_anchor_ratio,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -4114,6 +4475,8 @@ pub(super) fn run_fixture(
         electromagnetic_fallback_coefficient_ratio,
         electromagnetic_region_coefficient_contrast_index,
         electromagnetic_solver_conditioning_proxy,
+        electromagnetic_source_realization_ratio,
+        electromagnetic_boundary_anchor_ratio,
         publishable,
         parity,
         threshold_assertions,
