@@ -4,18 +4,18 @@ use crate::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingId, BindingName, BindingOwner,
     BindingResolution, BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution,
     CallSyntax, CapturedBinding, ClassArgumentBlock, ClassEnumeration, ClassEvent, ClassId,
-    ClassKind, ClassMethod, ClassProperty, ClassResolution, CommandArgument, EntrypointId,
-    EntrypointName, EntrypointOrigin, EntrypointPolicy, ExprId, FunctionAbi, FunctionId,
-    FunctionKind, FunctionModifiers, FunctionName, FunctionResolution, HirAssembly, HirBinding,
-    HirBlock, HirCall, HirCallableRef, HirClass, HirCommandCall, HirEntrypoint, HirExpr,
-    HirExprKind, HirFunction, HirImport, HirModule, HirPlace, HirStmt as SemanticHirStmt,
-    HirStmtKind, ImportResolution, IndexComponent, IndexKind, IndexResultContext,
-    IndexingSemantics, LoopIterationSemantics, LoweringContext, LoweringResult, ModuleId,
-    OperatorKind, PlaceMutation, PlaceMutationKind, QualifiedName, ReferenceKind,
-    ReferenceResolution, RequestedOutputCount, SemanticError, SemanticIndex, SourceId,
-    SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, Type, VarId, WorkspaceExportPolicy,
-    WorkspaceVisibility, AWAIT_EXTENSION_NAME, DISCARD_OUTPUT_NAME, NARGIN_BUILTIN_NAME,
-    NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
+    ClassKind, ClassMethod, ClassProperty, ClassResolution, CommandArgument, DefPath,
+    DefPathSegment, EntrypointId, EntrypointName, EntrypointOrigin, EntrypointPolicy, ExprId,
+    FunctionAbi, FunctionId, FunctionKind, FunctionModifiers, FunctionName, FunctionResolution,
+    HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass, HirCommandCall,
+    HirEntrypoint, HirExpr, HirExprKind, HirFunction, HirImport, HirModule, HirPlace,
+    HirStmt as SemanticHirStmt, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
+    IndexResultContext, IndexingSemantics, LoopIterationSemantics, LoweringContext, LoweringResult,
+    ModuleId, OperatorKind, PackageName, PlaceMutation, PlaceMutationKind, QualifiedName,
+    ReferenceKind, ReferenceResolution, RequestedOutputCount, SemanticError, SemanticIndex,
+    SourceId, SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, Type, VarId,
+    WorkspaceExportPolicy, WorkspaceVisibility, AWAIT_EXTENSION_NAME, DISCARD_OUTPUT_NAME,
+    NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use std::collections::{HashMap, HashSet};
@@ -1646,12 +1646,11 @@ impl SemanticCtx {
             )));
         }
         let imports = &self.assembly.modules[self.module.0].imports;
-        let specific_matches: Vec<String> = imports
+        let specific_matches: Vec<&HirImport> = imports
             .iter()
             .filter(|import| {
                 !import.wildcard && import.path.0.last().map(|part| part.0.as_str()) == Some(name)
             })
-            .filter_map(|import| import.path.display_name())
             .collect();
         if specific_matches.len() > 1 {
             return Err(SemanticError::new(format!(
@@ -1659,10 +1658,10 @@ impl SemanticCtx {
             ))
             .with_span(span));
         }
-        if let Some(qualified) = specific_matches.first() {
-            return Ok(crate::FunctionHandleTarget::DynamicName(SymbolName(
-                qualified.clone(),
-            )));
+        if let Some(import) = specific_matches.first() {
+            return Ok(crate::FunctionHandleTarget::DefPath(
+                def_path_for_import_path(&import.path),
+            ));
         }
         let wildcard_matches: Vec<String> = imports
             .iter()
@@ -1685,6 +1684,24 @@ impl SemanticCtx {
         Ok(crate::FunctionHandleTarget::DynamicName(SymbolName(
             name.to_string(),
         )))
+    }
+}
+
+fn def_path_for_import_path(path: &QualifiedName) -> DefPath {
+    let package = path
+        .0
+        .first()
+        .map(|segment| segment.0.clone())
+        .unwrap_or_default();
+    let item_name = path
+        .0
+        .last()
+        .cloned()
+        .unwrap_or_else(|| SymbolName(String::new()));
+    DefPath {
+        package: PackageName(package),
+        module: path.clone(),
+        item: vec![DefPathSegment::Function(item_name)],
     }
 }
 
