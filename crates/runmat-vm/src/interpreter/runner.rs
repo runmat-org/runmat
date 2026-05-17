@@ -152,7 +152,7 @@ async fn invoke_user_function_value(
         name.to_string(),
         args.to_vec(),
         1,
-        CallableFallbackPolicy::BuiltinByName,
+        CallableFallbackPolicy::RuntimeNameResolution,
         CallableCallKind::EndExpr,
     ))
     .await

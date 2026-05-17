@@ -490,7 +490,7 @@ pub async fn handle_prepared_user_function_call(
         name.to_string(),
         args,
         out_count,
-        CallableFallbackPolicy::BuiltinByName,
+        CallableFallbackPolicy::RuntimeNameResolution,
         CallableCallKind::Direct,
     );
     match execute_callable_descriptor(descriptor).await {
