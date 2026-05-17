@@ -52,22 +52,6 @@ pub type InvokeUserForEndExpr<'a> = dyn for<'b> Fn(
     ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>>
     + 'a;
 
-pub type BuiltinFallbackUserCall<'a> = dyn Fn(
-        String,
-        Vec<Value>,
-        usize,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, RuntimeError>>>>
-    + 'a;
-
-pub type InterpretFunctionCounts<'a> = dyn Fn(
-        crate::bytecode::Bytecode,
-        Vec<Value>,
-        String,
-        usize,
-        usize,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, RuntimeError>>>>
-    + 'a;
-
 pub struct DispatchMeta<'a> {
     pub instr: &'a Instr,
     pub var_names: &'a HashMap<usize, String>,
@@ -94,8 +78,6 @@ pub struct DispatchState<'a> {
 pub struct DispatchHooks<'a> {
     pub clear_value_residency: &'a mut dyn FnMut(&Value),
     pub invoke_user_for_end_expr: &'a InvokeUserForEndExpr<'a>,
-    pub builtin_fallback_user_call: &'a BuiltinFallbackUserCall<'a>,
-    pub interpret_function_counts: &'a InterpretFunctionCounts<'a>,
     pub store_var_before_overwrite: &'a mut dyn FnMut(&Value, &Value),
     pub store_var_after_store: &'a mut dyn FnMut(usize, &Value),
     pub store_local_before_local_overwrite: &'a mut dyn FnMut(&Value, &Value),
@@ -166,8 +148,6 @@ pub async fn dispatch_instruction(
     let DispatchHooks {
         clear_value_residency,
         invoke_user_for_end_expr,
-        builtin_fallback_user_call,
-        interpret_function_counts,
         store_var_before_overwrite,
         store_var_after_store,
         store_local_before_local_overwrite,
@@ -559,10 +539,6 @@ pub async fn dispatch_instruction(
                 },
                 *arg_count,
                 refresh_workspace_state,
-                builtin_fallback_user_call,
-                |bc, vars, name, out_count, in_count| {
-                    interpret_function_counts(bc, vars, name, out_count, in_count)
-                },
             )
             .await?
             {
@@ -610,10 +586,6 @@ pub async fn dispatch_instruction(
                 },
                 *arg_count,
                 refresh_workspace_state,
-                builtin_fallback_user_call,
-                |bc, vars, name, out_count, in_count| {
-                    interpret_function_counts(bc, vars, name, out_count, in_count)
-                },
             )
             .await?
             {
@@ -718,10 +690,6 @@ pub async fn dispatch_instruction(
                 },
                 args,
                 refresh_workspace_state,
-                builtin_fallback_user_call,
-                |bc, vars, name, out_count, in_count| {
-                    interpret_function_counts(bc, vars, name, out_count, in_count)
-                },
             )
             .await?
             {

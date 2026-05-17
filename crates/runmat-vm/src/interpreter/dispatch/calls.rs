@@ -461,19 +461,11 @@ pub async fn handle_method_call(
     Ok(MethodHandling::Completed)
 }
 
-pub async fn handle_prepared_user_function_call<BF, BFFut, IF, IFFut>(
+pub async fn handle_prepared_user_function_call(
     ctx: UserCallContext<'_>,
     args: Vec<Value>,
     refresh_vars: impl Fn(&[Value]),
-    _builtin_fallback: BF,
-    _interpret_counts: IF,
-) -> Result<UserCallHandling, RuntimeError>
-where
-    BF: FnOnce(String, Vec<Value>, usize) -> BFFut,
-    BFFut: Future<Output = Result<Option<Value>, RuntimeError>>,
-    IF: FnOnce(crate::bytecode::Bytecode, Vec<Value>, String, usize, usize) -> IFFut,
-    IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
+) -> Result<UserCallHandling, RuntimeError> {
     let UserCallContext {
         stack,
         name,
@@ -522,22 +514,13 @@ where
     }
 }
 
-pub async fn handle_user_function_call<BF, BFFut, IF, IFFut>(
+pub async fn handle_user_function_call(
     ctx: UserCallContext<'_>,
     arg_count: usize,
     refresh_vars: impl Fn(&[Value]),
-    builtin_fallback: BF,
-    interpret_counts: IF,
-) -> Result<UserCallHandling, RuntimeError>
-where
-    BF: FnOnce(String, Vec<Value>, usize) -> BFFut,
-    BFFut: Future<Output = Result<Option<Value>, RuntimeError>>,
-    IF: FnOnce(crate::bytecode::Bytecode, Vec<Value>, String, usize, usize) -> IFFut,
-    IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
+) -> Result<UserCallHandling, RuntimeError> {
     let args = crate::call::builtins::collect_call_args(ctx.stack, arg_count)?;
-    handle_prepared_user_function_call(ctx, args, refresh_vars, builtin_fallback, interpret_counts)
-        .await
+    handle_prepared_user_function_call(ctx, args, refresh_vars).await
 }
 
 pub async fn handle_builtin_expand_last_call<F, Fut>(

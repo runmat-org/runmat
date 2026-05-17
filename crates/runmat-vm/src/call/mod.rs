@@ -3,4 +3,3 @@ pub(crate) mod closures;
 pub(crate) mod descriptor;
 pub(crate) mod feval;
 pub(crate) mod shared;
-pub(crate) mod user;

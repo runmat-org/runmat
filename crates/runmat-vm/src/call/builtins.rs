@@ -80,17 +80,6 @@ pub fn vm_intrinsic_counter_builtin(
     }
 }
 
-pub fn single_result_output_list(result: Value, out_count: usize) -> Value {
-    let mut outputs = Vec::with_capacity(out_count);
-    if out_count > 0 {
-        outputs.push(result);
-        for _ in 1..out_count {
-            outputs.push(Value::Num(0.0));
-        }
-    }
-    Value::OutputList(outputs)
-}
-
 pub enum ImportedBuiltinResolution {
     Resolved(Value),
     Ambiguous(String),

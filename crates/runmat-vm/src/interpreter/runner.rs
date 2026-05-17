@@ -2,7 +2,6 @@ use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
 use crate::bytecode::{Bytecode, Instr, SemanticFunctionRegistry};
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
-use crate::call::user as call_user;
 use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
 use crate::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
 use crate::interpreter::engine as interp_engine;
@@ -63,32 +62,6 @@ fn invoke_user_for_end_expr_adapter<'a>(
             invoke_user_function_value(name, &argv, &semantic_registry, &mut local_vars).await
         }
     })
-}
-
-fn builtin_fallback_user_call_adapter(
-    name: String,
-    args: Vec<Value>,
-    out_count: usize,
-) -> Pin<Box<dyn Future<Output = Result<Option<Value>, RuntimeError>>>> {
-    Box::pin(async move {
-        if out_count == 1 {
-            call_user::try_builtin_fallback_single(&name, &args).await
-        } else {
-            call_user::try_builtin_fallback_multi(&name, &args, out_count).await
-        }
-    })
-}
-
-fn interpret_counts_adapter(
-    bc: Bytecode,
-    vars: Vec<Value>,
-    name: String,
-    out_count: usize,
-    in_count: usize,
-) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, RuntimeError>>>> {
-    Box::pin(
-        async move { interpret_function_with_counts(&bc, vars, &name, out_count, in_count).await },
-    )
 }
 
 runmat_thread_local! {
@@ -553,8 +526,6 @@ async fn run_interpreter_inner(
             interp_dispatch::DispatchHooks {
                 clear_value_residency: &mut clear_value_residency,
                 invoke_user_for_end_expr: &invoke_user_for_end_expr_adapter,
-                builtin_fallback_user_call: &builtin_fallback_user_call_adapter,
-                interpret_function_counts: &interpret_counts_adapter,
                 store_var_before_overwrite: &mut store_var_before_overwrite,
                 store_var_after_store: &mut store_var_after_store,
                 store_local_before_local_overwrite: &mut store_local_before_local_overwrite,
