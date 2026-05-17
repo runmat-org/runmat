@@ -950,6 +950,10 @@ impl Compiler {
                     self.compile_mir_operand(operand)?;
                     index_count += 1;
                 }
+                MirIndexComponent::Logical(operand) => {
+                    self.compile_mir_operand(operand)?;
+                    index_count += 1;
+                }
                 MirIndexComponent::End { offset, .. } if *offset <= 0 => {
                     self.emit(Instr::LoadConst(if *offset == 0 {
                         -0.0
@@ -985,6 +989,10 @@ impl Compiler {
             match component {
                 MirIndexComponent::Colon => expand_all = true,
                 MirIndexComponent::Expr(operand) => {
+                    self.compile_mir_operand(operand)?;
+                    index_count += 1;
+                }
+                MirIndexComponent::Logical(operand) => {
                     self.compile_mir_operand(operand)?;
                     index_count += 1;
                 }
@@ -1218,11 +1226,7 @@ impl Compiler {
                 self.compile_mir_rvalue(value)?;
                 self.emit(Instr::StoreIndexCell(indexing.components.len()));
             }
-            IndexKind::Dot => {
-                return Err(self.compile_error(
-                    "MIR bytecode lowering for dot assignment is not implemented yet",
-                ))
-            }
+            IndexKind::Dot => self.compile_mir_dot_store_from_rvalue(indexing, value)?,
         };
         Ok(())
     }
@@ -1298,11 +1302,7 @@ impl Compiler {
                 self.compile_mir_cell_index_components_any_context(indexing)?;
                 self.emit(Instr::IndexCell(indexing.components.len()));
             }
-            IndexKind::Dot => {
-                return Err(self.compile_error(
-                    "MIR bytecode lowering for dot indexing is not implemented yet",
-                ))
-            }
+            IndexKind::Dot => self.compile_mir_dot_read(indexing)?,
         }
         Ok(())
     }
@@ -1402,9 +1402,7 @@ impl Compiler {
                 self.emit(Instr::StoreIndexCell(indexing.components.len()));
                 Ok(())
             }
-            _ => Err(self.compile_error(
-                "MIR bytecode lowering for indexed member store-back is not implemented yet",
-            )),
+            IndexKind::Dot => self.compile_mir_dot_store_from_temp(indexing, tmp),
         }
     }
 
@@ -1932,11 +1930,7 @@ impl Compiler {
                 self.compile_mir_cell_index_components(indexing, indexing.result_context.clone())?;
                 self.emit(Instr::IndexCell(indexing.components.len()));
             }
-            IndexKind::Dot => {
-                return Err(self.compile_error(
-                    "MIR bytecode lowering for dot indexing is not implemented yet",
-                ))
-            }
+            IndexKind::Dot => self.compile_mir_dot_read(indexing)?,
         };
         Ok(())
     }
@@ -1990,6 +1984,7 @@ impl Compiler {
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
+                MirIndexComponent::Logical(operand) => self.compile_mir_operand(operand)?,
                 MirIndexComponent::End { offset, .. } if *offset <= 0 => {
                     self.emit(Instr::LoadConst(if *offset == 0 {
                         -0.0
@@ -2014,6 +2009,7 @@ impl Compiler {
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
+                MirIndexComponent::Logical(operand) => self.compile_mir_operand(operand)?,
                 MirIndexComponent::End { offset, .. } if *offset <= 0 => {
                     self.emit(Instr::LoadConst(if *offset == 0 {
                         -0.0
@@ -2057,6 +2053,75 @@ impl Compiler {
             colon_mask,
             end_mask,
         ));
+        Ok(())
+    }
+
+    fn compile_mir_dot_operand<'a>(
+        &mut self,
+        indexing: &'a MirIndexing,
+    ) -> Result<&'a MirOperand, CompileError> {
+        if indexing.components.len() != 1 {
+            return Err(self.compile_error(
+                "MIR bytecode lowering for dot indexing expects exactly one selector component",
+            ));
+        }
+        match &indexing.components[0] {
+            MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => Ok(operand),
+            _ => Err(self.compile_error(
+                "MIR bytecode lowering for dot indexing expects an expression selector",
+            )),
+        }
+    }
+
+    fn static_member_name_from_operand(operand: &MirOperand) -> Option<String> {
+        match operand {
+            MirOperand::Constant(MirConstant::String(value)) => Some(value.0.clone()),
+            _ => None,
+        }
+    }
+
+    fn compile_mir_dot_read(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
+        let operand = self.compile_mir_dot_operand(indexing)?;
+        if let Some(member) = Self::static_member_name_from_operand(operand) {
+            self.emit(Instr::LoadMember(member));
+        } else {
+            self.compile_mir_operand(operand)?;
+            self.emit(Instr::LoadMemberDynamic);
+        }
+        Ok(())
+    }
+
+    fn compile_mir_dot_store_from_rvalue(
+        &mut self,
+        indexing: &MirIndexing,
+        value: &MirRvalue,
+    ) -> Result<(), CompileError> {
+        let operand = self.compile_mir_dot_operand(indexing)?;
+        if let Some(member) = Self::static_member_name_from_operand(operand) {
+            self.compile_mir_rvalue(value)?;
+            self.emit(Instr::StoreMemberOrInit(member));
+        } else {
+            self.compile_mir_operand(operand)?;
+            self.compile_mir_rvalue(value)?;
+            self.emit(Instr::StoreMemberDynamicOrInit);
+        }
+        Ok(())
+    }
+
+    fn compile_mir_dot_store_from_temp(
+        &mut self,
+        indexing: &MirIndexing,
+        value_slot: usize,
+    ) -> Result<(), CompileError> {
+        let operand = self.compile_mir_dot_operand(indexing)?;
+        if let Some(member) = Self::static_member_name_from_operand(operand) {
+            self.emit(Instr::LoadVar(value_slot));
+            self.emit(Instr::StoreMemberOrInit(member));
+        } else {
+            self.compile_mir_operand(operand)?;
+            self.emit(Instr::LoadVar(value_slot));
+            self.emit(Instr::StoreMemberDynamicOrInit);
+        }
         Ok(())
     }
 
