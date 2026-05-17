@@ -9,7 +9,8 @@ use crate::builtins::structs::type_resolvers::getfield_type;
 use crate::indexing::perform_indexing;
 use crate::make_cell_with_shape;
 use crate::{
-    build_runtime_error, call_builtin_async, gather_if_needed_async, BuiltinResult, RuntimeError,
+    build_runtime_error, call_builtin_async, gather_if_needed_async, object_property_getter_name,
+    BuiltinResult, RuntimeError,
 };
 use runmat_builtins::{
     Access, CellArray, CharArray, ComplexTensor, HandleRef, Listener, LogicalArray, MException,
@@ -729,7 +730,7 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
             )));
         }
         if prop.is_dependent {
-            let getter = format!("get.{name}");
+            let getter = object_property_getter_name(name);
             match call_builtin_async(&getter, &[Value::Object(obj.clone())]).await {
                 Ok(value) => return Ok(value),
                 Err(err) => {

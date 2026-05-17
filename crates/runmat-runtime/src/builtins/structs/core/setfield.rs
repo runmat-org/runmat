@@ -11,7 +11,8 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::structs::type_resolvers::setfield_type;
 use crate::{
-    build_runtime_error, call_builtin_async, gather_if_needed_async, BuiltinResult, RuntimeError,
+    build_runtime_error, call_builtin_async, gather_if_needed_async, object_property_getter_name,
+    object_property_setter_name, BuiltinResult, RuntimeError,
 };
 use runmat_builtins::{
     Access, CellArray, CharArray, ComplexTensor, HandleRef, LogicalArray, ObjectInstance,
@@ -697,7 +698,7 @@ async fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult
             )));
         }
         if prop.is_dependent {
-            let getter = format!("get.{name}");
+            let getter = object_property_getter_name(name);
             match call_builtin_async(&getter, &[Value::Object(obj.clone())]).await {
                 Ok(value) => return Ok(value),
                 Err(err) => {
@@ -751,7 +752,7 @@ async fn write_object_property(
             return Err(setfield_flow(format!("Property '{name}' is private")));
         }
         if prop.is_dependent {
-            let setter = format!("set.{name}");
+            let setter = object_property_setter_name(name);
             match call_builtin_async(&setter, &[Value::Object(obj.clone()), rhs.clone()]).await {
                 Ok(value) => {
                     if let Value::Object(updated) = value {
