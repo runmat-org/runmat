@@ -53,6 +53,8 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
                 "nonlinear_contact_frictionless_reference_complex_gpu_provider",
                 "contact_frictionless_complex_load_amplification_ratio",
             ),
+            ("acoustic_harmonic_gpu_provider", "acoustic_mode_count"),
+            ("acoustic_harmonic_gpu_provider", "acoustic_residual_warn_threshold"),
         }
         observed = {
             (metric.get("fixture_id"), metric.get("assertion_name"))

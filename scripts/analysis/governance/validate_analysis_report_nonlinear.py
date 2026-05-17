@@ -111,6 +111,10 @@ REQUIRED_FIXTURES = {
         "electro_thermal_pathological_transient_severity_peak",
         "electro_thermal_pathological_temporal_variation",
     },
+    "acoustic_harmonic_gpu_provider": {
+        "acoustic_mode_count",
+        "acoustic_residual_warn_threshold",
+    },
     "cfd_steady_gpu_provider": {
         "cfd_reference_density_kg_per_m3",
         "cfd_dynamic_viscosity_pa_s",
@@ -185,6 +189,10 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_solver_solve_ms",
     },
     "electro_thermal_joule_pathological_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "acoustic_harmonic_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },

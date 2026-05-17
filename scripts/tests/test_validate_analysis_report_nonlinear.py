@@ -322,6 +322,13 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electro_nonlinear_severity": 0.1,
             },
             _record(
+                "acoustic_harmonic_gpu_provider",
+                {
+                    "acoustic_mode_count",
+                    "acoustic_residual_warn_threshold",
+                },
+            ),
+            _record(
                 "cfd_steady_gpu_provider",
                 {
                     "cfd_reference_density_kg_per_m3",

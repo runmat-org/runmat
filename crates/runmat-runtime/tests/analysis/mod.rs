@@ -15,14 +15,15 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
+    analysis_run_acoustic_with_options_op,
     analysis_run_cfd_with_options_op, analysis_run_cht_with_options_op,
     analysis_run_electromagnetic_with_options_op, analysis_run_fsi_with_options_op,
     analysis_run_linear_static_with_options, analysis_run_modal_with_options_op,
     analysis_run_nonlinear_with_options_op, analysis_run_thermal_with_options_op,
-    analysis_run_transient_with_options_op, analysis_validate, AnalysisCfdRunOptions,
-    AnalysisChtRunOptions, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
-    AnalysisElectromagneticRunOptions, AnalysisFsiRunOptions, AnalysisModalRunOptions,
-    AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisRunOptions,
+    analysis_run_transient_with_options_op, analysis_validate, AnalysisAcousticRunOptions,
+    AnalysisCfdRunOptions, AnalysisChtRunOptions, AnalysisCreateModelIntentSpec,
+    AnalysisCreateModelProfile, AnalysisElectromagneticRunOptions, AnalysisFsiRunOptions,
+    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisRunOptions,
     AnalysisThermalRunOptions, AnalysisTransientRunOptions, PrecisionMode, PreconditionerMode,
     QualityPolicy,
 };
@@ -46,6 +47,7 @@ enum ResidencyExpectation {
 enum AnalysisRunKind {
     LinearStatic,
     Modal,
+    Acoustic,
     Thermal,
     Transient,
     Cfd,

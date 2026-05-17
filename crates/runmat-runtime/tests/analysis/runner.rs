@@ -608,6 +608,16 @@ fn electromagnetic_profile_for_fixture(spec_id: &str) -> Option<ElectromagneticF
 }
 
 fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
+    if spec_id.starts_with("acoustic_harmonic_") {
+        model.steps = vec![runmat_analysis_core::AnalysisStep {
+            step_id: format!("step_acoustic_{}", spec_id),
+            kind: runmat_analysis_core::AnalysisStepKind::Modal,
+        }];
+        model.thermo_mechanical = None;
+        model.electro_thermal = None;
+        model.interfaces.clear();
+        model.cfd = None;
+    }
     if spec_id.starts_with("cfd_steady_") {
         model.steps = vec![runmat_analysis_core::AnalysisStep {
             step_id: format!("step_cfd_{}", spec_id),
@@ -1911,6 +1921,17 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
+        AnalysisRunKind::Acoustic => analysis_run_acoustic_with_options_op(
+            model,
+            ComputeBackend::Cpu,
+            AnalysisAcousticRunOptions {
+                mode_count: spec
+                    .modal_mode_count
+                    .unwrap_or(AnalysisAcousticRunOptions::default().mode_count),
+                ..AnalysisAcousticRunOptions::default()
+            },
+            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+        ),
         AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Cpu,
@@ -2049,6 +2070,17 @@ fn run_fixture_gpu(
                     .modal_mode_count
                     .unwrap_or(AnalysisModalRunOptions::default().mode_count),
                 ..AnalysisModalRunOptions::balanced()
+            },
+            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+        ),
+        AnalysisRunKind::Acoustic => analysis_run_acoustic_with_options_op(
+            model,
+            ComputeBackend::Gpu,
+            AnalysisAcousticRunOptions {
+                mode_count: spec
+                    .modal_mode_count
+                    .unwrap_or(AnalysisAcousticRunOptions::default().mode_count),
+                ..AnalysisAcousticRunOptions::default()
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -2570,6 +2602,32 @@ pub(super) fn run_fixture(
                 observed,
                 Some(min_separation),
                 None,
+            );
+        }
+        if spec.id.starts_with("acoustic_harmonic_") {
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_mode_count",
+                "FEA_ACOUSTIC_PLACEHOLDER",
+                diagnostic_metric(&cpu_envelope.data, "FEA_ACOUSTIC_PLACEHOLDER", "mode_count"),
+                Some(3.0),
+                Some(3.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "acoustic_residual_warn_threshold",
+                "FEA_ACOUSTIC_PLACEHOLDER",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_ACOUSTIC_PLACEHOLDER",
+                    "residual_warn_threshold",
+                ),
+                Some(1.0e-3),
+                Some(1.0e-3),
             );
         }
         if let Some(max_residual) = spec.max_transient_residual_norm {

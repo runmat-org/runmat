@@ -128,6 +128,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "reference": 1.413,
             "pass": True,
         },
+        {
+            "name": "acoustic_mode_count",
+            "fixture_id": "acoustic_harmonic_gpu_provider",
+            "observed": 3.0,
+            "reference": 3.0,
+            "pass": True,
+        },
+        {
+            "name": "acoustic_residual_warn_threshold",
+            "fixture_id": "acoustic_harmonic_gpu_provider",
+            "observed": 0.001,
+            "reference": 0.001,
+            "pass": True,
+        },
     ]
 
 
