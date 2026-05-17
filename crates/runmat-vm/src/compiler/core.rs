@@ -941,34 +941,7 @@ impl Compiler {
         output_count: usize,
     ) -> Result<(), CompileError> {
         self.compile_mir_operand(base)?;
-        let mut index_count = 0usize;
-        let mut expand_all = false;
-        for component in &indexing.components {
-            match component {
-                MirIndexComponent::Colon => expand_all = true,
-                MirIndexComponent::Expr(operand) => {
-                    self.compile_mir_operand(operand)?;
-                    index_count += 1;
-                }
-                MirIndexComponent::Logical(operand) => {
-                    self.compile_mir_operand(operand)?;
-                    index_count += 1;
-                }
-                MirIndexComponent::End { offset, .. } if *offset <= 0 => {
-                    self.emit(Instr::LoadConst(if *offset == 0 {
-                        -0.0
-                    } else {
-                        *offset as f64
-                    }));
-                    index_count += 1;
-                }
-                _ => {
-                    return Err(self.compile_error(
-                        "MIR bytecode lowering for this slice index is not implemented yet",
-                    ))
-                }
-            }
-        }
+        let (index_count, expand_all) = self.compile_mir_cell_selector_operands(indexing)?;
         if expand_all {
             self.emit(Instr::IndexCellExpand(0, output_count));
         } else {
@@ -983,16 +956,25 @@ impl Compiler {
         indexing: &MirIndexing,
     ) -> Result<(), CompileError> {
         self.compile_mir_operand(base)?;
+        let (index_count, expand_all) = self.compile_mir_cell_selector_operands(indexing)?;
+        self.emit(Instr::IndexCellList(if expand_all {
+            0
+        } else {
+            index_count
+        }));
+        Ok(())
+    }
+
+    fn compile_mir_cell_selector_operands(
+        &mut self,
+        indexing: &MirIndexing,
+    ) -> Result<(usize, bool), CompileError> {
         let mut index_count = 0usize;
         let mut expand_all = false;
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Colon => expand_all = true,
-                MirIndexComponent::Expr(operand) => {
-                    self.compile_mir_operand(operand)?;
-                    index_count += 1;
-                }
-                MirIndexComponent::Logical(operand) => {
+                MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
                     self.compile_mir_operand(operand)?;
                     index_count += 1;
                 }
@@ -1006,17 +988,12 @@ impl Compiler {
                 }
                 _ => {
                     return Err(self.compile_error(
-                        "MIR bytecode lowering for this slice index is not implemented yet",
+                        "MIR cell selector lowering only supports colon, expression/logical operands, and end/end-k",
                     ))
                 }
             }
         }
-        self.emit(Instr::IndexCellList(if expand_all {
-            0
-        } else {
-            index_count
-        }));
-        Ok(())
+        Ok((index_count, expand_all))
     }
 
     fn compile_mir_call_for_multi_assign(
