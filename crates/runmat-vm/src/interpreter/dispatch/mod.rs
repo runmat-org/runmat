@@ -705,6 +705,38 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CallFunctionExpandMultiOutput(name, specs, out_count) => {
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            match handle_prepared_user_function_call(
+                calls::UserCallContext {
+                    stack,
+                    name,
+                    out_count: *out_count,
+                    semantic_registry,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                args,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CallSemanticFunctionExpandMulti(function, specs) => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
             let descriptor = CallableDescriptor::semantic(*function, args, 1);

@@ -202,6 +202,7 @@ pub enum Instr {
     CallBuiltinExpandLast(String, usize, usize),
     CallBuiltinExpandAt(String, usize, usize, usize),
     CallFunctionExpandMulti(String, Vec<ArgSpec>),
+    CallFunctionExpandMultiOutput(String, Vec<ArgSpec>, usize),
     CallSemanticFunctionExpandMulti(FunctionId, Vec<ArgSpec>),
     CallSemanticFunctionExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
     CallBuiltinExpandMulti(String, Vec<ArgSpec>),
@@ -346,6 +347,7 @@ impl Instr {
             Instr::CallFevalExpandMulti(specs)
             | Instr::CallFevalExpandMultiOutput(specs, _)
             | Instr::CallFunctionExpandMulti(_, specs)
+            | Instr::CallFunctionExpandMultiOutput(_, specs, _)
             | Instr::CallSemanticFunctionExpandMulti(_, specs)
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
             | Instr::CallBuiltinExpandMulti(_, specs)

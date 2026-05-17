@@ -1124,8 +1124,11 @@ impl Compiler {
                     if output_count == 1 {
                         self.emit(Instr::CallFunctionExpandMulti(name, specs));
                     } else {
-                        self.emit(Instr::CreateFunctionHandle(name));
-                        self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
+                        self.emit(Instr::CallFunctionExpandMultiOutput(
+                            name,
+                            specs,
+                            output_count,
+                        ));
                     }
                 } else {
                     if output_count == 1 {
@@ -1653,8 +1656,11 @@ impl Compiler {
                         if output_count == 1 {
                             self.emit(Instr::CallFunctionExpandMulti(name, specs));
                         } else {
-                            self.emit(Instr::CreateFunctionHandle(name));
-                            self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
+                            self.emit(Instr::CallFunctionExpandMultiOutput(
+                                name,
+                                specs,
+                                output_count,
+                            ));
                         }
                     } else {
                         if output_count == 1 {
