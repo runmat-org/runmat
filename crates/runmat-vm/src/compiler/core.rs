@@ -1117,20 +1117,26 @@ impl Compiler {
                         "MIR bytecode lowering for this call callee is not implemented yet",
                     ));
                 };
-                self.emit(Instr::CreateFunctionHandle(name));
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
                     if output_count == 1 {
-                        self.emit(Instr::CallFevalExpandMulti(specs));
+                        self.emit(Instr::CallFunctionExpandMulti(name, specs));
                     } else {
+                        self.emit(Instr::CreateFunctionHandle(name));
                         self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
                     }
-                } else if output_count == 1 {
-                    self.emit(Instr::CallFeval(call.args.len()));
                 } else {
-                    self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                    if output_count == 1 {
+                        self.emit(Instr::CallFunction(name, call.args.len()));
+                    } else {
+                        self.emit(Instr::CallFunctionMulti(
+                            name,
+                            call.args.len(),
+                            output_count,
+                        ));
+                    }
                 }
             }
         }
@@ -1639,26 +1645,32 @@ impl Compiler {
                         "MIR bytecode lowering for this call callee is not implemented yet",
                     ));
                 };
-                self.emit(Instr::CreateFunctionHandle(name));
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if let Some(output_count) = requested_outputs {
                     if has_expansion {
                         if output_count == 1 {
-                            self.emit(Instr::CallFevalExpandMulti(specs));
+                            self.emit(Instr::CallFunctionExpandMulti(name, specs));
                         } else {
+                            self.emit(Instr::CreateFunctionHandle(name));
                             self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
                         }
-                    } else if output_count == 1 {
-                        self.emit(Instr::CallFeval(call.args.len()));
                     } else {
-                        self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                        if output_count == 1 {
+                            self.emit(Instr::CallFunction(name, call.args.len()));
+                        } else {
+                            self.emit(Instr::CallFunctionMulti(
+                                name,
+                                call.args.len(),
+                                output_count,
+                            ));
+                        }
                     }
                 } else if has_expansion {
-                    self.emit(Instr::CallFevalExpandMulti(specs));
+                    self.emit(Instr::CallFunctionExpandMulti(name, specs));
                 } else {
-                    self.emit(Instr::CallFeval(call.args.len()));
+                    self.emit(Instr::CallFunction(name, call.args.len()));
                 }
             }
         }
