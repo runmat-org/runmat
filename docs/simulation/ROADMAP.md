@@ -143,3 +143,5 @@ Progress update (2026-05-17):
     additive `AnalysisStudySpec.electromagnetic_run_options` is now validated by `analysis.validate_study/v1`, rejected when used on non-EM run kinds, and routed by `analysis.run_study/v1` into `analysis.run_electromagnetic/v1`; electromagnetic create-model profile defaults now seed an EM domain so study-driven EM runs are executable under canonical study workflows.
 38. [x] Study workflow typed outputs now surface EM execution options:
     additive `analysis.plan_study/v1` and `analysis.run_study/v1` typed payloads now include `electromagnetic_run_options`, with run-study reporting resolved EM defaults when options are omitted, improving programmatic reproducibility without requiring artifact JSON inspection.
+39. [x] Study workflow result-extraction ergonomics expanded:
+    additive `analysis.run_study/v1` typed output now includes concrete run operation identity (`run_operation`, `run_op_version`) plus propagated `quality_reasons`, so programmatic callers can consume execution verdict context without an immediate follow-up `analysis.results` call.

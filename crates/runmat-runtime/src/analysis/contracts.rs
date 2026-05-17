@@ -1067,9 +1067,13 @@ pub struct AnalysisStudyRunData {
     pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
     pub study_fingerprint: String,
     pub operation_sequence: Vec<String>,
+    pub run_operation: String,
+    pub run_op_version: String,
     pub run_id: String,
     pub run_status: RunStatus,
     pub publishable: bool,
+    #[serde(default)]
+    pub quality_reasons: Vec<QualityReason>,
     pub evidence_artifact_path: String,
 }
 

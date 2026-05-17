@@ -417,6 +417,9 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
     assert_eq!(run.op_version, "analysis.run_study/v1");
     assert_eq!(run.data.study_fingerprint, plan.data.study_fingerprint);
     assert!(run.data.electromagnetic_run_options.is_none());
+    assert_eq!(run.data.run_operation, "analysis.run_linear_static");
+    assert_eq!(run.data.run_op_version, "analysis.run_linear_static/v1");
+    assert_eq!(run.data.quality_reasons.len(), 0);
     assert!(PathBuf::from(&run.data.evidence_artifact_path).exists());
 
     drop(env_guard);

@@ -835,10 +835,12 @@ pub fn analysis_run_study_op(
     }
 
     let study_fingerprint = study_fingerprint(spec);
+    let run_operation = run_operation_for_kind(spec.run_kind).to_string();
+    let run_op_version = run_operation_version_for_kind(spec.run_kind).to_string();
     let operation_sequence = vec![
         ANALYSIS_CREATE_MODEL_OP_VERSION.to_string(),
         ANALYSIS_VALIDATE_OP_VERSION.to_string(),
-        run_operation_version_for_kind(spec.run_kind).to_string(),
+        run_op_version.clone(),
     ];
 
     let created = analysis_create_model_op(
@@ -904,9 +906,12 @@ pub fn analysis_run_study_op(
             "resolved_electromagnetic_run_options": resolved_electromagnetic_run_options.clone(),
             "study_fingerprint": study_fingerprint.clone(),
             "operation_sequence": operation_sequence.clone(),
+            "run_operation": run_operation.clone(),
+            "run_op_version": run_op_version.clone(),
             "run_id": run_envelope.data.run_id.clone(),
             "run_status": run_envelope.data.run_status,
             "publishable": run_envelope.data.publishable,
+            "quality_reasons": run_envelope.data.quality_reasons.clone(),
         }),
     )
     .map_err(|err| {
@@ -940,9 +945,12 @@ pub fn analysis_run_study_op(
             electromagnetic_run_options: resolved_electromagnetic_run_options,
             study_fingerprint,
             operation_sequence,
+            run_operation,
+            run_op_version,
             run_id: run_envelope.data.run_id,
             run_status: run_envelope.data.run_status,
             publishable: run_envelope.data.publishable,
+            quality_reasons: run_envelope.data.quality_reasons,
             evidence_artifact_path,
         },
     ))
@@ -7448,6 +7456,21 @@ fn run_operation_version_for_kind(kind: AnalysisRunKind) -> &'static str {
         AnalysisRunKind::Fsi => ANALYSIS_RUN_FSI_OP_VERSION,
         AnalysisRunKind::Nonlinear => ANALYSIS_RUN_NONLINEAR_OP_VERSION,
         AnalysisRunKind::Electromagnetic => ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+    }
+}
+
+fn run_operation_for_kind(kind: AnalysisRunKind) -> &'static str {
+    match kind {
+        AnalysisRunKind::LinearStatic => ANALYSIS_RUN_OPERATION,
+        AnalysisRunKind::Modal => ANALYSIS_RUN_MODAL_OPERATION,
+        AnalysisRunKind::Acoustic => ANALYSIS_RUN_ACOUSTIC_OPERATION,
+        AnalysisRunKind::Thermal => ANALYSIS_RUN_THERMAL_OPERATION,
+        AnalysisRunKind::Transient => ANALYSIS_RUN_TRANSIENT_OPERATION,
+        AnalysisRunKind::Cfd => ANALYSIS_RUN_CFD_OPERATION,
+        AnalysisRunKind::Cht => ANALYSIS_RUN_CHT_OPERATION,
+        AnalysisRunKind::Fsi => ANALYSIS_RUN_FSI_OPERATION,
+        AnalysisRunKind::Nonlinear => ANALYSIS_RUN_NONLINEAR_OPERATION,
+        AnalysisRunKind::Electromagnetic => ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
     }
 }
 

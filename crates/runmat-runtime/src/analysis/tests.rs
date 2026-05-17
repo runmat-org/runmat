@@ -960,6 +960,11 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(envelope.data.run_kind, AnalysisRunKind::LinearStatic);
     assert_eq!(envelope.data.backend, ComputeBackend::Cpu);
     assert!(envelope.data.electromagnetic_run_options.is_none());
+    assert_eq!(envelope.data.run_operation, "analysis.run_linear_static");
+    assert_eq!(
+        envelope.data.run_op_version,
+        "analysis.run_linear_static/v1"
+    );
     assert_eq!(
         envelope.data.operation_sequence,
         vec![
@@ -978,6 +983,7 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(persisted.run_id, envelope.data.run_id);
     assert_eq!(persisted.run_status, envelope.data.run_status);
     assert_eq!(persisted.publishable, envelope.data.publishable);
+    assert_eq!(persisted.quality_reasons, envelope.data.quality_reasons);
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
 }
@@ -1007,6 +1013,11 @@ fn analysis_run_study_honors_electromagnetic_run_options() {
         envelope.data.electromagnetic_run_options,
         spec.electromagnetic_run_options
     );
+    assert_eq!(envelope.data.run_operation, "analysis.run_electromagnetic");
+    assert_eq!(
+        envelope.data.run_op_version,
+        "analysis.run_electromagnetic/v1"
+    );
 
     let persisted = storage::load_run_result(&envelope.data.run_id)
         .expect("run load should succeed")
@@ -1026,6 +1037,7 @@ fn analysis_run_study_honors_electromagnetic_run_options() {
         .expect("harmonic coupling diagnostic should be present");
     assert!(harmonic_diag.message.contains("tolerance=0.00012345"));
     assert!(harmonic_diag.message.contains("iterations="));
+    assert_eq!(persisted.quality_reasons, envelope.data.quality_reasons);
 }
 
 #[test]
@@ -1041,6 +1053,11 @@ fn analysis_run_study_emits_default_electromagnetic_options_when_unspecified() {
     assert_eq!(
         envelope.data.electromagnetic_run_options,
         Some(AnalysisElectromagneticRunOptions::default())
+    );
+    assert_eq!(envelope.data.run_operation, "analysis.run_electromagnetic");
+    assert_eq!(
+        envelope.data.run_op_version,
+        "analysis.run_electromagnetic/v1"
     );
 }
 
