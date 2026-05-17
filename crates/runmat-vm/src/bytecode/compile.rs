@@ -321,6 +321,39 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_lowers_ambiguous_local_store_index_to_slice() {
+        let ast =
+            runmat_parser::parse("x = [10 20 30 40]; idx = [2 4]; x(idx) = [9 8];").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let x_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "x")
+            .expect("x export");
+
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::StoreSlice(1, _, _, _))));
+        assert!(!bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::StoreIndex(1))));
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        let Value::Tensor(tensor) = &vars[x_export.slot.0] else {
+            panic!("expected tensor");
+        };
+        assert_eq!(tensor.shape, vec![1, 4]);
+        assert_eq!(tensor.data, vec![10.0, 9.0, 30.0, 8.0]);
+    }
+
+    #[test]
     fn primary_compile_interprets_simple_indexed_assignment() {
         let ast = runmat_parser::parse("x = [1 2; 3 4]; x(1, 2) = 9;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
