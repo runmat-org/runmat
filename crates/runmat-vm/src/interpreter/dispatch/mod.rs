@@ -15,8 +15,6 @@ use runmat_builtins::Value;
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 
 pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
@@ -42,13 +40,6 @@ pub enum DispatchHandled {
     Return(DispatchDecision),
 }
 
-pub type InvokeUserForEndExpr<'a> = dyn for<'b> Fn(
-        &'b str,
-        Vec<Value>,
-        &'b [Value],
-    ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>>
-    + 'a;
-
 pub struct DispatchMeta<'a> {
     pub instr: &'a Instr,
     pub var_names: &'a HashMap<usize, String>,
@@ -73,7 +64,6 @@ pub struct DispatchState<'a> {
 
 pub struct DispatchHooks<'a> {
     pub clear_value_residency: &'a mut dyn FnMut(&Value),
-    pub invoke_user_for_end_expr: &'a InvokeUserForEndExpr<'a>,
     pub store_var_before_overwrite: &'a mut dyn FnMut(&Value, &Value),
     pub store_var_after_store: &'a mut dyn FnMut(usize, &Value),
     pub store_local_before_local_overwrite: &'a mut dyn FnMut(&Value, &Value),
@@ -142,7 +132,6 @@ pub async fn dispatch_instruction(
     } = state;
     let DispatchHooks {
         clear_value_residency,
-        invoke_user_for_end_expr,
         store_var_before_overwrite,
         store_var_after_store,
         store_local_before_local_overwrite,
@@ -157,7 +146,6 @@ pub async fn dispatch_instruction(
             semantic_registry,
             *pc,
             &mut *clear_value_residency,
-            &invoke_user_for_end_expr,
         )
         .await? =>
         {

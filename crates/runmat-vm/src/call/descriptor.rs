@@ -149,25 +149,6 @@ impl CallableDescriptor {
         }
     }
 
-    pub(crate) fn semantic_named(
-        function: FunctionId,
-        name: String,
-        args: Vec<Value>,
-        requested_outputs: usize,
-    ) -> Self {
-        Self::semantic_inner(
-            function.0,
-            Some(name.clone()),
-            CallableFallbackPolicy::None,
-            args,
-            requested_outputs,
-            CallableMetadata {
-                display_name: Some(name),
-                ..CallableMetadata::default()
-            },
-        )
-    }
-
     pub(crate) fn dynamic_named(
         name: String,
         args: Vec<Value>,

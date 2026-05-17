@@ -1,7 +1,6 @@
 use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
 use crate::bytecode::{Bytecode, Instr, SemanticFunctionRegistry};
-use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
 use crate::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
 use crate::interpreter::engine as interp_engine;
@@ -14,16 +13,12 @@ use crate::runtime::workspace::{
     workspace_snapshot,
 };
 use runmat_builtins::{CellArray, Value};
-use runmat_hir::CallableFallbackPolicy;
 use runmat_runtime::{
     user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
     RuntimeError,
 };
-use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Once;
 use tracing::{debug, info_span};
@@ -44,51 +39,8 @@ impl Drop for FusionPlanGuard {
 }
 
 type VmResult<T> = Result<T, RuntimeError>;
-
-fn invoke_user_for_end_expr_adapter<'a>(
-    name: &'a str,
-    argv: Vec<Value>,
-    vars_ref: &'a [Value],
-) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
-    Box::pin(async move {
-        let mut local_vars = vars_ref.to_owned();
-        let registry_ptr = CURRENT_SEMANTIC_REGISTRY.with(|slot| *slot.borrow());
-        if let Some(registry_ptr) = registry_ptr {
-            // The guard installed for the active interpreter frame owns this pointer lifetime.
-            let semantic_registry = unsafe { &*registry_ptr };
-            invoke_user_function_value(name, &argv, semantic_registry, &mut local_vars).await
-        } else {
-            let semantic_registry = SemanticFunctionRegistry::default();
-            invoke_user_function_value(name, &argv, &semantic_registry, &mut local_vars).await
-        }
-    })
-}
-
-runmat_thread_local! {
+runmat_thread_local::runmat_thread_local! {
     static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
-}
-
-runmat_thread_local! {
-    static CURRENT_SEMANTIC_REGISTRY: RefCell<Option<*const SemanticFunctionRegistry>> = const { RefCell::new(None) };
-}
-
-struct SemanticRegistryGuard {
-    previous: Option<*const SemanticFunctionRegistry>,
-}
-
-impl Drop for SemanticRegistryGuard {
-    fn drop(&mut self) {
-        let previous = self.previous.take();
-        CURRENT_SEMANTIC_REGISTRY.with(|slot| {
-            *slot.borrow_mut() = previous;
-        });
-    }
-}
-
-fn install_semantic_registry(registry: &SemanticFunctionRegistry) -> SemanticRegistryGuard {
-    let registry_ptr = registry as *const SemanticFunctionRegistry;
-    let previous = CURRENT_SEMANTIC_REGISTRY.with(|slot| slot.borrow_mut().replace(registry_ptr));
-    SemanticRegistryGuard { previous }
 }
 
 fn sync_initial_vars(initial: &mut [Value], vars: &[Value]) {
@@ -131,31 +83,6 @@ fn clear_residency(value: &Value) {
 #[cfg(feature = "native-accel")]
 fn same_gpu_handle(lhs: &Value, rhs: &Value) -> bool {
     accel_residency::same_gpu_handle(lhs, rhs)
-}
-
-async fn invoke_user_function_value(
-    name: &str,
-    args: &[Value],
-    semantic_registry: &SemanticFunctionRegistry,
-    _vars: &mut [Value],
-) -> Result<Value, RuntimeError> {
-    if let Some(function) = semantic_registry.resolve_name(name) {
-        return execute_callable_descriptor(CallableDescriptor::semantic_named(
-            function,
-            name.to_string(),
-            args.to_vec(),
-            1,
-        ))
-        .await;
-    }
-    execute_callable_descriptor(CallableDescriptor::dynamic_named(
-        name.to_string(),
-        args.to_vec(),
-        1,
-        CallableFallbackPolicy::RuntimeNameResolution,
-        CallableCallKind::EndExpr,
-    ))
-    .await
 }
 
 pub async fn invoke_semantic_function_value(
@@ -363,7 +290,6 @@ async fn run_interpreter_inner(
         bytecode,
     } = state;
     let semantic_registry = Arc::new(bytecode.semantic_registry());
-    let _semantic_registry_guard = install_semantic_registry(&semantic_registry);
     let semantic_registry_for_semantic_invoker = Arc::clone(&semantic_registry);
     let _semantic_function_guard =
         user_functions::install_semantic_function_invoker(Some(Arc::new(
@@ -527,7 +453,6 @@ async fn run_interpreter_inner(
             },
             interp_dispatch::DispatchHooks {
                 clear_value_residency: &mut clear_value_residency,
-                invoke_user_for_end_expr: &invoke_user_for_end_expr_adapter,
                 store_var_before_overwrite: &mut store_var_before_overwrite,
                 store_var_after_store: &mut store_var_after_store,
                 store_local_before_local_overwrite: &mut store_local_before_local_overwrite,
