@@ -959,6 +959,7 @@ pub enum AnalysisRunKind {
     Thermal,
     Transient,
     Cfd,
+    Cht,
     Nonlinear,
     Electromagnetic,
 }

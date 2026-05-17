@@ -626,6 +626,65 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             time_profile: Vec::new(),
         });
     }
+    if spec_id.starts_with("cht_coupled_") {
+        model.steps = vec![
+            runmat_analysis_core::AnalysisStep {
+                step_id: format!("step_cht_flow_{}", spec_id),
+                kind: runmat_analysis_core::AnalysisStepKind::Cfd,
+            },
+            runmat_analysis_core::AnalysisStep {
+                step_id: format!("step_cht_thermal_{}", spec_id),
+                kind: runmat_analysis_core::AnalysisStepKind::Thermal,
+            },
+        ];
+        model.electro_thermal = None;
+        model.interfaces.clear();
+        model.cfd = Some(runmat_analysis_core::CfdDomain {
+            enabled: true,
+            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
+            reference_density_kg_per_m3: 1.225,
+            dynamic_viscosity_pa_s: 1.81e-5,
+            inlet_velocity_m_per_s: 5.0,
+            turbulence_intensity: 0.06,
+            time_profile: vec![
+                runmat_analysis_core::CfdTimeProfilePoint {
+                    normalized_time: 0.0,
+                    inlet_scale: 0.8,
+                },
+                runmat_analysis_core::CfdTimeProfilePoint {
+                    normalized_time: 1.0,
+                    inlet_scale: 1.0,
+                },
+            ],
+        });
+        model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 60.0,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: vec![
+                runmat_analysis_core::ThermoRegionTemperatureDelta {
+                    region_id: "tip".to_string(),
+                    temperature_delta_k: 70.0,
+                },
+                runmat_analysis_core::ThermoRegionTemperatureDelta {
+                    region_id: "root".to_string(),
+                    temperature_delta_k: 45.0,
+                },
+            ],
+            time_profile: vec![
+                runmat_analysis_core::ThermoTimeProfilePoint {
+                    normalized_time: 0.0,
+                    scale: 0.5,
+                },
+                runmat_analysis_core::ThermoTimeProfilePoint {
+                    normalized_time: 1.0,
+                    scale: 1.0,
+                },
+            ],
+        });
+    }
 
     if let Some(profile) = electromagnetic_profile_for_fixture(spec_id) {
         model.steps = vec![runmat_analysis_core::AnalysisStep {
@@ -1543,43 +1602,45 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             time_profile: Vec::new(),
         });
     }
-    model.thermo_mechanical = thermo.map(|value| runmat_analysis_core::ThermoMechanicalDomain {
-        enabled: value.enabled,
-        reference_temperature_k: value.reference_temperature_k,
-        applied_temperature_delta_k: value.applied_temperature_delta_k,
-        field_artifact_id: value.field_artifact_id,
-        field_source: value
-            .field_source
-            .map(|source| runmat_analysis_core::ThermoFieldSource {
-                source_id: source.source_id,
-                revision: source.revision,
-                interpolation_mode: source.interpolation_mode.map(|mode| match mode {
-                    runmat_runtime::analysis::ThermoFieldInterpolationMode::Linear => {
-                        runmat_analysis_core::ThermoFieldInterpolationMode::Linear
-                    }
-                    runmat_runtime::analysis::ThermoFieldInterpolationMode::Step => {
-                        runmat_analysis_core::ThermoFieldInterpolationMode::Step
-                    }
-                }),
-                expected_region_ids: source.expected_region_ids,
+    if let Some(value) = thermo {
+        model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
+            enabled: value.enabled,
+            reference_temperature_k: value.reference_temperature_k,
+            applied_temperature_delta_k: value.applied_temperature_delta_k,
+            field_artifact_id: value.field_artifact_id,
+            field_source: value.field_source.map(|source| {
+                runmat_analysis_core::ThermoFieldSource {
+                    source_id: source.source_id,
+                    revision: source.revision,
+                    interpolation_mode: source.interpolation_mode.map(|mode| match mode {
+                        runmat_runtime::analysis::ThermoFieldInterpolationMode::Linear => {
+                            runmat_analysis_core::ThermoFieldInterpolationMode::Linear
+                        }
+                        runmat_runtime::analysis::ThermoFieldInterpolationMode::Step => {
+                            runmat_analysis_core::ThermoFieldInterpolationMode::Step
+                        }
+                    }),
+                    expected_region_ids: source.expected_region_ids,
+                }
             }),
-        region_temperature_deltas: value
-            .region_temperature_deltas
-            .into_iter()
-            .map(|delta| runmat_analysis_core::ThermoRegionTemperatureDelta {
-                region_id: delta.region_id,
-                temperature_delta_k: delta.temperature_delta_k,
-            })
-            .collect(),
-        time_profile: value
-            .time_profile
-            .into_iter()
-            .map(|point| runmat_analysis_core::ThermoTimeProfilePoint {
-                normalized_time: point.normalized_time,
-                scale: point.scale,
-            })
-            .collect(),
-    });
+            region_temperature_deltas: value
+                .region_temperature_deltas
+                .into_iter()
+                .map(|delta| runmat_analysis_core::ThermoRegionTemperatureDelta {
+                    region_id: delta.region_id,
+                    temperature_delta_k: delta.temperature_delta_k,
+                })
+                .collect(),
+            time_profile: value
+                .time_profile
+                .into_iter()
+                .map(|point| runmat_analysis_core::ThermoTimeProfilePoint {
+                    normalized_time: point.normalized_time,
+                    scale: point.scale,
+                })
+                .collect(),
+        });
+    }
 
     if let Some(electro) = electro_coupling_for_fixture(spec_id) {
         let mut material_region_ids = model
@@ -1868,6 +1929,26 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
+        AnalysisRunKind::Cht => analysis_run_cht_with_options_op(
+            model,
+            ComputeBackend::Cpu,
+            AnalysisChtRunOptions {
+                deterministic_mode: true,
+                precision_mode: PrecisionMode::Fp64,
+                quality_policy: QualityPolicy::Balanced,
+                time_step_s: 1.0e-3,
+                step_count: spec
+                    .transient_step_count
+                    .unwrap_or(AnalysisChtRunOptions::default().step_count),
+                max_linear_iters: 128,
+                tolerance: 1.0e-8,
+                residual_warn_threshold: 1.0e-4,
+                prep_context: None,
+                prep_artifact_id: None,
+                prep_calibration_profile: None,
+            },
+            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+        ),
         AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Cpu,
@@ -1960,6 +2041,26 @@ fn run_fixture_gpu(
                 step_count: spec
                     .transient_step_count
                     .unwrap_or(AnalysisCfdRunOptions::default().step_count),
+                max_linear_iters: 128,
+                tolerance: 1.0e-8,
+                residual_warn_threshold: 1.0e-4,
+                prep_context: None,
+                prep_artifact_id: None,
+                prep_calibration_profile: None,
+            },
+            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+        ),
+        AnalysisRunKind::Cht => analysis_run_cht_with_options_op(
+            model,
+            ComputeBackend::Gpu,
+            AnalysisChtRunOptions {
+                deterministic_mode: true,
+                precision_mode: PrecisionMode::Fp64,
+                quality_policy: QualityPolicy::Balanced,
+                time_step_s: 1.0e-3,
+                step_count: spec
+                    .transient_step_count
+                    .unwrap_or(AnalysisChtRunOptions::default().step_count),
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
@@ -2492,6 +2593,102 @@ pub(super) fn run_fixture(
                 diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
                 Some(0.0),
                 Some(0.0),
+            );
+        }
+        if spec.id.starts_with("cht_coupled_") {
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_reference_density_kg_per_m3",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "density"),
+                Some(1.20),
+                Some(1.25),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_dynamic_viscosity_pa_s",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "viscosity"),
+                Some(1.0e-5),
+                Some(3.0e-5),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_inlet_velocity_m_per_s",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "inlet_velocity"),
+                Some(4.0),
+                Some(6.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_turbulence_intensity",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "turbulence_intensity"),
+                Some(0.04),
+                Some(0.08),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_reynolds_proxy",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "reynolds_proxy"),
+                Some(2.0e5),
+                Some(5.0e5),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_profile_point_count",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
+                Some(2.0),
+                Some(2.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_applied_temperature_delta_k",
+                "FEA_CHT_COUPLING",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_CHT_COUPLING",
+                    "applied_temperature_delta_k",
+                ),
+                Some(60.0),
+                Some(60.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_step_count",
+                "FEA_CHT_COUPLING",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CHT_COUPLING", "step_count"),
+                Some(12.0),
+                Some(12.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cht_time_step_s",
+                "FEA_CHT_COUPLING",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CHT_COUPLING", "time_step_s"),
+                Some(1.0e-3),
+                Some(1.0e-3),
             );
         }
 

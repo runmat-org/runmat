@@ -1167,6 +1167,48 @@ fn analysis_trends_classifies_cfd_runs_separately() {
 }
 
 #[test]
+fn analysis_trends_classifies_cht_runs_separately() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+
+    let model = sample_cht_model();
+    for _ in 0..3 {
+        let _ = analysis_run_cht_op(
+            &model,
+            ComputeBackend::Cpu,
+            OperationContext::new(None, None),
+        )
+        .expect("cht run should persist for trends");
+    }
+
+    let trends = analysis_trends_op(
+        AnalysisTrendsQuery { window_size: 2 },
+        OperationContext::new(None, None),
+    )
+    .expect("trends should succeed");
+
+    let cht = trends
+        .data
+        .summaries
+        .iter()
+        .find(|summary| summary.run_kind == AnalysisRunKind::Cht)
+        .expect("cht trend summary should exist");
+    assert_eq!(cht.sample_count, 2);
+    assert!(cht.median_solve_ms.is_some());
+    assert!(cht.p95_solve_ms.is_some());
+    assert!(cht.failed_increment_rate.is_none());
+
+    let cfd = trends
+        .data
+        .summaries
+        .iter()
+        .find(|summary| summary.run_kind == AnalysisRunKind::Cfd);
+    assert!(cfd.is_none(), "cht runs should not classify as cfd");
+
+    storage::reset_artifact_store_for_tests();
+}
+
+#[test]
 fn analysis_results_summary_surfaces_thermo_transient_metrics() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();

@@ -15,12 +15,13 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
-    analysis_run_cfd_with_options_op, analysis_run_electromagnetic_with_options_op,
-    analysis_run_linear_static_with_options, analysis_run_modal_with_options_op,
-    analysis_run_nonlinear_with_options_op, analysis_run_thermal_with_options_op,
-    analysis_run_transient_with_options_op, analysis_validate, AnalysisCfdRunOptions,
-    AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisElectromagneticRunOptions,
-    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisRunOptions,
+    analysis_run_cfd_with_options_op, analysis_run_cht_with_options_op,
+    analysis_run_electromagnetic_with_options_op, analysis_run_linear_static_with_options,
+    analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
+    analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
+    analysis_validate, AnalysisCfdRunOptions, AnalysisChtRunOptions, AnalysisCreateModelIntentSpec,
+    AnalysisCreateModelProfile, AnalysisElectromagneticRunOptions, AnalysisModalRunOptions,
+    AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisRunOptions,
     AnalysisThermalRunOptions, AnalysisTransientRunOptions, PrecisionMode, PreconditionerMode,
     QualityPolicy,
 };
@@ -47,6 +48,7 @@ enum AnalysisRunKind {
     Thermal,
     Transient,
     Cfd,
+    Cht,
     Nonlinear,
     Electromagnetic,
 }
@@ -257,6 +259,7 @@ const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "transient_long_gpu_provider",
     "transient_shock_gpu_provider",
     "cfd_steady_gpu_provider",
+    "cht_coupled_gpu_provider",
     "thermo_mech_kickoff_gpu_provider",
     "thermo_gradient_benign_gpu_provider",
     "thermo_gradient_pathological_gpu_provider",

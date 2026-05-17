@@ -5565,6 +5565,7 @@ pub fn analysis_trends_op(
         AnalysisRunKind::Thermal,
         AnalysisRunKind::Transient,
         AnalysisRunKind::Cfd,
+        AnalysisRunKind::Cht,
         AnalysisRunKind::Nonlinear,
         AnalysisRunKind::Electromagnetic,
     ] {
@@ -6189,6 +6190,13 @@ fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
             .any(|diag| diag.code == "FEA_EM_PLACEHOLDER")
     {
         AnalysisRunKind::Electromagnetic
+    } else if run
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_CHT_COUPLING")
+    {
+        AnalysisRunKind::Cht
     } else if run
         .run
         .diagnostics
