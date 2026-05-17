@@ -218,6 +218,28 @@ pub(crate) async fn call_object_index_descriptor_method(
     call_runtime_method(&descriptor.into_runtime_method_args()?).await
 }
 
+pub(crate) async fn call_object_subsref_paren_values(
+    base: Value,
+    values: Vec<Value>,
+) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_paren(
+        base,
+        ObjectIndexSelector::IndexValues { values },
+    ))
+    .await
+}
+
+pub(crate) async fn call_object_subsref_brace_values(
+    base: Value,
+    values: Vec<Value>,
+) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+        base,
+        ObjectIndexSelector::IndexValues { values },
+    ))
+    .await
+}
+
 pub async fn build_expanded_args_from_specs<ExpandObjectAll, ExpandObjectIndices, FutAll, FutIdx>(
     stack: &mut Vec<Value>,
     specs: &[ArgSpec],

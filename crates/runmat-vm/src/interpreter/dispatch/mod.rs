@@ -9,9 +9,7 @@ mod stack;
 
 use crate::bytecode::Instr;
 use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
-use crate::call::shared::{
-    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexSelector,
-};
+use crate::call::shared::{call_object_subsref_brace_values, call_object_subsref_paren_values};
 use crate::interpreter::debug;
 use crate::runtime::workspace::refresh_workspace_state;
 use runmat_builtins::Value;
@@ -643,12 +641,7 @@ pub async fn dispatch_instruction(
                         Value::Object(obj) => obj,
                         _ => unreachable!(),
                     };
-                    let v =
-                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_paren(
-                            Value::Object(obj),
-                            ObjectIndexSelector::IndexValues { values: indices },
-                        ))
-                        .await?;
+                    let v = call_object_subsref_paren_values(Value::Object(obj), indices).await?;
                     Ok(vec![v])
                 },
             )
@@ -670,12 +663,7 @@ pub async fn dispatch_instruction(
                         Value::Object(obj) => obj,
                         _ => unreachable!(),
                     };
-                    let v =
-                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-                            Value::Object(obj),
-                            ObjectIndexSelector::IndexValues { values: indices },
-                        ))
-                        .await?;
+                    let v = call_object_subsref_brace_values(Value::Object(obj), indices).await?;
                     Ok(vec![v])
                 },
             )
@@ -702,12 +690,7 @@ pub async fn dispatch_instruction(
                         Value::Object(obj) => obj,
                         _ => unreachable!(),
                     };
-                    let v =
-                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-                            Value::Object(obj),
-                            ObjectIndexSelector::IndexValues { values: indices },
-                        ))
-                        .await?;
+                    let v = call_object_subsref_brace_values(Value::Object(obj), indices).await?;
                     Ok(vec![v])
                 },
             )

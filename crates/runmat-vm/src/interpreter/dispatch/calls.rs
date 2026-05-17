@@ -5,8 +5,9 @@ use crate::call::closures as call_closures;
 use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
 use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
-    build_expanded_args_from_specs, call_object_index_descriptor_method, expand_cell_indices,
-    ObjectIndexDescriptor, ObjectIndexSelector,
+    build_expanded_args_from_specs, call_object_index_descriptor_method,
+    call_object_subsref_brace_values, expand_cell_indices, ObjectIndexDescriptor,
+    ObjectIndexSelector,
 };
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -253,12 +254,7 @@ pub async fn build_builtin_expand_multi_args(
         |base, indices| async move {
             match base {
                 Value::Object(obj) => {
-                    let v =
-                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-                            Value::Object(obj),
-                            ObjectIndexSelector::IndexValues { values: indices },
-                        ))
-                        .await?;
+                    let v = call_object_subsref_brace_values(Value::Object(obj), indices).await?;
                     Ok(vec![v])
                 }
                 _ => Err(crate::interpreter::errors::mex(
@@ -303,12 +299,7 @@ pub async fn build_feval_expand_multi_args(
         |base, indices| async move {
             match base {
                 Value::Object(obj) => {
-                    let v =
-                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-                            Value::Object(obj),
-                            ObjectIndexSelector::IndexValues { values: indices },
-                        ))
-                        .await?;
+                    let v = call_object_subsref_brace_values(Value::Object(obj), indices).await?;
                     Ok(vec![v])
                 }
                 _ => Err(crate::interpreter::errors::mex(
@@ -355,12 +346,7 @@ pub async fn build_user_function_expand_multi_args(
             match (base, indices.len()) {
                 (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices),
                 (Value::Object(obj), _) => {
-                    let v =
-                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-                            Value::Object(obj),
-                            ObjectIndexSelector::IndexValues { values: indices },
-                        ))
-                        .await?;
+                    let v = call_object_subsref_brace_values(Value::Object(obj), indices).await?;
                     Ok(vec![v])
                 }
                 _ => Err(crate::interpreter::errors::mex(
