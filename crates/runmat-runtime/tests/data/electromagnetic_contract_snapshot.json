@@ -133,6 +133,9 @@
     "electromagnetic_source_overlap_ratio": null,
     "electromagnetic_source_interference_index": null,
     "electromagnetic_boundary_anchor_ratio": null,
+    "electromagnetic_boundary_condition_localization_ratio": null,
+    "electromagnetic_ground_anchor_effectiveness_ratio": null,
+    "electromagnetic_insulation_leakage_proxy": null,
     "electromagnetic_flux_divergence_proxy": null,
     "electromagnetic_energy_imbalance_ratio": null,
     "electromagnetic_boundary_energy_ratio": null

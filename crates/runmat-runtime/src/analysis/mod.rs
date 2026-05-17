@@ -29,10 +29,12 @@ use policy::{
     breach_rate_greater_than, breach_rate_less_than, electromagnetic_thresholds_for_policy,
     thermo_field_quality_thresholds_for_policy, thermo_gradient_thresholds_for_policy,
     thermo_thresholds_for_policy, EM_ASSIGNMENT_COVERAGE_MIN_BALANCED,
-    EM_BOUNDARY_ANCHOR_MIN_BALANCED, EM_BOUNDARY_ENERGY_MIN_BALANCED, EM_CONDITIONING_MAX_BALANCED,
+    EM_BOUNDARY_ANCHOR_MIN_BALANCED, EM_BOUNDARY_ENERGY_MIN_BALANCED,
+    EM_BOUNDARY_LOCALIZATION_MIN_BALANCED, EM_CONDITIONING_MAX_BALANCED,
     EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED, EM_ENERGY_IMBALANCE_MAX_BALANCED,
     EM_FALLBACK_COEFFICIENT_MAX_BALANCED, EM_FLUX_DIVERGENCE_MAX_BALANCED,
-    EM_HETEROGENEITY_THRESHOLD_BALANCED, EM_REGION_CONTRAST_MAX_BALANCED,
+    EM_GROUND_EFFECTIVENESS_MIN_BALANCED, EM_HETEROGENEITY_THRESHOLD_BALANCED,
+    EM_INSULATION_LEAKAGE_MAX_BALANCED, EM_REGION_CONTRAST_MAX_BALANCED,
     EM_SOURCE_INTERFERENCE_MAX_BALANCED, EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED,
     EM_SOURCE_OVERLAP_MAX_BALANCED, EM_SOURCE_REALIZATION_MIN_BALANCED,
     EM_SOURCE_REGION_COVERAGE_MIN_BALANCED, THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
@@ -2682,6 +2684,21 @@ pub fn analysis_run_electromagnetic_with_options_op(
     );
     let em_boundary_anchor_ratio =
         diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "boundary_anchor_ratio");
+    let em_boundary_condition_localization_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "boundary_condition_localization_ratio",
+    );
+    let em_ground_anchor_effectiveness_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "ground_anchor_effectiveness_ratio",
+    );
+    let em_insulation_leakage_proxy = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "insulation_leakage_proxy",
+    );
     let em_flux_divergence_proxy =
         diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "flux_divergence_proxy");
     let em_energy_imbalance_ratio =
@@ -2701,6 +2718,9 @@ pub fn analysis_run_electromagnetic_with_options_op(
         em_source_overlap_max_threshold,
         em_source_interference_max_threshold,
         em_boundary_anchor_min_threshold,
+        em_boundary_localization_min_threshold,
+        em_ground_effectiveness_min_threshold,
+        em_insulation_leakage_max_threshold,
         em_divergence_max_threshold,
         em_energy_imbalance_max_threshold,
         em_boundary_energy_min_threshold,
@@ -2741,6 +2761,15 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let em_boundary_anchor_breach = em_boundary_anchor_ratio
         .map(|value| value < em_boundary_anchor_min_threshold)
         .unwrap_or(false);
+    let em_boundary_localization_breach = em_boundary_condition_localization_ratio
+        .map(|value| value < em_boundary_localization_min_threshold)
+        .unwrap_or(false);
+    let em_ground_effectiveness_breach = em_ground_anchor_effectiveness_ratio
+        .map(|value| value < em_ground_effectiveness_min_threshold)
+        .unwrap_or(false);
+    let em_insulation_leakage_breach = em_insulation_leakage_proxy
+        .map(|value| value > em_insulation_leakage_max_threshold)
+        .unwrap_or(false);
     let em_divergence_breach = em_flux_divergence_proxy
         .map(|value| value > em_divergence_max_threshold)
         .unwrap_or(false);
@@ -2762,6 +2791,9 @@ pub fn analysis_run_electromagnetic_with_options_op(
         || em_source_overlap_breach
         || em_source_interference_breach
         || em_boundary_anchor_breach
+        || em_boundary_localization_breach
+        || em_ground_effectiveness_breach
+        || em_insulation_leakage_breach
         || em_divergence_breach
         || em_energy_imbalance_breach
         || em_boundary_energy_breach)
@@ -2898,6 +2930,36 @@ pub fn analysis_run_electromagnetic_with_options_op(
                 "electromagnetic boundary anchor ratio {} is below threshold {}",
                 em_boundary_anchor_ratio.unwrap_or(0.0),
                 em_boundary_anchor_min_threshold
+            ),
+        });
+    }
+    if em_boundary_localization_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticBoundaryLocalizationLow,
+            detail: format!(
+                "electromagnetic boundary condition localization ratio {} is below threshold {}",
+                em_boundary_condition_localization_ratio.unwrap_or(0.0),
+                em_boundary_localization_min_threshold
+            ),
+        });
+    }
+    if em_ground_effectiveness_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticGroundAnchorEffectivenessLow,
+            detail: format!(
+                "electromagnetic ground anchor effectiveness ratio {} is below threshold {}",
+                em_ground_anchor_effectiveness_ratio.unwrap_or(0.0),
+                em_ground_effectiveness_min_threshold
+            ),
+        });
+    }
+    if em_insulation_leakage_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticInsulationLeakageHigh,
+            detail: format!(
+                "electromagnetic insulation leakage proxy {} exceeds threshold {}",
+                em_insulation_leakage_proxy.unwrap_or(0.0),
+                em_insulation_leakage_max_threshold
             ),
         });
     }
@@ -3526,6 +3588,21 @@ pub fn analysis_results_op(
         "FEA_EM_STATIC",
         "boundary_anchor_ratio",
     );
+    let electromagnetic_boundary_condition_localization_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "boundary_condition_localization_ratio",
+    );
+    let electromagnetic_ground_anchor_effectiveness_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "ground_anchor_effectiveness_ratio",
+    );
+    let electromagnetic_insulation_leakage_proxy = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "insulation_leakage_proxy",
+    );
     let electromagnetic_flux_divergence_proxy = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
@@ -3628,6 +3705,9 @@ pub fn analysis_results_op(
         electromagnetic_source_overlap_ratio,
         electromagnetic_source_interference_index,
         electromagnetic_boundary_anchor_ratio,
+        electromagnetic_boundary_condition_localization_ratio,
+        electromagnetic_ground_anchor_effectiveness_ratio,
+        electromagnetic_insulation_leakage_proxy,
         electromagnetic_flux_divergence_proxy,
         electromagnetic_energy_imbalance_ratio,
         electromagnetic_boundary_energy_ratio,
@@ -4469,6 +4549,54 @@ pub fn analysis_trends_op(
             } else {
                 None
             };
+        let electromagnetic_boundary_localization_breach_rate =
+            if kind == AnalysisRunKind::Electromagnetic {
+                let values = entries
+                    .iter()
+                    .filter_map(|run| {
+                        diagnostic_metric(
+                            &run.run.diagnostics,
+                            "FEA_EM_STATIC",
+                            "boundary_condition_localization_ratio",
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                breach_rate_less_than(&values, EM_BOUNDARY_LOCALIZATION_MIN_BALANCED)
+            } else {
+                None
+            };
+        let electromagnetic_ground_effectiveness_breach_rate =
+            if kind == AnalysisRunKind::Electromagnetic {
+                let values = entries
+                    .iter()
+                    .filter_map(|run| {
+                        diagnostic_metric(
+                            &run.run.diagnostics,
+                            "FEA_EM_STATIC",
+                            "ground_anchor_effectiveness_ratio",
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                breach_rate_less_than(&values, EM_GROUND_EFFECTIVENESS_MIN_BALANCED)
+            } else {
+                None
+            };
+        let electromagnetic_insulation_leakage_breach_rate =
+            if kind == AnalysisRunKind::Electromagnetic {
+                let values = entries
+                    .iter()
+                    .filter_map(|run| {
+                        diagnostic_metric(
+                            &run.run.diagnostics,
+                            "FEA_EM_STATIC",
+                            "insulation_leakage_proxy",
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                breach_rate_greater_than(&values, EM_INSULATION_LEAKAGE_MAX_BALANCED)
+            } else {
+                None
+            };
         let electromagnetic_divergence_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
             let values = entries
                 .iter()
@@ -4556,6 +4684,9 @@ pub fn analysis_trends_op(
             electromagnetic_source_overlap_breach_rate,
             electromagnetic_source_interference_breach_rate,
             electromagnetic_boundary_anchor_breach_rate,
+            electromagnetic_boundary_localization_breach_rate,
+            electromagnetic_ground_effectiveness_breach_rate,
+            electromagnetic_insulation_leakage_breach_rate,
             electromagnetic_divergence_breach_rate,
             electromagnetic_energy_imbalance_breach_rate,
             electromagnetic_boundary_energy_breach_rate,

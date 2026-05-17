@@ -81,6 +81,30 @@ pub fn run_electromagnetic_with_options(
         .enumerate()
         .map(|(index, region)| (region.region_id.as_str(), index))
         .collect::<std::collections::HashMap<_, _>>();
+    let mut ground_region_indices = std::collections::BTreeSet::new();
+    let mut insulation_region_indices = std::collections::BTreeSet::new();
+    let mut mapped_boundary_condition_count = 0usize;
+    for bc in &model.boundary_conditions {
+        let Some(region_index) = region_index_by_id.get(bc.region_id.as_str()).copied() else {
+            continue;
+        };
+        match bc.kind {
+            BoundaryConditionKind::VectorPotentialGround => {
+                ground_region_indices.insert(region_index);
+                mapped_boundary_condition_count += 1;
+            }
+            BoundaryConditionKind::MagneticInsulation => {
+                insulation_region_indices.insert(region_index);
+                mapped_boundary_condition_count += 1;
+            }
+            _ => {}
+        }
+    }
+    let boundary_condition_localization_ratio = if electromagnetic_boundary_count == 0 {
+        0.0
+    } else {
+        mapped_boundary_condition_count as f64 / electromagnetic_boundary_count as f64
+    };
 
     let total_load_count = model.loads.len().max(1);
     let mut electromagnetic_source_count = 0usize;
@@ -248,11 +272,28 @@ pub fn run_electromagnetic_with_options(
     } else {
         magnetic_insulation_count as f64 / electromagnetic_boundary_count as f64
     };
-    if !stiffness_upper.is_empty() {
-        let boundary_coupling_scale = (1.0 - 0.35 * insulation_ratio).clamp(0.35, 1.0);
-        stiffness_upper[0] *= boundary_coupling_scale;
-        let last = stiffness_upper.len() - 1;
-        stiffness_upper[last] *= boundary_coupling_scale;
+    let mut edge_scales = vec![1.0_f64; stiffness_upper.len()];
+    let insulation_scale = (1.0 - 0.6 * insulation_ratio).clamp(0.2, 0.85);
+    for region_index in &insulation_region_indices {
+        let (start, end) = region_span_for_index(*region_index, region_count, node_count);
+        for edge_index in start..end.saturating_sub(1).min(edge_scales.len()) {
+            edge_scales[edge_index] *= insulation_scale;
+        }
+    }
+    for region_index in &ground_region_indices {
+        let (start, end) = region_span_for_index(*region_index, region_count, node_count);
+        for edge_index in start..end.saturating_sub(1).min(edge_scales.len()) {
+            edge_scales[edge_index] *= 1.1;
+        }
+    }
+    if !edge_scales.is_empty() {
+        let boundary_coupling_scale = (1.0 - 0.3 * insulation_ratio).clamp(0.35, 1.0);
+        edge_scales[0] *= boundary_coupling_scale;
+        let last = edge_scales.len() - 1;
+        edge_scales[last] *= boundary_coupling_scale;
+    }
+    for (edge, scale) in stiffness_upper.iter_mut().zip(edge_scales.iter()) {
+        *edge *= *scale;
     }
 
     let mut stiffness_diag = vec![0.0_f64; node_count];
@@ -272,6 +313,20 @@ pub fn run_electromagnetic_with_options(
     }
 
     let mut constrained = vec![false; node_count];
+    let mut expected_ground_anchor_nodes = 0usize;
+    if !ground_region_indices.is_empty() {
+        for region_index in &ground_region_indices {
+            let (start, end) = region_span_for_index(*region_index, region_count, node_count);
+            if start < node_count {
+                constrained[start] = true;
+                expected_ground_anchor_nodes += 1;
+            }
+            if end > 0 {
+                constrained[(end - 1).min(node_count - 1)] = true;
+                expected_ground_anchor_nodes += 1;
+            }
+        }
+    }
     let mut anchor_count = if electromagnetic_boundary_count == 0 {
         2
     } else {
@@ -297,6 +352,20 @@ pub fn run_electromagnetic_with_options(
         constrained[0] = true;
         constrained[node_count - 1] = true;
     }
+    let actual_ground_anchor_nodes = ground_region_indices
+        .iter()
+        .map(|region_index| {
+            let (start, end) = region_span_for_index(*region_index, region_count, node_count);
+            (start..end)
+                .filter(|node_index| constrained[*node_index])
+                .count()
+        })
+        .sum::<usize>();
+    let ground_anchor_effectiveness_ratio = if expected_ground_anchor_nodes == 0 {
+        0.0
+    } else {
+        (actual_ground_anchor_nodes as f64 / expected_ground_anchor_nodes as f64).clamp(0.0, 1.0)
+    };
     let mut rhs = vec![0.0_f64; node_count];
     for (i, rhs_i) in rhs.iter_mut().enumerate() {
         if constrained[i] {
@@ -400,6 +469,37 @@ pub fn run_electromagnetic_with_options(
         }
     }
     let boundary_energy_ratio = boundary_coupling_energy / total_coupling_energy.max(1.0e-9);
+    let insulated_edge_indices = insulation_region_indices
+        .iter()
+        .flat_map(|region_index| {
+            let (start, end) = region_span_for_index(*region_index, region_count, node_count);
+            start..end.saturating_sub(1)
+        })
+        .filter(|edge_index| *edge_index < summary.operator.stiffness_upper.len())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mean_all_coupling = if summary.operator.stiffness_upper.is_empty() {
+        1.0
+    } else {
+        summary.operator.stiffness_upper.iter().sum::<f64>()
+            / summary.operator.stiffness_upper.len() as f64
+    }
+    .max(1.0e-9);
+    let mean_insulated_coupling = if insulated_edge_indices.is_empty() {
+        mean_all_coupling
+    } else {
+        insulated_edge_indices
+            .iter()
+            .map(|edge_index| summary.operator.stiffness_upper[*edge_index])
+            .sum::<f64>()
+            / insulated_edge_indices.len() as f64
+    };
+    let insulation_leakage_proxy = if !summary.operator.stiffness_upper.is_empty()
+        && insulated_edge_indices.len() == summary.operator.stiffness_upper.len()
+    {
+        0.0
+    } else {
+        (mean_insulated_coupling / mean_all_coupling).clamp(0.0, 5.0)
+    };
     let unconstrained_diagonals = summary
         .operator
         .stiffness_diag
@@ -434,7 +534,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
+            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_proxy={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
             domain.enabled,
             domain.reference_frequency_hz,
             domain.applied_current_a,
@@ -456,6 +556,9 @@ pub fn run_electromagnetic_with_options(
             source_overlap_ratio,
             source_interference_index,
             boundary_anchor_ratio,
+            boundary_condition_localization_ratio,
+            ground_anchor_effectiveness_ratio,
+            insulation_leakage_proxy,
             flux_divergence_proxy,
             energy_imbalance_ratio,
             boundary_energy_ratio,

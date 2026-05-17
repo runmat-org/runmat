@@ -141,6 +141,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. Added cancellation-aware multi-source diagnostics (`source_overlap_ratio`, `source_interference_index`) to quantify overlapping opposing sources.
 3. Added overlap/interference policy thresholds, quality-reason mapping, trend breach rates, and a dedicated overlap reference fixture in conformance/baseline governance.
 
+## Maxwell EM Bring-Up Status (Phase 11)
+
+1. Added boundary-kernel readiness diagnostics (`boundary_condition_localization_ratio`, `ground_anchor_effectiveness_ratio`, `insulation_leakage_proxy`) to the EM static pipeline.
+2. Wired those metrics into runtime policy/reasoning and trend governance as thresholded breach-rate signals.
+3. Added a dedicated boundary-kernel stress reference fixture and extended conformance/baseline drift checks for the new boundary metrics.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

@@ -255,6 +255,17 @@ Not required for this milestone:
   - `analysis.results`/`analysis.trends` now surface overlap/interference posture and breach rates,
   - added EM overlap-interference reference fixture with deterministic thresholded conformance and baseline drift tracking.
 
+### Maxwell EM Phase-11 Status (2026-05-16)
+
+- Added EM boundary-kernel governance metrics as first-class runtime readiness signals:
+  - `boundary_condition_localization_ratio`,
+  - `ground_anchor_effectiveness_ratio`,
+  - `insulation_leakage_proxy`.
+- Extended runtime quality policy and trend surfaces:
+  - new balanced-policy thresholds + quality reasons for boundary localization, ground effectiveness, and insulation leakage,
+  - `analysis.results` summary and `analysis.trends` breach-rate payloads now expose these three signals.
+- Expanded conformance coverage with a dedicated EM boundary-kernel stress reference fixture and wired the new metrics into baseline + rolling drift checks.
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.

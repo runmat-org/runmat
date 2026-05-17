@@ -6,6 +6,7 @@ const EM_READINESS_TARGET_FIXTURES: &[&str] = &[
     "electromagnetic_reference_sparse_assignments_gpu_provider",
     "electromagnetic_reference_fallback_heavy_gpu_provider",
     "electromagnetic_reference_overlap_interference_gpu_provider",
+    "electromagnetic_reference_boundary_kernel_gpu_provider",
 ];
 const EM_MAX_READINESS_RELATIVE_DRIFT: f64 = 0.25;
 const EM_MAX_READINESS_ABSOLUTE_DRIFT: f64 = 0.05;
@@ -369,6 +370,36 @@ pub(super) fn check_rolling_baseline_drift(
             );
             check_rolling_metric_drift(
                 fixture_id,
+                "electromagnetic_boundary_condition_localization_ratio",
+                history,
+                current_record.electromagnetic_boundary_condition_localization_ratio,
+                |record| record.electromagnetic_boundary_condition_localization_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_ground_anchor_effectiveness_ratio",
+                history,
+                current_record.electromagnetic_ground_anchor_effectiveness_ratio,
+                |record| record.electromagnetic_ground_anchor_effectiveness_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_insulation_leakage_proxy",
+                history,
+                current_record.electromagnetic_insulation_leakage_proxy,
+                |record| record.electromagnetic_insulation_leakage_proxy,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
                 "electromagnetic_flux_divergence_proxy",
                 history,
                 current_record.electromagnetic_flux_divergence_proxy,
@@ -528,6 +559,33 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_boundary_anchor_ratio",
                 baseline_record.electromagnetic_boundary_anchor_ratio,
                 current_record.electromagnetic_boundary_anchor_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_boundary_condition_localization_ratio",
+                baseline_record.electromagnetic_boundary_condition_localization_ratio,
+                current_record.electromagnetic_boundary_condition_localization_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_ground_anchor_effectiveness_ratio",
+                baseline_record.electromagnetic_ground_anchor_effectiveness_ratio,
+                current_record.electromagnetic_ground_anchor_effectiveness_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_insulation_leakage_proxy",
+                baseline_record.electromagnetic_insulation_leakage_proxy,
+                current_record.electromagnetic_insulation_leakage_proxy,
                 EM_MAX_READINESS_RELATIVE_DRIFT,
                 EM_MAX_READINESS_ABSOLUTE_DRIFT,
                 failures,
