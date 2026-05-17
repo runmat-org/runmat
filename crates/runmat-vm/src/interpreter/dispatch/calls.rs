@@ -30,6 +30,16 @@ pub enum UserCallHandling {
     Uncaught(Box<RuntimeError>),
 }
 
+pub(crate) fn normalize_requested_outputs(value: Value, requested_outputs: usize) -> Value {
+    if requested_outputs != 1 {
+        return value;
+    }
+    match value {
+        Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
+        other => other,
+    }
+}
+
 pub struct ExceptionRouteContext<'a> {
     pub try_stack: &'a mut Vec<(usize, Option<usize>)>,
     pub vars: &'a mut Vec<Value>,
@@ -182,6 +192,7 @@ pub async fn build_user_function_expand_multi_args(
 pub fn handle_builtin_outcome(
     result: Result<Value, RuntimeError>,
     imported: ImportedBuiltinResolution,
+    output_hint: usize,
     stack: &mut Vec<Value>,
     ctx: ExceptionRouteContext<'_>,
     refresh_vars: impl Fn(&[Value]),
@@ -194,12 +205,12 @@ pub fn handle_builtin_outcome(
     } = ctx;
     match result {
         Ok(result) => {
-            stack.push(result);
+            stack.push(normalize_requested_outputs(result, output_hint));
             Ok(BuiltinHandling::Completed)
         }
         Err(err) => match imported {
             ImportedBuiltinResolution::Resolved(value) => {
-                stack.push(value);
+                stack.push(normalize_requested_outputs(value, output_hint));
                 Ok(BuiltinHandling::Completed)
             }
             ImportedBuiltinResolution::Ambiguous(message) => Err(message.into()),
@@ -285,7 +296,14 @@ async fn handle_builtin_call_inner(
             return Err(err);
         }
     }
-    handle_builtin_outcome(result, imported, stack, exception, refresh_vars)
+    handle_builtin_outcome(
+        result,
+        imported,
+        output_hint,
+        stack,
+        exception,
+        refresh_vars,
+    )
 }
 
 pub async fn handle_prepared_user_function_call(
@@ -317,7 +335,7 @@ pub async fn handle_prepared_user_function_call(
     );
     match execute_callable_descriptor(descriptor).await {
         Ok(result) => {
-            stack.push(result);
+            stack.push(normalize_requested_outputs(result, out_count));
             Ok(UserCallHandling::Completed)
         }
         Err(err) => Ok(
@@ -385,7 +403,7 @@ async fn handle_method_or_member_index_call_inner(
         fallback_policy,
     )
     .await?;
-    stack.push(value);
+    stack.push(normalize_requested_outputs(value, output_hint));
     Ok(MethodHandling::Completed)
 }
 
@@ -416,7 +434,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
         fallback_policy,
     )
     .await?;
-    stack.push(value);
+    stack.push(normalize_requested_outputs(value, output_hint));
     Ok(MethodHandling::Completed)
 }
 

@@ -459,7 +459,7 @@ pub async fn dispatch_instruction(
                 .await?
             {
                 crate::call::feval::FevalDispatch::Completed(result) => {
-                    stack.push(result);
+                    stack.push(calls::normalize_requested_outputs(result, *out_count));
                 }
             }
             Ok(Some(DispatchHandled::Generic(
@@ -473,7 +473,7 @@ pub async fn dispatch_instruction(
                 .await?
             {
                 crate::call::feval::FevalDispatch::Completed(result) => {
-                    stack.push(result);
+                    stack.push(calls::normalize_requested_outputs(result, *out_count));
                 }
             }
             Ok(Some(DispatchHandled::Generic(
@@ -483,7 +483,8 @@ pub async fn dispatch_instruction(
         Instr::CallSemanticFunction(function, arg_count) => {
             let args = crate::interpreter::stack::pop_args(stack, *arg_count)?;
             let descriptor = CallableDescriptor::semantic(*function, args, 1);
-            stack.push(execute_callable_descriptor(descriptor).await?);
+            let result = execute_callable_descriptor(descriptor).await?;
+            stack.push(calls::normalize_requested_outputs(result, 1));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -491,7 +492,8 @@ pub async fn dispatch_instruction(
         Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => {
             let args = crate::interpreter::stack::pop_args(stack, *arg_count)?;
             let descriptor = CallableDescriptor::semantic(*function, args, *out_count);
-            stack.push(execute_callable_descriptor(descriptor).await?);
+            let result = execute_callable_descriptor(descriptor).await?;
+            stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -539,7 +541,7 @@ pub async fn dispatch_instruction(
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let result =
                 runmat_runtime::call_builtin_async_with_outputs(name, &args, *out_count).await?;
-            stack.push(result);
+            stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -586,7 +588,8 @@ pub async fn dispatch_instruction(
         Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
             let descriptor = CallableDescriptor::semantic(*function, args, *out_count);
-            stack.push(execute_callable_descriptor(descriptor).await?);
+            let result = execute_callable_descriptor(descriptor).await?;
+            stack.push(calls::normalize_requested_outputs(result, *out_count));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
