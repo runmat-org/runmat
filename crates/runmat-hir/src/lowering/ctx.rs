@@ -1213,13 +1213,7 @@ impl SemanticCtx {
                 args: args.iter().map(command_argument).collect(),
             }),
             AstExpr::FuncHandle(name, _) => {
-                HirExprKind::FunctionHandle(if let Some(function) = self.function_names.get(name) {
-                    crate::FunctionHandleTarget::Function(*function)
-                } else if is_builtin(name) {
-                    crate::FunctionHandleTarget::Builtin(BuiltinId(name.clone()))
-                } else {
-                    crate::FunctionHandleTarget::DynamicName(SymbolName(name.clone()))
-                })
+                HirExprKind::FunctionHandle(self.resolve_function_handle_target(name, span)?)
             }
             AstExpr::AnonFunc { params, body, span } => {
                 let function_id = self.take_function_id();
@@ -1631,6 +1625,66 @@ impl SemanticCtx {
             syntax,
             requested_outputs,
         }
+    }
+
+    fn resolve_function_handle_target(
+        &self,
+        name: &str,
+        span: Span,
+    ) -> Result<crate::FunctionHandleTarget, SemanticError> {
+        if let Some(function) = self.function_names.get(name) {
+            return Ok(crate::FunctionHandleTarget::Function(*function));
+        }
+        if is_builtin(name) {
+            return Ok(crate::FunctionHandleTarget::Builtin(BuiltinId(
+                name.to_string(),
+            )));
+        }
+        if name.contains('.') {
+            return Ok(crate::FunctionHandleTarget::DynamicName(SymbolName(
+                name.to_string(),
+            )));
+        }
+        let imports = &self.assembly.modules[self.module.0].imports;
+        let specific_matches: Vec<String> = imports
+            .iter()
+            .filter(|import| {
+                !import.wildcard && import.path.0.last().map(|part| part.0.as_str()) == Some(name)
+            })
+            .filter_map(|import| import.path.display_name())
+            .collect();
+        if specific_matches.len() > 1 {
+            return Err(SemanticError::new(format!(
+                "ambiguous function handle target '{name}' via imports"
+            ))
+            .with_span(span));
+        }
+        if let Some(qualified) = specific_matches.first() {
+            return Ok(crate::FunctionHandleTarget::DynamicName(SymbolName(
+                qualified.clone(),
+            )));
+        }
+        let wildcard_matches: Vec<String> = imports
+            .iter()
+            .filter(|import| import.wildcard)
+            .filter_map(|import| import.path.display_name())
+            .map(|prefix| format!("{prefix}.{name}"))
+            .filter(|qualified| is_builtin(qualified))
+            .collect();
+        if wildcard_matches.len() > 1 {
+            return Err(SemanticError::new(format!(
+                "ambiguous function handle target '{name}' via wildcard imports"
+            ))
+            .with_span(span));
+        }
+        if let Some(qualified) = wildcard_matches.first() {
+            return Ok(crate::FunctionHandleTarget::DynamicName(SymbolName(
+                qualified.clone(),
+            )));
+        }
+        Ok(crate::FunctionHandleTarget::DynamicName(SymbolName(
+            name.to_string(),
+        )))
     }
 }
 

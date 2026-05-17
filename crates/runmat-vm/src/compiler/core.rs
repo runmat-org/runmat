@@ -32,6 +32,7 @@ pub struct Compiler {
     pub function: Option<FunctionId>,
     pub body: Option<MirBody>,
     pub class_registrations: Vec<ClassRegistration>,
+    pub class_names: HashMap<runmat_hir::ClassId, String>,
     current_span: Option<runmat_hir::Span>,
 }
 
@@ -309,6 +310,24 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
         .collect()
 }
 
+fn hir_class_names(hir: &HirAssembly) -> HashMap<runmat_hir::ClassId, String> {
+    hir.classes
+        .iter()
+        .map(|class| {
+            (
+                class.id,
+                class
+                    .name
+                    .0
+                    .iter()
+                    .map(|part| part.0.clone())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            )
+        })
+        .collect()
+}
+
 fn member_access_name(access: runmat_hir::MemberAccess) -> &'static str {
     match access {
         runmat_hir::MemberAccess::Private => "private",
@@ -393,6 +412,7 @@ impl Compiler {
             function: Some(function),
             body: Some(body),
             class_registrations: hir_class_registrations(hir),
+            class_names: hir_class_names(hir),
             current_span: None,
         })
     }
@@ -434,6 +454,7 @@ impl Compiler {
             function: Some(function),
             body: Some(body),
             class_registrations: hir_class_registrations(hir),
+            class_names: hir_class_names(hir),
             current_span: None,
         })
     }
@@ -1696,6 +1717,7 @@ impl Compiler {
                 Ok(path.module.display_name().or_else(|| path.display_name()))
             }
             CallableIdentity::Method(id) => Ok(Some(id.0.clone())),
+            CallableIdentity::ClassConstructor(class) => Ok(self.class_names.get(class).cloned()),
             _ => Ok(None),
         }
     }
@@ -1706,11 +1728,15 @@ impl Compiler {
         has_expansion: bool,
     ) -> Result<(), CompileError> {
         let name = match &call.callee {
-            MirCallee::Static(CallableIdentity::ExternalName(name)) if name.0.len() == 1 => {
-                name.0[0].0.clone()
-            }
-            MirCallee::Static(CallableIdentity::DynamicName(name)) => name.0.clone(),
             MirCallee::Static(CallableIdentity::Builtin(id)) => id.0.clone(),
+            MirCallee::Static(identity) => {
+                let Some(name) = self.mir_runtime_name_callee(identity)? else {
+                    return Err(self.compile_error(
+                        "MIR bytecode lowering for this method callee is not implemented yet",
+                    ));
+                };
+                name
+            }
             _ => {
                 return Err(self.compile_error(
                     "MIR bytecode lowering for this method callee is not implemented yet",
@@ -2457,14 +2483,13 @@ impl Compiler {
                 self.emit(Instr::CreateFunctionHandle(name.0.clone()));
                 Ok(())
             }
-            CallableIdentity::ExternalName(name) if name.0.len() == 1 => {
-                self.emit(Instr::CreateFunctionHandle(name.0[0].0.clone()));
-                Ok(())
-            }
-            CallableIdentity::Imported(path) => {
-                let Some(name) = path.display_name() else {
+            CallableIdentity::ExternalName(_)
+            | CallableIdentity::Imported(_)
+            | CallableIdentity::Method(_)
+            | CallableIdentity::ClassConstructor(_) => {
+                let Some(name) = self.mir_runtime_name_callee(target)? else {
                     return Err(self.compile_error(
-                        "MIR bytecode lowering for this imported function handle target is not implemented yet",
+                        "MIR bytecode lowering for this function handle target is not implemented yet",
                     ));
                 };
                 self.emit(Instr::CreateFunctionHandle(name));
@@ -2518,9 +2543,6 @@ impl Compiler {
                 ));
                 Ok(())
             }
-            _ => Err(self.compile_error(
-                "MIR bytecode lowering for this function handle target is not implemented yet",
-            )),
         }
     }
 
