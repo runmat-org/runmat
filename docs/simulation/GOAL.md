@@ -15,14 +15,14 @@ This is an internal engineering target document.
 
 ## Source Documents Reviewed
 
-- `docs/detailed-work/analysis-physics-domain-coverage-and-migration.md`
-- `docs/detailed-work/fea-rival-gap-matrix.md`
-- `docs/detailed-work/multi-physics-parity-roadmap.md`
-- `docs/detailed-work/code-reviewed-fea-workflow.md`
-- `docs/detailed-work/m6-industrial-credibility-benchmark-spec.md`
-- `docs/detailed-work/geo-and-analysis.md`
-- `docs/analysis/prep-aware-solves.md`
-- `docs/geometry/prep-for-analysis.md`
+- `docs/simulation/ARCHIVE/legacy-2026-05-17/analysis-physics-domain-coverage-and-migration.md`
+- `docs/simulation/ARCHIVE/legacy-2026-05-17/fea-rival-gap-matrix.md`
+- `docs/simulation/ARCHIVE/legacy-2026-05-17/multi-physics-parity-roadmap.md`
+- `docs/simulation/ARCHIVE/legacy-2026-05-17/code-reviewed-fea-workflow.md`
+- `docs/simulation/ARCHIVE/legacy-2026-05-17/m6-industrial-credibility-benchmark-spec.md`
+- `docs/simulation/ARCHIVE/legacy-2026-05-17/geo-and-analysis.md`
+- `docs/simulation/ARCHIVE/legacy-2026-05-17/prep-aware-solves.md`
+- `docs/simulation/ARCHIVE/legacy-2026-05-17/prep-for-analysis.md`
 
 ## North-Star Outcome
 

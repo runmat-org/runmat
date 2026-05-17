@@ -18,6 +18,7 @@ A slice is not complete when code compiles; it is complete when:
 - Trend/drift non-regression gates.
 - External-reference comparator gates (M6 track).
 - Artifact schema/presence gates.
+- Prep artifact trust-chain and compatibility gates for prep-aware solve paths.
 
 ## Branch Posture
 
@@ -51,4 +52,5 @@ Required artifact classes:
 - readiness verdict,
 - benchmark report,
 - external-reference comparator report,
+- prep artifact lineage/health evidence when prep-aware paths are required,
 - optional calibration/recommendation artifacts where domain policy requires them.

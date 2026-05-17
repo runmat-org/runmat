@@ -1,4 +1,4 @@
-# Detailed Work Docs Map
+# Simulation Docs Map
 
 This folder is intentionally small and high-signal.
 
