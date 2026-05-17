@@ -2305,7 +2305,7 @@ impl Compiler {
     fn mir_operand_rvalue(&self, operand: &MirOperand) -> Option<MirRvalue> {
         match operand {
             MirOperand::Local(local) => self.mir_local_rvalue(*local),
-            MirOperand::Constant(_) | MirOperand::FunctionHandle(_) | MirOperand::Temp(_) => None,
+            MirOperand::Constant(_) | MirOperand::FunctionHandle(_) => None,
         }
     }
 
@@ -2466,10 +2466,6 @@ impl Compiler {
             MirOperand::Constant(MirConstant::EmptyArray) => {
                 self.emit(Instr::CreateMatrix(0, 0));
                 Ok(())
-            }
-            MirOperand::Temp(_) => {
-                Err(self
-                    .compile_error("MIR bytecode lowering for this operand is not implemented yet"))
             }
         }
     }

@@ -791,7 +791,7 @@ fn scan_operand(
                 function_handles.push(target.clone());
             }
         }
-        MirOperand::Temp(_) | MirOperand::Constant(_) => {}
+        MirOperand::Constant(_) => {}
     }
 }
 

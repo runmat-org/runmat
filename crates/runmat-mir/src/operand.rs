@@ -1,11 +1,10 @@
-use crate::{MirLocalId, MirTempId};
+use crate::MirLocalId;
 use runmat_hir::{CallableIdentity, StringLiteral, SymbolName};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MirOperand {
     Local(MirLocalId),
-    Temp(MirTempId),
     Constant(MirConstant),
     FunctionHandle(CallableIdentity),
 }

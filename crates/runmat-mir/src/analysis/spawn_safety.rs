@@ -248,7 +248,7 @@ fn spawn_targets(
             .get(local.0)
             .filter(|targets| !targets.is_empty())
             .cloned(),
-        MirOperand::FunctionHandle(_) | MirOperand::Temp(_) | MirOperand::Constant(_) => None,
+        MirOperand::FunctionHandle(_) | MirOperand::Constant(_) => None,
     }
 }
 
