@@ -2,9 +2,7 @@ use crate::bytecode::EndExpr;
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::shared::{
     build_object_paren_expr_selector_values, build_object_paren_selector_values,
-    call_object_subsasgn_brace_values, call_object_subsasgn_paren_scalar_indices,
-    call_object_subsasgn_paren_values, call_object_subsref_brace_values,
-    call_object_subsref_paren_values,
+    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexSelector,
 };
 use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
@@ -141,17 +139,69 @@ fn pop_index_base(stack: &mut Vec<Value>) -> Result<Value, RuntimeError> {
     ))
 }
 
+async fn object_subsref_paren(base: Value, values: Vec<Value>) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_paren(
+        base,
+        ObjectIndexSelector::IndexValues { values },
+    ))
+    .await
+}
+
+async fn object_subsref_brace(base: Value, values: Vec<Value>) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+        base,
+        ObjectIndexSelector::IndexValues { values },
+    ))
+    .await
+}
+
+async fn object_subsasgn_paren(
+    base: Value,
+    values: Vec<Value>,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
+        base,
+        ObjectIndexSelector::IndexValues { values },
+        rhs,
+    ))
+    .await
+}
+
+async fn object_subsasgn_paren_scalar(
+    base: Value,
+    indices: Vec<usize>,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
+        base,
+        ObjectIndexSelector::ScalarIndices { indices },
+        rhs,
+    ))
+    .await
+}
+
+async fn object_subsasgn_brace(
+    base: Value,
+    values: Vec<Value>,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
+        base,
+        ObjectIndexSelector::IndexValues { values },
+        rhs,
+    ))
+    .await
+}
+
 async fn execute_brace_read_single(
     base: Value,
     raw_indices: &[Value],
 ) -> Result<Value, RuntimeError> {
     match base {
-        Value::Object(obj) => {
-            call_object_subsref_brace_values(Value::Object(obj), raw_indices.to_vec()).await
-        }
+        Value::Object(obj) => object_subsref_brace(Value::Object(obj), raw_indices.to_vec()).await,
         Value::HandleObject(handle) => {
-            call_object_subsref_brace_values(Value::HandleObject(handle), raw_indices.to_vec())
-                .await
+            object_subsref_brace(Value::HandleObject(handle), raw_indices.to_vec()).await
         }
         Value::Cell(ca) => {
             let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;
@@ -184,16 +234,14 @@ async fn execute_brace_expand(
             Ok(values)
         }
         Value::Object(obj) => {
-            let value =
-                call_object_subsref_brace_values(Value::Object(obj), raw_indices.to_vec()).await?;
+            let value = object_subsref_brace(Value::Object(obj), raw_indices.to_vec()).await?;
             let mut out = vec![value];
             out.resize(out_count, Value::Num(0.0));
             Ok(out)
         }
         Value::HandleObject(handle) => {
             let value =
-                call_object_subsref_brace_values(Value::HandleObject(handle), raw_indices.to_vec())
-                    .await?;
+                object_subsref_brace(Value::HandleObject(handle), raw_indices.to_vec()).await?;
             let mut out = vec![value];
             out.resize(out_count, Value::Num(0.0));
             Ok(out)
@@ -220,14 +268,12 @@ async fn execute_brace_list(base: Value, raw_indices: &[Value]) -> Result<Value,
             }
         }
         Value::Object(obj) => {
-            let value =
-                call_object_subsref_brace_values(Value::Object(obj), raw_indices.to_vec()).await?;
+            let value = object_subsref_brace(Value::Object(obj), raw_indices.to_vec()).await?;
             Ok(Value::OutputList(vec![value]))
         }
         Value::HandleObject(handle) => {
             let value =
-                call_object_subsref_brace_values(Value::HandleObject(handle), raw_indices.to_vec())
-                    .await?;
+                object_subsref_brace(Value::HandleObject(handle), raw_indices.to_vec()).await?;
             Ok(Value::OutputList(vec![value]))
         }
         _ => Err(crate::interpreter::errors::mex(
@@ -244,15 +290,10 @@ async fn execute_brace_store(
 ) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
-            call_object_subsasgn_brace_values(Value::Object(obj), raw_indices.to_vec(), rhs).await
+            object_subsasgn_brace(Value::Object(obj), raw_indices.to_vec(), rhs).await
         }
         Value::HandleObject(handle) => {
-            call_object_subsasgn_brace_values(
-                Value::HandleObject(handle),
-                raw_indices.to_vec(),
-                rhs,
-            )
-            .await
+            object_subsasgn_brace(Value::HandleObject(handle), raw_indices.to_vec(), rhs).await
         }
         Value::Cell(ca) => {
             let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;
@@ -451,7 +492,7 @@ pub async fn dispatch_indexing(
             ))?;
             match &base {
                 Value::Object(_) | Value::HandleObject(_) => {
-                    stack.push(call_object_subsref_paren_values(base, raw_indices.clone()).await?);
+                    stack.push(object_subsref_paren(base, raw_indices.clone()).await?);
                 }
                 Value::FunctionHandle(_)
                 | Value::SemanticFunctionHandle { .. }
@@ -535,18 +576,13 @@ pub async fn dispatch_indexing(
             match base {
                 Value::Object(obj) => {
                     stack.push(
-                        call_object_subsasgn_paren_scalar_indices(Value::Object(obj), indices, rhs)
-                            .await?,
+                        object_subsasgn_paren_scalar(Value::Object(obj), indices, rhs).await?,
                     );
                 }
                 Value::HandleObject(handle) => {
                     stack.push(
-                        call_object_subsasgn_paren_scalar_indices(
-                            Value::HandleObject(handle),
-                            indices,
-                            rhs,
-                        )
-                        .await?,
+                        object_subsasgn_paren_scalar(Value::HandleObject(handle), indices, rhs)
+                            .await?,
                     );
                 }
                 Value::Tensor(t) => {
@@ -625,9 +661,7 @@ pub async fn dispatch_indexing(
                         *end_mask,
                         &numeric,
                     )?;
-                    stack.push(
-                        call_object_subsref_paren_values(Value::Object(obj), selectors).await?,
-                    );
+                    stack.push(object_subsref_paren(Value::Object(obj), selectors).await?);
                 }
                 Value::HandleObject(handle) => {
                     let selectors = build_object_paren_selector_values(
@@ -636,10 +670,7 @@ pub async fn dispatch_indexing(
                         *end_mask,
                         &numeric,
                     )?;
-                    stack.push(
-                        call_object_subsref_paren_values(Value::HandleObject(handle), selectors)
-                            .await?,
-                    );
+                    stack.push(object_subsref_paren(Value::HandleObject(handle), selectors).await?);
                 }
                 Value::Tensor(t) => {
                     if *dims == 1 {
@@ -793,10 +824,7 @@ pub async fn dispatch_indexing(
                         *end_mask,
                         &numeric,
                     )?;
-                    stack.push(
-                        call_object_subsasgn_paren_values(Value::Object(obj), selectors, rhs)
-                            .await?,
-                    );
+                    stack.push(object_subsasgn_paren(Value::Object(obj), selectors, rhs).await?);
                 }
                 Value::HandleObject(handle) => {
                     let selectors = build_object_paren_selector_values(
@@ -806,12 +834,7 @@ pub async fn dispatch_indexing(
                         &numeric,
                     )?;
                     stack.push(
-                        call_object_subsasgn_paren_values(
-                            Value::HandleObject(handle),
-                            selectors,
-                            rhs,
-                        )
-                        .await?,
+                        object_subsasgn_paren(Value::HandleObject(handle), selectors, rhs).await?,
                     );
                 }
                 Value::Tensor(t) => {
@@ -1276,10 +1299,7 @@ pub async fn dispatch_indexing(
                         range_end_exprs,
                         &numeric,
                     )?;
-                    stack.push(
-                        call_object_subsasgn_paren_values(Value::Object(obj), idx_values, rhs)
-                            .await?,
-                    );
+                    stack.push(object_subsasgn_paren(Value::Object(obj), idx_values, rhs).await?);
                 }
                 _ => {
                     return Err("StoreSliceExpr only supports tensors currently"

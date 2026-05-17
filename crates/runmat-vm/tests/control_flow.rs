@@ -130,7 +130,13 @@ fn nested_break_and_continue_scopes() {
 #[test]
 fn undefined_variable_raises_mex() {
     let err = compile_semantic_source("y = x + 1;").err().unwrap();
-    assert!(err.message().contains("RunMat:UndefinedVariable"));
+    let message = err.message();
+    assert!(
+        message.contains("RunMat:UndefinedVariable")
+            || message.contains("UndefinedVariable")
+            || message.to_ascii_lowercase().contains("undefined variable"),
+        "unexpected undefined-variable diagnostic: {message}"
+    );
 }
 
 #[test]

@@ -237,67 +237,6 @@ pub(crate) async fn call_object_index_descriptor_method(
     call_runtime_method(&descriptor.into_runtime_method_args()?, None).await
 }
 
-pub(crate) async fn call_object_subsref_paren_values(
-    base: Value,
-    values: Vec<Value>,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_paren(
-        base,
-        ObjectIndexSelector::IndexValues { values },
-    ))
-    .await
-}
-
-pub(crate) async fn call_object_subsref_brace_values(
-    base: Value,
-    values: Vec<Value>,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-        base,
-        ObjectIndexSelector::IndexValues { values },
-    ))
-    .await
-}
-
-pub(crate) async fn call_object_subsasgn_paren_values(
-    base: Value,
-    values: Vec<Value>,
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
-        base,
-        ObjectIndexSelector::IndexValues { values },
-        rhs,
-    ))
-    .await
-}
-
-pub(crate) async fn call_object_subsasgn_paren_scalar_indices(
-    base: Value,
-    indices: Vec<usize>,
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
-        base,
-        ObjectIndexSelector::ScalarIndices { indices },
-        rhs,
-    ))
-    .await
-}
-
-pub(crate) async fn call_object_subsasgn_brace_values(
-    base: Value,
-    values: Vec<Value>,
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
-        base,
-        ObjectIndexSelector::IndexValues { values },
-        rhs,
-    ))
-    .await
-}
-
 fn encode_end_expr_value(expr: &EndExpr) -> Result<Value, RuntimeError> {
     fn mk_cell(items: Vec<Value>) -> Result<Value, RuntimeError> {
         let cols = items.len();

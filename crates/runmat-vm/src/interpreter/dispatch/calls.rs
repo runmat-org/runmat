@@ -4,7 +4,8 @@ use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::shared::{
-    build_expanded_args_from_specs, call_object_subsref_brace_values, expand_cell_indices,
+    build_expanded_args_from_specs, call_object_index_descriptor_method, expand_cell_indices,
+    ObjectIndexDescriptor, ObjectIndexSelector,
 };
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -28,6 +29,14 @@ pub enum UserCallHandling {
     Completed,
     Caught,
     Uncaught(Box<RuntimeError>),
+}
+
+async fn object_subsref_brace(base: Value, values: Vec<Value>) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+        base,
+        ObjectIndexSelector::IndexValues { values },
+    ))
+    .await
 }
 
 pub(crate) fn normalize_requested_outputs(value: Value, requested_outputs: usize) -> Value {
@@ -79,7 +88,7 @@ pub async fn build_builtin_expand_multi_args(
         |base| async move {
             match base {
                 Value::Object(obj) => {
-                    let v = call_object_subsref_brace_values(Value::Object(obj), vec![]).await?;
+                    let v = object_subsref_brace(Value::Object(obj), vec![]).await?;
                     match v {
                         Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                         other => Ok(vec![other]),
@@ -94,7 +103,7 @@ pub async fn build_builtin_expand_multi_args(
         |base, indices| async move {
             match base {
                 Value::Object(obj) => {
-                    let v = call_object_subsref_brace_values(Value::Object(obj), indices).await?;
+                    let v = object_subsref_brace(Value::Object(obj), indices).await?;
                     Ok(vec![v])
                 }
                 _ => Err(crate::interpreter::errors::mex(
@@ -119,7 +128,7 @@ pub async fn build_feval_expand_multi_args(
         |base| async move {
             match base {
                 Value::Object(obj) => {
-                    let v = call_object_subsref_brace_values(Value::Object(obj), vec![]).await?;
+                    let v = object_subsref_brace(Value::Object(obj), vec![]).await?;
                     match v {
                         Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                         other => Ok(vec![other]),
@@ -134,7 +143,7 @@ pub async fn build_feval_expand_multi_args(
         |base, indices| async move {
             match base {
                 Value::Object(obj) => {
-                    let v = call_object_subsref_brace_values(Value::Object(obj), indices).await?;
+                    let v = object_subsref_brace(Value::Object(obj), indices).await?;
                     Ok(vec![v])
                 }
                 _ => Err(crate::interpreter::errors::mex(
@@ -160,7 +169,7 @@ pub async fn build_user_function_expand_multi_args(
             match base {
                 Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                 Value::Object(obj) => {
-                    let v = call_object_subsref_brace_values(Value::Object(obj), vec![]).await?;
+                    let v = object_subsref_brace(Value::Object(obj), vec![]).await?;
                     match v {
                         Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                         other => Ok(vec![other]),
@@ -176,7 +185,7 @@ pub async fn build_user_function_expand_multi_args(
             match (base, indices.len()) {
                 (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices),
                 (Value::Object(obj), _) => {
-                    let v = call_object_subsref_brace_values(Value::Object(obj), indices).await?;
+                    let v = object_subsref_brace(Value::Object(obj), indices).await?;
                     Ok(vec![v])
                 }
                 _ => Err(crate::interpreter::errors::mex(
