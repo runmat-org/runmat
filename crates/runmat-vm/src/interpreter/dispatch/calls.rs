@@ -462,22 +462,6 @@ async fn handle_builtin_call_inner(
     handle_builtin_outcome(result, imported, stack, exception, refresh_vars)
 }
 
-pub async fn handle_method_call(
-    stack: &mut Vec<Value>,
-    name: &str,
-    arg_count: usize,
-    next_instr: Option<&Instr>,
-) -> Result<MethodHandling, RuntimeError> {
-    let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
-    let requested_outputs = requested_output_count_from_next(next_instr);
-    let output_hint = output_hint_for_next(next_instr);
-    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
-    let value =
-        call_closures::call_method_with_outputs(base, name, args, requested_outputs).await?;
-    stack.push(value);
-    Ok(MethodHandling::Completed)
-}
-
 pub async fn handle_prepared_user_function_call(
     ctx: UserCallContext<'_>,
     args: Vec<Value>,
@@ -678,33 +662,6 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     .await?;
     stack.push(value);
     Ok(MethodHandling::Completed)
-}
-
-pub async fn handle_static_method_call(
-    stack: &mut Vec<Value>,
-    class_name: &str,
-    method: &str,
-    arg_count: usize,
-    next_instr: Option<&Instr>,
-) -> Result<MethodHandling, RuntimeError> {
-    let args = crate::call::builtins::collect_call_args(stack, arg_count)?;
-    let requested_outputs = requested_output_count_from_next(next_instr);
-    let output_hint = output_hint_for_next(next_instr);
-    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
-    match call_closures::call_static_method_with_outputs(
-        class_name,
-        method,
-        args.clone(),
-        requested_outputs,
-    )
-    .await
-    {
-        Ok(v) => {
-            stack.push(v);
-            Ok(MethodHandling::Completed)
-        }
-        Err(err) => Err(err),
-    }
 }
 
 pub fn handle_load_method(

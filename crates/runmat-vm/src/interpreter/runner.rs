@@ -627,7 +627,6 @@ async fn run_interpreter_inner(
             | Instr::StoreIndexCell(_)
             | Instr::StoreSlice(_, _, _, _)
             | Instr::StoreSliceExpr { .. }
-            | Instr::CallMethod(_, _)
             | Instr::CallMethodOrMemberIndex(_, _)
             | Instr::CallMethodOrMemberIndexMulti(_, _, _)
             | Instr::CallMethodOrMemberIndexExpandMulti(_, _)
@@ -638,7 +637,6 @@ async fn run_interpreter_inner(
             | Instr::CreateClosure(_, _)
             | Instr::CreateSemanticClosure(_, _, _)
             | Instr::LoadStaticProperty(_, _)
-            | Instr::CallStaticMethod(_, _, _)
             | Instr::RegisterClass { .. }
             | Instr::CallFeval(_)
             | Instr::CallFevalMulti(_, _)

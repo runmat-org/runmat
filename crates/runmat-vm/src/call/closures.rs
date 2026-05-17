@@ -23,28 +23,6 @@ async fn call_explicit_builtin(
     }
 }
 
-fn is_builtin_type_class_name(class_name: &str) -> bool {
-    matches!(
-        class_name,
-        "gpuArray"
-            | "logical"
-            | "double"
-            | "single"
-            | "int8"
-            | "int16"
-            | "int32"
-            | "int64"
-            | "uint8"
-            | "uint16"
-            | "uint32"
-            | "uint64"
-            | "char"
-            | "string"
-            | "cell"
-            | "struct"
-    )
-}
-
 async fn call_named_with_policy(
     name: String,
     args: Vec<Value>,
@@ -144,102 +122,6 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
             }
         }
         _ => Err(mex("LoadMethod", "LoadMethod requires object or classref")),
-    }
-}
-
-pub async fn call_method_with_outputs(
-    base: Value,
-    name: &str,
-    args: Vec<Value>,
-    requested_outputs: Option<usize>,
-) -> Result<Value, RuntimeError> {
-    match base {
-        Value::Object(obj) => {
-            if let Some((m, _owner)) = lookup_method(&obj.class_name, name) {
-                if m.is_static {
-                    return Err(format!(
-                        "Method '{}' is static; use classref({}).{}",
-                        name, obj.class_name, name
-                    )
-                    .into());
-                }
-                if m.access == Access::Private {
-                    return Err(format!("Method '{}' is private", name).into());
-                }
-                let mut full_args = Vec::with_capacity(1 + args.len());
-                full_args.push(Value::Object(obj));
-                full_args.extend(args);
-                return call_named_with_policy(
-                    m.function_name,
-                    full_args,
-                    requested_outputs,
-                    CallableFallbackPolicy::RuntimeNameResolution,
-                )
-                .await;
-            }
-            let qualified = format!("{}.{}", obj.class_name, name);
-            let mut full_args = Vec::with_capacity(1 + args.len());
-            full_args.push(Value::Object(obj));
-            full_args.extend(args);
-            if let Some(result) = try_call_named_with_policy(
-                qualified,
-                full_args.clone(),
-                requested_outputs,
-                CallableFallbackPolicy::ObjectDispatch,
-            )
-            .await?
-            {
-                return Ok(result);
-            }
-            call_named_with_policy(
-                name.to_string(),
-                full_args,
-                requested_outputs,
-                CallableFallbackPolicy::RuntimeNameResolution,
-            )
-            .await
-        }
-        _ => Err(mex("CallMethod", "CallMethod on non-object")),
-    }
-}
-
-pub async fn call_static_method_with_outputs(
-    class_name: &str,
-    method: &str,
-    args: Vec<Value>,
-    requested_outputs: Option<usize>,
-) -> Result<Value, RuntimeError> {
-    if let Some((m, _owner)) = lookup_method(class_name, method) {
-        if !m.is_static {
-            return Err(format!("Method '{}' is not static", method).into());
-        }
-        if m.access == Access::Private {
-            return Err(format!("Method '{}' is private", method).into());
-        }
-        return call_named_with_policy(
-            m.function_name,
-            args,
-            requested_outputs,
-            CallableFallbackPolicy::RuntimeNameResolution,
-        )
-        .await;
-    }
-    let qualified = format!("{}.{}", class_name, method);
-    match call_named_with_policy(
-        qualified,
-        args.clone(),
-        requested_outputs,
-        CallableFallbackPolicy::RuntimeNameResolution,
-    )
-    .await
-    {
-        Ok(value) => Ok(value),
-        Err(_) if is_builtin_type_class_name(class_name) => {
-            let mut builtin_args = args;
-            builtin_args.push(Value::from(class_name));
-            call_explicit_builtin(method, &builtin_args, requested_outputs).await
-        }
-        Err(err) => Err(err),
     }
 }
 

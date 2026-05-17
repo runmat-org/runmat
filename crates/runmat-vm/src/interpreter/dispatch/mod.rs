@@ -27,11 +27,11 @@ pub use calls::{
     build_user_function_expand_multi_args, handle_builtin_call, handle_builtin_call_multi,
     handle_builtin_expand_at_call, handle_builtin_expand_last_call,
     handle_builtin_expand_multi_call, handle_create_closure, handle_create_semantic_closure,
-    handle_feval_dispatch, handle_load_method, handle_load_static_property, handle_method_call,
+    handle_feval_dispatch, handle_load_method, handle_load_static_property,
     handle_method_or_member_index_call, handle_method_or_member_index_expand_multi_call,
     handle_method_or_member_index_multi_call, handle_prepared_user_function_call,
-    handle_register_class, handle_static_method_call, handle_user_function_call, BuiltinHandling,
-    FevalHandling, UserCallHandling,
+    handle_register_class, handle_user_function_call, BuiltinHandling, FevalHandling,
+    UserCallHandling,
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
 pub use exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -799,12 +799,6 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallMethod(name, arg_count) => {
-            handle_method_call(stack, name, *arg_count, next_instr).await?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
         Instr::CallMethodOrMemberIndex(name, arg_count) => {
             handle_method_or_member_index_call(stack, name.clone(), *arg_count, next_instr).await?;
             Ok(Some(DispatchHandled::Generic(
@@ -879,12 +873,6 @@ pub async fn dispatch_instruction(
         }
         Instr::LoadStaticProperty(class_name, prop) => {
             handle_load_static_property(stack, class_name, prop)?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CallStaticMethod(class_name, method, arg_count) => {
-            handle_static_method_call(stack, class_name, method, *arg_count, next_instr).await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

@@ -154,7 +154,6 @@ pub enum Instr {
     StoreMemberDynamic,
     StoreMemberDynamicOrInit,
     LoadMethod(String),
-    CallMethod(String, usize),
 
     // Ambiguous `obj.name(...)` shape resolved at runtime as method call or member indexing.
     CallMethodOrMemberIndex(String, usize),
@@ -168,7 +167,6 @@ pub enum Instr {
     CreateClosure(String, usize),
     CreateSemanticClosure(FunctionId, String, usize),
     LoadStaticProperty(String, String),
-    CallStaticMethod(String, String, usize),
 
     // Registers a runtime class definition produced by `classdef` lowering.
     RegisterClass {
@@ -305,11 +303,8 @@ impl Instr {
             Instr::CallBuiltinMulti(_, argc, _) => effect(*argc, 1),
             Instr::CallFunctionMulti(_, argc, out_count)
             | Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
-            Instr::CallMethod(_, argc) | Instr::CallMethodOrMemberIndex(_, argc) => {
-                effect(argc + 1, 1)
-            }
-            Instr::CallMethodOrMemberIndexMulti(_, argc, _) => effect(argc + 1, 1),
-            Instr::CallStaticMethod(_, _, argc) => effect(*argc, 1),
+            Instr::CallMethodOrMemberIndex(_, argc)
+            | Instr::CallMethodOrMemberIndexMulti(_, argc, _) => effect(argc + 1, 1),
             Instr::CallFeval(argc) => effect(argc + 1, 1),
             Instr::CallFevalMulti(argc, _) => effect(argc + 1, 1),
             Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {
