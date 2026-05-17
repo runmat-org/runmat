@@ -17,6 +17,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "em_homogeneous_sigma_omega_response_coverage_ratio",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
             "name": "em_homogeneous_dispersive_loss_scale_mean",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 0.02,
@@ -31,10 +38,24 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "em_homogeneous_boundary_energy_ratio",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 0.46,
+            "reference": 0.46,
+            "pass": True,
+        },
+        {
             "name": "em_heterogeneous_sigma_omega_scale_spread_ratio",
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 1.25,
             "reference": 1.25,
+            "pass": True,
+        },
+        {
+            "name": "em_heterogeneous_sigma_omega_response_coverage_ratio",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
             "pass": True,
         },
         {
@@ -49,6 +70,27 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 8.6,
             "reference": 8.5,
+            "pass": True,
+        },
+        {
+            "name": "em_heterogeneous_source_realization_ratio",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 0.667,
+            "reference": 0.667,
+            "pass": True,
+        },
+        {
+            "name": "em_boundary_penalty_conditioning_contribution",
+            "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+            "observed": 0.918,
+            "reference": 0.918,
+            "pass": True,
+        },
+        {
+            "name": "em_phased_source_energy_consistency_ratio",
+            "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+            "observed": 0.203,
+            "reference": 0.203,
             "pass": True,
         },
         {
