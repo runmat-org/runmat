@@ -1,6 +1,5 @@
-use crate::{
-    CompatibilityHirProgram as HirProgram, CompatibilityHirStmt as HirStmt, SemanticError,
-};
+use crate::hir::{CompatibilityHirProgram as HirProgram, CompatibilityHirStmt as HirStmt};
+use crate::SemanticError;
 
 pub fn collect_imports(prog: &HirProgram) -> Vec<(Vec<String>, bool)> {
     let mut imports = Vec::new();

@@ -1,7 +1,8 @@
-use crate::{
+use crate::hir::{
     CompatibilityHirClassMember as HirClassMember, CompatibilityHirProgram as HirProgram,
-    CompatibilityHirStmt as HirStmt, SemanticError,
+    CompatibilityHirStmt as HirStmt,
 };
+use crate::SemanticError;
 
 pub fn validate_classdefs(prog: &HirProgram) -> Result<(), SemanticError> {
     use std::collections::HashSet;

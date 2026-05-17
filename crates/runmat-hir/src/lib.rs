@@ -58,11 +58,6 @@ pub use hir::{
     NARGIN_BUILTIN_NAME, NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
     TEST_CLASS_REGISTRATION_BUILTIN_NAME,
 };
-pub(crate) use hir::{
-    CompatibilityHirClassMember, CompatibilityHirExpr, CompatibilityHirExprKind,
-    CompatibilityHirLValue, CompatibilityHirProgram, CompatibilityHirStmt,
-    CompatibilityLoweringResult,
-};
 pub use ids::{
     BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, StmtId, VarId,
 };

@@ -2,11 +2,12 @@ use super::shared::{
     apply_lvalue_type_effects, collect_function_defs, join_env,
     refine_multi_assign_outputs_from_func, resolve_context_from_args, Analysis, FuncDef,
 };
-use crate::inference::expr::infer_expr_type_with_env;
-use crate::{
+use crate::hir::{
     CompatibilityHirExprKind as HirExprKind, CompatibilityHirProgram as HirProgram,
-    CompatibilityHirStmt as HirStmt, Type, VarId,
+    CompatibilityHirStmt as HirStmt,
 };
+use crate::inference::expr::infer_expr_type_with_env;
+use crate::{Type, VarId};
 use std::collections::HashMap;
 
 pub fn infer_global_variable_types(

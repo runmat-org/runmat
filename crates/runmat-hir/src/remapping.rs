@@ -1,8 +1,9 @@
-use crate::{
+use crate::hir::{
     CompatibilityHirClassMember as HirClassMember, CompatibilityHirExpr as HirExpr,
     CompatibilityHirExprKind as HirExprKind, CompatibilityHirLValue as HirLValue,
-    CompatibilityHirStmt as HirStmt, VarId,
+    CompatibilityHirStmt as HirStmt,
 };
+use crate::VarId;
 use std::collections::{HashMap, HashSet};
 
 pub fn remap_function_body(body: &[HirStmt], var_map: &HashMap<VarId, VarId>) -> Vec<HirStmt> {

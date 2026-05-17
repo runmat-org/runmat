@@ -4,11 +4,12 @@ use super::shared::{
     collect_struct_field_assertions, join_env, refine_multi_assign_outputs_from_func, Analysis,
     FuncDef,
 };
-use crate::{
+use crate::hir::{
     CompatibilityHirClassMember as HirClassMember, CompatibilityHirExpr as HirExpr,
     CompatibilityHirExprKind as HirExprKind, CompatibilityHirProgram as HirProgram,
-    CompatibilityHirStmt as HirStmt, Type, VarId,
+    CompatibilityHirStmt as HirStmt,
 };
+use crate::{Type, VarId};
 use std::collections::HashMap;
 
 pub fn infer_function_output_types(prog: &HirProgram) -> HashMap<String, Vec<Type>> {

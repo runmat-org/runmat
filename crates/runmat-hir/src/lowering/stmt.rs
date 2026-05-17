@@ -1,8 +1,9 @@
 use super::ctx::Ctx;
-use crate::{
+use crate::hir::{
     CompatibilityHirClassMember as HirClassMember, CompatibilityHirLValue as HirLValue,
-    CompatibilityHirStmt as HirStmt, SemanticError, VarId, DISCARD_OUTPUT_NAME,
+    CompatibilityHirStmt as HirStmt,
 };
+use crate::{SemanticError, VarId, DISCARD_OUTPUT_NAME};
 use runmat_parser::{self as parser, Stmt as AstStmt};
 
 impl Ctx {

@@ -1,10 +1,10 @@
+use crate::hir::{CompatibilityHirProgram as HirProgram, CompatibilityHirStmt as HirStmt};
 use crate::validation::classdefs::validate_classdefs;
 use crate::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingId, BindingName, BindingOwner,
     BindingResolution, BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution,
     CallSyntax, CapturedBinding, ClassArgumentBlock, ClassEnumeration, ClassEvent, ClassId,
-    ClassKind, ClassMethod, ClassProperty, ClassResolution, CommandArgument,
-    CompatibilityHirProgram as HirProgram, CompatibilityHirStmt as HirStmt, EntrypointId,
+    ClassKind, ClassMethod, ClassProperty, ClassResolution, CommandArgument, EntrypointId,
     EntrypointName, EntrypointOrigin, EntrypointPolicy, ExprId, FunctionAbi, FunctionId,
     FunctionKind, FunctionModifiers, FunctionName, FunctionResolution, HirAssembly, HirBinding,
     HirBlock, HirCall, HirCallableRef, HirClass, HirCommandCall, HirEntrypoint, HirExpr,
@@ -78,7 +78,7 @@ pub fn lower(
 pub fn lower_compatibility(
     prog: &AstProgram,
     context: &LoweringContext<'_>,
-) -> Result<crate::CompatibilityLoweringResult, SemanticError> {
+) -> Result<crate::hir::CompatibilityLoweringResult, SemanticError> {
     let mut ctx = Ctx::new();
 
     for (name, var_id) in context.variables {
@@ -110,7 +110,7 @@ pub fn lower_compatibility(
         .filter_map(|(id, name)| name.clone().map(|name| (name, id)))
         .collect();
 
-    Ok(crate::CompatibilityLoweringResult { hir, variables })
+    Ok(crate::hir::CompatibilityLoweringResult { hir, variables })
 }
 
 impl SemanticCtx {

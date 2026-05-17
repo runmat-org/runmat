@@ -1,8 +1,9 @@
-use crate::{
+use crate::hir::{
     CompatibilityHirClassMember as HirClassMember, CompatibilityHirExpr as HirExpr,
     CompatibilityHirExprKind as HirExprKind, CompatibilityHirLValue as HirLValue,
-    CompatibilityHirProgram as HirProgram, CompatibilityHirStmt as HirStmt, Type, VarId,
+    CompatibilityHirProgram as HirProgram, CompatibilityHirStmt as HirStmt,
 };
+use crate::{Type, VarId};
 use runmat_parser as parser;
 use std::collections::HashMap;
 use std::sync::OnceLock;
