@@ -138,10 +138,16 @@ REQUIRED_FIXTURES = {
         "em_heterogeneous_boundary_anchor_ratio",
     },
     "electromagnetic_reference_boundary_penalty_stress_gpu_provider": {
+        "em_boundary_penalty_anchor_ratio",
         "em_boundary_penalty_conditioning_contribution",
+        "em_boundary_penalty_real_residual_norm",
+        "em_boundary_penalty_imag_residual_norm",
     },
     "electromagnetic_reference_multi_region_phased_source_gpu_provider": {
         "em_phased_source_energy_consistency_ratio",
+        "em_phased_source_interference_index",
+        "em_phased_source_overlap_ratio",
+        "em_phased_source_region_coverage_ratio",
     },
     "electromagnetic_reference_sparse_assignments_gpu_provider": {
         "em_sparse_assignment_coverage_ratio",

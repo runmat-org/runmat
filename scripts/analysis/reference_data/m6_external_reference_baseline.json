@@ -279,6 +279,26 @@
       "tolerance_rel": 0.1
     },
     {
+      "name": "em_boundary_penalty_real_residual_norm",
+      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_boundary_penalty_real_residual_norm",
+      "reference": 0.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": null
+    },
+    {
+      "name": "em_boundary_penalty_imag_residual_norm",
+      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_boundary_penalty_imag_residual_norm",
+      "reference": 0.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": null
+    },
+    {
       "name": "em_phased_source_energy_consistency_ratio",
       "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -297,6 +317,26 @@
       "reference": 1.0,
       "tolerance_abs": 0.05,
       "tolerance_rel": 0.05
+    },
+    {
+      "name": "em_phased_source_overlap_ratio",
+      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_phased_source_overlap_ratio",
+      "reference": 0.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": null
+    },
+    {
+      "name": "em_phased_source_interference_index",
+      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_phased_source_interference_index",
+      "reference": 0.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": null
     },
     {
       "name": "em_sparse_fallback_coefficient_ratio",

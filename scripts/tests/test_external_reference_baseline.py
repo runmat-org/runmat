@@ -97,6 +97,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "em_boundary_penalty_real_residual_norm",
+            ),
+            (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "em_boundary_penalty_imag_residual_norm",
+            ),
+            (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
                 "em_boundary_penalty_conditioning_contribution",
             ),
             (
@@ -106,6 +114,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_multi_region_phased_source_gpu_provider",
                 "em_phased_source_region_coverage_ratio",
+            ),
+            (
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "em_phased_source_overlap_ratio",
+            ),
+            (
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "em_phased_source_interference_index",
             ),
             (
                 "electromagnetic_reference_sparse_assignments_gpu_provider",

@@ -178,6 +178,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "em_boundary_penalty_real_residual_norm",
+            "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "em_boundary_penalty_imag_residual_norm",
+            "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
             "name": "em_phased_source_energy_consistency_ratio",
             "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
             "observed": 0.203,
@@ -189,6 +203,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
+            "pass": True,
+        },
+        {
+            "name": "em_phased_source_overlap_ratio",
+            "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "em_phased_source_interference_index",
+            "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
             "pass": True,
         },
         {
