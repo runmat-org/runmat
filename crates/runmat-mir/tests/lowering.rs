@@ -1,4 +1,4 @@
-use runmat_hir::{lower, EnvironmentEffect, HirCallableRef, LoweringContext};
+use runmat_hir::{lower, CallableIdentity, EnvironmentEffect, LoweringContext};
 use runmat_mir::{
     analysis::{
         analyze_assembly, analyze_body, analyze_liveness, analyze_spawn_boundaries,
@@ -226,7 +226,7 @@ fn analyze_body_records_function_handle_value_flow_fact() {
     ));
     assert!(matches!(
         summary.function_handles[0],
-        runmat_hir::FunctionHandleTarget::Function(_)
+        CallableIdentity::SemanticFunction(_)
     ));
 }
 
@@ -365,9 +365,7 @@ fn direct_spawn_of_anonymous_function_uses_function_handle_temp_operand() {
             MirStmtKind::Assign {
                 place: MirPlace::Local(local),
                 value:
-                    MirRvalue::Use(MirOperand::FunctionHandle(
-                        runmat_hir::FunctionHandleTarget::Anonymous(_),
-                    )),
+                    MirRvalue::Use(MirOperand::FunctionHandle(CallableIdentity::AnonymousFunction(_))),
             } => saw_handle_temp = body.locals[local.0].kind == MirLocalKind::Temporary,
             MirStmtKind::Assign {
                 value: MirRvalue::Spawn(operand),
@@ -871,9 +869,9 @@ fn analyze_assembly_collects_semantic_marker_diagnostics() {
     let body = mir.bodies.values_mut().next().unwrap();
     let local = first_local_of_kind(body, MirLocalKind::Parameter);
     body.blocks[0].statements[0].kind = MirStmtKind::Expr(MirRvalue::Call(runmat_mir::MirCall {
-        callee: MirCallee::Static(HirCallableRef::Unresolved(runmat_hir::QualifiedName(vec![
-            runmat_hir::SymbolName("sink".into()),
-        ]))),
+        callee: MirCallee::Static(CallableIdentity::ExternalName(runmat_hir::QualifiedName(
+            vec![runmat_hir::SymbolName("sink".into())],
+        ))),
         args: vec![MirCallArg::Expansion {
             base: MirOperand::Local(local),
             indices: Vec::new(),
@@ -1238,7 +1236,7 @@ fn direct_function_call_preserves_callee_and_requested_outputs() {
 
     assert!(matches!(
         call.callee,
-        MirCallee::Static(HirCallableRef::Function(_))
+        MirCallee::Static(CallableIdentity::SemanticFunction(_))
     ));
     assert!(matches!(
         call.requested_outputs,
@@ -1279,10 +1277,12 @@ fn function_summary_propagates_user_callee_effects() {
         .functions
         .values()
         .find(|summary| {
-            summary
-                .calls
-                .iter()
-                .any(|call| matches!(call.callee, MirCallee::Static(HirCallableRef::Function(_))))
+            summary.calls.iter().any(|call| {
+                matches!(
+                    call.callee,
+                    MirCallee::Static(CallableIdentity::SemanticFunction(_))
+                )
+            })
         })
         .unwrap();
 
@@ -1307,10 +1307,12 @@ fn function_summary_records_async_future_dependency_edges() {
         .functions
         .values()
         .find(|summary| {
-            summary
-                .calls
-                .iter()
-                .any(|call| matches!(call.callee, MirCallee::Static(HirCallableRef::Function(_))))
+            summary.calls.iter().any(|call| {
+                matches!(
+                    call.callee,
+                    MirCallee::Static(CallableIdentity::SemanticFunction(_))
+                )
+            })
         })
         .unwrap();
 
