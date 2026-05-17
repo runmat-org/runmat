@@ -370,6 +370,36 @@ impl Default for AnalysisTransientRunOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisAcousticRunOptions {
+    pub deterministic_mode: bool,
+    pub precision_mode: PrecisionMode,
+    pub quality_policy: QualityPolicy,
+    pub mode_count: usize,
+    pub residual_warn_threshold: f64,
+    #[serde(default)]
+    pub prep_context: Option<AnalysisRunPrepContext>,
+    #[serde(default)]
+    pub prep_artifact_id: Option<String>,
+    #[serde(default)]
+    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
+}
+
+impl Default for AnalysisAcousticRunOptions {
+    fn default() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            mode_count: 3,
+            residual_warn_threshold: 1.0e-3,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisCfdRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
@@ -1036,6 +1066,7 @@ pub struct AnalysisStudyRunData {
 pub enum AnalysisRunKind {
     LinearStatic,
     Modal,
+    Acoustic,
     Thermal,
     Transient,
     Cfd,

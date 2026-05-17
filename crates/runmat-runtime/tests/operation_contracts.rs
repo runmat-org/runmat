@@ -5,9 +5,10 @@ use runmat_geometry_core::EntityKind;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_plan_study_op, analysis_results_by_run_id_op,
-    analysis_results_compare_op, analysis_results_op, analysis_run_electromagnetic_op,
-    analysis_run_fsi_op, analysis_run_linear_static_op, analysis_run_linear_static_with_options,
-    analysis_run_modal_op, analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
+    analysis_results_compare_op, analysis_results_op, analysis_run_acoustic_op,
+    analysis_run_electromagnetic_op, analysis_run_fsi_op, analysis_run_linear_static_op,
+    analysis_run_linear_static_with_options, analysis_run_modal_op,
+    analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
     analysis_run_nonlinear_with_options_op, analysis_run_study_op, analysis_run_transient_op,
     analysis_run_transient_with_options_op, analysis_trends_op, analysis_validate,
     analysis_validate_study_op, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
@@ -699,6 +700,53 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
     assert_eq!(invalid.error_code, "ANALYSIS_RUN_MODAL_INVALID_OPTIONS");
     assert_eq!(invalid.operation, "analysis.run_modal");
     assert_eq!(invalid.op_version, "analysis.run_modal/v1");
+}
+
+#[test]
+fn analysis_run_acoustic_contract_is_v1_and_typed() {
+    let geometry = geometry_load_op(
+        "/part.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some("trace-contract-acoustic-1".to_string()), None),
+    )
+    .expect("geometry load should succeed");
+
+    let acoustic_model = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_acoustic_model".to_string(),
+            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            prep_context: None,
+        },
+        OperationContext::new(Some("trace-contract-acoustic-2".to_string()), None),
+    )
+    .expect("acoustic model should be created");
+
+    let envelope = analysis_run_acoustic_op(
+        &acoustic_model.data,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-acoustic-3".to_string()), None),
+    )
+    .expect("acoustic run should produce envelope");
+    assert_eq!(envelope.operation, "analysis.run_acoustic");
+    assert_eq!(envelope.op_version, "analysis.run_acoustic/v1");
+    assert!(envelope.data.modal_results.is_some());
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_ACOUSTIC_PLACEHOLDER"));
+
+    let invalid = analysis_run_acoustic_op(
+        &fixture_model(FixtureId::CantileverLinearStatic),
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-acoustic-4".to_string()), None),
+    )
+    .expect_err("acoustic run should reject models without modal step");
+    assert_eq!(invalid.operation, "analysis.run_acoustic");
+    assert_eq!(invalid.op_version, "analysis.run_acoustic/v1");
+    assert_eq!(invalid.error_code, "ANALYSIS_RUN_ACOUSTIC_INVALID_MODEL");
 }
 
 #[test]

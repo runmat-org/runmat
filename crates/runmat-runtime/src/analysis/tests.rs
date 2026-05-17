@@ -1352,6 +1352,60 @@ fn analysis_trends_summarizes_recent_nonlinear_runs() {
 }
 
 #[test]
+fn analysis_trends_classifies_acoustic_runs_separately() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+
+    let geometry = sample_geometry_asset();
+    let acoustic_model = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "acoustic_trend_model".to_string(),
+            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            prep_context: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("acoustic model should be created");
+    for _ in 0..3 {
+        let _ = analysis_run_acoustic_op(
+            &acoustic_model.data,
+            ComputeBackend::Cpu,
+            OperationContext::new(None, None),
+        )
+        .expect("acoustic run should persist for trends");
+    }
+
+    let trends = analysis_trends_op(
+        AnalysisTrendsQuery { window_size: 2 },
+        OperationContext::new(None, None),
+    )
+    .expect("trends should succeed");
+
+    let acoustic = trends
+        .data
+        .summaries
+        .iter()
+        .find(|summary| summary.run_kind == AnalysisRunKind::Acoustic)
+        .expect("acoustic trend summary should exist");
+    assert_eq!(acoustic.sample_count, 2);
+    assert!(acoustic.median_solve_ms.is_some());
+    assert!(acoustic.p95_solve_ms.is_some());
+
+    let modal = trends
+        .data
+        .summaries
+        .iter()
+        .find(|summary| summary.run_kind == AnalysisRunKind::Modal);
+    assert!(
+        modal.is_none(),
+        "acoustic runs should not classify as modal"
+    );
+
+    storage::reset_artifact_store_for_tests();
+}
+
+#[test]
 fn analysis_trends_classifies_cfd_runs_separately() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
@@ -1903,6 +1957,22 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
         OperationContext::new(None, None),
     )
     .expect("fsi run should succeed");
+    let acoustic_model = analysis_create_model_op(
+        &sample_geometry_asset(),
+        AnalysisCreateModelIntentSpec {
+            model_id: "acoustic_op_version_model".to_string(),
+            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            prep_context: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("acoustic model should be created");
+    let acoustic = analysis_run_acoustic_op(
+        &acoustic_model.data,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("acoustic run should succeed");
 
     let read_op_version = |run_id: &str| -> String {
         let path = root.join("runs").join(format!("{run_id}.json"));
@@ -1919,6 +1989,10 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
     assert_eq!(read_op_version(&cfd.data.run_id), "analysis.run_cfd/v1");
     assert_eq!(read_op_version(&cht.data.run_id), "analysis.run_cht/v1");
     assert_eq!(read_op_version(&fsi.data.run_id), "analysis.run_fsi/v1");
+    assert_eq!(
+        read_op_version(&acoustic.data.run_id),
+        "analysis.run_acoustic/v1"
+    );
 
     storage::reset_artifact_store_for_tests();
     let _ = fs::remove_dir_all(&root);
@@ -2245,6 +2319,22 @@ fn analysis_run_modal_rejects_models_without_modal_step() {
     assert_eq!(err.operation, "analysis.run_modal");
     assert_eq!(err.op_version, "analysis.run_modal/v1");
     assert_eq!(err.error_code, "ANALYSIS_RUN_MODAL_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_acoustic_rejects_models_without_modal_step() {
+    let _guard = analysis_test_guard();
+    let model = sample_model();
+    let err = analysis_run_acoustic_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("acoustic run should fail for missing modal step");
+
+    assert_eq!(err.operation, "analysis.run_acoustic");
+    assert_eq!(err.op_version, "analysis.run_acoustic/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_ACOUSTIC_INVALID_MODEL");
 }
 
 #[test]
@@ -4078,6 +4168,49 @@ fn analysis_run_modal_returns_native_modal_result() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_MODAL_CONVERGENCE"));
+}
+
+#[test]
+fn analysis_run_acoustic_returns_modal_payload_and_acoustic_diagnostics() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let acoustic_model = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "acoustic_model_run".to_string(),
+            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            prep_context: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("acoustic model should be created");
+
+    let envelope = analysis_run_acoustic_op(
+        &acoustic_model.data,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("acoustic run should produce modal payload");
+
+    assert_eq!(envelope.operation, "analysis.run_acoustic");
+    assert_eq!(envelope.op_version, "analysis.run_acoustic/v1");
+    assert_eq!(
+        envelope.data.run.solver_method,
+        "matrix_free_subspace_iteration"
+    );
+    let modal = envelope
+        .data
+        .modal_results
+        .as_ref()
+        .expect("acoustic payload should be modal-shaped");
+    assert!(!modal.eigenvalues_hz.is_empty());
+    assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_ACOUSTIC_PLACEHOLDER"));
 }
 
 #[test]

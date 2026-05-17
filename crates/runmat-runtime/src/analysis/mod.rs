@@ -51,22 +51,22 @@ mod promotion;
 pub mod storage;
 
 pub use contracts::{
-    AnalysisCfdRunOptions, AnalysisChtRunOptions, AnalysisCreateModelIntentSpec,
-    AnalysisCreateModelPrepContext, AnalysisCreateModelProfile, AnalysisElectromagneticRunOptions,
-    AnalysisFsiRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
-    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisResultsData,
-    AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind, AnalysisRunOptions,
-    AnalysisRunPrepContext, AnalysisRunResult, AnalysisStudyPlanData, AnalysisStudyRunData,
-    AnalysisStudySpec, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
-    AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
-    ElectroThermalCouplingOptions, ElectroTimeProfilePoint, ElectromagneticResultsData,
-    ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
-    NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
-    PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
-    RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode, ThermoFieldSource,
-    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
-    TransientIntegrationMethod, TransientResultsData,
+    AnalysisAcousticRunOptions, AnalysisCfdRunOptions, AnalysisChtRunOptions,
+    AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
+    AnalysisElectromagneticRunOptions, AnalysisFsiRunOptions, AnalysisModalRunOptions,
+    AnalysisNonlinearRunOptions, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
+    AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind,
+    AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult, AnalysisStudyPlanData,
+    AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudyValidateResult,
+    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
+    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
+    ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
+    ElectromagneticResultsData, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
+    NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode,
+    PreconditionerMode, PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason,
+    QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode,
+    ThermoFieldSource, ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta,
+    ThermoTimeProfilePoint, TransientIntegrationMethod, TransientResultsData,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -83,6 +83,8 @@ const ANALYSIS_RUN_OPERATION: &str = "analysis.run_linear_static";
 const ANALYSIS_RUN_OP_VERSION: &str = "analysis.run_linear_static/v1";
 const ANALYSIS_RUN_MODAL_OPERATION: &str = "analysis.run_modal";
 const ANALYSIS_RUN_MODAL_OP_VERSION: &str = "analysis.run_modal/v1";
+const ANALYSIS_RUN_ACOUSTIC_OPERATION: &str = "analysis.run_acoustic";
+const ANALYSIS_RUN_ACOUSTIC_OP_VERSION: &str = "analysis.run_acoustic/v1";
 const ANALYSIS_RUN_TRANSIENT_OPERATION: &str = "analysis.run_transient";
 const ANALYSIS_RUN_TRANSIENT_OP_VERSION: &str = "analysis.run_transient/v1";
 const ANALYSIS_RUN_THERMAL_OPERATION: &str = "analysis.run_thermal";
@@ -845,6 +847,9 @@ pub fn analysis_run_study_op(
         AnalysisRunKind::Modal => {
             analysis_run_modal_op(&created.data, spec.backend, context.clone())
         }
+        AnalysisRunKind::Acoustic => {
+            analysis_run_acoustic_op(&created.data, spec.backend, context.clone())
+        }
         AnalysisRunKind::Thermal => {
             analysis_run_thermal_op(&created.data, spec.backend, context.clone())
         }
@@ -947,6 +952,19 @@ pub fn analysis_run_modal_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     analysis_run_modal_with_options_op(model, backend, AnalysisModalRunOptions::default(), context)
+}
+
+pub fn analysis_run_acoustic_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    analysis_run_acoustic_with_options_op(
+        model,
+        backend,
+        AnalysisAcousticRunOptions::default(),
+        context,
+    )
 }
 
 pub fn analysis_run_modal_with_options_op(
@@ -1296,6 +1314,329 @@ pub fn analysis_run_modal_with_options_op(
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_MODAL_OPERATION,
         ANALYSIS_RUN_MODAL_OP_VERSION,
+        &context,
+        result,
+    ))
+}
+
+pub fn analysis_run_acoustic_with_options_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: AnalysisAcousticRunOptions,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let has_modal_step = model
+        .steps
+        .iter()
+        .any(|step| step.kind == AnalysisStepKind::Modal);
+    if !has_modal_step {
+        return Err(operation_error(
+            ANALYSIS_RUN_ACOUSTIC_OPERATION,
+            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_ACOUSTIC_INVALID_MODEL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis model must include at least one modal step for analysis.run_acoustic",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        ));
+    }
+
+    if options.mode_count == 0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_ACOUSTIC_OPERATION,
+            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_ACOUSTIC_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_acoustic options require mode_count greater than zero",
+            BTreeMap::from([("mode_count".to_string(), options.mode_count.to_string())]),
+        ));
+    }
+
+    let thermo_options = resolve_thermo_coupling_options(
+        model,
+        model_thermo_coupling_options(model),
+        ANALYSIS_RUN_ACOUSTIC_OPERATION,
+        ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+        &context,
+    )?;
+    if let Some(thermo_options) = thermo_options.as_ref() {
+        if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
+            return Err(operation_error(
+                ANALYSIS_RUN_ACOUSTIC_OPERATION,
+                ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_ACOUSTIC_INVALID_OPTIONS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                detail,
+                metadata,
+            ));
+        }
+    }
+    let electro_options = model_electro_coupling_options(model);
+    if let Some(electro_options) = electro_options.as_ref() {
+        if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
+            return Err(operation_error(
+                ANALYSIS_RUN_ACOUSTIC_OPERATION,
+                ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_ACOUSTIC_INVALID_OPTIONS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                detail,
+                metadata,
+            ));
+        }
+    }
+
+    let prep_context = resolve_run_prep_context(
+        model,
+        options.prep_artifact_id.as_deref(),
+        options.prep_context,
+        ANALYSIS_RUN_ACOUSTIC_OPERATION,
+        ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+        &context,
+    )?;
+
+    let modal_run = run_modal_with_options(
+        model,
+        backend,
+        ModalSolveOptions {
+            mode_count: options.mode_count,
+            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
+            electro_thermal_context: to_fea_electro_thermal_context(electro_options),
+        },
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_ACOUSTIC_OPERATION,
+            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "SOLVER_MODEL_INVALID",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            err.to_string(),
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        )
+    })?;
+
+    let mut run = modal_run.run;
+    run.diagnostics
+        .push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+            code: "FEA_ACOUSTIC_PLACEHOLDER".to_string(),
+            severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
+            message: format!(
+                "mode_count={} residual_warn_threshold={}",
+                options.mode_count, options.residual_warn_threshold
+            ),
+        });
+    let mut fallback_events = Vec::new();
+    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
+    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
+        fallback_events.push(
+            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
+        );
+    }
+    let solver_convergence = if run.diagnostics.iter().any(|item| {
+        item.code == "FEA_MODAL_CONVERGENCE"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    }) {
+        QualityGate::Pass
+    } else {
+        QualityGate::Warn
+    };
+    let result_quality = if modal_run.eigenvalues_hz.is_empty() || modal_run.mode_shapes.is_empty()
+    {
+        QualityGate::Fail
+    } else if modal_run
+        .residual_norms
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max)
+        > options.residual_warn_threshold
+    {
+        QualityGate::Warn
+    } else {
+        QualityGate::Pass
+    };
+    let modal_orthogonality_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_MODAL_ORTHOGONALITY"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
+    let modal_separation_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_MODAL_SEPARATION"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
+
+    let mut quality_reasons = Vec::new();
+    if solver_convergence == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverNotConverged,
+            detail: "acoustic solver convergence gate is warning".to_string(),
+        });
+    }
+    if result_quality == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ModalResidualExceeded,
+            detail: format!(
+                "acoustic residual exceeds threshold {}",
+                options.residual_warn_threshold
+            ),
+        });
+    }
+    if modal_orthogonality_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ModalOrthogonalityExceeded,
+            detail: "acoustic M-orthogonality off-diagonal threshold exceeded".to_string(),
+        });
+    }
+    if modal_separation_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ModalSeparationLow,
+            detail: "acoustic frequency separation threshold is low".to_string(),
+        });
+    }
+    if fallback_events
+        .iter()
+        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+    {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverBackendFallback,
+            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+        });
+    }
+    if fallback_events.iter().any(|event| {
+        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
+    }) {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::FieldPromotionFallback,
+            detail: "field promotion fell back to host-backed values".to_string(),
+        });
+    }
+
+    let frequency_basis = if run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_MODAL_PLACEHOLDER")
+    {
+        ModalFrequencyBasis::PlaceholderLinearStatic
+    } else {
+        ModalFrequencyBasis::NativeEigenSolve
+    };
+
+    let publishable = match options.quality_policy {
+        QualityPolicy::Strict => {
+            solver_convergence == QualityGate::Pass
+                && result_quality == QualityGate::Pass
+                && quality_reasons.is_empty()
+        }
+        QualityPolicy::Balanced => {
+            solver_convergence == QualityGate::Pass
+                && result_quality == QualityGate::Pass
+                && !quality_reasons.iter().any(|r| {
+                    matches!(
+                        r.code,
+                        QualityReasonCode::ModalOrthogonalityExceeded
+                            | QualityReasonCode::ModalSeparationLow
+                    )
+                })
+        }
+        QualityPolicy::Exploratory => {
+            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
+        }
+    };
+    let run_status = if publishable {
+        RunStatus::Publishable
+    } else if result_quality == QualityGate::Fail {
+        RunStatus::Rejected
+    } else {
+        RunStatus::Degraded
+    };
+    let solver_backend = run.solver_backend.clone();
+    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
+    let solver_host_sync_count = run.solver_host_sync_count;
+    let solver_method = run.solver_method.clone();
+    let selected_preconditioner = run.preconditioner.clone();
+
+    let result = AnalysisRunResult {
+        run_id: storage::next_run_id(),
+        run,
+        modal_results: Some(ModalResultsData {
+            modal_payload_version: "modal_results/v1".to_string(),
+            eigenvalues_hz: modal_run.eigenvalues_hz,
+            mode_shapes: modal_run.mode_shapes,
+            residual_norms: modal_run.residual_norms,
+            mode_units: ModalFrequencyUnits::Hz,
+            frequency_basis,
+        }),
+        thermal_results: None,
+        transient_results: None,
+        nonlinear_results: None,
+        electromagnetic_results: None,
+        model_validity: QualityGate::Pass,
+        solver_convergence,
+        result_quality,
+        run_status,
+        publishable,
+        quality_reasons,
+        provenance: RunProvenance {
+            backend,
+            solver_backend,
+            solver_device_apply_k_ratio,
+            solver_host_sync_count,
+            precision_mode: contracts::format_precision_mode(options.precision_mode),
+            deterministic_mode: options.deterministic_mode,
+            solver_method,
+            preconditioner: selected_preconditioner,
+            quality_policy: contracts::format_quality_policy(options.quality_policy),
+            fallback_events,
+        },
+    };
+
+    storage::persist_run_result(&result).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_ACOUSTIC_OPERATION,
+            ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist analysis run artifact: {err}"),
+            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
+        )
+    })?;
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RUN_ACOUSTIC_OPERATION,
+        ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
         &context,
         result,
     ))
@@ -6341,6 +6682,7 @@ pub fn analysis_trends_op(
     for kind in [
         AnalysisRunKind::LinearStatic,
         AnalysisRunKind::Modal,
+        AnalysisRunKind::Acoustic,
         AnalysisRunKind::Thermal,
         AnalysisRunKind::Transient,
         AnalysisRunKind::Cfd,
@@ -6962,7 +7304,14 @@ pub fn analysis_trends_op(
 }
 
 fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
-    if run.electromagnetic_results.is_some()
+    if run
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_ACOUSTIC_PLACEHOLDER")
+    {
+        AnalysisRunKind::Acoustic
+    } else if run.electromagnetic_results.is_some()
         || run
             .run
             .diagnostics
@@ -7008,6 +7357,7 @@ fn run_operation_version_for_kind(kind: AnalysisRunKind) -> &'static str {
     match kind {
         AnalysisRunKind::LinearStatic => ANALYSIS_RUN_OP_VERSION,
         AnalysisRunKind::Modal => ANALYSIS_RUN_MODAL_OP_VERSION,
+        AnalysisRunKind::Acoustic => ANALYSIS_RUN_ACOUSTIC_OP_VERSION,
         AnalysisRunKind::Thermal => ANALYSIS_RUN_THERMAL_OP_VERSION,
         AnalysisRunKind::Transient => ANALYSIS_RUN_TRANSIENT_OP_VERSION,
         AnalysisRunKind::Cfd => ANALYSIS_RUN_CFD_OP_VERSION,
@@ -7049,6 +7399,9 @@ fn profile_supports_run_kind(
             matches!(profile, AnalysisCreateModelProfile::LinearStaticStructural)
         }
         AnalysisRunKind::Modal => matches!(profile, AnalysisCreateModelProfile::ModalStructural),
+        AnalysisRunKind::Acoustic => {
+            matches!(profile, AnalysisCreateModelProfile::AcousticHarmonic)
+        }
         AnalysisRunKind::Thermal => {
             matches!(
                 profile,
