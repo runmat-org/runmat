@@ -165,6 +165,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. Surfaced these signals as first-class runtime contract outputs in `analysis.results` summary and `analysis.trends` breach-rate tracking with policy thresholds and typed quality reasons.
 3. Added two EM governance reference fixtures (`boundary_penalty_stress`, `multi_region_phased_source`) and extended conformance/baseline drift gating to cover the new metrics.
 
+## Maxwell EM Bring-Up Status (Phase 15)
+
+1. Added explicit EM source phasing controls to model load schema (`phase_rad`, `amplitude_scale`) for `current_density` and `coil_current`.
+2. Upgraded harmonic EM solve to consume true complex RHS source vectors (`rhs_real`, `rhs_imag`) instead of synthetic imag forcing, and compute overlap/interference posture from complex source vectors.
+3. Applied boundary-penalty terms directly into assembled operator diagonal coefficients and kept penalty contribution as a measured first-class readiness metric.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

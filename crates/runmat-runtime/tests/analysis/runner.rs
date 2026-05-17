@@ -926,6 +926,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_region_homogeneous".to_string(),
                         kind: runmat_analysis_core::LoadKind::CoilCurrent {
                             current_a: profile.applied_current_a,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -935,6 +937,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             jx: 1.0,
                             jy: 0.0,
                             jz: 0.0,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -944,6 +948,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             jx: 0.0,
                             jy: 1.0,
                             jz: 0.0,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                 ];
@@ -977,6 +983,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_region_0".to_string(),
                         kind: runmat_analysis_core::LoadKind::CoilCurrent {
                             current_a: profile.applied_current_a * 0.85,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -986,6 +994,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             jx: 0.8,
                             jy: 0.3,
                             jz: 0.1,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1028,6 +1038,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_sparse_region_0".to_string(),
                         kind: runmat_analysis_core::LoadKind::CoilCurrent {
                             current_a: profile.applied_current_a * 0.4,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1091,6 +1103,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_fallback_region_0".to_string(),
                         kind: runmat_analysis_core::LoadKind::CoilCurrent {
                             current_a: profile.applied_current_a * 0.25,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1151,6 +1165,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_overlap_region_1".to_string(),
                         kind: runmat_analysis_core::LoadKind::CoilCurrent {
                             current_a: profile.applied_current_a,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1158,6 +1174,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_overlap_region_1".to_string(),
                         kind: runmat_analysis_core::LoadKind::CoilCurrent {
                             current_a: -profile.applied_current_a * 0.92,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1167,6 +1185,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             jx: 1.0,
                             jy: 0.4,
                             jz: 0.0,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1176,6 +1196,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             jx: -0.8,
                             jy: -0.35,
                             jz: 0.0,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                 ];
@@ -1219,6 +1241,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_boundary_region_24".to_string(),
                         kind: runmat_analysis_core::LoadKind::CoilCurrent {
                             current_a: profile.applied_current_a * 0.9,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1228,6 +1252,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             jx: 0.9,
                             jy: -0.5,
                             jz: 0.2,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                 ];
@@ -1258,6 +1284,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_penalty_region_10".to_string(),
                         kind: runmat_analysis_core::LoadKind::CoilCurrent {
                             current_a: profile.applied_current_a,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1265,6 +1293,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_penalty_region_13".to_string(),
                         kind: runmat_analysis_core::LoadKind::CoilCurrent {
                             current_a: profile.applied_current_a * -0.65,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1274,6 +1304,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             jx: 1.2,
                             jy: -0.7,
                             jz: 0.15,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                 ];
@@ -1302,6 +1334,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_phase_region_1".to_string(),
                         kind: runmat_analysis_core::LoadKind::CoilCurrent {
                             current_a: profile.applied_current_a,
+                            phase_rad: 0.0,
+                            amplitude_scale: 1.0,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1309,6 +1343,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_phase_region_3".to_string(),
                         kind: runmat_analysis_core::LoadKind::CoilCurrent {
                             current_a: -profile.applied_current_a * 0.8,
+                            phase_rad: std::f64::consts::PI * 0.85,
+                            amplitude_scale: 0.9,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1316,6 +1352,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_phase_region_7".to_string(),
                         kind: runmat_analysis_core::LoadKind::CoilCurrent {
                             current_a: profile.applied_current_a * 0.55,
+                            phase_rad: std::f64::consts::FRAC_PI_2,
+                            amplitude_scale: 0.8,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1325,6 +1363,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             jx: 0.9,
                             jy: -0.45,
                             jz: 0.2,
+                            phase_rad: std::f64::consts::PI / 3.0,
+                            amplitude_scale: 0.9,
                         },
                     },
                     runmat_analysis_core::LoadCase {
@@ -1334,6 +1374,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             jx: -0.85,
                             jy: 0.35,
                             jz: -0.1,
+                            phase_rad: -std::f64::consts::FRAC_PI_2,
+                            amplitude_scale: 0.85,
                         },
                     },
                 ];

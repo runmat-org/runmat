@@ -296,6 +296,11 @@ Not required for this milestone:
 - Extended EM reference-fixture governance family with:
   - `electromagnetic_reference_boundary_penalty_stress_gpu_provider`,
   - `electromagnetic_reference_multi_region_phased_source_gpu_provider`.
+- Added explicit EM source phasing inputs in analysis-core load schema:
+  - `LoadKind::CurrentDensity { phase_rad, amplitude_scale }`,
+  - `LoadKind::CoilCurrent { phase_rad, amplitude_scale }`.
+- Switched harmonic EM solve RHS handling to true complex-source forcing (`rhs_real` + `rhs_imag`) and computed source overlap/interference readiness from complex source vectors actually used by the solver.
+- Moved boundary penalty from diagnostic-only posture to operator-applied behavior by injecting boundary penalty terms into assembled stiffness diagonals and measuring contribution from actual assembled coefficients.
 
 ## Closeout Checklist for This Track
 

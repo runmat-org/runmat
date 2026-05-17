@@ -107,44 +107,66 @@ pub fn run_electromagnetic_with_options(
     let mut electromagnetic_source_strength = 0.0_f64;
     let mut mapped_source_count = 0usize;
     let mut aligned_source_count = 0usize;
-    let mut per_source_profiles = Vec::new();
+    let mut per_source_real_profiles = Vec::new();
+    let mut per_source_imag_profiles = Vec::new();
     let mut localized_source_abs_total = 0.0_f64;
     let h = 1.0 / (node_count - 1) as f64;
     for load in &model.loads {
         let source_inputs = match load.kind {
-            LoadKind::CurrentDensity { jx, jy, jz } => {
+            LoadKind::CurrentDensity {
+                jx,
+                jy,
+                jz,
+                phase_rad,
+                amplitude_scale,
+            } => {
                 let magnitude = (jx * jx + jy * jy + jz * jz).sqrt().clamp(0.0, 2.5);
                 if magnitude <= 1.0e-12 {
                     None
                 } else {
-                    let signed_sum = jx + jy + jz;
-                    let polarity = if signed_sum.abs() <= 1.0e-12 {
-                        1.0
-                    } else {
-                        signed_sum.signum()
-                    };
                     let directional_mix =
                         (jx.abs() + 2.0 * jy.abs() + 3.0 * jz.abs()) / magnitude.max(1.0e-12);
-                    Some((magnitude, polarity, 0.05 * directional_mix))
+                    Some((
+                        magnitude,
+                        phase_rad + 0.05 * directional_mix,
+                        amplitude_scale.abs().clamp(0.05, 4.0),
+                        false,
+                    ))
                 }
             }
-            LoadKind::CoilCurrent { current_a } => {
+            LoadKind::CoilCurrent {
+                current_a,
+                phase_rad,
+                amplitude_scale,
+            } => {
                 let magnitude =
                     (current_a.abs() / domain.applied_current_a.max(1.0e-9)).clamp(0.0, 2.5);
                 if magnitude <= 1.0e-12 {
                     None
                 } else {
-                    Some((magnitude, current_a.signum(), 0.0))
+                    let signed_phase = if current_a >= 0.0 {
+                        phase_rad
+                    } else {
+                        phase_rad + std::f64::consts::PI
+                    };
+                    Some((
+                        magnitude,
+                        signed_phase,
+                        amplitude_scale.abs().clamp(0.05, 4.0),
+                        true,
+                    ))
                 }
             }
             _ => None,
         };
-        let Some((source_scale, source_polarity, phase_shift)) = source_inputs else {
+        let Some((source_scale, source_phase_rad, amplitude_scale, coil_source)) = source_inputs
+        else {
             continue;
         };
         electromagnetic_source_count += 1;
-        electromagnetic_source_strength += source_scale;
-        let mut source_profile = vec![0.0_f64; node_count];
+        electromagnetic_source_strength += source_scale * amplitude_scale;
+        let mut source_profile_real = vec![0.0_f64; node_count];
+        let mut source_profile_imag = vec![0.0_f64; node_count];
 
         if let Some(region_index) = region_index_by_id.get(load.region_id.as_str()).copied() {
             mapped_source_count += 1;
@@ -156,44 +178,44 @@ pub fn run_electromagnetic_with_options(
                 if region.covered && !region.used_fallback {
                     aligned_source_count += 1;
                 }
-                let gain = regional_source_gain(
-                    &region,
-                    &material_stats,
-                    matches!(load.kind, LoadKind::CoilCurrent { .. }),
-                );
+                let gain = regional_source_gain(&region, &material_stats, coil_source);
                 let (start, end) = region_span_for_index(region_index, region_count, node_count);
-                for (local_idx, value) in source_profile[start..end].iter_mut().enumerate() {
+                for local_idx in 0..(end - start) {
                     let local_x = if end - start <= 1 {
                         0.5
                     } else {
                         local_idx as f64 / (end - start - 1) as f64
                     };
-                    let mode = if matches!(load.kind, LoadKind::CoilCurrent { .. }) {
-                        (std::f64::consts::PI * local_x).sin()
-                    } else {
-                        (std::f64::consts::PI * (local_x + phase_shift)).sin()
-                    };
-                    *value +=
-                        source_polarity * source_scale * domain.applied_current_a * gain * mode;
+                    let mode = (std::f64::consts::PI * local_x).sin();
+                    let magnitude =
+                        source_scale * amplitude_scale * domain.applied_current_a * gain * mode;
+                    let node_index = start + local_idx;
+                    source_profile_real[node_index] += magnitude * source_phase_rad.cos();
+                    source_profile_imag[node_index] += magnitude * source_phase_rad.sin();
                 }
             }
         } else {
-            for (i, value) in source_profile.iter_mut().enumerate() {
+            for i in 0..node_count {
                 let x = i as f64 * h;
-                *value += source_polarity
-                    * source_scale
-                    * domain.applied_current_a
-                    * 0.35
-                    * (std::f64::consts::PI * (x + phase_shift)).sin();
+                let mode = (std::f64::consts::PI * x).sin();
+                let magnitude =
+                    source_scale * amplitude_scale * domain.applied_current_a * 0.35 * mode;
+                source_profile_real[i] += magnitude * source_phase_rad.cos();
+                source_profile_imag[i] += magnitude * source_phase_rad.sin();
             }
         }
-        let source_abs_sum = source_profile.iter().map(|value| value.abs()).sum::<f64>();
+        let source_abs_sum = source_profile_real
+            .iter()
+            .zip(source_profile_imag.iter())
+            .map(|(real, imag)| (real * real + imag * imag).sqrt())
+            .sum::<f64>();
         if region_index_by_id.contains_key(load.region_id.as_str()) {
             localized_source_abs_total += source_abs_sum;
         } else {
             // Keep unmatched-region source deposition observable via interference/coverage metrics.
         }
-        per_source_profiles.push(source_profile);
+        per_source_real_profiles.push(source_profile_real);
+        per_source_imag_profiles.push(source_profile_imag);
     }
     let source_realization_ratio = electromagnetic_source_count as f64 / total_load_count as f64;
     let source_region_coverage_ratio = if electromagnetic_source_count == 0 {
@@ -206,32 +228,45 @@ pub fn run_electromagnetic_with_options(
     } else {
         aligned_source_count as f64 / mapped_source_count as f64
     };
-    let source_distribution = if per_source_profiles.is_empty() {
-        let mut synthetic = vec![0.0_f64; node_count];
-        for (i, value) in synthetic.iter_mut().enumerate() {
+    let (source_distribution_real, source_distribution_imag) = if per_source_real_profiles
+        .is_empty()
+    {
+        let mut synthetic_real = vec![0.0_f64; node_count];
+        let mut synthetic_imag = vec![0.0_f64; node_count];
+        for (i, value) in synthetic_real.iter_mut().enumerate() {
             let x = i as f64 * h;
             *value = domain.applied_current_a * 0.25 * (std::f64::consts::PI * x).sin();
+            synthetic_imag[i] = domain.applied_current_a * 0.10 * (std::f64::consts::PI * x).sin();
         }
-        per_source_profiles.push(synthetic.clone());
-        synthetic
+        per_source_real_profiles.push(synthetic_real.clone());
+        per_source_imag_profiles.push(synthetic_imag.clone());
+        (synthetic_real, synthetic_imag)
     } else {
-        let mut combined = vec![0.0_f64; node_count];
-        for profile in &per_source_profiles {
-            for (index, value) in profile.iter().enumerate() {
-                combined[index] += value;
+        let mut combined_real = vec![0.0_f64; node_count];
+        let mut combined_imag = vec![0.0_f64; node_count];
+        for (real_profile, imag_profile) in per_source_real_profiles
+            .iter()
+            .zip(per_source_imag_profiles.iter())
+        {
+            for index in 0..node_count {
+                combined_real[index] += real_profile[index];
+                combined_imag[index] += imag_profile[index];
             }
         }
-        combined
+        (combined_real, combined_imag)
     };
-    let source_distribution_sum = per_source_profiles
+    let source_distribution_sum = per_source_real_profiles
         .iter()
-        .flat_map(|profile| profile.iter())
-        .map(|value| value.abs())
+        .zip(per_source_imag_profiles.iter())
+        .flat_map(|(real_profile, imag_profile)| real_profile.iter().zip(imag_profile.iter()))
+        .map(|(real, imag)| (real * real + imag * imag).sqrt())
         .sum::<f64>()
         .max(1.0e-9);
     let source_localization_ratio = localized_source_abs_total / source_distribution_sum;
-    let source_overlap_ratio = source_overlap_ratio(&per_source_profiles);
-    let source_interference_index = source_interference_index(&per_source_profiles);
+    let source_overlap_ratio =
+        source_overlap_ratio(&per_source_real_profiles, &per_source_imag_profiles);
+    let source_interference_index =
+        source_interference_index(&per_source_real_profiles, &per_source_imag_profiles);
     let source_drive_scale = if electromagnetic_source_count == 0 {
         0.25
     } else {
@@ -305,6 +340,38 @@ pub fn run_electromagnetic_with_options(
         conductivity_coupling_terms[i] = (omega * node_sigma[i].max(1.0e-9)).max(1.0e-9);
         stiffness_diag[i] = left + right + (omega * omega * effective_permittivity_i).max(1.0e-9);
     }
+    let mut boundary_penalty_diag = vec![0.0_f64; node_count];
+    let penalty_base = stiffness_diag.iter().copied().sum::<f64>() / node_count as f64;
+    let ground_penalty_scale = (0.30 + 1.40 * boundary_anchor_ratio).clamp(0.20, 1.80);
+    let insulation_penalty_scale = (0.12 + 0.60 * insulation_ratio).clamp(0.08, 1.20);
+    let mut add_boundary_penalty = |node_index: usize, scale: f64| {
+        if node_index < node_count {
+            boundary_penalty_diag[node_index] += penalty_base * scale;
+        }
+    };
+    for region_index in &ground_region_indices {
+        let (start, end) = region_span_for_index(*region_index, region_count, node_count);
+        if start < end {
+            add_boundary_penalty(start, ground_penalty_scale);
+            add_boundary_penalty(start.saturating_add(1), 0.5 * ground_penalty_scale);
+            let tail = end.saturating_sub(1);
+            add_boundary_penalty(tail, ground_penalty_scale);
+            add_boundary_penalty(tail.saturating_sub(1), 0.5 * ground_penalty_scale);
+        }
+    }
+    for region_index in &insulation_region_indices {
+        let (start, end) = region_span_for_index(*region_index, region_count, node_count);
+        if start < end {
+            add_boundary_penalty(start, insulation_penalty_scale);
+            add_boundary_penalty(start.saturating_add(1), 0.5 * insulation_penalty_scale);
+            let tail = end.saturating_sub(1);
+            add_boundary_penalty(tail, insulation_penalty_scale);
+            add_boundary_penalty(tail.saturating_sub(1), 0.5 * insulation_penalty_scale);
+        }
+    }
+    for (diag, penalty) in stiffness_diag.iter_mut().zip(boundary_penalty_diag.iter()) {
+        *diag += *penalty;
+    }
 
     let mut constrained = vec![false; node_count];
     let mut expected_ground_anchor_nodes = 0usize;
@@ -360,8 +427,9 @@ pub fn run_electromagnetic_with_options(
     } else {
         (actual_ground_anchor_nodes as f64 / expected_ground_anchor_nodes as f64).clamp(0.0, 1.0)
     };
-    let mut rhs = vec![0.0_f64; node_count];
-    for (i, rhs_i) in rhs.iter_mut().enumerate() {
+    let mut rhs_real = vec![0.0_f64; node_count];
+    let mut rhs_imag = vec![0.0_f64; node_count];
+    for i in 0..node_count {
         if constrained[i] {
             continue;
         }
@@ -369,7 +437,9 @@ pub fn run_electromagnetic_with_options(
             / material_stats.conductivity_mean.max(1.0e-9))
         .clamp(0.2, 5.0);
         let effective_permittivity_i = epsilon0 * node_eps_r[i].max(1.0e-9);
-        *rhs_i = source_distribution[i] * source_drive_scale * conductivity_scale
+        rhs_real[i] = source_distribution_real[i] * source_drive_scale * conductivity_scale
+            / (1.0 + omega * effective_permittivity_i);
+        rhs_imag[i] = source_distribution_imag[i] * source_drive_scale * conductivity_scale
             / (1.0 + omega * effective_permittivity_i);
     }
 
@@ -382,10 +452,11 @@ pub fn run_electromagnetic_with_options(
         stiffness_upper,
         mass_diag: vec![1.0; node_count],
         damping_diag: vec![0.0; node_count],
-        rhs,
+        rhs: rhs_real.clone(),
     };
 
-    let base_rhs = summary.operator.rhs.clone();
+    let base_rhs_real = rhs_real;
+    let base_rhs_imag = rhs_imag;
     let backend_kind = if backend == ComputeBackend::Gpu {
         LinearAlgebraBackendKind::RuntimeTensor
     } else {
@@ -396,17 +467,13 @@ pub fn run_electromagnetic_with_options(
     let harmonic_solve = solve_harmonic_block_system(
         &summary.operator,
         &conductivity_coupling_terms,
-        &base_rhs,
+        &base_rhs_real,
+        &base_rhs_imag,
         harmonic_max_iters,
         harmonic_tol,
     );
     let vector_potential_real = harmonic_solve.real_solution.clone();
     let vector_potential_imag = harmonic_solve.imag_solution.clone();
-    let rhs_imag = conductivity_coupling_terms
-        .iter()
-        .zip(vector_potential_real.iter())
-        .map(|(c, real)| -c * real)
-        .collect::<Vec<_>>();
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_EM_HARMONIC_COUPLING".to_string(),
         severity: if harmonic_solve.converged {
@@ -462,24 +529,24 @@ pub fn run_electromagnetic_with_options(
         }
         let conductivity_imag = conductivity_coupling_terms[i] * vector_potential_imag[i];
         let conductivity_real = conductivity_coupling_terms[i] * vector_potential_real[i];
-        let residual_real = real_applied[i] - conductivity_imag - base_rhs[i];
-        let residual_imag = imag_applied[i] + conductivity_real - rhs_imag[i];
+        let residual_real = real_applied[i] - conductivity_imag - base_rhs_real[i];
+        let residual_imag = imag_applied[i] + conductivity_real - base_rhs_imag[i];
         real_residual_sq_sum += residual_real * residual_real;
         imag_residual_sq_sum += residual_imag * residual_imag;
         coupled_residual_sq_sum += residual_real * residual_real + residual_imag * residual_imag;
         real_equation_scale_sq_sum += real_applied[i] * real_applied[i]
             + conductivity_imag * conductivity_imag
-            + base_rhs[i] * base_rhs[i];
+            + base_rhs_real[i] * base_rhs_real[i];
         imag_equation_scale_sq_sum += imag_applied[i] * imag_applied[i]
             + conductivity_real * conductivity_real
-            + rhs_imag[i] * rhs_imag[i];
+            + base_rhs_imag[i] * base_rhs_imag[i];
         equation_scale_sq_sum += real_applied[i] * real_applied[i]
             + conductivity_imag * conductivity_imag
-            + base_rhs[i] * base_rhs[i]
+            + base_rhs_real[i] * base_rhs_real[i]
             + imag_applied[i] * imag_applied[i]
             + conductivity_real * conductivity_real
-            + rhs_imag[i] * rhs_imag[i];
-        rhs_sq_sum += base_rhs[i] * base_rhs[i];
+            + base_rhs_imag[i] * base_rhs_imag[i];
+        rhs_sq_sum += base_rhs_real[i] * base_rhs_real[i];
     }
     let max_residual_norm =
         coupled_residual_sq_sum.sqrt() / equation_scale_sq_sum.sqrt().max(1.0e-9);
@@ -487,7 +554,7 @@ pub fn run_electromagnetic_with_options(
         real_residual_sq_sum.sqrt() / real_equation_scale_sq_sum.sqrt().max(1.0e-9);
     let imag_residual_norm =
         imag_residual_sq_sum.sqrt() / imag_equation_scale_sq_sum.sqrt().max(1.0e-9);
-    let rhs_imag_norm = rhs_imag
+    let rhs_imag_norm = base_rhs_imag
         .iter()
         .map(|value| value * value)
         .sum::<f64>()
@@ -610,15 +677,21 @@ pub fn run_electromagnetic_with_options(
         )
     };
     let solver_conditioning_proxy = (max_diag / min_diag).max(1.0);
-    let boundary_penalty_conditioning_contribution =
-        ((vector_potential_ground_count as f64 / node_count as f64).clamp(0.0, 1.0)
-            * (solver_conditioning_proxy / (solver_conditioning_proxy + 1.0)))
-            .clamp(0.0, 1.0);
+    let boundary_penalty_conditioning_contribution = boundary_penalty_diag.iter().sum::<f64>()
+        / summary
+            .operator
+            .stiffness_diag
+            .iter()
+            .sum::<f64>()
+            .max(1.0e-9);
     let mut region_source_energy = vec![0.0_f64; region_count];
     let mut region_field_energy = vec![0.0_f64; region_count];
     for i in 0..node_count {
         let region_index = ((i * region_count) / node_count).min(region_count - 1);
-        region_source_energy[region_index] += source_distribution[i].abs();
+        region_source_energy[region_index] += (source_distribution_real[i]
+            * source_distribution_real[i]
+            + source_distribution_imag[i] * source_distribution_imag[i])
+            .sqrt();
         region_field_energy[region_index] += vector_potential[i].abs();
     }
     let source_total = region_source_energy.iter().sum::<f64>().max(1.0e-9);
@@ -980,64 +1053,96 @@ fn regional_source_gain(
     }
 }
 
-fn source_overlap_ratio(per_source_profiles: &[Vec<f64>]) -> f64 {
-    if per_source_profiles.is_empty() {
+fn source_overlap_ratio(
+    per_source_real_profiles: &[Vec<f64>],
+    per_source_imag_profiles: &[Vec<f64>],
+) -> f64 {
+    if per_source_real_profiles.is_empty() || per_source_imag_profiles.is_empty() {
         return 0.0;
     }
-    let node_count = per_source_profiles[0].len();
+    let node_count = per_source_real_profiles[0].len();
     if node_count == 0 {
         return 0.0;
     }
     let mut active_nodes = 0usize;
-    let mut overlap_nodes = 0usize;
+    let mut phase_conflict_nodes = 0usize;
     for node_index in 0..node_count {
-        let mut has_positive = false;
-        let mut has_negative = false;
-        for profile in per_source_profiles {
-            let value = profile[node_index];
-            if value > 1.0e-12 {
-                has_positive = true;
-            } else if value < -1.0e-12 {
-                has_negative = true;
+        let mut contributors = 0usize;
+        let mut sum_real = 0.0_f64;
+        let mut sum_imag = 0.0_f64;
+        let mut sum_mag = 0.0_f64;
+        for (real_profile, imag_profile) in per_source_real_profiles
+            .iter()
+            .zip(per_source_imag_profiles.iter())
+        {
+            let real = real_profile[node_index];
+            let imag = imag_profile[node_index];
+            let magnitude = (real * real + imag * imag).sqrt();
+            if magnitude > 1.0e-12 {
+                contributors += 1;
+                sum_real += real;
+                sum_imag += imag;
+                sum_mag += magnitude;
             }
         }
-        if has_positive || has_negative {
+        if contributors > 0 {
             active_nodes += 1;
-            if has_positive && has_negative {
-                overlap_nodes += 1;
+            let net_mag = (sum_real * sum_real + sum_imag * sum_imag).sqrt();
+            let cancellation = if sum_mag <= 1.0e-12 {
+                0.0
+            } else {
+                (1.0 - net_mag / sum_mag).clamp(0.0, 1.0)
+            };
+            if contributors > 1 && cancellation > 0.15 {
+                phase_conflict_nodes += 1;
             }
         }
     }
     if active_nodes == 0 {
         0.0
     } else {
-        overlap_nodes as f64 / active_nodes as f64
+        phase_conflict_nodes as f64 / active_nodes as f64
     }
 }
 
-fn source_interference_index(per_source_profiles: &[Vec<f64>]) -> f64 {
-    if per_source_profiles.is_empty() {
+fn source_interference_index(
+    per_source_real_profiles: &[Vec<f64>],
+    per_source_imag_profiles: &[Vec<f64>],
+) -> f64 {
+    if per_source_real_profiles.is_empty() || per_source_imag_profiles.is_empty() {
         return 0.0;
     }
-    let node_count = per_source_profiles[0].len();
+    let node_count = per_source_real_profiles[0].len();
     if node_count == 0 {
         return 0.0;
     }
-    let mut total_abs = 0.0_f64;
-    let mut net_abs = 0.0_f64;
+    let mut cancellation_sum = 0.0_f64;
+    let mut active_nodes = 0usize;
     for node_index in 0..node_count {
-        let mut net = 0.0_f64;
-        for profile in per_source_profiles {
-            let value = profile[node_index];
-            total_abs += value.abs();
-            net += value;
+        let mut sum_real = 0.0_f64;
+        let mut sum_imag = 0.0_f64;
+        let mut sum_mag = 0.0_f64;
+        for (real_profile, imag_profile) in per_source_real_profiles
+            .iter()
+            .zip(per_source_imag_profiles.iter())
+        {
+            let real = real_profile[node_index];
+            let imag = imag_profile[node_index];
+            let magnitude = (real * real + imag * imag).sqrt();
+            sum_real += real;
+            sum_imag += imag;
+            sum_mag += magnitude;
         }
-        net_abs += net.abs();
+        if sum_mag > 1.0e-12 {
+            let net_mag = (sum_real * sum_real + sum_imag * sum_imag).sqrt();
+            cancellation_sum += (1.0 - net_mag / sum_mag).clamp(0.0, 1.0);
+            active_nodes += 1;
+        }
     }
-    if total_abs <= 1.0e-12 {
+    if active_nodes == 0 {
         0.0
     } else {
-        (1.0 - (net_abs / total_abs)).clamp(0.0, 1.0)
+        (cancellation_sum / active_nodes as f64).clamp(0.0, 1.0)
     }
 }
 
@@ -1054,6 +1159,7 @@ fn solve_harmonic_block_system(
     operator: &OperatorSystem,
     coupling_terms: &[f64],
     rhs_real: &[f64],
+    rhs_imag: &[f64],
     max_iters: usize,
     tol: f64,
 ) -> HarmonicBlockSolveResult {
@@ -1066,7 +1172,7 @@ fn solve_harmonic_block_system(
             b[n + i] = 0.0;
         } else {
             b[i] = rhs_real[i];
-            b[n + i] = 0.0;
+            b[n + i] = rhs_imag[i];
         }
     }
     let b_norm = block_dot(&b, &b).sqrt().max(1.0e-9);
