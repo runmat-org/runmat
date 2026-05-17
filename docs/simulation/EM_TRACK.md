@@ -24,6 +24,7 @@ Last updated: 2026-05-17
 3. Stronger external-reference EM comparators integrated into protected-branch policy.
    Baseline complete: external-reference benchmark generation now compares expanded EM threshold-assertion metrics (including `sigma(omega)`, dispersive-loss, homogeneous/heterogeneous quality proxies, and boundary/phased-source entries) and governance validation enforces complete EM fixture metric-set presence in enforce mode.
 4. Continued robustness/performance hardening under larger EM workloads.
+   Baseline increment landed: additive EM harmonic solver controls (`residual_target`, `harmonic_tolerance`, `harmonic_max_iterations`) now route from runtime options into FEA solve behavior with validated contracts and diagnostic visibility.
 
 ## Next Recommended EM Slice
 

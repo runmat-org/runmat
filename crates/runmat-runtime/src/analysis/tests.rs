@@ -2682,6 +2682,9 @@ fn analysis_run_electromagnetic_sweep_emits_resonance_metrics() {
         AnalysisElectromagneticRunOptions {
             sweep_enabled: true,
             sweep_frequency_hz: vec![20.0, 40.0, 60.0, 120.0, 240.0],
+            residual_target: 5.0e-7,
+            harmonic_tolerance: 1.2345e-4,
+            harmonic_max_iterations: 64,
             ..AnalysisElectromagneticRunOptions::default()
         },
         OperationContext::new(Some("trace-em-run-sweep".to_string()), None),
@@ -2704,6 +2707,40 @@ fn analysis_run_electromagnetic_sweep_emits_resonance_metrics() {
         .iter()
         .filter(|diag| diag.code == "FEA_EM_SWEEP")
         .any(|diag| diag.message.contains("sweep_count=5")));
+    let harmonic_diag = envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_EM_HARMONIC_COUPLING")
+        .expect("harmonic coupling diagnostic should be present");
+    assert!(harmonic_diag.message.contains("tolerance=0.00012345"));
+    assert!(harmonic_diag.message.contains("iterations="));
+}
+
+#[test]
+fn analysis_run_electromagnetic_rejects_invalid_harmonic_controls() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    model.electromagnetic = Some(ElectromagneticDomain {
+        enabled: true,
+        reference_frequency_hz: 60.0,
+        applied_current_a: 120.0,
+    });
+    let err = analysis_run_electromagnetic_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisElectromagneticRunOptions {
+            harmonic_max_iterations: 0,
+            ..AnalysisElectromagneticRunOptions::default()
+        },
+        OperationContext::new(Some("trace-em-run-invalid-harmonic-controls".to_string()), None),
+    )
+    .expect_err("electromagnetic run should reject zero harmonic_max_iterations");
+    assert_eq!(err.operation, "analysis.run_electromagnetic");
+    assert_eq!(err.op_version, "analysis.run_electromagnetic/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS");
 }
 
 #[test]

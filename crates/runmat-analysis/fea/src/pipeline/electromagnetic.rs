@@ -474,8 +474,8 @@ pub fn run_electromagnetic_with_options(
     } else {
         LinearAlgebraBackendKind::CpuReference
     };
-    let harmonic_max_iters = 96usize;
-    let harmonic_tol = 1.0e-7;
+    let harmonic_max_iters = options.harmonic_max_iterations;
+    let harmonic_tol = options.harmonic_tolerance;
     let prepared_build_ms = prepared_start.elapsed().as_secs_f64() * 1_000.0;
     let solve_start = Instant::now();
     let harmonic_solve = solve_harmonic_block_system(

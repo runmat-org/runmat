@@ -4860,6 +4860,60 @@ pub fn analysis_run_electromagnetic_with_options_op(
             )]),
         ));
     }
+    if !options.residual_target.is_finite() || options.residual_target <= 0.0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_electromagnetic requires residual_target to be finite and positive",
+            BTreeMap::from([(
+                "residual_target".to_string(),
+                options.residual_target.to_string(),
+            )]),
+        ));
+    }
+    if !options.harmonic_tolerance.is_finite() || options.harmonic_tolerance <= 0.0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_electromagnetic requires harmonic_tolerance to be finite and positive",
+            BTreeMap::from([(
+                "harmonic_tolerance".to_string(),
+                options.harmonic_tolerance.to_string(),
+            )]),
+        ));
+    }
+    if options.harmonic_max_iterations == 0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_electromagnetic requires harmonic_max_iterations greater than zero",
+            BTreeMap::from([(
+                "harmonic_max_iterations".to_string(),
+                options.harmonic_max_iterations.to_string(),
+            )]),
+        ));
+    }
 
     let prep_context = resolve_run_prep_context(
         model,
@@ -4892,7 +4946,9 @@ pub fn analysis_run_electromagnetic_with_options_op(
     })?;
     let solve_options = ElectromagneticSolveOptions {
         prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
-        residual_target: 1.0e-6,
+        residual_target: options.residual_target,
+        harmonic_tolerance: options.harmonic_tolerance,
+        harmonic_max_iterations: options.harmonic_max_iterations,
     };
     let mut sweep_runs = Vec::with_capacity(sweep_frequency_hz.len());
     let mut sweep_peak_flux_density = Vec::with_capacity(sweep_frequency_hz.len());

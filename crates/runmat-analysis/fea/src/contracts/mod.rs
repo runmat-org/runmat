@@ -220,6 +220,8 @@ pub struct FeaElectromagneticRunResult {
 pub struct ElectromagneticSolveOptions {
     pub prep_context: Option<FeaPrepContext>,
     pub residual_target: f64,
+    pub harmonic_tolerance: f64,
+    pub harmonic_max_iterations: usize,
 }
 
 impl Default for ElectromagneticSolveOptions {
@@ -227,6 +229,8 @@ impl Default for ElectromagneticSolveOptions {
         Self {
             prep_context: None,
             residual_target: 1.0e-6,
+            harmonic_tolerance: 1.0e-7,
+            harmonic_max_iterations: 96,
         }
     }
 }

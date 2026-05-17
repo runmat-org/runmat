@@ -272,6 +272,9 @@ pub struct AnalysisElectromagneticRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
     pub quality_policy: QualityPolicy,
+    pub residual_target: f64,
+    pub harmonic_tolerance: f64,
+    pub harmonic_max_iterations: usize,
     #[serde(default)]
     pub prep_context: Option<AnalysisRunPrepContext>,
     #[serde(default)]
@@ -290,6 +293,9 @@ impl Default for AnalysisElectromagneticRunOptions {
             deterministic_mode: false,
             precision_mode: PrecisionMode::Fp64,
             quality_policy: QualityPolicy::Balanced,
+            residual_target: 1.0e-6,
+            harmonic_tolerance: 1.0e-7,
+            harmonic_max_iterations: 96,
             prep_context: None,
             prep_artifact_id: None,
             prep_calibration_profile: None,
