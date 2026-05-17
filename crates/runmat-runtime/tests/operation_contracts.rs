@@ -5,8 +5,8 @@ use runmat_geometry_core::EntityKind;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_compare_op,
-    analysis_results_op, analysis_run_electromagnetic_op, analysis_run_linear_static_op,
-    analysis_run_linear_static_with_options, analysis_run_modal_op,
+    analysis_results_op, analysis_run_electromagnetic_op, analysis_run_fsi_op,
+    analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_run_modal_op,
     analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
     analysis_run_nonlinear_with_options_op, analysis_run_transient_op,
     analysis_run_transient_with_options_op, analysis_trends_op, analysis_validate,
@@ -646,6 +646,77 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
     assert_eq!(invalid.operation, "analysis.run_transient");
     assert_eq!(invalid.op_version, "analysis.run_transient/v1");
     assert_eq!(invalid.error_code, "ANALYSIS_RUN_TRANSIENT_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_fsi_contract_is_v1_and_typed() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.steps = vec![
+        runmat_analysis_core::AnalysisStep {
+            step_id: "fsi_structure".to_string(),
+            kind: runmat_analysis_core::AnalysisStepKind::Transient,
+        },
+        runmat_analysis_core::AnalysisStep {
+            step_id: "fsi_flow".to_string(),
+            kind: runmat_analysis_core::AnalysisStepKind::Cfd,
+        },
+    ];
+    model.cfd = Some(runmat_analysis_core::CfdDomain {
+        enabled: true,
+        solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
+        reference_density_kg_per_m3: 1.225,
+        dynamic_viscosity_pa_s: 1.81e-5,
+        inlet_velocity_m_per_s: 4.0,
+        turbulence_intensity: 0.06,
+        time_profile: vec![
+            runmat_analysis_core::CfdTimeProfilePoint {
+                normalized_time: 0.0,
+                inlet_scale: 0.6,
+            },
+            runmat_analysis_core::CfdTimeProfilePoint {
+                normalized_time: 1.0,
+                inlet_scale: 1.0,
+            },
+        ],
+    });
+
+    let envelope = analysis_run_fsi_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-fsi-1".to_string()), None),
+    )
+    .expect("fsi run should return envelope");
+    assert_eq!(envelope.operation, "analysis.run_fsi");
+    assert_eq!(envelope.op_version, "analysis.run_fsi/v1");
+    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
+    assert!(envelope.data.transient_results.is_some());
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_CFD_FLOW"));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_FSI_COUPLING"));
+
+    let mut invalid_model = model.clone();
+    invalid_model.steps = vec![runmat_analysis_core::AnalysisStep {
+        step_id: "fsi_flow_only".to_string(),
+        kind: runmat_analysis_core::AnalysisStepKind::Cfd,
+    }];
+    let invalid = analysis_run_fsi_op(
+        &invalid_model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-fsi-2".to_string()), None),
+    )
+    .expect_err("fsi run should reject missing transient step");
+    assert_eq!(invalid.operation, "analysis.run_fsi");
+    assert_eq!(invalid.op_version, "analysis.run_fsi/v1");
+    assert_eq!(invalid.error_code, "ANALYSIS_RUN_FSI_INVALID_MODEL");
 }
 
 #[test]
