@@ -2,4 +2,4 @@ pub(crate) mod ctx;
 pub(crate) mod expr;
 pub(crate) mod stmt;
 
-pub use ctx::{lower, lower_compatibility};
+pub use ctx::lower;
