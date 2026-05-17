@@ -487,6 +487,32 @@ pub fn analysis_create_model_op(
                 },
             ],
         ),
+        AnalysisCreateModelProfile::FsiCoupled => (
+            BoundaryCondition {
+                bc_id: "bc_default_fixed".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::Fixed,
+            },
+            LoadCase {
+                load_id: "load_default_fsi_seed".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::Force {
+                    fx: 0.0,
+                    fy: -450.0,
+                    fz: 0.0,
+                },
+            },
+            vec![
+                AnalysisStep {
+                    step_id: "step_default_fsi_structure".to_string(),
+                    kind: AnalysisStepKind::Transient,
+                },
+                AnalysisStep {
+                    step_id: "step_default_fsi_flow".to_string(),
+                    kind: AnalysisStepKind::Cfd,
+                },
+            ],
+        ),
     };
 
     let cfd = match intent.profile {
@@ -528,6 +554,24 @@ pub fn analysis_create_model_op(
                 runmat_analysis_core::CfdTimeProfilePoint {
                     normalized_time: 0.0,
                     inlet_scale: 0.7,
+                },
+                runmat_analysis_core::CfdTimeProfilePoint {
+                    normalized_time: 1.0,
+                    inlet_scale: 1.0,
+                },
+            ],
+        }),
+        AnalysisCreateModelProfile::FsiCoupled => Some(runmat_analysis_core::CfdDomain {
+            enabled: true,
+            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
+            reference_density_kg_per_m3: 1.225,
+            dynamic_viscosity_pa_s: 1.81e-5,
+            inlet_velocity_m_per_s: 4.0,
+            turbulence_intensity: 0.06,
+            time_profile: vec![
+                runmat_analysis_core::CfdTimeProfilePoint {
+                    normalized_time: 0.0,
+                    inlet_scale: 0.6,
                 },
                 runmat_analysis_core::CfdTimeProfilePoint {
                     normalized_time: 1.0,

@@ -74,7 +74,7 @@ Legend: `[x]` complete baseline, `[~]` in active deepening, `[ ]` not started.
 | Maxwell EM | Static/harmonic to transient/frequency-dependent, reference-benchmarked | [~] |
 | CFD core | Steady/transient fluid solver family | [~] |
 | CHT | Fluid-thermal coupled family | [~] |
-| FSI | Coupled structural-fluid family | [ ] |
+| FSI | Coupled structural-fluid family | [~] |
 | Acoustics | Acoustic solver family | [ ] |
 | Meshing/adaptivity | Production mesh generation/refinement pipeline | [ ] |
 | CAD interop depth | Robust CAD-native ingestion + metadata fidelity | [~] |

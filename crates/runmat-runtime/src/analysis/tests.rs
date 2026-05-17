@@ -675,6 +675,43 @@ fn analysis_create_model_supports_cht_coupled_profile_template() {
 }
 
 #[test]
+fn analysis_create_model_supports_fsi_coupled_profile_template() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "fsi_coupled_model".to_string(),
+            profile: AnalysisCreateModelProfile::FsiCoupled,
+            prep_context: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("fsi coupled profile should be supported");
+
+    assert_eq!(envelope.data.steps.len(), 2);
+    assert!(envelope
+        .data
+        .steps
+        .iter()
+        .any(|step| step.kind == AnalysisStepKind::Transient));
+    assert!(envelope
+        .data
+        .steps
+        .iter()
+        .any(|step| step.kind == AnalysisStepKind::Cfd));
+    assert_eq!(envelope.data.loads[0].load_id, "load_default_fsi_seed");
+    let cfd = envelope
+        .data
+        .cfd
+        .as_ref()
+        .expect("cfd domain should be populated for fsi profile");
+    assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
+    assert_eq!(cfd.time_profile.len(), 2);
+    assert!(envelope.data.thermo_mechanical.is_none());
+}
+
+#[test]
 fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence() {
     let _guard = analysis_test_guard();
     let geometry = sample_step_like_geometry_asset();

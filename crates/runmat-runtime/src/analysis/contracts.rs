@@ -65,6 +65,7 @@ pub enum AnalysisCreateModelProfile {
     CfdSteadyState,
     CfdTransient,
     ChtCoupled,
+    FsiCoupled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

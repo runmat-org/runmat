@@ -18,7 +18,7 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 | Maxwell EM | From scaffolding to governance-backed solver path | [~] |
 | CFD core | Steady/transient fluid foundation | [~] |
 | CHT | Fluid-thermal coupled family | [~] |
-| FSI | Structural-fluid coupled family | [ ] |
+| FSI | Structural-fluid coupled family | [~] |
 | Acoustics | Acoustic solver family | [ ] |
 | Meshing/adaptivity | Production meshing/refinement pipeline | [ ] |
 | External-reference gating (M6) | Protected-branch enforced external comparators | [~] |
@@ -50,4 +50,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - CFD benchmark/trend baseline landed: conformance harness now includes CFD fixtures with flow-metric threshold assertions, and runtime trends classify CFD runs as a dedicated run family.
 - CHT first run-path baseline landed: `analysis.run_cht/v1` now executes coupled CFD + thermal runs with typed transient+thermal payloads and first CHT diagnostics (`FEA_CHT_COUPLING`, `FEA_CFD_FLOW`) under existing quality/provenance posture.
 - CHT benchmark/trend baseline landed: conformance harness now includes CHT fixtures with coupled flow/coupling threshold assertions, and runtime trends classify CHT runs as a dedicated run family (`AnalysisRunKind::Cht`).
+- FSI contract kickoff landed: additive `analysis.create_model` now supports an `fsi_coupled` profile template to seed coupled transient-structural + CFD model scaffolding while dedicated FSI run/governance paths remain pending.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.
