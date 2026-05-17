@@ -2015,16 +2015,6 @@ impl Compiler {
             match component {
                 MirIndexComponent::Colon => colon_mask |= 1u32 << dim,
                 MirIndexComponent::End { offset, .. } if *offset == 0 => end_mask |= 1u32 << dim,
-                MirIndexComponent::Expr(MirOperand::Local(local))
-                    if self.mir_local_is_colon(*local) =>
-                {
-                    colon_mask |= 1u32 << dim;
-                }
-                MirIndexComponent::Expr(MirOperand::Local(local))
-                    if self.mir_local_is_end(*local) =>
-                {
-                    end_mask |= 1u32 << dim;
-                }
                 MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
                     self.compile_mir_operand(operand)?;
                     numeric_count += 1;
@@ -2069,11 +2059,6 @@ impl Compiler {
                         end_numeric_exprs.push((numeric_count, end_expr_with_offset(*offset)));
                     }
                     numeric_count += 1;
-                }
-                MirIndexComponent::Expr(MirOperand::Local(local))
-                    if self.mir_local_is_colon(*local) =>
-                {
-                    colon_mask |= 1u32 << dim;
                 }
                 MirIndexComponent::Expr(operand)
                     if self.mir_operand_range_end_spec(operand).is_some() =>
@@ -2165,14 +2150,6 @@ impl Compiler {
             }
         }
         Ok(())
-    }
-
-    fn mir_local_is_colon(&self, local: runmat_mir::MirLocalId) -> bool {
-        self.mir_local_matches_rvalue(local, |value| matches!(value, MirRvalue::Colon))
-    }
-
-    fn mir_local_is_end(&self, local: runmat_mir::MirLocalId) -> bool {
-        self.mir_local_matches_rvalue(local, |value| matches!(value, MirRvalue::End))
     }
 
     fn mir_operand_end_expr(&self, operand: &MirOperand) -> Option<EndExpr> {
@@ -2319,27 +2296,6 @@ impl Compiler {
             args,
         };
         Some((expr, has_end))
-    }
-
-    fn mir_local_matches_rvalue(
-        &self,
-        local: runmat_mir::MirLocalId,
-        predicate: impl Fn(&MirRvalue) -> bool,
-    ) -> bool {
-        let Some(body) = &self.body else {
-            return false;
-        };
-        body.blocks.iter().any(|block| {
-            block.statements.iter().any(|stmt| {
-                matches!(
-                    &stmt.kind,
-                    MirStmtKind::Assign {
-                        place: MirPlace::Local(candidate),
-                        value,
-                    } if *candidate == local && predicate(value)
-                )
-            })
-        })
     }
 
     fn compile_mir_operand(&mut self, operand: &MirOperand) -> Result<(), CompileError> {

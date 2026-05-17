@@ -245,7 +245,10 @@ pub(crate) fn lower_indexing_with_replacements(
         components: indexing
             .components
             .iter()
-            .map(|component| lower_index_component(ctx, component, temps, await_replacements))
+            .enumerate()
+            .map(|(dim, component)| {
+                lower_index_component(ctx, dim, component, temps, await_replacements)
+            })
             .collect::<Result<_, _>>()?,
         result_context: indexing.result_context.clone(),
     })
@@ -253,6 +256,7 @@ pub(crate) fn lower_indexing_with_replacements(
 
 fn lower_index_component(
     ctx: &MirLoweringContext,
+    dim: usize,
     component: &IndexComponent,
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
@@ -263,12 +267,19 @@ fn lower_index_component(
             dim: *dim,
             offset: *offset,
         },
-        IndexComponent::Expr(expr) => MirIndexComponent::Expr(lower_operand_with_replacements(
-            ctx,
-            expr,
-            temps,
-            await_replacements,
-        )?),
+        IndexComponent::Expr(expr) => match expr.kind {
+            HirExprKind::Colon => MirIndexComponent::Colon,
+            HirExprKind::End => MirIndexComponent::End {
+                dim: Some(dim),
+                offset: 0,
+            },
+            _ => MirIndexComponent::Expr(lower_operand_with_replacements(
+                ctx,
+                expr,
+                temps,
+                await_replacements,
+            )?),
+        },
         IndexComponent::Logical(expr) => MirIndexComponent::Logical(
             lower_operand_with_replacements(ctx, expr, temps, await_replacements)?,
         ),
