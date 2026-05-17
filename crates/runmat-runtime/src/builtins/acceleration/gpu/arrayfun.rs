@@ -569,6 +569,15 @@ enum Callable {
 }
 
 impl Callable {
+    fn resolved_semantic_handle(name: &str) -> Option<Self> {
+        let function = user_functions::resolve_semantic_function_by_name(name)?;
+        Some(Callable::Closure(Closure {
+            function_name: name.to_string(),
+            semantic_function: Some(function),
+            captures: Vec::new(),
+        }))
+    }
+
     fn from_function(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(text) => Self::from_text(&text),
@@ -611,14 +620,19 @@ impl Callable {
             if name.is_empty() {
                 Err(arrayfun_flow("arrayfun: empty function handle"))
             } else {
+                if let Some(callable) = Self::resolved_semantic_handle(name) {
+                    return Ok(callable);
+                }
                 Ok(Callable::Builtin {
                     name: name.to_string(),
                 })
             }
         } else {
-            Ok(Callable::Builtin {
-                name: trimmed.to_ascii_lowercase(),
-            })
+            let name = trimmed.to_ascii_lowercase();
+            if let Some(callable) = Self::resolved_semantic_handle(&name) {
+                return Ok(callable);
+            }
+            Ok(Callable::Builtin { name })
         }
     }
 

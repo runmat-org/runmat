@@ -420,6 +420,15 @@ enum Callable {
 }
 
 impl Callable {
+    fn resolved_semantic_handle(name: &str) -> Option<Self> {
+        let function = user_functions::resolve_semantic_function_by_name(name)?;
+        Some(Callable::Closure(Closure {
+            function_name: name.to_string(),
+            semantic_function: Some(function),
+            captures: Vec::new(),
+        }))
+    }
+
     fn from_function(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Self::from_text(&s, true),
@@ -474,6 +483,9 @@ impl Callable {
                     IDENT_INVALID_INPUT,
                 ))
             } else {
+                if let Some(callable) = Self::resolved_semantic_handle(name) {
+                    return Ok(callable);
+                }
                 Ok(Callable::Builtin {
                     name: name.to_string(),
                 })
@@ -490,6 +502,9 @@ impl Callable {
                 } else {
                     trimmed.to_string()
                 };
+                if let Some(callable) = Self::resolved_semantic_handle(&name) {
+                    return Ok(callable);
+                }
                 Ok(Callable::Builtin { name })
             }
         }

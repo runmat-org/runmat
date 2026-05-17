@@ -45,6 +45,20 @@ fn unresolved_external_cellfun_callback_fails_without_legacy_fallback() {
 }
 
 #[test]
+fn unresolved_external_cellfun_str2func_callback_fails_without_legacy_fallback() {
+    let err = execute_semantic_source_result(
+        "xs = {1, 2}; h = str2func('definitely_missing_callback'); ys = cellfun(h, xs);",
+    )
+    .expect_err("unresolved external cellfun str2func callback should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn nargin_nargout_in_user_functions() {
     // Single-output: nargin/nargout should reflect call site
     let program = r#"
@@ -630,6 +644,26 @@ fn cellfun_upper_function_handle_round_trip() {
     }
 
     assert!(found);
+}
+
+#[test]
+fn cellfun_str2func_local_semantic_callback_executes() {
+    let vars = execute_semantic_source(
+        "function y = inc(x); y = x + 1; end; xs = {1, 2}; ys = cellfun(str2func('inc'), xs); total = sum(ys);",
+    );
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
+}
+
+#[test]
+fn arrayfun_str2func_local_semantic_callback_executes() {
+    let vars = execute_semantic_source(
+        "function y = inc(x); y = x + 1; end; xs = [1, 2]; ys = arrayfun(str2func('inc'), xs); total = sum(ys);",
+    );
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
 }
 
 #[test]
