@@ -1,6 +1,6 @@
 use runmat_hir::{
-    lower, CallKind, FunctionHandleTarget, FunctionKind, HirAssembly, HirExprKind, HirPlace,
-    HirStmtKind, IndexKind, LoweringContext,
+    lower, CallKind, DefPathSegment, FunctionHandleTarget, FunctionKind, HirAssembly, HirExprKind,
+    HirPlace, HirStmtKind, IndexKind, LoweringContext,
 };
 use runmat_parser::parse;
 
@@ -169,6 +169,18 @@ fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
     assert!(
         matches!(&entry_body(&handle)[0].kind, HirStmtKind::ExprStmt(expr, _) if matches!(expr.kind, HirExprKind::FunctionHandle(FunctionHandleTarget::Builtin(_)) | HirExprKind::FunctionHandle(FunctionHandleTarget::DynamicName(_))))
     );
+
+    let imported_handle = lower_assembly("import Point.origin; @origin;");
+    assert!(entry_body(&imported_handle).iter().any(|stmt| matches!(
+        &stmt.kind,
+        HirStmtKind::ExprStmt(expr, _)
+            if matches!(
+                &expr.kind,
+                HirExprKind::FunctionHandle(FunctionHandleTarget::DefPath(path))
+                    if path.module.display_name().as_deref() == Some("Point.origin")
+                        && matches!(path.item.as_slice(), [DefPathSegment::Function(_)])
+            )
+    )));
 
     let anon = lower_assembly("@(x) x+1");
     assert!(anon

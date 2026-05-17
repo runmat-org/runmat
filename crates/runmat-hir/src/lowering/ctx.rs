@@ -1677,9 +1677,14 @@ impl SemanticCtx {
             .with_span(span));
         }
         if let Some(qualified) = wildcard_matches.first() {
-            return Ok(crate::FunctionHandleTarget::DynamicName(SymbolName(
-                qualified.clone(),
-            )));
+            return Ok(crate::FunctionHandleTarget::DefPath(
+                def_path_for_import_path(&qualified_name(
+                    &qualified
+                        .split('.')
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>(),
+                )),
+            ));
         }
         Ok(crate::FunctionHandleTarget::DynamicName(SymbolName(
             name.to_string(),
