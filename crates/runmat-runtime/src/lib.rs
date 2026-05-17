@@ -1191,6 +1191,51 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
     }
 }
 
+#[runmat_macros::runtime_builtin(name = "str2func", builtin_path = "crate")]
+fn str2func_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    fn normalize_handle_name(text: &str) -> Option<String> {
+        let trimmed = text.trim();
+        let name = trimmed.strip_prefix('@').unwrap_or(trimmed).trim();
+        (!name.is_empty()).then(|| name.to_string())
+    }
+
+    let name = match value {
+        Value::String(text) => normalize_handle_name(&text),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            let text: String = ca.data.iter().collect();
+            normalize_handle_name(&text)
+        }
+        Value::CharArray(_) => {
+            return Err(
+                ("str2func: function name char array must be a row vector".to_string()).into(),
+            )
+        }
+        other => {
+            return Err(
+                (format!("str2func: expected string/char function name, got {other:?}")).into(),
+            )
+        }
+    }
+    .ok_or_else(|| "str2func: function name must not be empty".to_string())?;
+
+    if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name) {
+        Ok(Value::SemanticFunctionHandle { name, function })
+    } else {
+        Ok(Value::FunctionHandle(name))
+    }
+}
+
+#[runmat_macros::runtime_builtin(name = "func2str", builtin_path = "crate")]
+fn func2str_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    match value {
+        Value::FunctionHandle(name) | Value::SemanticFunctionHandle { name, .. } => {
+            Ok(Value::String(name))
+        }
+        Value::Closure(closure) => Ok(Value::String(closure.function_name)),
+        other => Err((format!("func2str: expected function handle, got {other:?}")).into()),
+    }
+}
+
 // -------- Reductions: sum/prod/mean/any/all --------
 
 #[allow(dead_code)]
@@ -1574,6 +1619,56 @@ mod tests {
         ))
         .expect("resolved name-only handle feval succeeds");
         assert_eq!(result, Value::Num(11.0));
+    }
+
+    #[test]
+    fn str2func_returns_semantic_handle_when_resolver_can_resolve() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_target").then_some(145)
+            })));
+        let value = str2func_builtin(Value::String("resolved_target".to_string()))
+            .expect("str2func should succeed");
+        assert_eq!(
+            value,
+            Value::SemanticFunctionHandle {
+                name: "resolved_target".to_string(),
+                function: 145,
+            }
+        );
+    }
+
+    #[test]
+    fn str2func_returns_dynamic_handle_when_resolver_cannot_resolve() {
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let value = str2func_builtin(Value::String("@missing_target".to_string()))
+            .expect("str2func should succeed");
+        assert_eq!(value, Value::FunctionHandle("missing_target".to_string()));
+    }
+
+    #[test]
+    fn func2str_extracts_name_from_function_handles() {
+        assert_eq!(
+            func2str_builtin(Value::FunctionHandle("sin".to_string())).expect("func2str"),
+            Value::String("sin".to_string())
+        );
+        assert_eq!(
+            func2str_builtin(Value::SemanticFunctionHandle {
+                name: "local_fn".to_string(),
+                function: 44,
+            })
+            .expect("func2str"),
+            Value::String("local_fn".to_string())
+        );
+        assert_eq!(
+            func2str_builtin(Value::Closure(runmat_builtins::Closure {
+                function_name: "captured_fn".to_string(),
+                semantic_function: None,
+                captures: Vec::new(),
+            }))
+            .expect("func2str"),
+            Value::String("captured_fn".to_string())
+        );
     }
 
     #[test]

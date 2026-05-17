@@ -56,6 +56,37 @@ fn feval_with_unresolved_string_handle_errors() {
 }
 
 #[test]
+fn str2func_and_func2str_round_trip_for_builtin_handle() {
+    let vars = execute_semantic_source("f = str2func('sin'); name = func2str(f); y = feval(f, 0);")
+        .unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "sin")));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if n.abs() < 1e-9)));
+}
+
+#[test]
+fn str2func_resolves_local_semantic_function_handle() {
+    let vars = execute_semantic_source(
+        "function y = inc(x); y = x + 1; end; f = str2func('inc'); r = feval(f, 2);",
+    )
+    .unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+}
+
+#[test]
+fn str2func_unresolved_external_callback_errors_without_legacy_fallback() {
+    let err =
+        execute_semantic_source("f = str2func('definitely_missing_callback'); y = feval(f, 1);")
+            .expect_err("unresolved str2func callback should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+}
+
+#[test]
 fn fzero_accepts_anonymous_function() {
     let vars = execute_semantic_source("f = @(x) cos(x) - x; r = fzero(f, 0.5);").unwrap();
     assert!(vars

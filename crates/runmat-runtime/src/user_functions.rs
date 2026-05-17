@@ -126,9 +126,13 @@ pub async fn try_call_semantic_function_by_name(
     args: &[Value],
     requested_outputs: usize,
 ) -> Option<Result<Value, RuntimeError>> {
-    let resolver = SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone())?;
-    let function = resolver(name)?;
+    let function = resolve_semantic_function_by_name(name)?;
     try_call_semantic_function(function, args, requested_outputs).await
+}
+
+pub fn resolve_semantic_function_by_name(name: &str) -> Option<usize> {
+    let resolver = SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone())?;
+    resolver(name)
 }
 
 pub async fn try_call_semantic_descriptor(
