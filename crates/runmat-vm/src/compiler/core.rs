@@ -1292,39 +1292,52 @@ impl Compiler {
             .components
             .iter()
             .all(|component| matches!(component, MirIndexComponent::Expr(_)))
-            && !indexing.components.iter().any(|component| {
-                matches!(component, MirIndexComponent::Expr(MirOperand::Local(local)) if self.mir_local_is_colon(*local))
-                    || matches!(component, MirIndexComponent::Expr(operand) if self.mir_operand_end_expr(operand).is_some())
-                    || matches!(component, MirIndexComponent::Expr(operand) if self.mir_operand_is_non_scalar_index(operand))
+            && !indexing.components.iter().any(|component| match component {
+                MirIndexComponent::Expr(MirOperand::Local(local)) => {
+                    self.mir_local_is_colon(*local)
+                        || !self.mir_operand_is_definitely_scalar_index(&MirOperand::Local(*local))
+                }
+                MirIndexComponent::Expr(operand) => {
+                    self.mir_operand_end_expr(operand).is_some()
+                        || !self.mir_operand_is_definitely_scalar_index(operand)
+                }
+                _ => true,
             })
     }
 
-    fn mir_operand_is_non_scalar_index(&self, operand: &MirOperand) -> bool {
+    fn mir_operand_is_definitely_scalar_index(&self, operand: &MirOperand) -> bool {
         match operand {
+            MirOperand::Constant(MirConstant::Number(_)) => true,
             MirOperand::Local(local) => self.mir_local_matches_rvalue(*local, |value| {
-                self.mir_rvalue_is_non_scalar_index(value)
+                self.mir_rvalue_is_definitely_scalar_index(value)
             }),
-            _ => false,
+            MirOperand::Temp(_) | MirOperand::FunctionHandle(_) | MirOperand::Constant(_) => false,
         }
     }
 
-    fn mir_rvalue_is_non_scalar_index(&self, value: &MirRvalue) -> bool {
+    fn mir_rvalue_is_definitely_scalar_index(&self, value: &MirRvalue) -> bool {
         match value {
-            MirRvalue::Range { .. } => true,
-            MirRvalue::Aggregate { rows, cols, .. } => rows.saturating_mul(*cols) != 1,
-            MirRvalue::Call(_) => true,
-            MirRvalue::Binary(_, op, _) => matches!(
-                op,
-                OperatorKind::Equal
-                    | OperatorKind::NotEqual
-                    | OperatorKind::Less
-                    | OperatorKind::LessEqual
-                    | OperatorKind::Greater
-                    | OperatorKind::GreaterEqual
-                    | OperatorKind::ElementwiseAnd
-                    | OperatorKind::ElementwiseOr
-            ),
-            MirRvalue::Use(operand) => self.mir_operand_is_non_scalar_index(operand),
+            MirRvalue::Use(operand) => self.mir_operand_is_definitely_scalar_index(operand),
+            MirRvalue::Unary(op, operand) => {
+                matches!(op, OperatorKind::UnaryPlus | OperatorKind::UnaryMinus)
+                    && self.mir_operand_is_definitely_scalar_index(operand)
+            }
+            MirRvalue::Binary(left, op, right) => {
+                matches!(
+                    op,
+                    OperatorKind::Add
+                        | OperatorKind::Subtract
+                        | OperatorKind::MatrixMultiply
+                        | OperatorKind::ElementwiseMultiply
+                        | OperatorKind::Mrdivide
+                        | OperatorKind::Mldivide
+                        | OperatorKind::ElementwiseDivide
+                        | OperatorKind::ElementwiseLeftDivide
+                        | OperatorKind::MatrixPower
+                        | OperatorKind::ElementwisePower
+                ) && self.mir_operand_is_definitely_scalar_index(left)
+                    && self.mir_operand_is_definitely_scalar_index(right)
+            }
             _ => false,
         }
     }
