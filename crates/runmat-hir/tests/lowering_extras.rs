@@ -1,5 +1,5 @@
 use runmat_hir::{
-    lower, lower_compatibility, HirAssembly, HirExprKind, HirPlace, HirStmtKind, IndexKind,
+    compatibility, lower, HirAssembly, HirExprKind, HirPlace, HirStmtKind, IndexKind,
     LoweringContext,
 };
 use runmat_parser::parse;
@@ -67,9 +67,9 @@ fn lvalue_assignment_lowering_total() {
 #[test]
 fn import_normalization_and_ambiguity() {
     let ast = parse("import pkg.*; import pkg.sub.Class; import other.Class").unwrap();
-    let hir = lower_compatibility(&ast, &LoweringContext::empty())
+    let hir = compatibility::lower(&ast, &LoweringContext::empty())
         .unwrap()
         .hir;
-    let err = runmat_hir::validate_imports(&hir);
+    let err = compatibility::validate_imports(&hir);
     assert!(err.is_err());
 }

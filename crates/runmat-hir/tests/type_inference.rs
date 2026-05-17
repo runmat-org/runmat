@@ -1,28 +1,26 @@
-use runmat_hir::*;
-use runmat_hir::{
-    CompatibilityHirExprKind as HirExprKind, CompatibilityHirProgram as HirProgram,
-    CompatibilityHirStmt as HirStmt,
+use runmat_hir::compatibility::{
+    self, infer_function_output_types, infer_function_variable_types, HirExprKind, HirProgram,
+    HirStmt, LoweringResult as CompatibilityLoweringResult,
 };
+use runmat_hir::*;
 
 use runmat_runtime as _;
 
 fn lower(code: &str) -> HirProgram {
     let ast = runmat_parser::parse(code).unwrap();
-    runmat_hir::lower_compatibility(&ast, &LoweringContext::empty())
+    compatibility::lower(&ast, &LoweringContext::empty())
         .map(|result| result.hir)
         .unwrap()
 }
 
-fn lower_result(code: &str) -> runmat_hir::CompatibilityLoweringResult {
+fn lower_result(code: &str) -> CompatibilityLoweringResult {
     let ast = runmat_parser::parse(code).unwrap();
-    runmat_hir::lower_compatibility(&ast, &LoweringContext::empty()).unwrap()
+    compatibility::lower(&ast, &LoweringContext::empty()).unwrap()
 }
 
-fn infer_globals(
-    result: &runmat_hir::CompatibilityLoweringResult,
-) -> std::collections::HashMap<VarId, Type> {
-    let returns = runmat_hir::infer_function_output_types(&result.hir);
-    runmat_hir::infer_global_variable_types(&result.hir, &returns)
+fn infer_globals(result: &CompatibilityLoweringResult) -> std::collections::HashMap<VarId, Type> {
+    let returns = compatibility::infer_function_output_types(&result.hir);
+    compatibility::infer_global_variable_types(&result.hir, &returns)
 }
 
 #[test]
