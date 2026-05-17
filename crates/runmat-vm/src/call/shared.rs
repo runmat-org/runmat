@@ -665,12 +665,12 @@ mod tests {
     fn object_paren_selector_values_validate_numeric_arity() {
         let missing = build_object_paren_selector_values(2, 0, 0, &[Value::Num(1.0)])
             .expect_err("missing selector should fail");
-        assert_eq!(missing.identifier(), Some("MissingNumericIndex"));
+        assert_eq!(missing.identifier(), Some("RunMat:MissingNumericIndex"));
 
         let extra =
             build_object_paren_selector_values(2, 0b01, 0, &[Value::Num(2.0), Value::Num(3.0)])
                 .expect_err("extra selector should fail");
-        assert_eq!(extra.identifier(), Some("UnexpectedNumericIndex"));
+        assert_eq!(extra.identifier(), Some("RunMat:UnexpectedNumericIndex"));
     }
 
     #[test]
