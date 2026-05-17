@@ -1,7 +1,7 @@
 use crate::{
-    LegacyHirClassMember as HirClassMember, LegacyHirExpr as HirExpr,
-    LegacyHirExprKind as HirExprKind, LegacyHirLValue as HirLValue, LegacyHirProgram as HirProgram,
-    LegacyHirStmt as HirStmt, Type, VarId,
+    CompatibilityHirClassMember as HirClassMember, CompatibilityHirExpr as HirExpr,
+    CompatibilityHirExprKind as HirExprKind, CompatibilityHirLValue as HirLValue,
+    CompatibilityHirProgram as HirProgram, CompatibilityHirStmt as HirStmt, Type, VarId,
 };
 use runmat_parser as parser;
 use std::collections::HashMap;

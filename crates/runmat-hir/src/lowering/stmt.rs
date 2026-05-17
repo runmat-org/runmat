@@ -1,7 +1,7 @@
 use super::ctx::Ctx;
 use crate::{
-    LegacyHirClassMember as HirClassMember, LegacyHirLValue as HirLValue, LegacyHirStmt as HirStmt,
-    SemanticError, VarId, DISCARD_OUTPUT_NAME,
+    CompatibilityHirClassMember as HirClassMember, CompatibilityHirLValue as HirLValue,
+    CompatibilityHirStmt as HirStmt, SemanticError, VarId, DISCARD_OUTPUT_NAME,
 };
 use runmat_parser::{self as parser, Stmt as AstStmt};
 

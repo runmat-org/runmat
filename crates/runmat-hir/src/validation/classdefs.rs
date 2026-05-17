@@ -1,6 +1,6 @@
 use crate::{
-    LegacyHirClassMember as HirClassMember, LegacyHirProgram as HirProgram,
-    LegacyHirStmt as HirStmt, SemanticError,
+    CompatibilityHirClassMember as HirClassMember, CompatibilityHirProgram as HirProgram,
+    CompatibilityHirStmt as HirStmt, SemanticError,
 };
 
 pub fn validate_classdefs(prog: &HirProgram) -> Result<(), SemanticError> {

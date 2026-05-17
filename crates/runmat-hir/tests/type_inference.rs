@@ -1,6 +1,7 @@
 use runmat_hir::*;
 use runmat_hir::{
-    LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt,
+    CompatibilityHirExprKind as HirExprKind, CompatibilityHirProgram as HirProgram,
+    CompatibilityHirStmt as HirStmt,
 };
 
 use runmat_runtime as _;

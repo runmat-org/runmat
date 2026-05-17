@@ -4,8 +4,8 @@ use super::shared::{
 };
 use crate::inference::expr::infer_expr_type_with_env;
 use crate::{
-    LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt,
-    Type, VarId,
+    CompatibilityHirExprKind as HirExprKind, CompatibilityHirProgram as HirProgram,
+    CompatibilityHirStmt as HirStmt, Type, VarId,
 };
 use std::collections::HashMap;
 

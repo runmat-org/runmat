@@ -5,9 +5,9 @@ use super::shared::{
     FuncDef,
 };
 use crate::{
-    LegacyHirClassMember as HirClassMember, LegacyHirExpr as HirExpr,
-    LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram, LegacyHirStmt as HirStmt,
-    Type, VarId,
+    CompatibilityHirClassMember as HirClassMember, CompatibilityHirExpr as HirExpr,
+    CompatibilityHirExprKind as HirExprKind, CompatibilityHirProgram as HirProgram,
+    CompatibilityHirStmt as HirStmt, Type, VarId,
 };
 use std::collections::HashMap;
 

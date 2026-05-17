@@ -1,5 +1,7 @@
 use super::shared::{eval_const_num, logical_binary_result, resolve_context_from_args};
-use crate::{LegacyHirExpr as HirExpr, LegacyHirExprKind as HirExprKind, Type, VarId};
+use crate::{
+    CompatibilityHirExpr as HirExpr, CompatibilityHirExprKind as HirExprKind, Type, VarId,
+};
 use runmat_parser as parser;
 use std::collections::HashMap;
 

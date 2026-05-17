@@ -1,4 +1,4 @@
-use crate::{CompatibilityMode, FunctionId, LegacyHirStmt as HirStmt};
+use crate::{CompatibilityHirStmt as HirStmt, CompatibilityMode, FunctionId};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 

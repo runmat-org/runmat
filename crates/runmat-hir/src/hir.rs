@@ -1023,80 +1023,84 @@ pub struct CommandOptionName(pub String);
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct StringLiteral(pub String);
 
-// Legacy HIR retained only for the old lowering/inference pipeline during migration.
+// Compatibility AST retained for source-level lowering/inference APIs during migration.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct LegacyHirExpr {
-    pub kind: LegacyHirExprKind,
+pub struct CompatibilityHirExpr {
+    pub kind: CompatibilityHirExprKind,
     pub ty: Type,
     pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum LegacyHirExprKind {
+pub enum CompatibilityHirExprKind {
     Number(String),
     String(String),
     Var(VarId),
     Constant(String),
-    Unary(parser::UnOp, Box<LegacyHirExpr>),
-    Binary(Box<LegacyHirExpr>, parser::BinOp, Box<LegacyHirExpr>),
-    Tensor(Vec<Vec<LegacyHirExpr>>),
-    Cell(Vec<Vec<LegacyHirExpr>>),
-    Index(Box<LegacyHirExpr>, Vec<LegacyHirExpr>),
-    IndexCell(Box<LegacyHirExpr>, Vec<LegacyHirExpr>),
+    Unary(parser::UnOp, Box<CompatibilityHirExpr>),
+    Binary(
+        Box<CompatibilityHirExpr>,
+        parser::BinOp,
+        Box<CompatibilityHirExpr>,
+    ),
+    Tensor(Vec<Vec<CompatibilityHirExpr>>),
+    Cell(Vec<Vec<CompatibilityHirExpr>>),
+    Index(Box<CompatibilityHirExpr>, Vec<CompatibilityHirExpr>),
+    IndexCell(Box<CompatibilityHirExpr>, Vec<CompatibilityHirExpr>),
     Range(
-        Box<LegacyHirExpr>,
-        Option<Box<LegacyHirExpr>>,
-        Box<LegacyHirExpr>,
+        Box<CompatibilityHirExpr>,
+        Option<Box<CompatibilityHirExpr>>,
+        Box<CompatibilityHirExpr>,
     ),
     Colon,
     End,
-    Member(Box<LegacyHirExpr>, String),
-    MemberDynamic(Box<LegacyHirExpr>, Box<LegacyHirExpr>),
-    DottedInvoke(Box<LegacyHirExpr>, String, Vec<LegacyHirExpr>),
-    MethodCall(Box<LegacyHirExpr>, String, Vec<LegacyHirExpr>),
+    Member(Box<CompatibilityHirExpr>, String),
+    MemberDynamic(Box<CompatibilityHirExpr>, Box<CompatibilityHirExpr>),
+    DottedInvoke(Box<CompatibilityHirExpr>, String, Vec<CompatibilityHirExpr>),
+    MethodCall(Box<CompatibilityHirExpr>, String, Vec<CompatibilityHirExpr>),
     AnonFunc {
         params: Vec<VarId>,
-        body: Box<LegacyHirExpr>,
+        body: Box<CompatibilityHirExpr>,
     },
     FuncHandle(String),
-    FuncCall(String, Vec<LegacyHirExpr>),
+    FuncCall(String, Vec<CompatibilityHirExpr>),
     MetaClass(String),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum LegacyHirStmt {
-    ExprStmt(LegacyHirExpr, bool, Span),
-    Assign(VarId, LegacyHirExpr, bool, Span),
-    MultiAssign(Vec<Option<VarId>>, LegacyHirExpr, bool, Span),
-    AssignLValue(LegacyHirLValue, LegacyHirExpr, bool, Span),
+pub enum CompatibilityHirStmt {
+    ExprStmt(CompatibilityHirExpr, bool, Span),
+    Assign(VarId, CompatibilityHirExpr, bool, Span),
+    MultiAssign(Vec<Option<VarId>>, CompatibilityHirExpr, bool, Span),
+    AssignLValue(CompatibilityHirLValue, CompatibilityHirExpr, bool, Span),
     If {
-        cond: LegacyHirExpr,
-        then_body: Vec<LegacyHirStmt>,
-        elseif_blocks: Vec<(LegacyHirExpr, Vec<LegacyHirStmt>)>,
-        else_body: Option<Vec<LegacyHirStmt>>,
+        cond: CompatibilityHirExpr,
+        then_body: Vec<CompatibilityHirStmt>,
+        elseif_blocks: Vec<(CompatibilityHirExpr, Vec<CompatibilityHirStmt>)>,
+        else_body: Option<Vec<CompatibilityHirStmt>>,
         span: Span,
     },
     While {
-        cond: LegacyHirExpr,
-        body: Vec<LegacyHirStmt>,
+        cond: CompatibilityHirExpr,
+        body: Vec<CompatibilityHirStmt>,
         span: Span,
     },
     For {
         var: VarId,
-        expr: LegacyHirExpr,
-        body: Vec<LegacyHirStmt>,
+        expr: CompatibilityHirExpr,
+        body: Vec<CompatibilityHirStmt>,
         span: Span,
     },
     Switch {
-        expr: LegacyHirExpr,
-        cases: Vec<(LegacyHirExpr, Vec<LegacyHirStmt>)>,
-        otherwise: Option<Vec<LegacyHirStmt>>,
+        expr: CompatibilityHirExpr,
+        cases: Vec<(CompatibilityHirExpr, Vec<CompatibilityHirStmt>)>,
+        otherwise: Option<Vec<CompatibilityHirStmt>>,
         span: Span,
     },
     TryCatch {
-        try_body: Vec<LegacyHirStmt>,
+        try_body: Vec<CompatibilityHirStmt>,
         catch_var: Option<VarId>,
-        catch_body: Vec<LegacyHirStmt>,
+        catch_body: Vec<CompatibilityHirStmt>,
         span: Span,
     },
     Global(Vec<(VarId, String)>, Span),
@@ -1108,7 +1112,7 @@ pub enum LegacyHirStmt {
         name: String,
         params: Vec<VarId>,
         outputs: Vec<VarId>,
-        body: Vec<LegacyHirStmt>,
+        body: Vec<CompatibilityHirStmt>,
         has_varargin: bool,
         has_varargout: bool,
         span: Span,
@@ -1116,7 +1120,7 @@ pub enum LegacyHirStmt {
     ClassDef {
         name: String,
         super_class: Option<String>,
-        members: Vec<LegacyHirClassMember>,
+        members: Vec<CompatibilityHirClassMember>,
         span: Span,
     },
     Import {
@@ -1126,45 +1130,45 @@ pub enum LegacyHirStmt {
     },
 }
 
-impl LegacyHirExpr {
+impl CompatibilityHirExpr {
     pub fn span(&self) -> Span {
         self.span
     }
 }
 
-impl LegacyHirStmt {
+impl CompatibilityHirStmt {
     pub fn span(&self) -> Span {
         match self {
-            LegacyHirStmt::ExprStmt(_, _, span)
-            | LegacyHirStmt::Assign(_, _, _, span)
-            | LegacyHirStmt::MultiAssign(_, _, _, span)
-            | LegacyHirStmt::AssignLValue(_, _, _, span)
-            | LegacyHirStmt::Global(_, span)
-            | LegacyHirStmt::Persistent(_, span)
-            | LegacyHirStmt::Break(span)
-            | LegacyHirStmt::Continue(span)
-            | LegacyHirStmt::Return(span) => *span,
-            LegacyHirStmt::If { span, .. }
-            | LegacyHirStmt::While { span, .. }
-            | LegacyHirStmt::For { span, .. }
-            | LegacyHirStmt::Switch { span, .. }
-            | LegacyHirStmt::TryCatch { span, .. }
-            | LegacyHirStmt::Function { span, .. }
-            | LegacyHirStmt::ClassDef { span, .. }
-            | LegacyHirStmt::Import { span, .. } => *span,
+            CompatibilityHirStmt::ExprStmt(_, _, span)
+            | CompatibilityHirStmt::Assign(_, _, _, span)
+            | CompatibilityHirStmt::MultiAssign(_, _, _, span)
+            | CompatibilityHirStmt::AssignLValue(_, _, _, span)
+            | CompatibilityHirStmt::Global(_, span)
+            | CompatibilityHirStmt::Persistent(_, span)
+            | CompatibilityHirStmt::Break(span)
+            | CompatibilityHirStmt::Continue(span)
+            | CompatibilityHirStmt::Return(span) => *span,
+            CompatibilityHirStmt::If { span, .. }
+            | CompatibilityHirStmt::While { span, .. }
+            | CompatibilityHirStmt::For { span, .. }
+            | CompatibilityHirStmt::Switch { span, .. }
+            | CompatibilityHirStmt::TryCatch { span, .. }
+            | CompatibilityHirStmt::Function { span, .. }
+            | CompatibilityHirStmt::ClassDef { span, .. }
+            | CompatibilityHirStmt::Import { span, .. } => *span,
         }
     }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum LegacyHirClassMember {
+pub enum CompatibilityHirClassMember {
     Properties {
         attributes: Vec<parser::Attr>,
         names: Vec<String>,
     },
     Methods {
         attributes: Vec<parser::Attr>,
-        body: Vec<LegacyHirStmt>,
+        body: Vec<CompatibilityHirStmt>,
     },
     Events {
         attributes: Vec<parser::Attr>,
@@ -1181,17 +1185,17 @@ pub enum LegacyHirClassMember {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum LegacyHirLValue {
+pub enum CompatibilityHirLValue {
     Var(VarId),
-    Member(Box<LegacyHirExpr>, String),
-    MemberDynamic(Box<LegacyHirExpr>, Box<LegacyHirExpr>),
-    Index(Box<LegacyHirExpr>, Vec<LegacyHirExpr>),
-    IndexCell(Box<LegacyHirExpr>, Vec<LegacyHirExpr>),
+    Member(Box<CompatibilityHirExpr>, String),
+    MemberDynamic(Box<CompatibilityHirExpr>, Box<CompatibilityHirExpr>),
+    Index(Box<CompatibilityHirExpr>, Vec<CompatibilityHirExpr>),
+    IndexCell(Box<CompatibilityHirExpr>, Vec<CompatibilityHirExpr>),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct LegacyHirProgram {
-    pub body: Vec<LegacyHirStmt>,
+pub struct CompatibilityHirProgram {
+    pub body: Vec<CompatibilityHirStmt>,
     #[serde(default)]
     pub var_types: Vec<Type>,
 }

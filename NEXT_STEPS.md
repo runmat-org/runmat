@@ -212,7 +212,7 @@ Design implication:
 
 Current unresolved-call inventory:
 
-- Raw fallback compiler boundary: removed. There is no VM path that rebuilds `LegacyHirProgram` and recompiles it during dispatch.
+- Raw fallback compiler boundary: removed. There is no VM path that rebuilds a compatibility HIR program and recompiles it during dispatch.
 - Multi-output `feval`: `handle_feval_user_multi_output` asks `SemanticFunctionRegistry` / `runmat_runtime::user_functions::try_call_semantic_function`; unresolved names now raise `UndefinedFunction`.
 - Named/expanded user calls: `handle_prepared_user_function_call` checks the semantic registry, then builtin dispatch, then raises `UndefinedFunction`. Primary MIR lowering emits `CallSemanticFunction*` for semantic function callees.
 - End-expression callbacks: local/session user-function calls carry `EndExpr::SemanticCall` and execute through `CallableDescriptor`; unresolved names or values without semantic identity now fail instead of entering legacy recompilation.
@@ -236,7 +236,7 @@ Completed implementation slices:
 
 Observed older-HIR artifacts worth collapsing:
 
-- `LegacyHirProgram`, `LegacyHirStmt`, and `LegacyHirExpr` no longer appear in compiled VM source; remaining references are in HIR compatibility code and tests.
+- `CompatibilityHirProgram`, `CompatibilityHirStmt`, and `CompatibilityHirExpr` now name the source-level compatibility AST; the old legacy-prefixed public type names have been removed from `runmat-hir`.
 - The legacy-shaped user-function record and `runmat_vm::legacy::*` compatibility namespace have been removed. Downstream callers should use semantic function bytecode/registry APIs.
 - VM execution internals such as `CallFrame` and `ExecutionContext` are no longer root-level `runmat_vm` exports or bytecode prelude exports; call-stack diagnostics use runtime call-frame types instead.
 - Legacy bytecode compilation is no longer exposed through VM public modules or used by VM dispatch.
@@ -456,7 +456,7 @@ Current ratchet status:
 - Remaining `functions.rs` legacy execution sites cover semantic gaps for varargout mismatch diagnostics, struct-field vector/range indexing through member reads, test-class constructor resolution, metaclass postfix member/method lowering, dependent property backing behavior, `containers.Map` package calls, and string aggregate concatenation.
 - Turbine mixed arithmetic/function-call, simple scalar function compilation, scalar callback variable-isolation, compute-intensive scalar callback, nested scalar callback, function-parameter validation, and error-handling success-path coverage now use semantic registry-backed named calls instead of hand-built legacy function metadata.
 - Turbine fallback-boundary tests now use unresolved-name bytecode or semantic registry fixtures; no `LegacyUserFunction` test fixtures remain.
-- Remaining production legacy recompilation usage is gone; remaining legacy HIR references are tied to HIR compatibility code/tests, native-accel graph construction, or semantic gaps called out above.
+- Remaining production legacy recompilation usage is gone; source-level compatibility AST references are confined to `runmat-hir` compatibility/inference code and tests.
 
 ## Validation Cadence
 

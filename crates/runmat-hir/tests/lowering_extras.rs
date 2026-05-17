@@ -1,6 +1,6 @@
 use runmat_hir::{
-    lower, LegacyHirExprKind as HirExprKind, LegacyHirProgram as HirProgram,
-    LegacyHirStmt as HirStmt, LoweringContext,
+    lower, CompatibilityHirExprKind as HirExprKind, CompatibilityHirProgram as HirProgram,
+    CompatibilityHirStmt as HirStmt, LoweringContext,
 };
 use runmat_parser::parse;
 

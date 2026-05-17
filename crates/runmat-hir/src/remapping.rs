@@ -1,7 +1,7 @@
 use crate::{
-    LegacyHirClassMember as HirClassMember, LegacyHirExpr as HirExpr,
-    LegacyHirExprKind as HirExprKind, LegacyHirLValue as HirLValue, LegacyHirStmt as HirStmt,
-    VarId,
+    CompatibilityHirClassMember as HirClassMember, CompatibilityHirExpr as HirExpr,
+    CompatibilityHirExprKind as HirExprKind, CompatibilityHirLValue as HirLValue,
+    CompatibilityHirStmt as HirStmt, VarId,
 };
 use std::collections::{HashMap, HashSet};
 
