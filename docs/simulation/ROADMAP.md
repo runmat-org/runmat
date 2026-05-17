@@ -157,3 +157,5 @@ Progress update (2026-05-17):
     additive `analysis.run_study_sweep/v1` now supports policy-controlled failure handling (`fail_fast`) plus typed per-study failure entries (`failed_count`, `failure_entries`) so automation pipelines can choose between fail-fast semantics and partial-progress sweep completion.
 45. [x] Study sweep typed validation operation landed:
     added additive `analysis.validate_study_sweep/v1` with typed sweep-level and per-study validation outputs (`AnalysisStudySweepValidateData`, `AnalysisStudySweepValidateEntry`) including structured study issues and persisted sweep validation evidence artifacts for automation-first preflight workflows.
+46. [x] Study sweep typed planning operation landed:
+    added additive `analysis.plan_study_sweep/v1` with typed per-study plan outputs (`AnalysisStudySweepPlanData`, `AnalysisStudySweepPlanEntry`), planned/failure aggregate counts, continue-on-failure semantics via `fail_fast`, and persisted sweep planning evidence artifacts for automation-ready multi-study preflight planning.

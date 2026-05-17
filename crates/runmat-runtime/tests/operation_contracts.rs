@@ -4,10 +4,10 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::EntityKind;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
-    analysis_create_model_op, analysis_plan_study_op, analysis_results_by_run_id_op,
-    analysis_results_compare_op, analysis_results_op, analysis_run_acoustic_op,
-    analysis_run_electromagnetic_op, analysis_run_fsi_op, analysis_run_linear_static_op,
-    analysis_run_linear_static_with_options, analysis_run_modal_op,
+    analysis_create_model_op, analysis_plan_study_op, analysis_plan_study_sweep_op,
+    analysis_results_by_run_id_op, analysis_results_compare_op, analysis_results_op,
+    analysis_run_acoustic_op, analysis_run_electromagnetic_op, analysis_run_fsi_op,
+    analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_run_modal_op,
     analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
     analysis_run_nonlinear_with_options_op, analysis_run_study_op, analysis_run_study_sweep_op,
     analysis_run_transient_op, analysis_run_transient_with_options_op, analysis_trends_op,
@@ -682,6 +682,89 @@ fn analysis_study_sweep_validate_contract_is_v1_and_typed() {
                 .iter()
                 .any(|code| code == "ANALYSIS_STUDY_ID_EMPTY")
     }));
+    assert!(PathBuf::from(&envelope.data.evidence_artifact_path).exists());
+
+    drop(env_guard);
+    let _ = fs::remove_dir_all(&evidence_root);
+}
+
+#[test]
+fn analysis_study_sweep_plan_contract_is_v1_and_typed() {
+    static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
+    let evidence_root = std::env::temp_dir().join(format!(
+        "runmat-study-sweep-plan-contract-artifacts-{}-{}",
+        std::process::id(),
+        NEXT_TMP_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = fs::remove_dir_all(&evidence_root);
+    let env_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+    };
+    std::env::set_var(
+        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        evidence_root.display().to_string(),
+    );
+
+    let geometry = geometry_load_op(
+        "/part.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some("trace-contract-study-sweep-plan-1".to_string()), None),
+    )
+    .expect("geometry load should succeed");
+    let sweep = AnalysisStudySweepSpec {
+        sweep_id: "contract_study_sweep_plan_001".to_string(),
+        studies: vec![
+            AnalysisStudySpec {
+                study_id: "contract_study_sweep_plan_ok".to_string(),
+                geometry: geometry.data.clone(),
+                create_model_intent: AnalysisCreateModelIntentSpec {
+                    model_id: "contract_study_sweep_plan_ok_model".to_string(),
+                    profile: AnalysisCreateModelProfile::LinearStaticStructural,
+                    prep_context: None,
+                },
+                run_kind: AnalysisRunKind::LinearStatic,
+                backend: ComputeBackend::Cpu,
+                electromagnetic_run_options: None,
+            },
+            AnalysisStudySpec {
+                study_id: "contract_study_sweep_plan_em".to_string(),
+                geometry: geometry.data.clone(),
+                create_model_intent: AnalysisCreateModelIntentSpec {
+                    model_id: "contract_study_sweep_plan_em_model".to_string(),
+                    profile: AnalysisCreateModelProfile::ElectromagneticStatic,
+                    prep_context: None,
+                },
+                run_kind: AnalysisRunKind::Electromagnetic,
+                backend: ComputeBackend::Cpu,
+                electromagnetic_run_options: None,
+            },
+        ],
+        fail_fast: true,
+    };
+
+    let envelope = analysis_plan_study_sweep_op(
+        &sweep,
+        OperationContext::new(Some("trace-contract-study-sweep-plan-2".to_string()), None),
+    )
+    .expect("sweep planning should return typed payload");
+    assert_eq!(envelope.operation, "analysis.plan_study_sweep");
+    assert_eq!(envelope.op_version, "analysis.plan_study_sweep/v1");
+    assert_eq!(envelope.data.study_count, 2);
+    assert_eq!(envelope.data.planned_count, 2);
+    assert_eq!(envelope.data.failed_count, 0);
+    assert_eq!(envelope.data.plan_entries.len(), 2);
+    assert!(envelope.data.failure_entries.is_empty());
+    assert!(envelope
+        .data
+        .plan_entries
+        .iter()
+        .any(|entry| entry.run_kind == AnalysisRunKind::LinearStatic));
+    assert!(envelope
+        .data
+        .plan_entries
+        .iter()
+        .any(|entry| entry.run_kind == AnalysisRunKind::Electromagnetic));
     assert!(PathBuf::from(&envelope.data.evidence_artifact_path).exists());
 
     drop(env_guard);

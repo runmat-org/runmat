@@ -1117,6 +1117,32 @@ pub struct AnalysisStudySweepValidateData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudySweepPlanEntry {
+    pub study_id: String,
+    pub model_id: String,
+    pub run_kind: AnalysisRunKind,
+    pub backend: ComputeBackend,
+    #[serde(default)]
+    pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
+    pub operation_sequence: Vec<String>,
+    pub run_operation: String,
+    pub run_op_version: String,
+    pub study_fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudySweepPlanData {
+    pub sweep_id: String,
+    pub study_count: usize,
+    pub planned_count: usize,
+    pub failed_count: usize,
+    #[serde(default)]
+    pub failure_entries: Vec<AnalysisStudySweepFailureEntry>,
+    pub plan_entries: Vec<AnalysisStudySweepPlanEntry>,
+    pub evidence_artifact_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisStudySweepRunEntry {
     pub study_id: String,
     pub run_kind: AnalysisRunKind,

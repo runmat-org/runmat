@@ -58,17 +58,18 @@ pub use contracts::{
     AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind,
     AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult, AnalysisStudyIssue,
     AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
-    AnalysisStudySweepFailureEntry, AnalysisStudySweepRunEntry, AnalysisStudySweepSpec,
-    AnalysisStudySweepValidateData, AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult,
-    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
-    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
-    ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
-    ElectromagneticResultsData, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
-    NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode,
-    PreconditionerMode, PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason,
-    QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode,
-    ThermoFieldSource, ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta,
-    ThermoTimeProfilePoint, TransientIntegrationMethod, TransientResultsData,
+    AnalysisStudySweepFailureEntry, AnalysisStudySweepPlanData, AnalysisStudySweepPlanEntry,
+    AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudySweepValidateData,
+    AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult, AnalysisThermalRunOptions,
+    AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
+    AnalysisValidateResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
+    ElectroThermalCouplingOptions, ElectroTimeProfilePoint, ElectromagneticResultsData,
+    ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
+    NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
+    PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
+    RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode, ThermoFieldSource,
+    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
+    TransientIntegrationMethod, TransientResultsData,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -77,6 +78,8 @@ const ANALYSIS_VALIDATE_STUDY_OPERATION: &str = "analysis.validate_study";
 const ANALYSIS_VALIDATE_STUDY_OP_VERSION: &str = "analysis.validate_study/v1";
 const ANALYSIS_PLAN_STUDY_OPERATION: &str = "analysis.plan_study";
 const ANALYSIS_PLAN_STUDY_OP_VERSION: &str = "analysis.plan_study/v1";
+const ANALYSIS_PLAN_STUDY_SWEEP_OPERATION: &str = "analysis.plan_study_sweep";
+const ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION: &str = "analysis.plan_study_sweep/v1";
 const ANALYSIS_RUN_STUDY_OPERATION: &str = "analysis.run_study";
 const ANALYSIS_RUN_STUDY_OP_VERSION: &str = "analysis.run_study/v1";
 const ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION: &str = "analysis.validate_study_sweep";
@@ -979,6 +982,162 @@ pub fn analysis_run_study_op(
             quality_reasons: run_envelope.data.quality_reasons,
             provenance: run_envelope.data.provenance,
             evidence_artifact_path,
+        },
+    ))
+}
+
+pub fn analysis_plan_study_sweep_op(
+    spec: &AnalysisStudySweepSpec,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisStudySweepPlanData>, OperationErrorEnvelope> {
+    let mut issue_codes = Vec::new();
+    if spec.sweep_id.trim().is_empty() {
+        issue_codes.push("ANALYSIS_STUDY_SWEEP_ID_EMPTY".to_string());
+    }
+    if spec.studies.is_empty() {
+        issue_codes.push("ANALYSIS_STUDY_SWEEP_STUDIES_EMPTY".to_string());
+    }
+    if !issue_codes.is_empty() {
+        return Err(operation_error(
+            ANALYSIS_PLAN_STUDY_SWEEP_OPERATION,
+            ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_PLAN_STUDY_SWEEP_INVALID_SPEC",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "study sweep spec is invalid",
+            BTreeMap::from([("issue_codes".to_string(), issue_codes.join(","))]),
+        ));
+    }
+
+    let mut plan_entries = Vec::with_capacity(spec.studies.len());
+    let mut failure_entries = Vec::new();
+    for (index, study) in spec.studies.iter().enumerate() {
+        let planned = match analysis_plan_study_op(study, context.clone()) {
+            Ok(plan) => plan,
+            Err(err) => {
+                if spec.fail_fast {
+                    return Err(operation_error(
+                        ANALYSIS_PLAN_STUDY_SWEEP_OPERATION,
+                        ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
+                        &context,
+                        OperationErrorSpec {
+                            error_code: "ANALYSIS_PLAN_STUDY_SWEEP_STUDY_FAILED",
+                            error_type: OperationErrorType::Validation,
+                            retryable: false,
+                            severity: OperationErrorSeverity::Error,
+                        },
+                        format!(
+                            "study sweep planning failed at index {} for study_id {}: {}",
+                            index, study.study_id, err.error_code
+                        ),
+                        BTreeMap::from([
+                            ("sweep_id".to_string(), spec.sweep_id.clone()),
+                            ("study_id".to_string(), study.study_id.clone()),
+                            ("study_index".to_string(), index.to_string()),
+                            ("cause_error_code".to_string(), err.error_code),
+                        ]),
+                    ));
+                }
+                failure_entries.push(AnalysisStudySweepFailureEntry {
+                    study_id: study.study_id.clone(),
+                    study_index: index,
+                    error_code: err.error_code,
+                    message: err.message,
+                });
+                continue;
+            }
+        };
+        plan_entries.push(AnalysisStudySweepPlanEntry {
+            study_id: planned.data.study_id,
+            model_id: planned.data.model_id,
+            run_kind: planned.data.run_kind,
+            backend: planned.data.backend,
+            electromagnetic_run_options: planned.data.electromagnetic_run_options,
+            operation_sequence: planned.data.operation_sequence,
+            run_operation: planned.data.run_operation,
+            run_op_version: planned.data.run_op_version,
+            study_fingerprint: planned.data.study_fingerprint,
+        });
+    }
+
+    let sanitized_sweep_id = sanitize_study_sweep_id(&spec.sweep_id);
+    let evidence_path = study_evidence_root()
+        .join("sweeps")
+        .join(sanitized_sweep_id)
+        .join("plan.json");
+    if let Some(parent) = evidence_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            operation_error(
+                ANALYSIS_PLAN_STUDY_SWEEP_OPERATION,
+                ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                    error_type: OperationErrorType::Internal,
+                    retryable: true,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to create study sweep planning evidence directory: {err}"),
+                BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
+            )
+        })?;
+    }
+    let payload = serde_json::json!({
+        "schema_version": "analysis_study_sweep_plan_artifact/v1",
+        "sweep_id": spec.sweep_id.clone(),
+        "study_count": spec.studies.len(),
+        "planned_count": plan_entries.len(),
+        "failed_count": failure_entries.len(),
+        "failure_entries": failure_entries.clone(),
+        "plan_entries": plan_entries.clone(),
+    });
+    let payload_bytes = serde_json::to_vec_pretty(&payload).map_err(|err| {
+        operation_error(
+            ANALYSIS_PLAN_STUDY_SWEEP_OPERATION,
+            ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to encode study sweep planning evidence payload: {err}"),
+            BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
+        )
+    })?;
+    atomic_write_bytes(&evidence_path, &payload_bytes).map_err(|err| {
+        operation_error(
+            ANALYSIS_PLAN_STUDY_SWEEP_OPERATION,
+            ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            err,
+            BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
+        )
+    })?;
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_PLAN_STUDY_SWEEP_OPERATION,
+        ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
+        &context,
+        AnalysisStudySweepPlanData {
+            sweep_id: spec.sweep_id.clone(),
+            study_count: spec.studies.len(),
+            planned_count: plan_entries.len(),
+            failed_count: failure_entries.len(),
+            failure_entries,
+            plan_entries,
+            evidence_artifact_path: evidence_path.display().to_string(),
         },
     ))
 }

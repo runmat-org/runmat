@@ -980,6 +980,102 @@ fn analysis_plan_study_surfaces_electromagnetic_run_operation_and_options() {
 }
 
 #[test]
+fn analysis_plan_study_sweep_returns_typed_plan_entries() {
+    let _guard = analysis_test_guard();
+    let root = temp_artifact_root("plan-study-sweep-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let env_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+    };
+    std::env::set_var(
+        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        root.display().to_string(),
+    );
+    let sweep_spec = AnalysisStudySweepSpec {
+        sweep_id: "study_sweep_plan_001".to_string(),
+        studies: vec![
+            sample_linear_static_study_spec(),
+            sample_electromagnetic_study_spec(),
+        ],
+        fail_fast: true,
+    };
+
+    let envelope = analysis_plan_study_sweep_op(&sweep_spec, OperationContext::new(None, None))
+        .expect("study sweep plan should succeed");
+
+    assert_eq!(envelope.operation, "analysis.plan_study_sweep");
+    assert_eq!(envelope.op_version, "analysis.plan_study_sweep/v1");
+    assert_eq!(envelope.data.sweep_id, "study_sweep_plan_001");
+    assert_eq!(envelope.data.study_count, 2);
+    assert_eq!(envelope.data.planned_count, 2);
+    assert_eq!(envelope.data.failed_count, 0);
+    assert!(envelope.data.failure_entries.is_empty());
+    assert_eq!(envelope.data.plan_entries.len(), 2);
+    assert!(envelope
+        .data
+        .plan_entries
+        .iter()
+        .all(|entry| entry.study_fingerprint.starts_with("sha256:")));
+    assert!(envelope
+        .data
+        .plan_entries
+        .iter()
+        .any(|entry| entry.run_kind == AnalysisRunKind::LinearStatic));
+    assert!(envelope
+        .data
+        .plan_entries
+        .iter()
+        .any(|entry| entry.run_kind == AnalysisRunKind::Electromagnetic));
+    assert!(envelope.data.evidence_artifact_path.ends_with("plan.json"));
+    assert!(PathBuf::from(&envelope.data.evidence_artifact_path).exists());
+    drop(env_guard);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_plan_study_sweep_rejects_empty_study_set() {
+    let _guard = analysis_test_guard();
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "study_sweep_plan_empty".to_string(),
+        studies: Vec::new(),
+        fail_fast: true,
+    };
+
+    let err = analysis_plan_study_sweep_op(&spec, OperationContext::new(None, None))
+        .expect_err("empty sweep plan should be rejected");
+    assert_eq!(err.operation, "analysis.plan_study_sweep");
+    assert_eq!(err.op_version, "analysis.plan_study_sweep/v1");
+    assert_eq!(err.error_code, "ANALYSIS_PLAN_STUDY_SWEEP_INVALID_SPEC");
+}
+
+#[test]
+fn analysis_plan_study_sweep_can_continue_on_study_failure() {
+    let _guard = analysis_test_guard();
+    let mut invalid = sample_linear_static_study_spec();
+    invalid.study_id = "   ".to_string();
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "study_sweep_plan_continue".to_string(),
+        studies: vec![sample_linear_static_study_spec(), invalid],
+        fail_fast: false,
+    };
+
+    let envelope = analysis_plan_study_sweep_op(&spec, OperationContext::new(None, None))
+        .expect("continue-on-failure sweep planning should succeed");
+
+    assert_eq!(envelope.data.study_count, 2);
+    assert_eq!(envelope.data.planned_count, 1);
+    assert_eq!(envelope.data.failed_count, 1);
+    assert_eq!(envelope.data.plan_entries.len(), 1);
+    assert_eq!(envelope.data.failure_entries.len(), 1);
+    assert_eq!(envelope.data.failure_entries[0].study_index, 1);
+    assert_eq!(
+        envelope.data.failure_entries[0].error_code,
+        "ANALYSIS_PLAN_STUDY_INVALID_SPEC"
+    );
+}
+
+#[test]
 fn analysis_run_study_executes_linear_static_path() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
