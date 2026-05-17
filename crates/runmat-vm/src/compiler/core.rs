@@ -1027,11 +1027,6 @@ impl Compiler {
             RequestedOutputCount::Zero if output_count == 0 => {}
             RequestedOutputCount::One if output_count == 1 => {}
             RequestedOutputCount::Exactly(count) if count == output_count => {}
-            RequestedOutputCount::AtLeast(_) | RequestedOutputCount::UnknownDynamic => {
-                return Err(self.compile_error(
-                    "MIR multi-assign calls must carry a fixed requested output count",
-                ))
-            }
             _ => {
                 return Err(
                     self.compile_error("MIR multi-assign call output count does not match targets")
@@ -1663,12 +1658,6 @@ impl Compiler {
             RequestedOutputCount::Zero => Ok(0),
             RequestedOutputCount::One => Ok(1),
             RequestedOutputCount::Exactly(count) => Ok(count),
-            RequestedOutputCount::AtLeast(_) => Err(self.compile_error(
-                "MIR call requested output count must be fixed; AtLeast is unsupported",
-            )),
-            RequestedOutputCount::UnknownDynamic => Err(self.compile_error(
-                "MIR call requested output count must be explicit; UnknownDynamic is unsupported",
-            )),
         }
     }
 
@@ -1685,11 +1674,6 @@ impl Compiler {
             RequestedOutputCount::Zero => 0,
             RequestedOutputCount::One => 1,
             RequestedOutputCount::Exactly(count) => count,
-            RequestedOutputCount::AtLeast(_) | RequestedOutputCount::UnknownDynamic => {
-                return Err(self.compile_error(
-                    "MIR multi-assign targets must carry a fixed requested output count",
-                ))
-            }
         };
         if count != expected {
             return Err(self.compile_error(format!(

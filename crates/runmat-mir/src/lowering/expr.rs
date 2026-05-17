@@ -362,16 +362,6 @@ fn requested_output_count_for_arg_expansion(
         RequestedOutputCount::Zero => 0,
         RequestedOutputCount::One => 1,
         RequestedOutputCount::Exactly(count) => *count,
-        RequestedOutputCount::AtLeast(_) => {
-            return Err(SemanticError::new(
-                "MIR lowering requires fixed call output counts; AtLeast is unsupported",
-            ))
-        }
-        RequestedOutputCount::UnknownDynamic => {
-            return Err(SemanticError::new(
-                "MIR lowering requires explicit call output counts; UnknownDynamic is unsupported",
-            ))
-        }
     })
 }
 

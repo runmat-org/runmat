@@ -240,17 +240,11 @@ fn lower_output_target(
 
 fn fixed_requested_output_count(
     requested_outputs: &RequestedOutputCount,
-    context: &str,
+    _context: &str,
 ) -> Result<usize, SemanticError> {
     match requested_outputs {
         RequestedOutputCount::Zero => Ok(0),
         RequestedOutputCount::One => Ok(1),
         RequestedOutputCount::Exactly(count) => Ok(*count),
-        RequestedOutputCount::AtLeast(_) => Err(SemanticError::new(format!(
-            "{context} must be fixed; AtLeast is unsupported"
-        ))),
-        RequestedOutputCount::UnknownDynamic => Err(SemanticError::new(format!(
-            "{context} must be explicit; UnknownDynamic is unsupported"
-        ))),
     }
 }

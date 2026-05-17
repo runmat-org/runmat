@@ -510,8 +510,6 @@ pub enum RequestedOutputCount {
     Zero,
     One,
     Exactly(usize),
-    AtLeast(usize),
-    UnknownDynamic,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
