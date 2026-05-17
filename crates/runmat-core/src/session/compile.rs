@@ -392,19 +392,23 @@ fn bind_semantic_function_end_expr(
     registry: &runmat_vm::SemanticFunctionRegistry,
 ) {
     match expr {
-        runmat_vm::EndExpr::Call(name, args) => {
-            for arg in args.iter_mut() {
-                bind_semantic_function_end_expr(arg, registry);
+        runmat_vm::EndExpr::ResolvedCall {
+            identity,
+            display_name,
+            args,
+            ..
+        } => {
+            if let runmat_hir::CallableIdentity::DynamicName(name) = identity {
+                let dynamic_name = name.0.clone();
+                if let Some(function) = registry.resolve_name(&dynamic_name) {
+                    *identity = runmat_hir::CallableIdentity::SemanticFunction(function);
+                    *display_name = Some(dynamic_name);
+                }
             }
-            if let Some(function) = registry.resolve_name(name) {
-                let name = name.clone();
-                let args = std::mem::take(args);
-                *expr = runmat_vm::EndExpr::SemanticCall(function, name, args);
-            }
-        }
-        runmat_vm::EndExpr::SemanticCall(function, name, args) => {
-            if let Some(function) = registry.get(*function) {
-                *name = function.display_name.clone();
+            if let runmat_hir::CallableIdentity::SemanticFunction(function_id) = identity {
+                if let Some(function) = registry.get(*function_id) {
+                    *display_name = Some(function.display_name.clone());
+                }
             }
             for arg in args {
                 bind_semantic_function_end_expr(arg, registry);
@@ -443,15 +447,16 @@ fn remap_semantic_function_end_expr(
     remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
 ) {
     match expr {
-        runmat_vm::EndExpr::SemanticCall(function, _, args) => {
-            if let Some(new_id) = remap.get(function).copied() {
-                *function = new_id;
+        runmat_vm::EndExpr::ResolvedCall { identity, args, .. } => {
+            match identity {
+                runmat_hir::CallableIdentity::SemanticFunction(function)
+                | runmat_hir::CallableIdentity::AnonymousFunction(function) => {
+                    if let Some(new_id) = remap.get(function).copied() {
+                        *function = new_id;
+                    }
+                }
+                _ => {}
             }
-            for arg in args {
-                remap_semantic_function_end_expr(arg, remap);
-            }
-        }
-        runmat_vm::EndExpr::Call(_, args) => {
             for arg in args {
                 remap_semantic_function_end_expr(arg, remap);
             }

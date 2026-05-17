@@ -1,4 +1,4 @@
-use runmat_hir::FunctionId;
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,8 +18,12 @@ pub enum EndExpr {
     End,
     Const(f64),
     Var(usize),
-    Call(String, Vec<EndExpr>),
-    SemanticCall(FunctionId, String, Vec<EndExpr>),
+    ResolvedCall {
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        display_name: Option<String>,
+        args: Vec<EndExpr>,
+    },
     Add(Box<EndExpr>, Box<EndExpr>),
     Sub(Box<EndExpr>, Box<EndExpr>),
     Mul(Box<EndExpr>, Box<EndExpr>),

@@ -1,7 +1,5 @@
 use crate::bytecode::EndExpr;
-use crate::call::descriptor::{
-    try_execute_callable_descriptor, CallableCallKind, CallableDescriptor,
-};
+use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::shared::{
     build_object_paren_expr_selector_values, build_object_paren_selector_values,
     call_object_subsasgn_brace_values, call_object_subsasgn_paren_scalar_indices,
@@ -386,40 +384,27 @@ where
                         "end expression must be numeric",
                     )
                 }),
-                EndExpr::Call(name, args) => {
+                EndExpr::ResolvedCall {
+                    identity,
+                    fallback_policy,
+                    display_name,
+                    args,
+                } => {
                     let mut argv: Vec<Value> = Vec::with_capacity(args.len());
                     for a in args {
                         let val = eval_end_expr_value(a, end_value, vars, call_user).await?;
                         argv.push(Value::Num(val));
                     }
-                    let v = match runmat_runtime::call_builtin_async(name, &argv).await {
-                        Ok(v) => v,
-                        Err(_) => call_user(name, argv, vars).await?,
-                    };
-                    idx_end_expr::value_to_f64(&v).map_err(|_| {
-                        crate::interpreter::errors::mex(
-                            "UnsupportedIndexType",
-                            "end call must return scalar",
-                        )
-                    })
-                }
-                EndExpr::SemanticCall(function, name, args) => {
-                    let mut argv: Vec<Value> = Vec::with_capacity(args.len());
-                    for a in args {
-                        let val = eval_end_expr_value(a, end_value, vars, call_user).await?;
-                        argv.push(Value::Num(val));
-                    }
-                    let descriptor = CallableDescriptor::semantic_named(
-                        *function,
-                        name.clone(),
-                        argv.clone(),
+                    let descriptor = CallableDescriptor::resolved(
+                        identity.clone(),
+                        display_name.clone(),
+                        argv,
                         1,
+                        *fallback_policy,
+                        CallableCallKind::EndExpr,
                     )
                     .with_call_kind(CallableCallKind::EndExpr);
-                    let v = match try_execute_callable_descriptor(descriptor).await? {
-                        Some(value) => value,
-                        None => call_user(name, argv, vars).await?,
-                    };
+                    let v = execute_callable_descriptor(descriptor).await?;
                     idx_end_expr::value_to_f64(&v).map_err(|_| {
                         crate::interpreter::errors::mex(
                             "UnsupportedIndexType",

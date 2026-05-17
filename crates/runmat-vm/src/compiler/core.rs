@@ -2358,22 +2358,20 @@ impl Compiler {
     }
 
     fn mir_call_end_expr_internal(&self, call: &MirCall) -> Option<(EndExpr, bool)> {
-        let semantic_function = match &call.callee {
-            MirCallee::Static(CallableIdentity::SemanticFunction(function)) => Some(*function),
-            _ => None,
-        };
-        let name = match &call.callee {
-            MirCallee::Static(CallableIdentity::SemanticFunction(function)) => self
-                .layout
-                .as_ref()
-                .and_then(|layout| layout.functions.get(function))
-                .map(|layout| layout.display_name.clone())?,
-            MirCallee::Static(CallableIdentity::Builtin(id)) => id.0.clone(),
-            MirCallee::Static(CallableIdentity::ExternalName(name)) if name.0.len() == 1 => {
-                name.0[0].0.clone()
+        let (identity, display_name) = match &call.callee {
+            MirCallee::Static(identity) => {
+                let display_name = match identity {
+                    CallableIdentity::SemanticFunction(function) => self
+                        .layout
+                        .as_ref()
+                        .and_then(|layout| layout.functions.get(function))
+                        .map(|layout| layout.display_name.clone())
+                        .or_else(|| identity.display_name()),
+                    _ => identity.display_name(),
+                };
+                (identity.clone(), display_name)
             }
-            MirCallee::Static(CallableIdentity::DynamicName(name)) => name.0.clone(),
-            _ => return None,
+            MirCallee::Dynamic(_) => return None,
         };
         let mut args = Vec::with_capacity(call.args.len());
         let mut has_end = false;
@@ -2385,9 +2383,11 @@ impl Compiler {
             args.push(expr);
             has_end |= arg_has_end;
         }
-        let expr = match semantic_function {
-            Some(function) => EndExpr::SemanticCall(function, name, args),
-            None => EndExpr::Call(name, args),
+        let expr = EndExpr::ResolvedCall {
+            identity,
+            fallback_policy: call.fallback_policy,
+            display_name,
+            args,
         };
         Some((expr, has_end))
     }

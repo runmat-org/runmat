@@ -296,11 +296,17 @@ fn encode_end_expr_value(expr: &EndExpr) -> Result<Value, RuntimeError> {
         EndExpr::End => Ok(Value::String("end".to_string())),
         EndExpr::Const(v) => Ok(Value::Num(*v)),
         EndExpr::Var(i) => Ok(Value::String(format!("var:{i}"))),
-        EndExpr::Call(name, args) | EndExpr::SemanticCall(_, name, args) => {
-            let mut items = vec![
-                Value::String("call".to_string()),
-                Value::String(name.clone()),
-            ];
+        EndExpr::ResolvedCall {
+            identity,
+            display_name,
+            args,
+            ..
+        } => {
+            let name = display_name
+                .clone()
+                .or_else(|| identity.display_name())
+                .unwrap_or_else(|| "<unnamed>".to_string());
+            let mut items = vec![Value::String("call".to_string()), Value::String(name)];
             for a in args {
                 items.push(encode_end_expr_value(a)?);
             }

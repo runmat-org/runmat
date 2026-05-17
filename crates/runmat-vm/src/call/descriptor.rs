@@ -189,6 +189,28 @@ impl CallableDescriptor {
         )
     }
 
+    pub(crate) fn resolved(
+        identity: CallableIdentity,
+        display_name: Option<String>,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        fallback_policy: CallableFallbackPolicy,
+        call_kind: CallableCallKind,
+    ) -> Self {
+        Self::resolved_inner(
+            identity,
+            display_name.clone(),
+            fallback_policy,
+            args,
+            requested_outputs,
+            CallableMetadata {
+                call_kind,
+                display_name,
+                ..CallableMetadata::default()
+            },
+        )
+    }
+
     pub(crate) fn with_call_kind(mut self, call_kind: CallableCallKind) -> Self {
         self.metadata.call_kind = call_kind;
         self
@@ -342,6 +364,7 @@ async fn execute_resolved_callable(
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
     match identity {
+        CallableIdentity::Builtin(id) => runmat_runtime::call_builtin_async(&id.0, &args).await,
         CallableIdentity::SemanticFunction(function) => {
             if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
                 function.0,
@@ -390,6 +413,9 @@ async fn try_execute_resolved_callable(
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Option<Value>, RuntimeError> {
     match identity {
+        CallableIdentity::Builtin(id) => runmat_runtime::call_builtin_async(&id.0, &args)
+            .await
+            .map(Some),
         CallableIdentity::SemanticFunction(function) => {
             if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
                 function.0,
