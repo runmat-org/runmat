@@ -6,11 +6,16 @@ use runmat_runtime::RuntimeError;
 pub async fn forward_builtin_feval(
     func_value: Value,
     args: Vec<Value>,
+    requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
     let mut argv = Vec::with_capacity(1 + args.len());
     argv.push(func_value);
     argv.extend(args);
-    call_runtime_feval(&argv).await
+    if requested_outputs == 1 {
+        call_runtime_feval(&argv).await
+    } else {
+        runmat_runtime::call_builtin_async_with_outputs("feval", &argv, requested_outputs).await
+    }
 }
 
 pub async fn call_runtime_feval(args: &[Value]) -> Result<Value, RuntimeError> {

@@ -1,12 +1,21 @@
+use crate::call::descriptor::{
+    execute_callable_descriptor, try_execute_callable_descriptor, CallableCallKind,
+    CallableDescriptor,
+};
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
 use runmat_builtins::{
     builtin_functions, get_static_property_value, lookup_method, lookup_property, Access,
     CellArray, Closure, Value,
 };
+use runmat_hir::CallableFallbackPolicy;
 use runmat_runtime::RuntimeError;
 
-async fn call_runtime_builtin(
+fn requested_output_arity(requested_outputs: Option<usize>) -> usize {
+    requested_outputs.unwrap_or(1)
+}
+
+async fn call_explicit_builtin(
     name: &str,
     args: &[Value],
     requested_outputs: Option<usize>,
@@ -15,6 +24,38 @@ async fn call_runtime_builtin(
         Some(count) => runmat_runtime::call_builtin_async_with_outputs(name, args, count).await,
         None => runmat_runtime::call_builtin_async(name, args).await,
     }
+}
+
+async fn call_named_with_policy(
+    name: String,
+    args: Vec<Value>,
+    requested_outputs: Option<usize>,
+    fallback_policy: CallableFallbackPolicy,
+) -> Result<Value, RuntimeError> {
+    execute_callable_descriptor(CallableDescriptor::dynamic_named(
+        name,
+        args,
+        requested_output_arity(requested_outputs),
+        fallback_policy,
+        CallableCallKind::Direct,
+    ))
+    .await
+}
+
+async fn try_call_named_with_policy(
+    name: String,
+    args: Vec<Value>,
+    requested_outputs: Option<usize>,
+    fallback_policy: CallableFallbackPolicy,
+) -> Result<Option<Value>, RuntimeError> {
+    try_execute_callable_descriptor(CallableDescriptor::dynamic_named(
+        name,
+        args,
+        requested_output_arity(requested_outputs),
+        fallback_policy,
+        CallableCallKind::Direct,
+    ))
+    .await
 }
 
 pub fn create_closure(
@@ -109,17 +150,35 @@ pub async fn call_method_with_outputs(
                 let mut full_args = Vec::with_capacity(1 + args.len());
                 full_args.push(Value::Object(obj));
                 full_args.extend(args);
-                return call_runtime_builtin(&m.function_name, &full_args, requested_outputs).await;
+                return call_named_with_policy(
+                    m.function_name,
+                    full_args,
+                    requested_outputs,
+                    CallableFallbackPolicy::RuntimeNameResolution,
+                )
+                .await;
             }
             let qualified = format!("{}.{}", obj.class_name, name);
             let mut full_args = Vec::with_capacity(1 + args.len());
             full_args.push(Value::Object(obj));
-            full_args.extend(args.clone());
-            if let Ok(v) = call_runtime_builtin(&qualified, &full_args, requested_outputs).await {
-                Ok(v)
-            } else {
-                call_runtime_builtin(name, &full_args, requested_outputs).await
+            full_args.extend(args);
+            if let Some(result) = try_call_named_with_policy(
+                qualified,
+                full_args.clone(),
+                requested_outputs,
+                CallableFallbackPolicy::None,
+            )
+            .await?
+            {
+                return Ok(result);
             }
+            call_named_with_policy(
+                name.to_string(),
+                full_args,
+                requested_outputs,
+                CallableFallbackPolicy::RuntimeNameResolution,
+            )
+            .await
         }
         _ => Err(mex("CallMethod", "CallMethod on non-object")),
     }
@@ -138,10 +197,22 @@ pub async fn call_static_method_with_outputs(
         if m.access == Access::Private {
             return Err(format!("Method '{}' is private", method).into());
         }
-        return call_runtime_builtin(&m.function_name, &args, requested_outputs).await;
+        return call_named_with_policy(
+            m.function_name,
+            args,
+            requested_outputs,
+            CallableFallbackPolicy::RuntimeNameResolution,
+        )
+        .await;
     }
     let qualified = format!("{}.{}", class_name, method);
-    call_runtime_builtin(&qualified, &args, requested_outputs).await
+    call_named_with_policy(
+        qualified,
+        args,
+        requested_outputs,
+        CallableFallbackPolicy::RuntimeNameResolution,
+    )
+    .await
 }
 
 pub fn load_static_property(class_name: &str, prop: &str) -> Result<Value, RuntimeError> {
@@ -186,17 +257,37 @@ pub async fn call_method_or_member_index_with_outputs(
                 let mut full_args = Vec::with_capacity(1 + args.len());
                 full_args.push(Value::Object(obj));
                 full_args.extend(args);
-                return call_runtime_builtin(&m.function_name, &full_args, requested_outputs).await;
+                return call_named_with_policy(
+                    m.function_name,
+                    full_args,
+                    requested_outputs,
+                    CallableFallbackPolicy::RuntimeNameResolution,
+                )
+                .await;
             }
 
             let mut method_args = Vec::with_capacity(1 + args.len());
             method_args.push(Value::Object(obj.clone()));
             method_args.extend(args.iter().cloned());
             let qualified = format!("{}.{}", obj.class_name, name);
-            if let Ok(v) = call_runtime_builtin(&qualified, &method_args, requested_outputs).await {
+            if let Some(v) = try_call_named_with_policy(
+                qualified,
+                method_args.clone(),
+                requested_outputs,
+                CallableFallbackPolicy::None,
+            )
+            .await?
+            {
                 return Ok(v);
             }
-            if let Ok(v) = call_runtime_builtin(&name, &method_args, requested_outputs).await {
+            if let Some(v) = try_call_named_with_policy(
+                name.clone(),
+                method_args.clone(),
+                requested_outputs,
+                CallableFallbackPolicy::None,
+            )
+            .await?
+            {
                 return Ok(v);
             }
 
@@ -209,7 +300,7 @@ pub async fn call_method_or_member_index_with_outputs(
                     .map_err(|e| format!("getfield idx build: {e}"))?;
                 getfield_args.push(Value::Cell(idx_cell));
             }
-            call_runtime_builtin("getfield", &getfield_args, requested_outputs).await
+            call_explicit_builtin("getfield", &getfield_args, requested_outputs).await
         }
         Value::HandleObject(handle) => {
             if let Ok(v) = crate::call::shared::call_object_named_method_with_outputs(
@@ -232,18 +323,31 @@ pub async fn call_method_or_member_index_with_outputs(
                     .map_err(|e| format!("getfield idx build: {e}"))?;
                 getfield_args.push(Value::Cell(idx_cell));
             }
-            call_runtime_builtin("getfield", &getfield_args, requested_outputs).await
+            call_explicit_builtin("getfield", &getfield_args, requested_outputs).await
         }
         Value::ClassRef(cls) => {
             if let Some((m, _owner)) = lookup_method(&cls, &name) {
                 if !m.is_static {
                     return Err(format!("Method '{}' is not static", name).into());
                 }
-                return call_runtime_builtin(&m.function_name, &args, requested_outputs).await;
+                return call_named_with_policy(
+                    m.function_name,
+                    args,
+                    requested_outputs,
+                    CallableFallbackPolicy::RuntimeNameResolution,
+                )
+                .await;
             }
 
             let qualified = format!("{cls}.{name}");
-            if let Ok(v) = call_runtime_builtin(&qualified, &args, requested_outputs).await {
+            if let Some(v) = try_call_named_with_policy(
+                qualified,
+                args.clone(),
+                requested_outputs,
+                CallableFallbackPolicy::None,
+            )
+            .await?
+            {
                 return Ok(v);
             }
 
@@ -263,7 +367,7 @@ pub async fn call_method_or_member_index_with_outputs(
                     .map_err(|e| format!("getfield idx build: {e}"))?;
                 getfield_args.push(Value::Cell(idx_cell));
             }
-            call_runtime_builtin("getfield", &getfield_args, requested_outputs).await
+            call_explicit_builtin("getfield", &getfield_args, requested_outputs).await
         }
     }
 }

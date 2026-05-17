@@ -342,7 +342,12 @@ async fn execute_resolved_callable(
                     | CallableFallbackPolicy::RuntimeNameResolution
             ) {
                 if let Some(name) = metadata.display_name.clone() {
-                    return forward_builtin_feval(Value::FunctionHandle(name), args).await;
+                    return forward_builtin_feval(
+                        Value::FunctionHandle(name),
+                        args,
+                        requested_outputs,
+                    )
+                    .await;
                 }
             }
             Err(semantic_unavailable_error(function.0, &metadata))
@@ -353,7 +358,7 @@ async fn execute_resolved_callable(
                 let Some(name) = other.display_name() else {
                     return Err(undefined_name_error("<unnamed callable>", &metadata));
                 };
-                forward_builtin_feval(Value::FunctionHandle(name), args).await
+                forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
             }
             CallableFallbackPolicy::None
             | CallableFallbackPolicy::ObjectDispatch
@@ -391,9 +396,13 @@ async fn try_execute_resolved_callable(
                     | CallableFallbackPolicy::RuntimeNameResolution
             ) {
                 if let Some(name) = metadata.display_name {
-                    return forward_builtin_feval(Value::FunctionHandle(name), args)
-                        .await
-                        .map(Some);
+                    return forward_builtin_feval(
+                        Value::FunctionHandle(name),
+                        args,
+                        requested_outputs,
+                    )
+                    .await
+                    .map(Some);
                 }
             }
             Ok(None)
@@ -409,7 +418,7 @@ async fn try_execute_resolved_callable(
             let Some(name) = other.display_name() else {
                 return Ok(None);
             };
-            forward_builtin_feval(Value::FunctionHandle(name), args)
+            forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs)
                 .await
                 .map(Some)
         }
@@ -433,7 +442,9 @@ pub(crate) async fn execute_callable_descriptor(
             execute_resolved_callable(identity, args, requested_outputs, metadata, fallback_policy)
                 .await
         }
-        CallableTarget::FevalForward(func_value) => forward_builtin_feval(func_value, args).await,
+        CallableTarget::FevalForward(func_value) => {
+            forward_builtin_feval(func_value, args, requested_outputs).await
+        }
     }
 }
 
@@ -461,7 +472,9 @@ pub(crate) async fn try_execute_callable_descriptor(
             .await
         }
         CallableTarget::FevalForward(func_value) => {
-            forward_builtin_feval(func_value, args).await.map(Some)
+            forward_builtin_feval(func_value, args, requested_outputs)
+                .await
+                .map(Some)
         }
     }
 }
