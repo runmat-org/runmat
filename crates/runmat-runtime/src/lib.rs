@@ -1047,25 +1047,34 @@ async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 
 #[runmat_macros::runtime_builtin(name = "feval", builtin_path = "crate")]
 async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    async fn call_by_name(name: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
+    async fn call_by_name(
+        name: &str,
+        args: &[Value],
+        requested_outputs: usize,
+    ) -> crate::BuiltinResult<Value> {
         let request = crate::user_functions::SemanticCallableRequest::named_with_policy(
             name.to_string(),
             args.to_vec(),
-            1,
+            requested_outputs,
             crate::user_functions::SemanticCallableKind::Feval,
             runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
         );
         if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await {
             return result;
         }
-        crate::call_builtin_async(name, args).await
+        if requested_outputs == 1 {
+            crate::call_builtin_async(name, args).await
+        } else {
+            crate::call_builtin_async_with_outputs(name, args, requested_outputs).await
+        }
     }
+    let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
 
     match f {
         // Function handle strings like "@sin"
         Value::String(s) => {
             if let Some(name) = s.strip_prefix('@') {
-                call_by_name(name, &rest).await
+                call_by_name(name, &rest, requested_outputs).await
             } else {
                 Err(
                     (format!("feval: expected function handle string starting with '@', got {s}"))
@@ -1078,7 +1087,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             if ca.rows == 1 {
                 let s: String = ca.data.iter().collect();
                 if let Some(name) = s.strip_prefix('@') {
-                    call_by_name(name, &rest).await
+                    call_by_name(name, &rest, requested_outputs).await
                 } else {
                     Err((format!(
                         "feval: expected function handle string starting with '@', got {s}"
@@ -1089,20 +1098,20 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                 Err(("feval: function handle char array must be a row vector".to_string()).into())
             }
         }
-        Value::FunctionHandle(name) => call_by_name(&name, &rest).await,
+        Value::FunctionHandle(name) => call_by_name(&name, &rest, requested_outputs).await,
         Value::SemanticFunctionHandle { name, function } => {
             let request = crate::user_functions::SemanticCallableRequest::semantic(
                 function,
                 name.clone(),
                 rest.clone(),
-                1,
+                requested_outputs,
                 crate::user_functions::SemanticCallableKind::Feval,
             );
             if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await
             {
                 return result;
             }
-            call_by_name(&name, &rest).await
+            call_by_name(&name, &rest, requested_outputs).await
         }
         Value::Closure(c) => {
             let mut args = c.captures.clone();
@@ -1112,7 +1121,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                     function,
                     c.function_name.clone(),
                     args.clone(),
-                    1,
+                    requested_outputs,
                     crate::user_functions::SemanticCallableKind::Feval,
                 );
                 if let Some(result) =
@@ -1121,7 +1130,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                     return result;
                 }
             }
-            call_by_name(&c.function_name, &args).await
+            call_by_name(&c.function_name, &args, requested_outputs).await
         }
         other => Err((format!("feval: unsupported function value {other:?}")).into()),
     }
@@ -1524,5 +1533,50 @@ mod tests {
         block_on(notify_builtin(target, "Changed".to_string(), Vec::new()))
             .expect("notify succeeds");
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn feval_semantic_handle_honors_zero_requested_outputs() {
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |function, args, requested_outputs| {
+                assert_eq!(function, 46);
+                assert_eq!(requested_outputs, 0);
+                assert_eq!(args, &[Value::Num(5.0)]);
+                Box::pin(async { Ok(Value::OutputList(Vec::new())) })
+            },
+        )));
+        let _output_guard = crate::output_count::push_output_count(Some(0));
+        let handle = Value::SemanticFunctionHandle {
+            name: "semantic_target".to_string(),
+            function: 46,
+        };
+
+        let result = block_on(feval_builtin(handle, vec![Value::Num(5.0)]))
+            .expect("semantic function handle feval succeeds");
+        assert_eq!(result, Value::OutputList(Vec::new()));
+    }
+
+    #[test]
+    fn feval_semantic_handle_honors_multi_requested_outputs() {
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |function, args, requested_outputs| {
+                assert_eq!(function, 47);
+                assert_eq!(requested_outputs, 2);
+                assert_eq!(args, &[Value::Num(6.0)]);
+                Box::pin(async { Ok(Value::OutputList(vec![Value::Num(1.0), Value::Num(2.0)])) })
+            },
+        )));
+        let _output_guard = crate::output_count::push_output_count(Some(2));
+        let handle = Value::SemanticFunctionHandle {
+            name: "semantic_target".to_string(),
+            function: 47,
+        };
+
+        let result = block_on(feval_builtin(handle, vec![Value::Num(6.0)]))
+            .expect("semantic function handle feval succeeds");
+        assert_eq!(
+            result,
+            Value::OutputList(vec![Value::Num(1.0), Value::Num(2.0)])
+        );
     }
 }
