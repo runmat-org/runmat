@@ -3402,8 +3402,8 @@ pub(super) fn run_fixture(
                             "nonlinear_line_search_backtracks",
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_line_search_backtracks,
-                            Some(1.0),
-                            None,
+                            Some(8.0),
+                            Some(12.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3433,7 +3433,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_max_increment_norm,
                             None,
-                            Some(5.0e-3),
+                            Some(1.0e-4),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3443,7 +3443,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_iteration_spike_count,
                             None,
-                            Some(4.0),
+                            Some(2.0),
                         );
                     }
                     if spec.id == "nonlinear_assembly_stress_gpu_provider" {
@@ -3454,8 +3454,8 @@ pub(super) fn run_fixture(
                             "nonlinear_stress_converged_increments",
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_converged_increments,
-                            Some(30.0),
-                            None,
+                            Some(32.0),
+                            Some(32.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3475,7 +3475,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_failed_increments,
                             None,
-                            Some(2.0),
+                            Some(1.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3485,7 +3485,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_max_residual_norm,
                             None,
-                            Some(1.0e-3),
+                            Some(1.0e-5),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3495,7 +3495,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_max_increment_norm,
                             None,
-                            Some(1.0e-2),
+                            Some(1.0e-4),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3504,8 +3504,8 @@ pub(super) fn run_fixture(
                             "nonlinear_stress_line_search_backtracks",
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_line_search_backtracks,
-                            Some(1.0),
-                            Some(64.0),
+                            Some(8.0),
+                            Some(14.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3514,8 +3514,8 @@ pub(super) fn run_fixture(
                             "nonlinear_stress_tangent_rebuild_count",
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_tangent_rebuild_count,
-                            Some(4.0),
-                            Some(24.0),
+                            Some(5.0),
+                            Some(10.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3525,7 +3525,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_iteration_spike_count,
                             None,
-                            Some(8.0),
+                            Some(3.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3535,7 +3535,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_convergence_stall_count,
                             None,
-                            Some(6.0),
+                            Some(2.0),
                         );
                     }
                     if spec.id == "nonlinear_softening_proxy_gpu_provider" {
@@ -3557,7 +3557,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_failed_increments,
                             None,
-                            Some(3.0),
+                            Some(1.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3567,7 +3567,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_convergence_stall_count,
                             Some(0.0),
-                            Some(10.0),
+                            Some(2.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3577,7 +3577,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_iteration_spike_count,
                             Some(1.0),
-                            Some(12.0),
+                            Some(4.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3587,7 +3587,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_backtrack_burst_count,
                             Some(1.0),
-                            Some(12.0),
+                            Some(4.0),
                         );
                     }
                     if spec.id == "nonlinear_load_path_mix_gpu_provider" {

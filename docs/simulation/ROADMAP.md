@@ -77,3 +77,5 @@ Progress update (2026-05-17):
    tightened nonlinear plastic/contact proxy and reference threshold assertions (severity and load realization/amplification bands) to lock benchmark behavior; validated with `cargo test -p runmat-runtime --test analysis` and `cargo test -p runmat-runtime --lib -- --test-threads=1`.
 5. [x] Electro-thermal benchmark tightening landed:
    tightened benign/pathological electro-thermal and nonlinear mixed-load electro-thermal threshold assertions (Joule coupling, conductivity spread, severity, temporal variation, and time-scale bands); validated with `cargo test -p runmat-runtime --test analysis` and `cargo test -p runmat-runtime --lib -- --test-threads=1`.
+6. [x] Nonlinear convergence benchmark tightening landed:
+   tightened nonlinear assembly/stress/softening convergence threshold assertions (line-search backtracks, increment/residual norms, spike/stall counts, and tangent rebuild bands) to reduce permissive drift windows; validated with `cargo test -p runmat-runtime --test analysis` and `cargo test -p runmat-runtime --lib -- --test-threads=1`.
