@@ -161,6 +161,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_LOCALIZATION_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_DROP_TREND_RATIO": "1.1",
@@ -187,6 +188,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO": "0.55",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX": "0.7",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO": "0.15",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO": "0.45",
@@ -312,6 +314,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_LOCALIZATION_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_DROP_TREND_RATIO": "1.2",
@@ -338,6 +341,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO": "0.65",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO": "0.12",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO": "0.4",
@@ -463,6 +467,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_LOCALIZATION_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_DROP_TREND_RATIO": "1.35",
@@ -489,6 +494,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO": "0.1",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO": "0.35",
@@ -1686,6 +1692,15 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_max_overlap_source_overlap_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
     em_max_overlap_source_interference_trend_ratio_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_TREND_RATIO",
@@ -1902,6 +1917,12 @@ def evaluate_release_readiness(
                 "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO",
                 "0.85",
             ),
+        )
+    )
+    em_min_overlap_source_overlap_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO", "0.8"),
         )
     )
     em_max_overlap_source_interference_index_threshold = float(
@@ -2316,6 +2337,7 @@ def evaluate_release_readiness(
     em_max_fallback_heavy_energy_imbalance_ratio = None
     em_min_overlap_source_region_coverage_ratio = None
     em_min_overlap_source_material_alignment_ratio = None
+    em_min_overlap_source_overlap_ratio = None
     em_max_overlap_source_interference_index = None
     em_min_boundary_kernel_localization_ratio = None
     em_min_boundary_kernel_ground_anchor_effectiveness_ratio = None
@@ -2344,6 +2366,7 @@ def evaluate_release_readiness(
     em_fallback_heavy_energy_imbalance_trend_ratio = None
     em_overlap_source_region_coverage_drop_trend_ratio = None
     em_overlap_source_material_alignment_drop_trend_ratio = None
+    em_overlap_source_overlap_drop_trend_ratio = None
     em_overlap_source_interference_trend_ratio = None
     em_boundary_kernel_localization_drop_trend_ratio = None
     em_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio = None
@@ -3334,6 +3357,14 @@ def evaluate_release_readiness(
             ),
             (
                 "electromagnetic_reference_overlap_interference_gpu_provider",
+                "em_overlap_source_overlap_ratio",
+                "min",
+                "EM_OVERLAP_SOURCE_OVERLAP_RATIO_LOW",
+                "EM overlap source overlap ratio",
+                em_min_overlap_source_overlap_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_overlap_interference_gpu_provider",
                 "em_overlap_source_interference_index",
                 "max",
                 "EM_OVERLAP_SOURCE_INTERFERENCE_INDEX_HIGH",
@@ -3558,6 +3589,12 @@ def evaluate_release_readiness(
                     or observed < em_min_overlap_source_material_alignment_ratio
                 ):
                     em_min_overlap_source_material_alignment_ratio = observed
+            elif assertion_name.endswith("overlap_source_overlap_ratio"):
+                if (
+                    em_min_overlap_source_overlap_ratio is None
+                    or observed < em_min_overlap_source_overlap_ratio
+                ):
+                    em_min_overlap_source_overlap_ratio = observed
             elif assertion_name.endswith("overlap_source_interference_index"):
                 if (
                     em_max_overlap_source_interference_index is None
@@ -4945,6 +4982,26 @@ def evaluate_release_readiness(
                 )
             )
 
+        em_overlap_source_overlap_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_overlap_source_overlap_ratio"
+        )
+        if (
+            em_overlap_source_overlap_drop_trend_ratio is not None
+            and em_overlap_source_overlap_drop_trend_ratio
+            > em_max_overlap_source_overlap_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_OVERLAP_SOURCE_OVERLAP_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM overlap source overlap drop trend ratio "
+                        f"{em_overlap_source_overlap_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_overlap_source_overlap_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         em_overlap_source_interference_trend_ratio = fixture_assertion_trend_ratio(
             "em_overlap_source_interference_index",
             ratio_mode="increase",
@@ -5604,6 +5661,8 @@ def evaluate_release_readiness(
         "em_min_overlap_source_region_coverage_ratio_threshold": em_min_overlap_source_region_coverage_ratio_threshold,
         "em_min_overlap_source_material_alignment_ratio": em_min_overlap_source_material_alignment_ratio,
         "em_min_overlap_source_material_alignment_ratio_threshold": em_min_overlap_source_material_alignment_ratio_threshold,
+        "em_min_overlap_source_overlap_ratio": em_min_overlap_source_overlap_ratio,
+        "em_min_overlap_source_overlap_ratio_threshold": em_min_overlap_source_overlap_ratio_threshold,
         "em_max_overlap_source_interference_index": em_max_overlap_source_interference_index,
         "em_max_overlap_source_interference_index_threshold": em_max_overlap_source_interference_index_threshold,
         "em_min_boundary_kernel_localization_ratio": em_min_boundary_kernel_localization_ratio,
@@ -5660,6 +5719,8 @@ def evaluate_release_readiness(
         "em_max_overlap_source_region_coverage_drop_trend_ratio_threshold": em_max_overlap_source_region_coverage_drop_trend_ratio_threshold,
         "em_overlap_source_material_alignment_drop_trend_ratio": em_overlap_source_material_alignment_drop_trend_ratio,
         "em_max_overlap_source_material_alignment_drop_trend_ratio_threshold": em_max_overlap_source_material_alignment_drop_trend_ratio_threshold,
+        "em_overlap_source_overlap_drop_trend_ratio": em_overlap_source_overlap_drop_trend_ratio,
+        "em_max_overlap_source_overlap_drop_trend_ratio_threshold": em_max_overlap_source_overlap_drop_trend_ratio_threshold,
         "em_overlap_source_interference_trend_ratio": em_overlap_source_interference_trend_ratio,
         "em_max_overlap_source_interference_trend_ratio_threshold": em_max_overlap_source_interference_trend_ratio_threshold,
         "em_boundary_kernel_localization_drop_trend_ratio": em_boundary_kernel_localization_drop_trend_ratio,
@@ -6094,6 +6155,14 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_min_fallback_heavy_source_realization_ratio_threshold') if result.get('em_min_fallback_heavy_source_realization_ratio_threshold') is not None else '-'}`/`{result.get('em_max_fallback_heavy_energy_imbalance_ratio_threshold') if result.get('em_max_fallback_heavy_energy_imbalance_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM overlap region/material/overlap ratios: "
+        f"`{result.get('em_min_overlap_source_region_coverage_ratio') if result.get('em_min_overlap_source_region_coverage_ratio') is not None else '-'}`/`{result.get('em_min_overlap_source_material_alignment_ratio') if result.get('em_min_overlap_source_material_alignment_ratio') is not None else '-'}`/`{result.get('em_min_overlap_source_overlap_ratio') if result.get('em_min_overlap_source_overlap_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM overlap region/material/overlap thresholds: "
+        f"`{result.get('em_min_overlap_source_region_coverage_ratio_threshold') if result.get('em_min_overlap_source_region_coverage_ratio_threshold') is not None else '-'}`/`{result.get('em_min_overlap_source_material_alignment_ratio_threshold') if result.get('em_min_overlap_source_material_alignment_ratio_threshold') is not None else '-'}`/`{result.get('em_min_overlap_source_overlap_ratio_threshold') if result.get('em_min_overlap_source_overlap_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- EM overlap interference index: "
         f"`{result.get('em_max_overlap_source_interference_index') if result.get('em_max_overlap_source_interference_index') is not None else '-'}`"
     )
@@ -6118,8 +6187,8 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_boundary_penalty_real_residual_norm_trend_ratio') if result.get('em_boundary_penalty_real_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_penalty_imag_residual_norm_trend_ratio') if result.get('em_boundary_penalty_imag_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_overlap_trend_ratio') if result.get('em_phased_source_overlap_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_interference_trend_ratio') if result.get('em_phased_source_interference_trend_ratio') is not None else '-'}`"
     )
     lines.append(
-        "- EM non-core trend ratios (sparse assignment, sparse fallback, sparse source realization, sparse energy imbalance, fallback source realization, fallback energy imbalance, overlap interference, boundary-kernel leakage): "
-        f"`{result.get('em_sparse_assignment_coverage_drop_trend_ratio') if result.get('em_sparse_assignment_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_fallback_coefficient_trend_ratio') if result.get('em_sparse_fallback_coefficient_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_source_realization_drop_trend_ratio') if result.get('em_sparse_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_energy_imbalance_trend_ratio') if result.get('em_sparse_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_fallback_heavy_source_realization_drop_trend_ratio') if result.get('em_fallback_heavy_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_fallback_heavy_energy_imbalance_trend_ratio') if result.get('em_fallback_heavy_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_overlap_source_interference_trend_ratio') if result.get('em_overlap_source_interference_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_kernel_insulation_leakage_trend_ratio') if result.get('em_boundary_kernel_insulation_leakage_trend_ratio') is not None else '-'}`"
+        "- EM non-core trend ratios (sparse assignment, sparse fallback, sparse source realization, sparse energy imbalance, fallback source realization, fallback energy imbalance, overlap ratio, overlap interference, boundary-kernel leakage): "
+        f"`{result.get('em_sparse_assignment_coverage_drop_trend_ratio') if result.get('em_sparse_assignment_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_fallback_coefficient_trend_ratio') if result.get('em_sparse_fallback_coefficient_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_source_realization_drop_trend_ratio') if result.get('em_sparse_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_energy_imbalance_trend_ratio') if result.get('em_sparse_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_fallback_heavy_source_realization_drop_trend_ratio') if result.get('em_fallback_heavy_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_fallback_heavy_energy_imbalance_trend_ratio') if result.get('em_fallback_heavy_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_overlap_source_overlap_drop_trend_ratio') if result.get('em_overlap_source_overlap_drop_trend_ratio') is not None else '-'}`/`{result.get('em_overlap_source_interference_trend_ratio') if result.get('em_overlap_source_interference_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_kernel_insulation_leakage_trend_ratio') if result.get('em_boundary_kernel_insulation_leakage_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Plasticity Posture")

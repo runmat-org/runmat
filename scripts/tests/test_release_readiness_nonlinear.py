@@ -281,6 +281,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_LOCALIZATION_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_DROP_TREND_RATIO",
@@ -307,6 +308,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO",
@@ -621,6 +623,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "threshold_assertions": [
                     {"name": "em_overlap_source_region_coverage_ratio", "observed": 0.7},
                     {"name": "em_overlap_source_material_alignment_ratio", "observed": 0.7},
+                    {"name": "em_overlap_source_overlap_ratio", "observed": 0.6},
                     {"name": "em_overlap_source_interference_index", "observed": 0.92},
                 ],
             }
@@ -711,6 +714,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO"
         ] = "0.8"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX"] = (
             "0.85"
         )
@@ -750,6 +754,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO_HIGH", codes)
         self.assertIn("EM_OVERLAP_SOURCE_REGION_COVERAGE_RATIO_LOW", codes)
         self.assertIn("EM_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO_LOW", codes)
+        self.assertIn("EM_OVERLAP_SOURCE_OVERLAP_RATIO_LOW", codes)
         self.assertIn("EM_OVERLAP_SOURCE_INTERFERENCE_INDEX_HIGH", codes)
         self.assertIn("EM_BOUNDARY_KERNEL_LOCALIZATION_RATIO_LOW", codes)
         self.assertIn("EM_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO_LOW", codes)
@@ -990,6 +995,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_overlap_source_material_alignment_ratio",
                         "observed": 0.6,
                     },
+                    {"name": "em_overlap_source_overlap_ratio", "observed": 0.6},
                     {"name": "em_overlap_source_interference_index", "observed": 0.8},
                 ],
             }
@@ -1069,6 +1075,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_overlap_source_material_alignment_ratio",
                         "observed": 1.0,
                     },
+                    {"name": "em_overlap_source_overlap_ratio", "observed": 1.0},
                     {"name": "em_overlap_source_interference_index", "observed": 0.2},
                 ],
             }
@@ -1139,6 +1146,9 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO"
         ] = "1.5"
         os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_TREND_RATIO"
         ] = "1.5"
         os.environ[
@@ -1167,6 +1177,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_WORSENING", codes)
         self.assertIn("EM_OVERLAP_SOURCE_REGION_COVERAGE_TREND_WORSENING", codes)
         self.assertIn("EM_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_TREND_WORSENING", codes)
+        self.assertIn("EM_OVERLAP_SOURCE_OVERLAP_TREND_WORSENING", codes)
         self.assertIn("EM_OVERLAP_SOURCE_INTERFERENCE_TREND_WORSENING", codes)
         self.assertIn("EM_BOUNDARY_KERNEL_LOCALIZATION_TREND_WORSENING", codes)
         self.assertIn(
@@ -2670,7 +2681,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM boundary-kernel localization/ground/leakage", summary)
         self.assertIn("EM breach rate/threshold", summary)
         self.assertIn(
-            "EM non-core trend ratios (sparse assignment, sparse fallback, sparse source realization, sparse energy imbalance, fallback source realization, fallback energy imbalance, overlap interference, boundary-kernel leakage)",
+            "EM non-core trend ratios (sparse assignment, sparse fallback, sparse source realization, sparse energy imbalance, fallback source realization, fallback energy imbalance, overlap ratio, overlap interference, boundary-kernel leakage)",
             summary,
         )
         self.assertIn("### Promotion Evidence Quality", summary)
