@@ -175,3 +175,5 @@ Progress update (2026-05-17):
     `release_readiness_nonlinear.py` now evaluates homogeneous/heterogeneous EM dispersive-coupling-ratio threshold assertions with profile-tuned maximum thresholds, promoting excessive coupling-ratio excursions into explicit readiness reasons and breach-rate accounting.
 54. [x] Key-performance release-readiness coverage expanded to additional priority domains:
     `release_readiness_nonlinear.py` now treats representative thermo/electro/plastic/contact fixtures as key-performance workloads (speedup floor + slowdown trend checks), extending scale-regression gating beyond EM/acoustic/CFD/CHT/FSI.
+55. [x] EM external-reference source-coverage/anchor comparator enforcement expanded:
+    M6 baseline and validator-required metric sets now include homogeneous/heterogeneous EM source-region-coverage and boundary-anchor assertion comparators, with nonlinear schema governance requiring the corresponding threshold assertions so source/boundary-fidelity evidence gaps fail benchmark/external-reference enforcement.

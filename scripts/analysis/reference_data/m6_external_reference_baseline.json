@@ -129,6 +129,26 @@
       "tolerance_rel": 0.05
     },
     {
+      "name": "em_homogeneous_source_region_coverage_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_source_region_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 0.05
+    },
+    {
+      "name": "em_homogeneous_boundary_anchor_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_boundary_anchor_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 0.05
+    },
+    {
       "name": "em_heterogeneous_sigma_omega_scale_spread_ratio",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -217,6 +237,26 @@
       "reference": 1.0,
       "tolerance_abs": 0.05,
       "tolerance_rel": 0.05
+    },
+    {
+      "name": "em_heterogeneous_source_region_coverage_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_source_region_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 0.05
+    },
+    {
+      "name": "em_heterogeneous_boundary_anchor_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_boundary_anchor_ratio",
+      "reference": 0.75,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.2
     },
     {
       "name": "em_boundary_penalty_conditioning_contribution",

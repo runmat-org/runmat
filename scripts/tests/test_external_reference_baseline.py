@@ -44,6 +44,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
                 "em_homogeneous_source_material_alignment_ratio",
             ),
             (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_source_region_coverage_ratio",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_boundary_anchor_ratio",
+            ),
+            (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "em_heterogeneous_sigma_omega_scale_spread_ratio",
             ),
@@ -74,6 +82,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "em_heterogeneous_source_material_alignment_ratio",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_source_region_coverage_ratio",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_boundary_anchor_ratio",
             ),
             (
                 "electromagnetic_reference_boundary_penalty_stress_gpu_provider",

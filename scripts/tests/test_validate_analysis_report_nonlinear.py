@@ -333,6 +333,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "em_homogeneous_flux_divergence_proxy",
                     "em_homogeneous_boundary_energy_ratio",
                     "em_homogeneous_source_material_alignment_ratio",
+                    "em_homogeneous_source_region_coverage_ratio",
+                    "em_homogeneous_boundary_anchor_ratio",
                 },
             ),
             _record(
@@ -347,6 +349,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "em_heterogeneous_region_contrast_index",
                     "em_heterogeneous_source_realization_ratio",
                     "em_heterogeneous_source_material_alignment_ratio",
+                    "em_heterogeneous_source_region_coverage_ratio",
+                    "em_heterogeneous_boundary_anchor_ratio",
                 },
             ),
             _record(
