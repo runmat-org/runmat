@@ -38,6 +38,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "em_homogeneous_dispersive_coupling_ratio",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 5.5e-21,
+            "reference": 5.4e-21,
+            "pass": True,
+        },
+        {
             "name": "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 0.9996,
@@ -91,6 +98,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 0.983,
             "reference": 0.983,
+            "pass": True,
+        },
+        {
+            "name": "em_heterogeneous_dispersive_coupling_ratio",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 4.5e-19,
+            "reference": 4.4e-19,
             "pass": True,
         },
         {

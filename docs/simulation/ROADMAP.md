@@ -169,3 +169,5 @@ Progress update (2026-05-17):
     `release_readiness_nonlinear.py` now evaluates rolling trend ratios for homogeneous/heterogeneous EM phase attenuation assertions (mean and conductivity attenuation ratio) under profile-tuned thresholds, emitting dedicated readiness reasons when phase-fidelity posture regresses relative to baseline.
 51. [x] EM external-reference source-alignment comparator enforcement expanded:
     M6 baseline and validator-required metric sets now include homogeneous/heterogeneous EM source-material-alignment assertion comparators, with nonlinear schema governance requiring the corresponding threshold assertions so source-fidelity evidence gaps fail benchmark/external-reference enforcement.
+52. [x] EM external-reference dispersive-coupling comparator enforcement expanded:
+    M6 baseline and validator-required metric sets now include homogeneous/heterogeneous EM dispersive-coupling-ratio assertion comparators, with nonlinear schema governance requiring the corresponding threshold assertions so dispersive-coupling evidence gaps fail benchmark/external-reference enforcement.

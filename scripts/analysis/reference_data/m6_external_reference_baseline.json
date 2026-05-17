@@ -79,6 +79,16 @@
       "tolerance_rel": 0.03
     },
     {
+      "name": "em_homogeneous_dispersive_coupling_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_dispersive_coupling_ratio",
+      "reference": 5.451480279808294e-21,
+      "tolerance_abs": 1e-19,
+      "tolerance_rel": 3.0
+    },
+    {
       "name": "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -157,6 +167,16 @@
       "reference": 0.9833816359543125,
       "tolerance_abs": 0.08,
       "tolerance_rel": 0.1
+    },
+    {
+      "name": "em_heterogeneous_dispersive_coupling_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_dispersive_coupling_ratio",
+      "reference": 4.46556681941466e-19,
+      "tolerance_abs": 2e-18,
+      "tolerance_rel": 3.0
     },
     {
       "name": "em_heterogeneous_dispersive_phase_conductivity_attenuation_ratio",
