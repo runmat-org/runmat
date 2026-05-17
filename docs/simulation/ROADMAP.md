@@ -153,3 +153,5 @@ Progress update (2026-05-17):
     additive `analysis.run_study/v1` typed payload now exposes `solver_convergence`, `result_quality`, and full `provenance`, allowing automation to consume gate posture and backend/solver lineage without immediate secondary results queries.
 43. [x] Study sweep orchestration baseline landed:
     added additive high-level operation `analysis.run_study_sweep/v1` with typed sweep contracts (`AnalysisStudySweepSpec`/`AnalysisStudySweepData`) for deterministic sequential multi-study execution, aggregate run-entry summaries, and persisted sweep evidence artifacts under the study artifact root.
+44. [x] Study sweep failure-policy ergonomics expanded:
+    additive `analysis.run_study_sweep/v1` now supports policy-controlled failure handling (`fail_fast`) plus typed per-study failure entries (`failed_count`, `failure_entries`) so automation pipelines can choose between fail-fast semantics and partial-progress sweep completion.

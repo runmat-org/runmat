@@ -486,6 +486,7 @@ fn analysis_study_sweep_contract_executes_multiple_studies() {
     let sweep = AnalysisStudySweepSpec {
         sweep_id: "contract_study_sweep_001".to_string(),
         studies,
+        fail_fast: true,
     };
 
     let envelope = analysis_run_study_sweep_op(
@@ -498,12 +499,100 @@ fn analysis_study_sweep_contract_executes_multiple_studies() {
     assert_eq!(envelope.data.sweep_id, "contract_study_sweep_001");
     assert_eq!(envelope.data.study_count, 2);
     assert_eq!(envelope.data.success_count, 2);
+    assert_eq!(envelope.data.failed_count, 0);
+    assert!(envelope.data.failure_entries.is_empty());
     assert_eq!(envelope.data.run_entries.len(), 2);
     assert!(envelope.data.run_entries.iter().all(|entry| {
         entry.run_id.starts_with("run_")
             && (entry.run_kind == AnalysisRunKind::LinearStatic
                 || entry.run_kind == AnalysisRunKind::Electromagnetic)
     }));
+    assert!(PathBuf::from(&envelope.data.evidence_artifact_path).exists());
+
+    drop(env_guard);
+    let _ = fs::remove_dir_all(&evidence_root);
+}
+
+#[test]
+fn analysis_study_sweep_contract_can_continue_on_failure() {
+    static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
+    let evidence_root = std::env::temp_dir().join(format!(
+        "runmat-study-sweep-continue-contract-artifacts-{}-{}",
+        std::process::id(),
+        NEXT_TMP_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = fs::remove_dir_all(&evidence_root);
+    let env_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+    };
+    std::env::set_var(
+        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        evidence_root.display().to_string(),
+    );
+
+    let geometry = geometry_load_op(
+        "/part.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(
+            Some("trace-contract-study-sweep-continue-1".to_string()),
+            None,
+        ),
+    )
+    .expect("geometry load should succeed");
+    let mut invalid_study = AnalysisStudySpec {
+        study_id: "contract_study_sweep_invalid".to_string(),
+        geometry: geometry.data.clone(),
+        create_model_intent: AnalysisCreateModelIntentSpec {
+            model_id: "contract_study_sweep_invalid_model".to_string(),
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            prep_context: None,
+        },
+        run_kind: AnalysisRunKind::LinearStatic,
+        backend: ComputeBackend::Cpu,
+        electromagnetic_run_options: None,
+    };
+    invalid_study.study_id = "   ".to_string();
+    let sweep = AnalysisStudySweepSpec {
+        sweep_id: "contract_study_sweep_continue_001".to_string(),
+        studies: vec![
+            AnalysisStudySpec {
+                study_id: "contract_study_sweep_ok".to_string(),
+                geometry: geometry.data.clone(),
+                create_model_intent: AnalysisCreateModelIntentSpec {
+                    model_id: "contract_study_sweep_ok_model".to_string(),
+                    profile: AnalysisCreateModelProfile::LinearStaticStructural,
+                    prep_context: None,
+                },
+                run_kind: AnalysisRunKind::LinearStatic,
+                backend: ComputeBackend::Cpu,
+                electromagnetic_run_options: None,
+            },
+            invalid_study,
+        ],
+        fail_fast: false,
+    };
+
+    let envelope = analysis_run_study_sweep_op(
+        &sweep,
+        OperationContext::new(
+            Some("trace-contract-study-sweep-continue-2".to_string()),
+            None,
+        ),
+    )
+    .expect("continue-on-failure sweep should succeed");
+    assert_eq!(envelope.operation, "analysis.run_study_sweep");
+    assert_eq!(envelope.op_version, "analysis.run_study_sweep/v1");
+    assert_eq!(envelope.data.study_count, 2);
+    assert_eq!(envelope.data.success_count, 1);
+    assert_eq!(envelope.data.failed_count, 1);
+    assert_eq!(envelope.data.run_entries.len(), 1);
+    assert_eq!(envelope.data.failure_entries.len(), 1);
+    assert_eq!(envelope.data.failure_entries[0].study_index, 1);
+    assert_eq!(
+        envelope.data.failure_entries[0].error_code,
+        "ANALYSIS_RUN_STUDY_INVALID_SPEC"
+    );
     assert!(PathBuf::from(&envelope.data.evidence_artifact_path).exists());
 
     drop(env_guard);

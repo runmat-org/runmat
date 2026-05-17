@@ -1094,6 +1094,8 @@ pub struct AnalysisStudyRunData {
 pub struct AnalysisStudySweepSpec {
     pub sweep_id: String,
     pub studies: Vec<AnalysisStudySpec>,
+    #[serde(default = "default_study_sweep_fail_fast")]
+    pub fail_fast: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1112,8 +1114,23 @@ pub struct AnalysisStudySweepData {
     pub sweep_id: String,
     pub study_count: usize,
     pub success_count: usize,
+    pub failed_count: usize,
+    #[serde(default)]
+    pub failure_entries: Vec<AnalysisStudySweepFailureEntry>,
     pub run_entries: Vec<AnalysisStudySweepRunEntry>,
     pub evidence_artifact_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisStudySweepFailureEntry {
+    pub study_id: String,
+    pub study_index: usize,
+    pub error_code: String,
+    pub message: String,
+}
+
+fn default_study_sweep_fail_fast() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

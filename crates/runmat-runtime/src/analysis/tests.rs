@@ -1137,6 +1137,7 @@ fn analysis_run_study_sweep_executes_multiple_studies() {
     let sweep_spec = AnalysisStudySweepSpec {
         sweep_id: "study_sweep_001".to_string(),
         studies: vec![linear, electromagnetic],
+        fail_fast: true,
     };
 
     let envelope = analysis_run_study_sweep_op(&sweep_spec, OperationContext::new(None, None))
@@ -1147,6 +1148,8 @@ fn analysis_run_study_sweep_executes_multiple_studies() {
     assert_eq!(envelope.data.sweep_id, "study_sweep_001");
     assert_eq!(envelope.data.study_count, 2);
     assert_eq!(envelope.data.success_count, 2);
+    assert_eq!(envelope.data.failed_count, 0);
+    assert!(envelope.data.failure_entries.is_empty());
     assert_eq!(envelope.data.run_entries.len(), 2);
     assert!(envelope
         .data
@@ -1174,6 +1177,7 @@ fn analysis_run_study_sweep_rejects_empty_study_set() {
     let spec = AnalysisStudySweepSpec {
         sweep_id: "study_sweep_empty".to_string(),
         studies: Vec::new(),
+        fail_fast: true,
     };
 
     let err = analysis_run_study_sweep_op(&spec, OperationContext::new(None, None))
@@ -1181,6 +1185,52 @@ fn analysis_run_study_sweep_rejects_empty_study_set() {
     assert_eq!(err.operation, "analysis.run_study_sweep");
     assert_eq!(err.op_version, "analysis.run_study_sweep/v1");
     assert_eq!(err.error_code, "ANALYSIS_RUN_STUDY_SWEEP_INVALID_SPEC");
+}
+
+#[test]
+fn analysis_run_study_sweep_fail_fast_returns_error_on_invalid_study() {
+    let _guard = analysis_test_guard();
+    let mut invalid = sample_linear_static_study_spec();
+    invalid.study_id = "   ".to_string();
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "study_sweep_fail_fast".to_string(),
+        studies: vec![sample_linear_static_study_spec(), invalid],
+        fail_fast: true,
+    };
+
+    let err = analysis_run_study_sweep_op(&spec, OperationContext::new(None, None))
+        .expect_err("fail-fast sweep should return error");
+    assert_eq!(err.operation, "analysis.run_study_sweep");
+    assert_eq!(err.op_version, "analysis.run_study_sweep/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_STUDY_SWEEP_STUDY_FAILED");
+}
+
+#[test]
+fn analysis_run_study_sweep_can_continue_on_study_failure() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let mut invalid = sample_linear_static_study_spec();
+    invalid.study_id = "   ".to_string();
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "study_sweep_continue".to_string(),
+        studies: vec![sample_linear_static_study_spec(), invalid],
+        fail_fast: false,
+    };
+
+    let envelope = analysis_run_study_sweep_op(&spec, OperationContext::new(None, None))
+        .expect("continue-on-failure sweep should succeed");
+
+    assert_eq!(envelope.data.study_count, 2);
+    assert_eq!(envelope.data.success_count, 1);
+    assert_eq!(envelope.data.failed_count, 1);
+    assert_eq!(envelope.data.run_entries.len(), 1);
+    assert_eq!(envelope.data.failure_entries.len(), 1);
+    assert_eq!(envelope.data.failure_entries[0].study_index, 1);
+    assert_eq!(
+        envelope.data.failure_entries[0].error_code,
+        "ANALYSIS_RUN_STUDY_INVALID_SPEC"
+    );
+    assert!(envelope.data.failure_entries[0].study_id.trim().is_empty());
 }
 
 #[test]

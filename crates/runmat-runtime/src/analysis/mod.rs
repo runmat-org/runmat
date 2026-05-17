@@ -58,16 +58,17 @@ pub use contracts::{
     AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind,
     AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult, AnalysisStudyIssue,
     AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
-    AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudyValidateResult,
-    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
-    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
-    ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
-    ElectromagneticResultsData, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
-    NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode,
-    PreconditionerMode, PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason,
-    QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode,
-    ThermoFieldSource, ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta,
-    ThermoTimeProfilePoint, TransientIntegrationMethod, TransientResultsData,
+    AnalysisStudySweepFailureEntry, AnalysisStudySweepRunEntry, AnalysisStudySweepSpec,
+    AnalysisStudyValidateResult, AnalysisThermalRunOptions, AnalysisTransientRunOptions,
+    AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult,
+    ContactInterfaceOptions, ElectroRegionConductivityScale, ElectroThermalCouplingOptions,
+    ElectroTimeProfilePoint, ElectromagneticResultsData, ModalFrequencyBasis, ModalFrequencyUnits,
+    ModalResultsData, NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions,
+    PrecisionMode, PreconditionerMode, PrepCalibrationProfile, QualityGate, QualityPolicy,
+    QualityReason, QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData,
+    ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalCouplingOptions,
+    ThermoRegionTemperatureDelta, ThermoTimeProfilePoint, TransientIntegrationMethod,
+    TransientResultsData,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -1008,30 +1009,43 @@ pub fn analysis_run_study_sweep_op(
     }
 
     let mut run_entries = Vec::with_capacity(spec.studies.len());
+    let mut failure_entries = Vec::new();
     for (index, study) in spec.studies.iter().enumerate() {
-        let run = analysis_run_study_op(study, context.clone()).map_err(|err| {
-            operation_error(
-                ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
-                ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
-                &context,
-                OperationErrorSpec {
-                    error_code: "ANALYSIS_RUN_STUDY_SWEEP_STUDY_FAILED",
-                    error_type: OperationErrorType::Validation,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                format!(
-                    "study sweep failed at index {} for study_id {}: {}",
-                    index, study.study_id, err.error_code
-                ),
-                BTreeMap::from([
-                    ("sweep_id".to_string(), spec.sweep_id.clone()),
-                    ("study_id".to_string(), study.study_id.clone()),
-                    ("study_index".to_string(), index.to_string()),
-                    ("cause_error_code".to_string(), err.error_code),
-                ]),
-            )
-        })?;
+        let run = match analysis_run_study_op(study, context.clone()) {
+            Ok(run) => run,
+            Err(err) => {
+                if spec.fail_fast {
+                    return Err(operation_error(
+                        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+                        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+                        &context,
+                        OperationErrorSpec {
+                            error_code: "ANALYSIS_RUN_STUDY_SWEEP_STUDY_FAILED",
+                            error_type: OperationErrorType::Validation,
+                            retryable: false,
+                            severity: OperationErrorSeverity::Error,
+                        },
+                        format!(
+                            "study sweep failed at index {} for study_id {}: {}",
+                            index, study.study_id, err.error_code
+                        ),
+                        BTreeMap::from([
+                            ("sweep_id".to_string(), spec.sweep_id.clone()),
+                            ("study_id".to_string(), study.study_id.clone()),
+                            ("study_index".to_string(), index.to_string()),
+                            ("cause_error_code".to_string(), err.error_code),
+                        ]),
+                    ));
+                }
+                failure_entries.push(AnalysisStudySweepFailureEntry {
+                    study_id: study.study_id.clone(),
+                    study_index: index,
+                    error_code: err.error_code,
+                    message: err.message,
+                });
+                continue;
+            }
+        };
         run_entries.push(AnalysisStudySweepRunEntry {
             study_id: run.data.study_id,
             run_kind: run.data.run_kind,
@@ -1078,8 +1092,11 @@ pub fn analysis_run_study_sweep_op(
     let payload = serde_json::json!({
         "schema_version": "analysis_study_sweep_run_artifact/v1",
         "sweep_id": spec.sweep_id.clone(),
+        "fail_fast": spec.fail_fast,
         "study_count": spec.studies.len(),
         "success_count": run_entries.len(),
+        "failed_count": failure_entries.len(),
+        "failure_entries": failure_entries.clone(),
         "run_entries": run_entries.clone(),
     });
     let payload_bytes = serde_json::to_vec_pretty(&payload).map_err(|err| {
@@ -1122,6 +1139,8 @@ pub fn analysis_run_study_sweep_op(
             sweep_id: spec.sweep_id.clone(),
             study_count: spec.studies.len(),
             success_count: run_entries.len(),
+            failed_count: failure_entries.len(),
+            failure_entries,
             run_entries,
             evidence_artifact_path,
         },
