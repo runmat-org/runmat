@@ -11,7 +11,7 @@ use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, Exce
 use crate::object::class_def as obj_class_def;
 use crate::object::resolve as obj_resolve;
 use runmat_builtins::{MException, Value};
-use runmat_hir::CallableFallbackPolicy;
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
 use runmat_runtime::RuntimeError;
 
 pub enum BuiltinHandling {
@@ -355,17 +355,29 @@ pub async fn handle_user_function_call(
 
 pub async fn handle_method_or_member_index_multi_call(
     stack: &mut Vec<Value>,
-    name: String,
+    identity: CallableIdentity,
+    display_name: Option<String>,
+    fallback_policy: CallableFallbackPolicy,
     arg_count: usize,
     out_count: usize,
 ) -> Result<MethodHandling, RuntimeError> {
-    handle_method_or_member_index_call_inner(stack, name, arg_count, Some(out_count), out_count)
-        .await
+    handle_method_or_member_index_call_inner(
+        stack,
+        identity,
+        display_name,
+        fallback_policy,
+        arg_count,
+        Some(out_count),
+        out_count,
+    )
+    .await
 }
 
 async fn handle_method_or_member_index_call_inner(
     stack: &mut Vec<Value>,
-    name: String,
+    identity: CallableIdentity,
+    display_name: Option<String>,
+    fallback_policy: CallableFallbackPolicy,
     arg_count: usize,
     requested_outputs: Option<usize>,
     output_hint: usize,
@@ -374,9 +386,11 @@ async fn handle_method_or_member_index_call_inner(
     let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
     let value = call_closures::call_method_or_member_index_with_outputs(
         base,
-        name,
+        identity,
+        display_name,
         args,
         requested_outputs,
+        fallback_policy,
     )
     .await?;
     stack.push(value);
@@ -385,7 +399,9 @@ async fn handle_method_or_member_index_call_inner(
 
 pub async fn handle_method_or_member_index_expand_multi_call(
     stack: &mut Vec<Value>,
-    name: String,
+    identity: CallableIdentity,
+    display_name: Option<String>,
+    fallback_policy: CallableFallbackPolicy,
     specs: &[ArgSpec],
     requested_outputs: Option<usize>,
     output_hint: usize,
@@ -401,9 +417,11 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
     let value = call_closures::call_method_or_member_index_with_outputs(
         base,
-        name,
+        identity,
+        display_name,
         args,
         requested_outputs,
+        fallback_policy,
     )
     .await?;
     stack.push(value);

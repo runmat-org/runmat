@@ -589,17 +589,38 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallMethodOrMemberIndexMulti(name, arg_count, out_count) => {
-            handle_method_or_member_index_multi_call(stack, name.clone(), *arg_count, *out_count)
-                .await?;
+        Instr::CallMethodOrMemberIndexMulti {
+            identity,
+            display_name,
+            fallback_policy,
+            arg_count,
+            out_count,
+        } => {
+            handle_method_or_member_index_multi_call(
+                stack,
+                identity.clone(),
+                display_name.clone(),
+                *fallback_policy,
+                *arg_count,
+                *out_count,
+            )
+            .await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallMethodOrMemberIndexExpandMultiOutput(name, specs, out_count) => {
+        Instr::CallMethodOrMemberIndexExpandMultiOutput {
+            identity,
+            display_name,
+            fallback_policy,
+            specs,
+            out_count,
+        } => {
             handle_method_or_member_index_expand_multi_call(
                 stack,
-                name.clone(),
+                identity.clone(),
+                display_name.clone(),
+                *fallback_policy,
                 specs,
                 Some(*out_count),
                 *out_count,

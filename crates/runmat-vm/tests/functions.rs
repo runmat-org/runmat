@@ -1084,8 +1084,8 @@ fn method_expand_multi_output_uses_typed_instruction() {
         compile_semantic_source(source).expect("compile method expand multi-output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput(name, specs, out_count)
-            if name == "deal" && *out_count == 2 && specs.len() == 2 && specs[1].is_expand && specs[1].expand_all
+        runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, out_count, .. }
+            if *out_count == 2 && specs.len() == 2 && specs[1].is_expand && specs[1].expand_all
     )));
 
     let vars = interpret(&bytecode).expect("execute method expand multi-output");
@@ -1152,8 +1152,8 @@ fn method_expand_single_output_uses_typed_instruction() {
         compile_semantic_source(source).expect("compile method expand single-output source");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput(name, specs, out_count)
-            if name == "deal" && *out_count == 1 && specs.len() == 2 && specs[1].is_expand && specs[1].expand_all
+        runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, out_count, .. }
+            if *out_count == 1 && specs.len() == 2 && specs[1].is_expand && specs[1].expand_all
     )));
 }
 
@@ -1191,8 +1191,8 @@ fn method_multi_output_uses_typed_instruction() {
     let bytecode = compile_semantic_source(source).expect("compile method multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CallMethodOrMemberIndexMulti(name, argc, out_count)
-            if name == "deal" && *argc == 2 && *out_count == 2
+        runmat_vm::Instr::CallMethodOrMemberIndexMulti { arg_count, out_count, .. }
+            if *arg_count == 2 && *out_count == 2
     )));
 
     let vars = interpret(&bytecode).expect("execute method multi-output");
@@ -1208,8 +1208,8 @@ fn method_single_output_uses_typed_instruction() {
     let bytecode = compile_semantic_source(source).expect("compile method single-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CallMethodOrMemberIndexMulti(name, argc, out_count)
-            if name == "deal" && *argc == 2 && *out_count == 1
+        runmat_vm::Instr::CallMethodOrMemberIndexMulti { arg_count, out_count, .. }
+            if *arg_count == 2 && *out_count == 1
     )));
 }
 

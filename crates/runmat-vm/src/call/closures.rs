@@ -5,7 +5,7 @@ use crate::call::descriptor::{
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
 use runmat_builtins::{builtin_functions, lookup_method, Access, CellArray, Closure, Value};
-use runmat_hir::CallableFallbackPolicy;
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
 use runmat_runtime::RuntimeError;
 
 fn requested_output_arity(requested_outputs: Option<usize>) -> usize {
@@ -127,10 +127,20 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
 
 pub async fn call_method_or_member_index_with_outputs(
     base: Value,
-    name: String,
+    identity: CallableIdentity,
+    display_name: Option<String>,
     args: Vec<Value>,
     requested_outputs: Option<usize>,
+    fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
+    let name = display_name
+        .or_else(|| identity.display_name())
+        .ok_or_else(|| {
+            mex(
+                "UndefinedFunction",
+                "method/member-index call missing callable name",
+            )
+        })?;
     match base {
         Value::Object(obj) => {
             if let Some((m, _owner)) = lookup_method(&obj.class_name, &name) {
@@ -151,7 +161,7 @@ pub async fn call_method_or_member_index_with_outputs(
                     m.function_name,
                     full_args,
                     requested_outputs,
-                    CallableFallbackPolicy::RuntimeNameResolution,
+                    fallback_policy,
                 )
                 .await;
             }
@@ -185,7 +195,7 @@ pub async fn call_method_or_member_index_with_outputs(
                 qualified,
                 method_args.clone(),
                 requested_outputs,
-                CallableFallbackPolicy::RuntimeNameResolution,
+                fallback_policy,
             )
             .await
             {
@@ -198,7 +208,7 @@ pub async fn call_method_or_member_index_with_outputs(
                 name.clone(),
                 method_args,
                 requested_outputs,
-                CallableFallbackPolicy::RuntimeNameResolution,
+                fallback_policy,
             )
             .await
             {
@@ -250,19 +260,13 @@ pub async fn call_method_or_member_index_with_outputs(
                     m.function_name,
                     args,
                     requested_outputs,
-                    CallableFallbackPolicy::RuntimeNameResolution,
+                    fallback_policy,
                 )
                 .await;
             }
 
             let qualified = format!("{cls}.{name}");
-            call_named_with_policy(
-                qualified,
-                args,
-                requested_outputs,
-                CallableFallbackPolicy::RuntimeNameResolution,
-            )
-            .await
+            call_named_with_policy(qualified, args, requested_outputs, fallback_policy).await
         }
         other => {
             let mut getfield_args = Vec::with_capacity(3);

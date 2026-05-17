@@ -625,8 +625,8 @@ async fn run_interpreter_inner(
             | Instr::StoreIndexCell(_)
             | Instr::StoreSlice(_, _, _, _)
             | Instr::StoreSliceExpr { .. }
-            | Instr::CallMethodOrMemberIndexMulti(_, _, _)
-            | Instr::CallMethodOrMemberIndexExpandMultiOutput(_, _, _)
+            | Instr::CallMethodOrMemberIndexMulti { .. }
+            | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. }
             | Instr::LoadMethod(_)
             | Instr::CreateFunctionHandle(_)
             | Instr::CreateSemanticFunctionHandle(_, _)

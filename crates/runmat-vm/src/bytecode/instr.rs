@@ -153,8 +153,20 @@ pub enum Instr {
     LoadMethod(String),
 
     // Ambiguous `obj.name(...)` shape resolved at runtime as method call or member indexing.
-    CallMethodOrMemberIndexMulti(String, usize, usize),
-    CallMethodOrMemberIndexExpandMultiOutput(String, Vec<ArgSpec>, usize),
+    CallMethodOrMemberIndexMulti {
+        identity: CallableIdentity,
+        display_name: Option<String>,
+        fallback_policy: CallableFallbackPolicy,
+        arg_count: usize,
+        out_count: usize,
+    },
+    CallMethodOrMemberIndexExpandMultiOutput {
+        identity: CallableIdentity,
+        display_name: Option<String>,
+        fallback_policy: CallableFallbackPolicy,
+        specs: Vec<ArgSpec>,
+        out_count: usize,
+    },
 
     // Closure and static class dispatch.
     CreateFunctionHandle(String),
@@ -286,7 +298,7 @@ impl Instr {
             Instr::CallBuiltinMulti(_, argc, _) => effect(*argc, 1),
             Instr::CallFunctionMulti(_, argc, out_count)
             | Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
-            Instr::CallMethodOrMemberIndexMulti(_, argc, _) => effect(argc + 1, 1),
+            Instr::CallMethodOrMemberIndexMulti { arg_count, .. } => effect(arg_count + 1, 1),
             Instr::CallFevalMulti(argc, _) => effect(argc + 1, 1),
             Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {
                 effect(rows * cols, 1)
@@ -330,7 +342,7 @@ impl Instr {
             | Instr::CallFunctionExpandMultiOutput(_, specs, _)
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
             | Instr::CallBuiltinExpandMultiOutput(_, specs, _)
-            | Instr::CallMethodOrMemberIndexExpandMultiOutput(_, specs, _) => {
+            | Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, .. } => {
                 let fixed = specs.iter().filter(|s| !s.is_expand).count();
                 let expanded: usize = specs
                     .iter()

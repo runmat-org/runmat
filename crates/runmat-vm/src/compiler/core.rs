@@ -1732,31 +1732,31 @@ impl Compiler {
         call: &MirCall,
         has_expansion: bool,
     ) -> Result<(), CompileError> {
-        let name = match &call.callee {
-            MirCallee::Static(CallableIdentity::Builtin(id)) => id.0.clone(),
-            MirCallee::Static(identity) => {
-                if !matches!(
-                    call.fallback_policy,
-                    runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
-                ) {
-                    return Err(self.compile_error(format!(
-                        "MIR method-call fallback policy {:?} is not supported for callee {:?}",
-                        call.fallback_policy, identity
-                    )));
-                }
-                let Some(name) = self.mir_runtime_name_callee(identity)? else {
-                    return Err(self.compile_error(
-                        "MIR bytecode lowering for this method callee is not implemented yet",
-                    ));
-                };
-                name
-            }
+        let identity = match &call.callee {
+            MirCallee::Static(identity) => identity.clone(),
             _ => {
                 return Err(self.compile_error(
                     "MIR bytecode lowering for this method callee is not implemented yet",
                 ))
             }
         };
+        let fallback_policy = match call.fallback_policy {
+            runmat_hir::CallableFallbackPolicy::None => {
+                runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+            }
+            other => other,
+        };
+        if !matches!(
+            fallback_policy,
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+                | runmat_hir::CallableFallbackPolicy::ObjectDispatch
+        ) {
+            return Err(self.compile_error(format!(
+                "MIR method-call fallback policy {:?} is not supported for callee {:?}",
+                fallback_policy, identity
+            )));
+        }
+        let display_name = self.mir_runtime_name_callee(&identity)?;
         if call.args.is_empty() {
             return Err(self.compile_error("MIR method calls require a base receiver"));
         }
@@ -1766,20 +1766,24 @@ impl Compiler {
         if has_expansion {
             let (specs, _) = self.mir_call_arg_specs(&call.args);
             let output_count = self.call_requested_output_count(call).unwrap_or(1);
-            self.emit(Instr::CallMethodOrMemberIndexExpandMultiOutput(
-                name,
+            self.emit(Instr::CallMethodOrMemberIndexExpandMultiOutput {
+                identity,
+                display_name,
+                fallback_policy,
                 specs,
-                output_count,
-            ));
+                out_count: output_count,
+            });
             return Ok(());
         }
         let argc = call.args.len().saturating_sub(1);
         let output_count = self.call_requested_output_count(call).unwrap_or(1);
-        self.emit(Instr::CallMethodOrMemberIndexMulti(
-            name,
-            argc,
-            output_count,
-        ));
+        self.emit(Instr::CallMethodOrMemberIndexMulti {
+            identity,
+            display_name,
+            fallback_policy,
+            arg_count: argc,
+            out_count: output_count,
+        });
         Ok(())
     }
 

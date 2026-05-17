@@ -760,7 +760,7 @@ impl BytecodeCompiler {
                     Instr::CallBuiltinExpandMultiOutput(_, _, _)
                     | Instr::CallFunctionExpandMultiOutput(_, _, _)
                     | Instr::CallFevalExpandMultiOutput(_, _)
-                    | Instr::CallMethodOrMemberIndexExpandMultiOutput(_, _, _) => {
+                    | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. } => {
                         return Self::unsupported_expanded_call_jit();
                     }
                     // Not yet supported in JIT; require interpreter
@@ -788,7 +788,7 @@ impl BytecodeCompiler {
                     | Instr::CreateSemanticFunctionHandle(_, _)
                     | Instr::CreateClosure(_, _)
                     | Instr::CreateSemanticClosure(_, _, _)
-                    | Instr::CallMethodOrMemberIndexMulti(_, _, _)
+                    | Instr::CallMethodOrMemberIndexMulti { .. }
                     | Instr::IndexCellExpand(_, _)
                     | Instr::IndexCellList(_)
                     | Instr::StoreIndex(_)
