@@ -110,6 +110,37 @@ REQUIRED_FIXTURES = {
         "electro_thermal_pathological_transient_severity_peak",
         "electro_thermal_pathological_temporal_variation",
     },
+    "cfd_steady_gpu_provider": {
+        "cfd_reference_density_kg_per_m3",
+        "cfd_dynamic_viscosity_pa_s",
+        "cfd_inlet_velocity_m_per_s",
+        "cfd_turbulence_intensity",
+        "cfd_reynolds_proxy",
+        "cfd_profile_point_count",
+    },
+    "cht_coupled_gpu_provider": {
+        "cht_reference_density_kg_per_m3",
+        "cht_dynamic_viscosity_pa_s",
+        "cht_inlet_velocity_m_per_s",
+        "cht_turbulence_intensity",
+        "cht_reynolds_proxy",
+        "cht_profile_point_count",
+        "cht_applied_temperature_delta_k",
+        "cht_step_count",
+        "cht_time_step_s",
+    },
+    "fsi_coupled_gpu_provider": {
+        "fsi_reference_density_kg_per_m3",
+        "fsi_dynamic_viscosity_pa_s",
+        "fsi_inlet_velocity_m_per_s",
+        "fsi_turbulence_intensity",
+        "fsi_reynolds_proxy",
+        "fsi_profile_point_count",
+        "fsi_step_count",
+        "fsi_time_step_s",
+        "fsi_structural_step_count",
+        "fsi_cfd_profile_point_count",
+    },
 }
 
 THERMO_REQUIRED_FIELDS = {

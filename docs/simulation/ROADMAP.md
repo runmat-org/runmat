@@ -101,3 +101,5 @@ Progress update (2026-05-17):
     `analysis.validate_study/v1`, `analysis.plan_study/v1`, and `analysis.run_study/v1` now persist canonical study evidence artifacts (`validate.json`, `plan.json`, `run.json`) keyed by deterministic study fingerprint under a configurable study artifact root (`RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT`), with typed payload fields exposing evidence artifact paths.
 17. [x] Coupled-family artifact op-version classification hardened:
     filesystem analysis artifacts now classify and persist family-accurate `op_version` for CFD/CHT/FSI runs (`analysis.run_cfd/v1`, `analysis.run_cht/v1`, `analysis.run_fsi/v1`) based on diagnostic signatures, with regression coverage to prevent coupled runs from collapsing into generic transient op-version labels.
+18. [x] Coupled-family governance validator coverage expanded:
+    release/nonlinear benchmark schema validation now requires CFD/CHT/FSI provider fixture threshold-assertion sets (`cfd_steady_gpu_provider`, `cht_coupled_gpu_provider`, `fsi_coupled_gpu_provider`) so coupled-family conformance regressions fail policy validation instead of silently passing.

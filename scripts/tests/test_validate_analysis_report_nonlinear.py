@@ -1,0 +1,398 @@
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+from scripts.analysis.governance.validate_analysis_report_nonlinear import main
+
+
+def _record(fixture_id: str, assertion_names: set[str]) -> dict:
+    return {
+        "fixture_id": fixture_id,
+        "threshold_assertions": [
+            {"name": name, "observed": 1.0, "passed": True}
+            for name in sorted(assertion_names)
+        ],
+    }
+
+
+class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
+    def _base_records(self) -> list[dict]:
+        return [
+            _record(
+                "nonlinear_assembly_gpu_provider",
+                {
+                    "nonlinear_total_increments",
+                    "nonlinear_failed_increments",
+                    "nonlinear_iteration_spike_count",
+                },
+            ),
+            _record(
+                "nonlinear_assembly_stress_gpu_provider",
+                {
+                    "nonlinear_stress_total_increments",
+                    "nonlinear_stress_stall_count",
+                    "nonlinear_stress_iteration_spike_count",
+                },
+            ),
+            _record(
+                "nonlinear_softening_proxy_gpu_provider",
+                {
+                    "nonlinear_softening_total_increments",
+                    "nonlinear_softening_spike_count",
+                    "nonlinear_softening_backtrack_bursts",
+                },
+            ),
+            _record(
+                "nonlinear_load_path_mix_gpu_provider",
+                {
+                    "nonlinear_path_mix_total_increments",
+                    "nonlinear_path_mix_max_backtracks_per_increment",
+                    "nonlinear_path_mix_backtrack_bursts",
+                    "nonlinear_path_mix_effective_modulus_scale",
+                    "nonlinear_path_mix_material_spread_ratio",
+                    "thermo_nonlinear_severity",
+                    "electro_nonlinear_joule_heating_scale",
+                    "electro_nonlinear_conductivity_spread_ratio",
+                    "electro_nonlinear_severity_peak",
+                },
+            )
+            | {
+                "thermo_coupling_enabled": True,
+                "thermo_coupling_fingerprint": 1,
+                "thermo_constitutive_temperature_factor": 1.0,
+                "thermo_effective_modulus_scale": 1.0,
+                "thermo_constitutive_material_spread_ratio": 1.0,
+                "thermo_assignment_heterogeneity_index": 1.0,
+                "thermo_region_delta_count": 1.0,
+                "thermo_spatial_coverage_ratio": 1.0,
+                "thermo_field_extrapolation_ratio": 0.0,
+                "thermo_transient_severity": 0.1,
+                "thermo_nonlinear_severity": 0.1,
+                "electro_thermal_coupling_enabled": True,
+                "electro_thermal_coupling_fingerprint": 1,
+                "electro_joule_heating_scale": 1.0,
+                "electro_conductivity_spread_ratio": 1.0,
+                "electro_transient_severity": 0.1,
+                "electro_nonlinear_severity": 0.1,
+            },
+            _record(
+                "nonlinear_plasticity_proxy_gpu_provider",
+                {
+                    "plasticity_nonlinear_severity_peak",
+                    "plasticity_nonlinear_severity_mean",
+                },
+            )
+            | {
+                "electro_thermal_coupling_enabled": True,
+                "electro_thermal_coupling_fingerprint": 1,
+                "electro_joule_heating_scale": 1.0,
+                "electro_conductivity_spread_ratio": 1.0,
+                "electro_transient_severity": 0.1,
+                "electro_nonlinear_severity": 0.1,
+                "plastic_nonlinear_severity": 0.1,
+            },
+            _record(
+                "nonlinear_contact_proxy_gpu_provider",
+                {"contact_nonlinear_severity_peak", "contact_nonlinear_severity_mean"},
+            )
+            | {"contact_nonlinear_severity": 0.1},
+            _record(
+                "nonlinear_contact_frictionless_reference_gpu_provider",
+                {"contact_frictionless_severity_peak", "contact_frictionless_severity_mean"},
+            )
+            | {"contact_nonlinear_severity": 0.1},
+            _record(
+                "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+                {
+                    "contact_frictionless_complex_severity_peak",
+                    "contact_frictionless_complex_severity_mean",
+                },
+            )
+            | {"contact_nonlinear_severity": 0.1},
+            _record(
+                "nonlinear_plastic_hardening_reference_gpu_provider",
+                {
+                    "plasticity_hardening_reference_severity_peak",
+                    "plasticity_hardening_reference_severity_mean",
+                },
+            ),
+            _record(
+                "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+                {
+                    "plasticity_hardening_reference_complex_severity_peak",
+                    "plasticity_hardening_reference_complex_severity_mean",
+                },
+            ),
+            _record(
+                "thermo_mech_kickoff_gpu_provider",
+                {
+                    "thermo_mech_thermal_strain_scale",
+                    "thermo_mech_thermal_load_scale",
+                    "thermo_mech_effective_modulus_scale",
+                    "thermo_mech_material_spread_ratio",
+                    "thermo_mech_assignment_heterogeneity_index",
+                    "thermo_mech_transient_severity",
+                    "thermo_mech_transient_time_scale_mean",
+                },
+            )
+            | {
+                "thermo_coupling_enabled": True,
+                "thermo_coupling_fingerprint": 1,
+                "thermo_constitutive_temperature_factor": 1.0,
+                "thermo_effective_modulus_scale": 1.0,
+                "thermo_constitutive_material_spread_ratio": 1.0,
+                "thermo_assignment_heterogeneity_index": 1.0,
+                "thermo_region_delta_count": 1.0,
+                "thermo_spatial_coverage_ratio": 1.0,
+                "thermo_field_extrapolation_ratio": 0.0,
+                "thermo_transient_severity": 0.1,
+                "thermo_nonlinear_severity": 0.1,
+            },
+            _record(
+                "thermo_gradient_benign_gpu_provider",
+                {"thermo_gradient_benign_spread_ratio", "thermo_gradient_benign_heterogeneity"},
+            )
+            | {
+                "thermo_coupling_enabled": True,
+                "thermo_coupling_fingerprint": 1,
+                "thermo_constitutive_temperature_factor": 1.0,
+                "thermo_effective_modulus_scale": 1.0,
+                "thermo_constitutive_material_spread_ratio": 1.0,
+                "thermo_assignment_heterogeneity_index": 1.0,
+                "thermo_region_delta_count": 1.0,
+                "thermo_spatial_coverage_ratio": 1.0,
+                "thermo_field_extrapolation_ratio": 0.0,
+                "thermo_transient_severity": 0.1,
+                "thermo_nonlinear_severity": 0.1,
+            },
+            _record(
+                "thermo_gradient_pathological_gpu_provider",
+                {
+                    "thermo_gradient_pathological_spread_ratio",
+                    "thermo_gradient_pathological_heterogeneity",
+                    "thermo_gradient_pathological_temporal_variation",
+                },
+            )
+            | {
+                "thermo_coupling_enabled": True,
+                "thermo_coupling_fingerprint": 1,
+                "thermo_constitutive_temperature_factor": 1.0,
+                "thermo_effective_modulus_scale": 1.0,
+                "thermo_constitutive_material_spread_ratio": 1.0,
+                "thermo_assignment_heterogeneity_index": 1.0,
+                "thermo_region_delta_count": 1.0,
+                "thermo_spatial_coverage_ratio": 1.0,
+                "thermo_field_extrapolation_ratio": 0.0,
+                "thermo_transient_severity": 0.1,
+                "thermo_nonlinear_severity": 0.1,
+            },
+            _record(
+                "thermo_ramp_smooth_gpu_provider",
+                {
+                    "thermo_ramp_smooth_temporal_variation",
+                    "thermo_ramp_smooth_spatial_gradient_index",
+                    "thermo_ramp_smooth_spatial_coverage_ratio",
+                    "thermo_ramp_smooth_field_extrapolation_ratio",
+                },
+            )
+            | {
+                "thermo_coupling_enabled": True,
+                "thermo_coupling_fingerprint": 1,
+                "thermo_constitutive_temperature_factor": 1.0,
+                "thermo_effective_modulus_scale": 1.0,
+                "thermo_constitutive_material_spread_ratio": 1.0,
+                "thermo_assignment_heterogeneity_index": 1.0,
+                "thermo_region_delta_count": 1.0,
+                "thermo_spatial_coverage_ratio": 1.0,
+                "thermo_field_extrapolation_ratio": 0.0,
+                "thermo_transient_severity": 0.1,
+                "thermo_nonlinear_severity": 0.1,
+            },
+            _record(
+                "thermo_ramp_smooth_field_artifact_gpu_provider",
+                {
+                    "thermo_ramp_smooth_temporal_variation",
+                    "thermo_ramp_smooth_spatial_gradient_index",
+                    "thermo_ramp_smooth_spatial_coverage_ratio",
+                    "thermo_ramp_smooth_field_extrapolation_ratio",
+                },
+            )
+            | {
+                "thermo_coupling_enabled": True,
+                "thermo_coupling_fingerprint": 1,
+                "thermo_constitutive_temperature_factor": 1.0,
+                "thermo_effective_modulus_scale": 1.0,
+                "thermo_constitutive_material_spread_ratio": 1.0,
+                "thermo_assignment_heterogeneity_index": 1.0,
+                "thermo_region_delta_count": 1.0,
+                "thermo_spatial_coverage_ratio": 1.0,
+                "thermo_field_extrapolation_ratio": 0.0,
+                "thermo_transient_severity": 0.1,
+                "thermo_nonlinear_severity": 0.1,
+                "thermo_field_artifact_id": "artifact_1",
+                "thermo_field_artifact_approved": True,
+                "thermo_field_artifact_age_days": 0.1,
+                "thermo_field_artifact_provenance_valid": True,
+            },
+            _record(
+                "thermo_shock_oscillatory_gpu_provider",
+                {
+                    "thermo_shock_oscillatory_temporal_variation",
+                    "thermo_shock_oscillatory_spatial_gradient_index",
+                    "thermo_shock_oscillatory_spatial_coverage_ratio",
+                    "thermo_shock_oscillatory_field_extrapolation_ratio",
+                },
+            )
+            | {
+                "thermo_coupling_enabled": True,
+                "thermo_coupling_fingerprint": 1,
+                "thermo_constitutive_temperature_factor": 1.0,
+                "thermo_effective_modulus_scale": 1.0,
+                "thermo_constitutive_material_spread_ratio": 1.0,
+                "thermo_assignment_heterogeneity_index": 1.0,
+                "thermo_region_delta_count": 1.0,
+                "thermo_spatial_coverage_ratio": 1.0,
+                "thermo_field_extrapolation_ratio": 0.0,
+                "thermo_transient_severity": 0.1,
+                "thermo_nonlinear_severity": 0.1,
+            },
+            _record(
+                "thermo_shock_oscillatory_field_artifact_gpu_provider",
+                {
+                    "thermo_shock_oscillatory_temporal_variation",
+                    "thermo_shock_oscillatory_spatial_gradient_index",
+                    "thermo_shock_oscillatory_spatial_coverage_ratio",
+                    "thermo_shock_oscillatory_field_extrapolation_ratio",
+                },
+            )
+            | {
+                "thermo_coupling_enabled": True,
+                "thermo_coupling_fingerprint": 1,
+                "thermo_constitutive_temperature_factor": 1.0,
+                "thermo_effective_modulus_scale": 1.0,
+                "thermo_constitutive_material_spread_ratio": 1.0,
+                "thermo_assignment_heterogeneity_index": 1.0,
+                "thermo_region_delta_count": 1.0,
+                "thermo_spatial_coverage_ratio": 1.0,
+                "thermo_field_extrapolation_ratio": 0.0,
+                "thermo_transient_severity": 0.1,
+                "thermo_nonlinear_severity": 0.1,
+                "thermo_field_artifact_id": "artifact_2",
+                "thermo_field_artifact_approved": True,
+                "thermo_field_artifact_age_days": 0.1,
+                "thermo_field_artifact_provenance_valid": True,
+            },
+            _record(
+                "electro_thermal_joule_benign_gpu_provider",
+                {
+                    "electro_thermal_benign_joule_heating_scale",
+                    "electro_thermal_benign_conductivity_spread_ratio",
+                    "electro_thermal_benign_transient_severity_peak",
+                    "electro_thermal_benign_temporal_variation",
+                },
+            )
+            | {
+                "electro_thermal_coupling_enabled": True,
+                "electro_thermal_coupling_fingerprint": 1,
+                "electro_joule_heating_scale": 1.0,
+                "electro_conductivity_spread_ratio": 1.0,
+                "electro_transient_severity": 0.1,
+                "electro_nonlinear_severity": 0.1,
+            },
+            _record(
+                "electro_thermal_joule_pathological_gpu_provider",
+                {
+                    "electro_thermal_pathological_joule_heating_scale",
+                    "electro_thermal_pathological_conductivity_spread_ratio",
+                    "electro_thermal_pathological_transient_severity_peak",
+                    "electro_thermal_pathological_temporal_variation",
+                },
+            )
+            | {
+                "electro_thermal_coupling_enabled": True,
+                "electro_thermal_coupling_fingerprint": 1,
+                "electro_joule_heating_scale": 1.0,
+                "electro_conductivity_spread_ratio": 1.0,
+                "electro_transient_severity": 0.1,
+                "electro_nonlinear_severity": 0.1,
+            },
+            _record(
+                "cfd_steady_gpu_provider",
+                {
+                    "cfd_reference_density_kg_per_m3",
+                    "cfd_dynamic_viscosity_pa_s",
+                    "cfd_inlet_velocity_m_per_s",
+                    "cfd_turbulence_intensity",
+                    "cfd_reynolds_proxy",
+                    "cfd_profile_point_count",
+                },
+            ),
+            _record(
+                "cht_coupled_gpu_provider",
+                {
+                    "cht_reference_density_kg_per_m3",
+                    "cht_dynamic_viscosity_pa_s",
+                    "cht_inlet_velocity_m_per_s",
+                    "cht_turbulence_intensity",
+                    "cht_reynolds_proxy",
+                    "cht_profile_point_count",
+                    "cht_applied_temperature_delta_k",
+                    "cht_step_count",
+                    "cht_time_step_s",
+                },
+            ),
+            _record(
+                "fsi_coupled_gpu_provider",
+                {
+                    "fsi_reference_density_kg_per_m3",
+                    "fsi_dynamic_viscosity_pa_s",
+                    "fsi_inlet_velocity_m_per_s",
+                    "fsi_turbulence_intensity",
+                    "fsi_reynolds_proxy",
+                    "fsi_profile_point_count",
+                    "fsi_step_count",
+                    "fsi_time_step_s",
+                    "fsi_structural_step_count",
+                    "fsi_cfd_profile_point_count",
+                },
+            ),
+        ]
+
+    def _run_main_with_report(self, report_path: Path) -> int:
+        import sys
+
+        previous_argv = sys.argv[:]
+        sys.argv = ["validate_analysis_report_nonlinear.py", str(report_path)]
+        try:
+            return main()
+        finally:
+            sys.argv = previous_argv
+
+    def test_passes_with_cfd_cht_fsi_required_assertions_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": self._base_records()}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 0)
+
+    def test_fails_when_fsi_required_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "fsi_coupled_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "fsi_structural_step_count"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
