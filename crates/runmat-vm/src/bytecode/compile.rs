@@ -130,9 +130,9 @@ mod tests {
     use crate::Instr;
     use futures::executor::block_on;
     use runmat_builtins::Value;
-    use runmat_hir::{lower, LoweringContext};
+    use runmat_hir::{lower, LoweringContext, RequestedOutputCount};
     use runmat_mir::lowering::lower_assembly;
-    use runmat_mir::MirTerminatorKind;
+    use runmat_mir::{MirRvalue, MirStmtKind, MirTerminatorKind};
 
     #[test]
     fn primary_compile_attaches_derived_layout() {
@@ -379,6 +379,38 @@ mod tests {
             .instructions
             .iter()
             .any(|instr| matches!(instr, Instr::CallSemanticFunction(_, _))));
+    }
+
+    #[test]
+    fn primary_compile_rejects_unknown_dynamic_requested_outputs() {
+        let ast = runmat_parser::parse("y = sqrt(9);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint_target = hir.assembly.entrypoints[0].target;
+        let body = mir
+            .bodies
+            .get_mut(&entrypoint_target)
+            .expect("entrypoint body");
+
+        let mut patched = false;
+        for stmt in &mut body.blocks[0].statements {
+            if let MirStmtKind::Assign {
+                value: MirRvalue::Call(call),
+                ..
+            } = &mut stmt.kind
+            {
+                call.requested_outputs = RequestedOutputCount::UnknownDynamic;
+                patched = true;
+                break;
+            }
+        }
+        assert!(
+            patched,
+            "expected entrypoint block to contain call assignment"
+        );
+
+        let err = compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).expect_err("error");
+        assert!(err.message.contains("UnknownDynamic is unsupported"));
     }
 
     #[test]

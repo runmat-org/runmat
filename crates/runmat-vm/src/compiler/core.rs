@@ -1544,7 +1544,7 @@ impl Compiler {
     }
 
     fn compile_mir_call(&mut self, call: &MirCall) -> Result<(), CompileError> {
-        let requested_outputs = self.resolved_call_output_count(call);
+        let requested_outputs = self.resolved_call_output_count(call)?;
 
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke)
@@ -1647,21 +1647,21 @@ impl Compiler {
         Ok(())
     }
 
-    fn call_requested_output_count(&self, call: &MirCall) -> Option<usize> {
+    fn call_requested_output_count(&self, call: &MirCall) -> Result<usize, CompileError> {
         match call.requested_outputs {
-            RequestedOutputCount::Zero => Some(0),
-            RequestedOutputCount::One => Some(1),
+            RequestedOutputCount::Zero => Ok(0),
+            RequestedOutputCount::One => Ok(1),
             RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count) => {
-                Some(count)
+                Ok(count)
             }
-            RequestedOutputCount::UnknownDynamic => None,
+            RequestedOutputCount::UnknownDynamic => Err(self.compile_error(
+                "MIR call requested output count must be explicit; UnknownDynamic is unsupported",
+            )),
         }
     }
 
-    fn resolved_call_output_count(&self, call: &MirCall) -> usize {
-        // Expression-context calls in current semantic lowering require at least one materialized
-        // value; unknown-dynamic requests currently lower to the historical single-output policy.
-        self.call_requested_output_count(call).unwrap_or(1)
+    fn resolved_call_output_count(&self, call: &MirCall) -> Result<usize, CompileError> {
+        self.call_requested_output_count(call)
     }
 
     fn output_count_for_targets(
@@ -1741,7 +1741,7 @@ impl Compiler {
         }
         if has_expansion {
             let (specs, _) = self.mir_call_arg_specs(&call.args);
-            let output_count = self.resolved_call_output_count(call);
+            let output_count = self.resolved_call_output_count(call)?;
             self.emit(Instr::CallMethodOrMemberIndexExpandMultiOutput {
                 identity,
                 display_name,
@@ -1752,7 +1752,7 @@ impl Compiler {
             return Ok(());
         }
         let argc = call.args.len().saturating_sub(1);
-        let output_count = self.resolved_call_output_count(call);
+        let output_count = self.resolved_call_output_count(call)?;
         self.emit(Instr::CallMethodOrMemberIndexMulti {
             identity,
             display_name,
