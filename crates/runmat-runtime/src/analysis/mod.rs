@@ -57,7 +57,8 @@ pub use contracts::{
     AnalysisNonlinearRunOptions, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
     AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind,
     AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult, AnalysisStudyIssue,
-    AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudyValidateResult,
+    AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
+    AnalysisStudySweepRunEntry, AnalysisStudySweepSpec, AnalysisStudyValidateResult,
     AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
     AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
     ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
@@ -77,6 +78,8 @@ const ANALYSIS_PLAN_STUDY_OPERATION: &str = "analysis.plan_study";
 const ANALYSIS_PLAN_STUDY_OP_VERSION: &str = "analysis.plan_study/v1";
 const ANALYSIS_RUN_STUDY_OPERATION: &str = "analysis.run_study";
 const ANALYSIS_RUN_STUDY_OP_VERSION: &str = "analysis.run_study/v1";
+const ANALYSIS_RUN_STUDY_SWEEP_OPERATION: &str = "analysis.run_study_sweep";
+const ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION: &str = "analysis.run_study_sweep/v1";
 const ANALYSIS_VALIDATE_OPERATION: &str = "analysis.validate";
 const ANALYSIS_VALIDATE_OP_VERSION: &str = "analysis.validate/v1";
 const ANALYSIS_RUN_OPERATION: &str = "analysis.run_linear_static";
@@ -972,6 +975,154 @@ pub fn analysis_run_study_op(
             result_quality: run_envelope.data.result_quality,
             quality_reasons: run_envelope.data.quality_reasons,
             provenance: run_envelope.data.provenance,
+            evidence_artifact_path,
+        },
+    ))
+}
+
+pub fn analysis_run_study_sweep_op(
+    spec: &AnalysisStudySweepSpec,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisStudySweepData>, OperationErrorEnvelope> {
+    let mut issue_codes = Vec::new();
+    if spec.sweep_id.trim().is_empty() {
+        issue_codes.push("ANALYSIS_STUDY_SWEEP_ID_EMPTY".to_string());
+    }
+    if spec.studies.is_empty() {
+        issue_codes.push("ANALYSIS_STUDY_SWEEP_STUDIES_EMPTY".to_string());
+    }
+    if !issue_codes.is_empty() {
+        return Err(operation_error(
+            ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+            ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_STUDY_SWEEP_INVALID_SPEC",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "study sweep spec is invalid",
+            BTreeMap::from([("issue_codes".to_string(), issue_codes.join(","))]),
+        ));
+    }
+
+    let mut run_entries = Vec::with_capacity(spec.studies.len());
+    for (index, study) in spec.studies.iter().enumerate() {
+        let run = analysis_run_study_op(study, context.clone()).map_err(|err| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+                ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_STUDY_SWEEP_STUDY_FAILED",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!(
+                    "study sweep failed at index {} for study_id {}: {}",
+                    index, study.study_id, err.error_code
+                ),
+                BTreeMap::from([
+                    ("sweep_id".to_string(), spec.sweep_id.clone()),
+                    ("study_id".to_string(), study.study_id.clone()),
+                    ("study_index".to_string(), index.to_string()),
+                    ("cause_error_code".to_string(), err.error_code),
+                ]),
+            )
+        })?;
+        run_entries.push(AnalysisStudySweepRunEntry {
+            study_id: run.data.study_id,
+            run_kind: run.data.run_kind,
+            run_id: run.data.run_id,
+            run_status: run.data.run_status,
+            publishable: run.data.publishable,
+            run_operation: run.data.run_operation,
+            run_op_version: run.data.run_op_version,
+        });
+    }
+
+    let sanitized_sweep_id = spec
+        .sweep_id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let evidence_root = study_evidence_root()
+        .join("sweeps")
+        .join(sanitized_sweep_id)
+        .join("run.json");
+    if let Some(parent) = evidence_root.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            operation_error(
+                ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+                ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                    error_type: OperationErrorType::Internal,
+                    retryable: true,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to create study sweep evidence directory: {err}"),
+                BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
+            )
+        })?;
+    }
+    let payload = serde_json::json!({
+        "schema_version": "analysis_study_sweep_run_artifact/v1",
+        "sweep_id": spec.sweep_id.clone(),
+        "study_count": spec.studies.len(),
+        "success_count": run_entries.len(),
+        "run_entries": run_entries.clone(),
+    });
+    let payload_bytes = serde_json::to_vec_pretty(&payload).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+            ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to encode study sweep evidence payload: {err}"),
+            BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
+        )
+    })?;
+    atomic_write_bytes(&evidence_root, &payload_bytes).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+            ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            err,
+            BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
+        )
+    })?;
+
+    let evidence_artifact_path = evidence_root.display().to_string();
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RUN_STUDY_SWEEP_OPERATION,
+        ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION,
+        &context,
+        AnalysisStudySweepData {
+            sweep_id: spec.sweep_id.clone(),
+            study_count: spec.studies.len(),
+            success_count: run_entries.len(),
+            run_entries,
             evidence_artifact_path,
         },
     ))

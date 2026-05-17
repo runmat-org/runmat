@@ -31,6 +31,7 @@ Last updated: 2026-05-17
    Baseline increment landed: `analysis.plan_study` typed output now includes planned run-operation identity, allowing EM study orchestration clients to select the electromagnetic run-contract path without introspecting operation-sequence arrays.
    Baseline increment landed: `analysis.validate_study` typed output now includes structured issue details (`code`, `message`) so EM study-option validation failures are machine-readable without external issue-code message mapping.
    Baseline increment landed: `analysis.run_study` typed output now includes solver gates and full run provenance (`solver_convergence`, `result_quality`, `provenance`), improving EM automation-side extraction of readiness posture and execution lineage.
+   Baseline increment landed: `analysis.run_study_sweep` now supports deterministic sequential multi-study orchestration, including EM studies, with typed aggregate run-entry outputs and sweep evidence artifacts for programmatic study pipelines.
 
 ## Next Recommended EM Slice
 

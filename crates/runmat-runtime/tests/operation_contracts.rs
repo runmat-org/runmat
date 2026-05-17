@@ -9,13 +9,14 @@ use runmat_runtime::analysis::{
     analysis_run_electromagnetic_op, analysis_run_fsi_op, analysis_run_linear_static_op,
     analysis_run_linear_static_with_options, analysis_run_modal_op,
     analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
-    analysis_run_nonlinear_with_options_op, analysis_run_study_op, analysis_run_transient_op,
-    analysis_run_transient_with_options_op, analysis_trends_op, analysis_validate,
-    analysis_validate_study_op, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
-    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery,
-    AnalysisResultsQuery, AnalysisRunKind, AnalysisRunOptions, AnalysisStudySpec,
-    AnalysisTransientRunOptions, AnalysisTrendsQuery, ModalFrequencyBasis, ModalFrequencyUnits,
-    PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy, QualityReasonCode, RunStatus,
+    analysis_run_nonlinear_with_options_op, analysis_run_study_op, analysis_run_study_sweep_op,
+    analysis_run_transient_op, analysis_run_transient_with_options_op, analysis_trends_op,
+    analysis_validate, analysis_validate_study_op, AnalysisCreateModelIntentSpec,
+    AnalysisCreateModelProfile, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    AnalysisResultsCompareQuery, AnalysisResultsQuery, AnalysisRunKind, AnalysisRunOptions,
+    AnalysisStudySpec, AnalysisStudySweepSpec, AnalysisTransientRunOptions, AnalysisTrendsQuery,
+    ModalFrequencyBasis, ModalFrequencyUnits, PrecisionMode, PreconditionerMode, QualityGate,
+    QualityPolicy, QualityReasonCode, RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -427,6 +428,83 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
     assert_eq!(run.data.quality_reasons.len(), 0);
     assert_eq!(run.data.provenance.backend, ComputeBackend::Cpu);
     assert!(PathBuf::from(&run.data.evidence_artifact_path).exists());
+
+    drop(env_guard);
+    let _ = fs::remove_dir_all(&evidence_root);
+}
+
+#[test]
+fn analysis_study_sweep_contract_executes_multiple_studies() {
+    static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
+    let evidence_root = std::env::temp_dir().join(format!(
+        "runmat-study-sweep-contract-artifacts-{}-{}",
+        std::process::id(),
+        NEXT_TMP_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = fs::remove_dir_all(&evidence_root);
+    let env_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+    };
+    std::env::set_var(
+        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        evidence_root.display().to_string(),
+    );
+
+    let geometry = geometry_load_op(
+        "/part.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some("trace-contract-study-sweep-1".to_string()), None),
+    )
+    .expect("geometry load should succeed");
+    let studies = vec![
+        AnalysisStudySpec {
+            study_id: "contract_study_sweep_linear".to_string(),
+            geometry: geometry.data.clone(),
+            create_model_intent: AnalysisCreateModelIntentSpec {
+                model_id: "contract_study_sweep_linear_model".to_string(),
+                profile: AnalysisCreateModelProfile::LinearStaticStructural,
+                prep_context: None,
+            },
+            run_kind: AnalysisRunKind::LinearStatic,
+            backend: ComputeBackend::Cpu,
+            electromagnetic_run_options: None,
+        },
+        AnalysisStudySpec {
+            study_id: "contract_study_sweep_em".to_string(),
+            geometry: geometry.data.clone(),
+            create_model_intent: AnalysisCreateModelIntentSpec {
+                model_id: "contract_study_sweep_em_model".to_string(),
+                profile: AnalysisCreateModelProfile::ElectromagneticStatic,
+                prep_context: None,
+            },
+            run_kind: AnalysisRunKind::Electromagnetic,
+            backend: ComputeBackend::Cpu,
+            electromagnetic_run_options: None,
+        },
+    ];
+    let sweep = AnalysisStudySweepSpec {
+        sweep_id: "contract_study_sweep_001".to_string(),
+        studies,
+    };
+
+    let envelope = analysis_run_study_sweep_op(
+        &sweep,
+        OperationContext::new(Some("trace-contract-study-sweep-2".to_string()), None),
+    )
+    .expect("study sweep should succeed");
+    assert_eq!(envelope.operation, "analysis.run_study_sweep");
+    assert_eq!(envelope.op_version, "analysis.run_study_sweep/v1");
+    assert_eq!(envelope.data.sweep_id, "contract_study_sweep_001");
+    assert_eq!(envelope.data.study_count, 2);
+    assert_eq!(envelope.data.success_count, 2);
+    assert_eq!(envelope.data.run_entries.len(), 2);
+    assert!(envelope.data.run_entries.iter().all(|entry| {
+        entry.run_id.starts_with("run_")
+            && (entry.run_kind == AnalysisRunKind::LinearStatic
+                || entry.run_kind == AnalysisRunKind::Electromagnetic)
+    }));
+    assert!(PathBuf::from(&envelope.data.evidence_artifact_path).exists());
 
     drop(env_guard);
     let _ = fs::remove_dir_all(&evidence_root);

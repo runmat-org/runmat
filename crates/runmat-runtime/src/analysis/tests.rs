@@ -1119,6 +1119,71 @@ fn analysis_run_study_emits_default_electromagnetic_options_when_unspecified() {
 }
 
 #[test]
+fn analysis_run_study_sweep_executes_multiple_studies() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("run-study-sweep-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let env_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+    };
+    std::env::set_var(
+        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        root.display().to_string(),
+    );
+    let linear = sample_linear_static_study_spec();
+    let electromagnetic = sample_electromagnetic_study_spec();
+    let sweep_spec = AnalysisStudySweepSpec {
+        sweep_id: "study_sweep_001".to_string(),
+        studies: vec![linear, electromagnetic],
+    };
+
+    let envelope = analysis_run_study_sweep_op(&sweep_spec, OperationContext::new(None, None))
+        .expect("study sweep should succeed");
+
+    assert_eq!(envelope.operation, "analysis.run_study_sweep");
+    assert_eq!(envelope.op_version, "analysis.run_study_sweep/v1");
+    assert_eq!(envelope.data.sweep_id, "study_sweep_001");
+    assert_eq!(envelope.data.study_count, 2);
+    assert_eq!(envelope.data.success_count, 2);
+    assert_eq!(envelope.data.run_entries.len(), 2);
+    assert!(envelope
+        .data
+        .run_entries
+        .iter()
+        .any(|entry| entry.run_kind == AnalysisRunKind::LinearStatic));
+    assert!(envelope
+        .data
+        .run_entries
+        .iter()
+        .any(|entry| entry.run_kind == AnalysisRunKind::Electromagnetic));
+    assert!(envelope
+        .data
+        .run_entries
+        .iter()
+        .all(|entry| entry.run_id.starts_with("run_")));
+    assert!(envelope.data.evidence_artifact_path.ends_with("run.json"));
+    drop(env_guard);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_run_study_sweep_rejects_empty_study_set() {
+    let _guard = analysis_test_guard();
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "study_sweep_empty".to_string(),
+        studies: Vec::new(),
+    };
+
+    let err = analysis_run_study_sweep_op(&spec, OperationContext::new(None, None))
+        .expect_err("empty sweep should be rejected");
+    assert_eq!(err.operation, "analysis.run_study_sweep");
+    assert_eq!(err.op_version, "analysis.run_study_sweep/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_STUDY_SWEEP_INVALID_SPEC");
+}
+
+#[test]
 fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence() {
     let _guard = analysis_test_guard();
     let geometry = sample_step_like_geometry_asset();

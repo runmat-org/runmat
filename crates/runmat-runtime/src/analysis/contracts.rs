@@ -1090,6 +1090,32 @@ pub struct AnalysisStudyRunData {
     pub evidence_artifact_path: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudySweepSpec {
+    pub sweep_id: String,
+    pub studies: Vec<AnalysisStudySpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudySweepRunEntry {
+    pub study_id: String,
+    pub run_kind: AnalysisRunKind,
+    pub run_id: String,
+    pub run_status: RunStatus,
+    pub publishable: bool,
+    pub run_operation: String,
+    pub run_op_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudySweepData {
+    pub sweep_id: String,
+    pub study_count: usize,
+    pub success_count: usize,
+    pub run_entries: Vec<AnalysisStudySweepRunEntry>,
+    pub evidence_artifact_path: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisRunKind {
