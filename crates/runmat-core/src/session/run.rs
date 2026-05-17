@@ -226,15 +226,13 @@ impl RunMatSession {
                                     .with_identifier("RunMat:input:ParseError")
                                     .build()
                             })?;
-                        let lowering = runmat_hir::lower(
-                            &ast,
-                            &LoweringContext::new(&HashMap::new(), &HashMap::new()),
-                        )
-                        .map_err(|e| {
-                            build_runtime_error(format!("input: lowering error: {e}"))
-                                .with_identifier("RunMat:input:LowerError")
-                                .build()
-                        })?;
+                        let lowering =
+                            runmat_hir::lower(&ast, &LoweringContext::new(&HashMap::new()))
+                                .map_err(|e| {
+                                    build_runtime_error(format!("input: lowering error: {e}"))
+                                        .with_identifier("RunMat:input:LowerError")
+                                        .build()
+                                })?;
                         let bc =
                             compile_eval_hook_bytecode(&lowering).map_err(RuntimeError::from)?;
                         let result_idx = bc.var_names.iter().find_map(|(idx, name)| {

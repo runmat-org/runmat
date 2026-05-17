@@ -17,7 +17,7 @@ impl RunMatSession {
             let workspace_bindings = self.lowering_workspace_bindings();
             runmat_hir::lower(
                 &ast,
-                &LoweringContext::new(&workspace_bindings, &HashMap::new())
+                &LoweringContext::new(&workspace_bindings)
                     .with_semantic_functions(&semantic_function_names),
             )?
         };

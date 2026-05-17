@@ -93,7 +93,7 @@ pub fn lower_compatibility(
         }
     }
 
-    for (name, func_stmt) in context.functions {
+    for (name, func_stmt) in context.compatibility_functions() {
         ctx.functions.insert(name.clone(), func_stmt.clone());
     }
 
