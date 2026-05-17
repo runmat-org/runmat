@@ -26,6 +26,28 @@ async fn call_explicit_builtin(
     }
 }
 
+fn is_builtin_type_class_name(class_name: &str) -> bool {
+    matches!(
+        class_name,
+        "gpuArray"
+            | "logical"
+            | "double"
+            | "single"
+            | "int8"
+            | "int16"
+            | "int32"
+            | "int64"
+            | "uint8"
+            | "uint16"
+            | "uint32"
+            | "uint64"
+            | "char"
+            | "string"
+            | "cell"
+            | "struct"
+    )
+}
+
 async fn call_named_with_policy(
     name: String,
     args: Vec<Value>,
@@ -206,13 +228,22 @@ pub async fn call_static_method_with_outputs(
         .await;
     }
     let qualified = format!("{}.{}", class_name, method);
-    call_named_with_policy(
+    match call_named_with_policy(
         qualified,
-        args,
+        args.clone(),
         requested_outputs,
         CallableFallbackPolicy::RuntimeNameResolution,
     )
     .await
+    {
+        Ok(value) => Ok(value),
+        Err(_) if is_builtin_type_class_name(class_name) => {
+            let mut builtin_args = args;
+            builtin_args.push(Value::from(class_name));
+            call_explicit_builtin(method, &builtin_args, requested_outputs).await
+        }
+        Err(err) => Err(err),
+    }
 }
 
 pub fn load_static_property(class_name: &str, prop: &str) -> Result<Value, RuntimeError> {

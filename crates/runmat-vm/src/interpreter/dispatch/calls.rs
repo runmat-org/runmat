@@ -650,7 +650,7 @@ pub async fn handle_static_method_call(
     arg_count: usize,
     next_instr: Option<&Instr>,
 ) -> Result<MethodHandling, RuntimeError> {
-    let mut args = crate::call::builtins::collect_call_args(stack, arg_count)?;
+    let args = crate::call::builtins::collect_call_args(stack, arg_count)?;
     let requested_outputs = requested_output_count_from_next(next_instr);
     let output_hint = output_hint_for_next(next_instr);
     let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
@@ -666,41 +666,7 @@ pub async fn handle_static_method_call(
             stack.push(v);
             Ok(MethodHandling::Completed)
         }
-        Err(_) => {
-            let is_type_class = matches!(
-                class_name,
-                "gpuArray"
-                    | "logical"
-                    | "double"
-                    | "single"
-                    | "int8"
-                    | "int16"
-                    | "int32"
-                    | "int64"
-                    | "uint8"
-                    | "uint16"
-                    | "uint32"
-                    | "uint64"
-                    | "char"
-                    | "string"
-                    | "cell"
-                    | "struct"
-            );
-            if is_type_class {
-                args.push(Value::from(class_name));
-                let v = match requested_outputs {
-                    Some(count) => {
-                        runmat_runtime::call_builtin_async_with_outputs(method, &args, count)
-                            .await?
-                    }
-                    None => runmat_runtime::call_builtin_async(method, &args).await?,
-                };
-                stack.push(v);
-                Ok(MethodHandling::Completed)
-            } else {
-                Err(format!("Unknown static method '{}' on class {}", method, class_name).into())
-            }
-        }
+        Err(err) => Err(err),
     }
 }
 
