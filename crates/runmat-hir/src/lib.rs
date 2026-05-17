@@ -22,8 +22,6 @@ pub mod compatibility {
     pub use crate::inference::function_vars::infer_function_variable_types;
     pub use crate::inference::globals::infer_global_variable_types;
     pub use crate::lowering::lower_compatibility as lower;
-    pub use crate::validation::classdefs::validate_classdefs;
-    pub use crate::validation::imports::validate_imports;
 }
 
 pub use diagnostic::{

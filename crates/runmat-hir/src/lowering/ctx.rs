@@ -1,5 +1,6 @@
 use crate::hir::{CompatibilityHirProgram as HirProgram, CompatibilityHirStmt as HirStmt};
 use crate::validation::classdefs::validate_classdefs;
+use crate::validation::imports::validate_imports;
 use crate::{
     AssignmentCreationPolicy, AssignmentShapePolicy, BindingId, BindingName, BindingOwner,
     BindingResolution, BindingRole, BindingStorage, BuiltinId, CallKind, CallResolution,
@@ -97,6 +98,7 @@ pub fn lower_compatibility(
     let var_types = ctx.var_types.clone();
     let hir = HirProgram { body, var_types };
     validate_classdefs(&hir)?;
+    validate_imports(&hir)?;
     let variables = ctx
         .var_names
         .iter()

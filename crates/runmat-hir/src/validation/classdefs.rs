@@ -4,7 +4,7 @@ use crate::hir::{
 };
 use crate::SemanticError;
 
-pub fn validate_classdefs(prog: &HirProgram) -> Result<(), SemanticError> {
+pub(crate) fn validate_classdefs(prog: &HirProgram) -> Result<(), SemanticError> {
     use std::collections::HashSet;
 
     fn norm_attr_value(v: &str) -> String {

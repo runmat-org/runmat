@@ -28,7 +28,7 @@ fn normalize_imports(prog: &HirProgram) -> Vec<NormalizedImport> {
     out
 }
 
-pub fn validate_imports(prog: &HirProgram) -> Result<(), SemanticError> {
+pub(crate) fn validate_imports(prog: &HirProgram) -> Result<(), SemanticError> {
     use std::collections::{HashMap, HashSet};
 
     let norms = normalize_imports(prog);

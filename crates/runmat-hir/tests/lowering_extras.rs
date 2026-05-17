@@ -67,9 +67,6 @@ fn lvalue_assignment_lowering_total() {
 #[test]
 fn import_normalization_and_ambiguity() {
     let ast = parse("import pkg.*; import pkg.sub.Class; import other.Class").unwrap();
-    let hir = compatibility::lower(&ast, &LoweringContext::empty())
-        .unwrap()
-        .hir;
-    let err = compatibility::validate_imports(&hir);
-    assert!(err.is_err());
+    let result = compatibility::lower(&ast, &LoweringContext::empty());
+    assert!(result.is_err());
 }
