@@ -801,12 +801,17 @@ impl TurbineEngine {
                     num_indices.hash(&mut hasher);
                 }
                 Instr::Return => "Return".hash(&mut hasher),
-                Instr::CallFunctionMulti(name, argc, out_count) => {
+                Instr::CallFunctionMulti {
+                    display_name,
+                    arg_count,
+                    out_count,
+                    ..
+                } => {
                     Self::hash_named_function_call(
                         &mut hasher,
                         "CallFunctionMulti",
-                        name,
-                        *argc,
+                        display_name.as_deref().unwrap_or("<unnamed>"),
+                        *arg_count,
                         Some(*out_count),
                     );
                 }
@@ -1679,7 +1684,7 @@ mod tests {
             source
                 .matches(&["Self::", "hash_named_function_call("].concat())
                 .count(),
-            2
+            1
         );
     }
 

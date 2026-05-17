@@ -1104,7 +1104,8 @@ impl Compiler {
                         call.fallback_policy, identity
                     )));
                 }
-                let Some(name) = self.mir_runtime_name_callee(identity)? else {
+                let display_name = self.mir_runtime_name_callee(identity)?;
+                let Some(_) = display_name else {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this call callee is not implemented yet",
                     ));
@@ -1113,17 +1114,21 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    self.emit(Instr::CallFunctionExpandMultiOutput(
-                        name,
+                    self.emit(Instr::CallFunctionExpandMultiOutput {
+                        identity: identity.clone(),
+                        display_name,
+                        fallback_policy: call.fallback_policy,
                         specs,
-                        output_count,
-                    ));
+                        out_count: output_count,
+                    });
                 } else {
-                    self.emit(Instr::CallFunctionMulti(
-                        name,
-                        call.args.len(),
-                        output_count,
-                    ));
+                    self.emit(Instr::CallFunctionMulti {
+                        identity: identity.clone(),
+                        display_name,
+                        fallback_policy: call.fallback_policy,
+                        arg_count: call.args.len(),
+                        out_count: output_count,
+                    });
                 }
             }
         }
@@ -1634,7 +1639,8 @@ impl Compiler {
                         call.fallback_policy, identity
                     )));
                 }
-                let Some(name) = self.mir_runtime_name_callee(identity)? else {
+                let display_name = self.mir_runtime_name_callee(identity)?;
+                let Some(_) = display_name else {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this call callee is not implemented yet",
                     ));
@@ -1644,32 +1650,40 @@ impl Compiler {
                 }
                 if let Some(output_count) = requested_outputs {
                     if has_expansion {
-                        self.emit(Instr::CallFunctionExpandMultiOutput(
-                            name,
+                        self.emit(Instr::CallFunctionExpandMultiOutput {
+                            identity: identity.clone(),
+                            display_name: display_name.clone(),
+                            fallback_policy: call.fallback_policy,
                             specs,
-                            output_count,
-                        ));
+                            out_count: output_count,
+                        });
                     } else {
-                        self.emit(Instr::CallFunctionMulti(
-                            name,
-                            call.args.len(),
-                            output_count,
-                        ));
+                        self.emit(Instr::CallFunctionMulti {
+                            identity: identity.clone(),
+                            display_name: display_name.clone(),
+                            fallback_policy: call.fallback_policy,
+                            arg_count: call.args.len(),
+                            out_count: output_count,
+                        });
                     }
                 } else {
                     let fallback_count = 1;
                     if has_expansion {
-                        self.emit(Instr::CallFunctionExpandMultiOutput(
-                            name,
+                        self.emit(Instr::CallFunctionExpandMultiOutput {
+                            identity: identity.clone(),
+                            display_name: display_name.clone(),
+                            fallback_policy: call.fallback_policy,
                             specs,
-                            fallback_count,
-                        ));
+                            out_count: fallback_count,
+                        });
                     } else {
-                        self.emit(Instr::CallFunctionMulti(
-                            name,
-                            call.args.len(),
-                            fallback_count,
-                        ));
+                        self.emit(Instr::CallFunctionMulti {
+                            identity: identity.clone(),
+                            display_name: display_name.clone(),
+                            fallback_policy: call.fallback_policy,
+                            arg_count: call.args.len(),
+                            out_count: fallback_count,
+                        });
                     }
                 }
             }

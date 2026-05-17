@@ -508,13 +508,20 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallFunctionMulti(name, arg_count, out_count) => {
+        Instr::CallFunctionMulti {
+            identity,
+            display_name,
+            fallback_policy,
+            arg_count,
+            out_count,
+        } => {
             match handle_user_function_call(
                 calls::UserCallContext {
                     stack,
-                    name,
+                    identity: identity.clone(),
+                    display_name: display_name.clone(),
+                    fallback_policy: *fallback_policy,
                     out_count: *out_count,
-                    semantic_registry,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,
@@ -549,14 +556,21 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallFunctionExpandMultiOutput(name, specs, out_count) => {
+        Instr::CallFunctionExpandMultiOutput {
+            identity,
+            display_name,
+            fallback_policy,
+            specs,
+            out_count,
+        } => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
             match handle_prepared_user_function_call(
                 calls::UserCallContext {
                     stack,
-                    name,
+                    identity: identity.clone(),
+                    display_name: display_name.clone(),
+                    fallback_policy: *fallback_policy,
                     out_count: *out_count,
-                    semantic_registry,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,

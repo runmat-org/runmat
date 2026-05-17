@@ -656,7 +656,12 @@ impl BytecodeCompiler {
                         }
                         pc += 1;
                     }
-                    Instr::CallFunctionMulti(func_name, arg_count, out_count) => {
+                    Instr::CallFunctionMulti {
+                        display_name,
+                        arg_count,
+                        out_count,
+                        ..
+                    } => {
                         if *out_count > 1 {
                             match instructions.get(pc + 1) {
                                 Some(Instr::Unpack(count)) if count == out_count => {}
@@ -666,6 +671,11 @@ impl BytecodeCompiler {
                             }
                         }
 
+                        let func_name = display_name.as_deref().ok_or_else(|| {
+                            execution_error(
+                                "Named multi-output JIT call requires a display name".to_string(),
+                            )
+                        })?;
                         let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
                         let results = Self::compile_named_function_multi_call_jit(
                             builder, ctx, func_name, &args, *out_count,
@@ -758,7 +768,7 @@ impl BytecodeCompiler {
                         block_terminated = true;
                     }
                     Instr::CallBuiltinExpandMultiOutput(_, _, _)
-                    | Instr::CallFunctionExpandMultiOutput(_, _, _)
+                    | Instr::CallFunctionExpandMultiOutput { .. }
                     | Instr::CallFevalExpandMultiOutput(_, _)
                     | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. } => {
                         return Self::unsupported_expanded_call_jit();
@@ -2154,7 +2164,7 @@ mod tests {
 
         assert_eq!(
             source
-                .matches(&["Instr::", "CallFunctionMulti(func_name"].concat())
+                .matches(&["Instr::", "CallFunctionMulti {",].concat())
                 .count(),
             1
         );

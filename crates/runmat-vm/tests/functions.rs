@@ -1219,8 +1219,8 @@ fn unresolved_function_single_output_uses_typed_instruction() {
     let bytecode = compile_semantic_source(source).expect("compile unresolved call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CallFunctionMulti(name, argc, out_count)
-            if name == "definitely_missing_callback" && *argc == 1 && *out_count == 1
+        runmat_vm::Instr::CallFunctionMulti { display_name, arg_count, out_count, .. }
+            if display_name.as_deref() == Some("definitely_missing_callback") && *arg_count == 1 && *out_count == 1
     )));
 }
 
@@ -1230,8 +1230,8 @@ fn unresolved_function_expand_single_output_uses_typed_instruction() {
     let bytecode = compile_semantic_source(source).expect("compile unresolved expanded call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CallFunctionExpandMultiOutput(name, specs, out_count)
-            if name == "definitely_missing_callback" && *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+        runmat_vm::Instr::CallFunctionExpandMultiOutput { display_name, specs, out_count, .. }
+            if display_name.as_deref() == Some("definitely_missing_callback") && *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
     )));
 }
 

@@ -13,6 +13,18 @@ mod runmat_hir {
     pub use ::runmat_hir::FunctionId;
 }
 
+fn named_call_instr(name: &str, arg_count: usize, out_count: usize) -> Instr {
+    Instr::CallFunctionMulti {
+        identity: ::runmat_hir::CallableIdentity::DynamicName(::runmat_hir::SymbolName(
+            name.to_string(),
+        )),
+        display_name: Some(name.to_string()),
+        fallback_policy: ::runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+        arg_count,
+        out_count,
+    }
+}
+
 #[test]
 fn test_turbine_engine_creation() {
     let engine = TurbineEngine::new();
@@ -980,9 +992,9 @@ fn test_jit_legacy_user_function_fallback_removed() {
 
     let bytecode = Bytecode::with_instructions(
         vec![
-            Instr::LoadConst(5.0),                                   // Load argument
-            Instr::CallFunctionMulti("my_double".to_string(), 1, 1), // Call function
-            Instr::StoreVar(0),                                      // Store result
+            Instr::LoadConst(5.0),               // Load argument
+            named_call_instr("my_double", 1, 1), // Call function
+            Instr::StoreVar(0),                  // Store result
         ],
         1,
     );
@@ -1086,7 +1098,7 @@ fn test_jit_named_call_resolves_semantic_registry() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(5.0),
-                Instr::CallFunctionMulti("inc".to_string(), 1, 1),
+                named_call_instr("inc", 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1143,7 +1155,7 @@ fn test_jit_named_call_prefers_semantic_registry_over_legacy_shape() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(9.0),
-                Instr::CallFunctionMulti("inc".to_string(), 1, 1),
+                named_call_instr("inc", 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1261,7 +1273,7 @@ fn test_jit_named_semantic_multi_output_call() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(5.0),
-                Instr::CallFunctionMulti("pair".to_string(), 1, 2),
+                named_call_instr("pair", 1, 2),
                 Instr::Unpack(2),
                 Instr::StoreVar(1),
                 Instr::StoreVar(0),
@@ -1511,10 +1523,7 @@ fn test_jit_function_variable_preservation() {
     assert_eq!(vars[1], Value::Num(100.0));
 
     let function_bytecode = Bytecode::with_instructions(
-        vec![
-            Instr::CallFunctionMulti("add_globals".to_string(), 0, 1),
-            Instr::StoreVar(2),
-        ],
+        vec![named_call_instr("add_globals", 0, 1), Instr::StoreVar(2)],
         3,
     );
 
@@ -1588,7 +1597,7 @@ fn test_jit_mixed_execution_patterns() {
                 Instr::StoreVar(1),
                 // Function call: z = square(y) = 64
                 Instr::LoadVar(1),
-                Instr::CallFunctionMulti("square".to_string(), 1, 1),
+                named_call_instr("square", 1, 1),
                 Instr::StoreVar(2),
                 // JIT-able: result = z + 10 = 74
                 Instr::LoadVar(2),
@@ -1622,11 +1631,11 @@ fn test_jit_function_compilation_attempts() {
     let function_instructions_bytecode = Bytecode::with_instructions(
         vec![
             Instr::LoadConst(42.0),
-            Instr::LoadLocal(0),  // Should be handled gracefully
-            Instr::StoreLocal(1), // Should be handled gracefully
-            Instr::EnterScope(5), // Should be handled gracefully
-            Instr::ExitScope(5),  // Should be handled gracefully
-            Instr::CallFunctionMulti("test".to_string(), 1, 1), // Should trigger fallback
+            Instr::LoadLocal(0),            // Should be handled gracefully
+            Instr::StoreLocal(1),           // Should be handled gracefully
+            Instr::EnterScope(5),           // Should be handled gracefully
+            Instr::ExitScope(5),            // Should be handled gracefully
+            named_call_instr("test", 1, 1), // Should trigger fallback
             Instr::StoreVar(0),
         ],
         1,
@@ -1672,8 +1681,7 @@ fn test_jit_engine_statistics_with_functions() {
         let _ = engine.execute_or_compile(&jit_bytecode, &mut vars);
     }
 
-    let function_bytecode =
-        Bytecode::with_instructions(vec![Instr::CallFunctionMulti("noop".to_string(), 0, 1)], 1);
+    let function_bytecode = Bytecode::with_instructions(vec![named_call_instr("noop", 0, 1)], 1);
 
     assert!(engine
         .execute_or_compile(&function_bytecode, &mut vars)
@@ -1728,7 +1736,7 @@ fn test_jit_simple_function_compilation() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(5.0),
-                Instr::CallFunctionMulti("double".to_string(), 1, 1),
+                named_call_instr("double", 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1831,7 +1839,7 @@ fn test_jit_nested_function_calls_compilation() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(4.0),
-                Instr::CallFunctionMulti("multiply_and_add".to_string(), 1, 1),
+                named_call_instr("multiply_and_add", 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1904,7 +1912,7 @@ fn test_jit_function_parameter_validation() {
             vec![
                 Instr::LoadConst(5.0),
                 // Only 1 argument but function expects 2
-                Instr::CallFunctionMulti("add_two".to_string(), 1, 1),
+                named_call_instr("add_two", 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1929,7 +1937,7 @@ fn test_jit_function_parameter_validation() {
             vec![
                 Instr::LoadConst(3.0),
                 Instr::LoadConst(7.0),
-                Instr::CallFunctionMulti("add_two".to_string(), 2, 1),
+                named_call_instr("add_two", 2, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1989,7 +1997,7 @@ fn test_jit_function_variable_isolation() {
                 Instr::LoadConst(100.0),
                 Instr::StoreVar(1), // Store in global var 1
                 Instr::LoadConst(8.0),
-                Instr::CallFunctionMulti("isolate_test".to_string(), 1, 1),
+                named_call_instr("isolate_test", 1, 1),
                 Instr::StoreVar(0),
             ],
             2,
@@ -2062,7 +2070,7 @@ fn test_jit_function_compilation_performance() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(6.0),
-                Instr::CallFunctionMulti("compute_intensive".to_string(), 1, 1),
+                named_call_instr("compute_intensive", 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -2110,7 +2118,7 @@ fn test_jit_function_error_handling() {
     let bytecode_undefined = Bytecode::with_instructions(
         vec![
             Instr::LoadConst(5.0),
-            Instr::CallFunctionMulti("undefined_function".to_string(), 1, 1),
+            named_call_instr("undefined_function", 1, 1),
             Instr::StoreVar(0),
         ],
         1,
@@ -2147,7 +2155,7 @@ fn test_jit_function_error_handling() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(42.0),
-                Instr::CallFunctionMulti("simple".to_string(), 1, 1),
+                named_call_instr("simple", 1, 1),
                 Instr::StoreVar(0),
             ],
             1,

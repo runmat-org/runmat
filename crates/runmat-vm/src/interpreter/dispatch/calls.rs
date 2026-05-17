@@ -1,4 +1,4 @@
-use crate::bytecode::{ArgSpec, SemanticFunctionRegistry};
+use crate::bytecode::ArgSpec;
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
@@ -50,14 +50,11 @@ pub struct BuiltinCallContext<'a> {
 
 pub struct UserCallContext<'a> {
     pub stack: &'a mut Vec<Value>,
-    pub name: &'a str,
+    pub identity: CallableIdentity,
+    pub display_name: Option<String>,
+    pub fallback_policy: CallableFallbackPolicy,
     pub out_count: usize,
-    pub semantic_registry: &'a SemanticFunctionRegistry,
     pub exception: ExceptionRouteContext<'a>,
-}
-
-fn push_single_result(stack: &mut Vec<Value>, result: Value) {
-    stack.push(result);
 }
 
 pub async fn build_builtin_expand_multi_args(
@@ -298,9 +295,10 @@ pub async fn handle_prepared_user_function_call(
 ) -> Result<UserCallHandling, RuntimeError> {
     let UserCallContext {
         stack,
-        name,
+        identity,
+        display_name,
+        fallback_policy,
         out_count,
-        semantic_registry,
         exception,
     } = ctx;
     let ExceptionRouteContext {
@@ -309,18 +307,12 @@ pub async fn handle_prepared_user_function_call(
         last_exception,
         pc,
     } = exception;
-    if let Some(function) = semantic_registry.resolve_name(name) {
-        let descriptor =
-            CallableDescriptor::semantic_named(function, name.to_string(), args.clone(), out_count);
-        push_single_result(stack, execute_callable_descriptor(descriptor).await?);
-        return Ok(UserCallHandling::Completed);
-    }
-
-    let descriptor = CallableDescriptor::dynamic_named(
-        name.to_string(),
+    let descriptor = CallableDescriptor::resolved(
+        identity,
+        display_name,
         args,
         out_count,
-        CallableFallbackPolicy::RuntimeNameResolution,
+        fallback_policy,
         CallableCallKind::Direct,
     );
     match execute_callable_descriptor(descriptor).await {

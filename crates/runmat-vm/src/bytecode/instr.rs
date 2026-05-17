@@ -199,10 +199,22 @@ pub enum Instr {
     CallBuiltinMulti(String, usize, usize),
 
     // Calls a user function and shapes the result list to `out_count`.
-    CallFunctionMulti(String, usize, usize),
+    CallFunctionMulti {
+        identity: CallableIdentity,
+        display_name: Option<String>,
+        fallback_policy: CallableFallbackPolicy,
+        arg_count: usize,
+        out_count: usize,
+    },
     CallSemanticFunctionMulti(FunctionId, usize, usize),
 
-    CallFunctionExpandMultiOutput(String, Vec<ArgSpec>, usize),
+    CallFunctionExpandMultiOutput {
+        identity: CallableIdentity,
+        display_name: Option<String>,
+        fallback_policy: CallableFallbackPolicy,
+        specs: Vec<ArgSpec>,
+        out_count: usize,
+    },
     CallSemanticFunctionExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
     CallBuiltinExpandMultiOutput(String, Vec<ArgSpec>, usize),
 
@@ -296,8 +308,12 @@ impl Instr {
             | Instr::LoadMethod(_) => effect(1, 1),
             Instr::CallSemanticFunction(_, argc) => effect(*argc, 1),
             Instr::CallBuiltinMulti(_, argc, _) => effect(*argc, 1),
-            Instr::CallFunctionMulti(_, argc, out_count)
-            | Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
+            Instr::CallFunctionMulti {
+                arg_count,
+                out_count,
+                ..
+            } => effect(*arg_count, *out_count),
+            Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
             Instr::CallMethodOrMemberIndexMulti { arg_count, .. } => effect(arg_count + 1, 1),
             Instr::CallFevalMulti(argc, _) => effect(argc + 1, 1),
             Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {
@@ -339,7 +355,7 @@ impl Instr {
             Instr::LoadStaticProperty(_, _) => effect(0, 1),
             Instr::RegisterClass { .. } => effect(0, 0),
             Instr::CallFevalExpandMultiOutput(specs, _)
-            | Instr::CallFunctionExpandMultiOutput(_, specs, _)
+            | Instr::CallFunctionExpandMultiOutput { specs, .. }
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
             | Instr::CallBuiltinExpandMultiOutput(_, specs, _)
             | Instr::CallMethodOrMemberIndexExpandMultiOutput { specs, .. } => {
