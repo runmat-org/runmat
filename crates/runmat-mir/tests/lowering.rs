@@ -85,6 +85,39 @@ fn patch_entrypoint_call_requested_outputs(
     hir
 }
 
+fn patch_entrypoint_multi_assign_requested_outputs(
+    source: &str,
+    target_requested_outputs: RequestedOutputCount,
+    call_requested_outputs: RequestedOutputCount,
+) -> runmat_hir::LoweringResult {
+    let ast = runmat_parser::parse(source).expect("parse");
+    let mut hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+    let entry_target = hir.assembly.entrypoints[0].target;
+    let function = hir
+        .assembly
+        .functions
+        .iter_mut()
+        .find(|function| function.id == entry_target)
+        .expect("entrypoint target function");
+    let mut patched = false;
+    for stmt in &mut function.body.statements {
+        let runmat_hir::HirStmtKind::MultiAssign(targets, expr, _) = &mut stmt.kind else {
+            continue;
+        };
+        targets.requested_outputs = target_requested_outputs.clone();
+        if let runmat_hir::HirExprKind::Call(call) = &mut expr.kind {
+            call.requested_outputs = call_requested_outputs.clone();
+            patched = true;
+            break;
+        }
+    }
+    assert!(
+        patched,
+        "expected entrypoint to contain a multi-assign call"
+    );
+    hir
+}
+
 #[test]
 fn simple_function_lowers_to_single_block_with_binding_locals() {
     let mir = lower_mir("function y = f(x); y = x + 1; end");
@@ -140,6 +173,28 @@ fn lower_assembly_rejects_unknown_dynamic_requested_outputs() {
     );
     let err = lower_assembly(&hir.assembly).expect_err("lower should fail");
     assert!(err.message.contains("UnknownDynamic is unsupported"));
+}
+
+#[test]
+fn lower_assembly_rejects_multi_assign_target_count_mismatch() {
+    let hir = patch_entrypoint_multi_assign_requested_outputs(
+        "x = 1; [~, idx] = max(x);",
+        RequestedOutputCount::One,
+        RequestedOutputCount::One,
+    );
+    let err = lower_assembly(&hir.assembly).expect_err("lower should fail");
+    assert!(err.message.contains("output target count mismatch"));
+}
+
+#[test]
+fn lower_assembly_rejects_multi_assign_call_target_policy_mismatch() {
+    let hir = patch_entrypoint_multi_assign_requested_outputs(
+        "x = 1; [~, idx] = max(x);",
+        RequestedOutputCount::Exactly(2),
+        RequestedOutputCount::One,
+    );
+    let err = lower_assembly(&hir.assembly).expect_err("lower should fail");
+    assert!(err.message.contains("must match multi-assign targets"));
 }
 
 #[test]
