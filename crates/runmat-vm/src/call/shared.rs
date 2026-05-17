@@ -153,9 +153,23 @@ async fn call_runtime_method(
     args: &[Value],
     requested_outputs: Option<usize>,
 ) -> Result<Value, RuntimeError> {
-    match requested_outputs {
-        Some(count) => runmat_runtime::call_method_async_with_outputs(args, count).await,
-        None => runmat_runtime::call_method_async(args).await,
+    let result = match requested_outputs {
+        Some(count) => runmat_runtime::call_method_async_with_outputs(args, count).await?,
+        None => runmat_runtime::call_method_async(args).await?,
+    };
+    Ok(normalize_method_outputs(
+        result,
+        requested_outputs.unwrap_or(1),
+    ))
+}
+
+fn normalize_method_outputs(value: Value, requested_outputs: usize) -> Value {
+    if requested_outputs != 1 {
+        return value;
+    }
+    match value {
+        Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
+        other => other,
     }
 }
 
@@ -608,7 +622,7 @@ where
 mod tests {
     use super::{
         build_object_paren_expr_selector_values, build_object_paren_selector_values,
-        ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector,
+        normalize_method_outputs, ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector,
     };
     use crate::bytecode::EndExpr;
     use runmat_builtins::Value;
@@ -738,5 +752,23 @@ mod tests {
         )
         .expect_err("duplicate range dimensions should fail");
         assert_eq!(err.identifier(), Some("RunMat:DuplicateRangeSelectorDim"));
+    }
+
+    #[test]
+    fn normalize_method_outputs_collapses_singleton_output_list_for_single_request() {
+        let value = normalize_method_outputs(
+            Value::OutputList(vec![Value::Num(7.0)]),
+            1,
+        );
+        assert_eq!(value, Value::Num(7.0));
+    }
+
+    #[test]
+    fn normalize_method_outputs_preserves_output_list_for_multi_request() {
+        let value = normalize_method_outputs(
+            Value::OutputList(vec![Value::Num(7.0)]),
+            2,
+        );
+        assert_eq!(value, Value::OutputList(vec![Value::Num(7.0)]));
     }
 }
