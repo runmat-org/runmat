@@ -132,6 +132,8 @@ REQUIRED_FIXTURES = {
         "em_phased_source_energy_consistency_ratio",
     },
     "acoustic_harmonic_gpu_provider": {
+        "acoustic_max_m_orthogonality_offdiag",
+        "acoustic_min_relative_frequency_separation",
         "acoustic_mode_count",
         "acoustic_residual_warn_threshold",
     },

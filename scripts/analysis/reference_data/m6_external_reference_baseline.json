@@ -279,6 +279,26 @@
       "tolerance_rel": 0.0
     },
     {
+      "name": "acoustic_max_m_orthogonality_offdiag",
+      "fixture_id": "acoustic_harmonic_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_max_m_orthogonality_offdiag",
+      "reference": 0.0,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": null
+    },
+    {
+      "name": "acoustic_min_relative_frequency_separation",
+      "fixture_id": "acoustic_harmonic_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "acoustic_min_relative_frequency_separation",
+      "reference": 0.017246580865162855,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.5
+    },
+    {
       "name": "acoustic_residual_warn_threshold",
       "fixture_id": "acoustic_harmonic_gpu_provider",
       "field": "unused_for_threshold_source",

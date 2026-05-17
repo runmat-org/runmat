@@ -127,3 +127,5 @@ Progress update (2026-05-17):
     `validate_analysis_report_nonlinear.py` now requires EM provider fixture threshold assertion sets (homogeneous/heterogeneous/boundary-penalty/phased-source) and finite GPU performance telemetry fields for those fixtures, with conformance-harness fallback telemetry wiring so `gpu_solver_solve_ms` remains populated when EM-specific cost diagnostics are absent.
 30. [x] Release-readiness performance trend gating expanded beyond nonlinear-only fixtures:
     `release_readiness_nonlinear.py` now evaluates key EM/acoustic/CFD/CHT/FSI provider fixtures for minimum GPU speedup and rolling slowdown ratios (with governance-profile defaults and enforceable fixture-presence policy), adding regression blocking posture for non-nonlinear key workloads.
+31. [x] Acoustic comparator/assertion governance depth expanded:
+    acoustic conformance + external-reference governance now enforce acoustic-specific modal quality metrics (`acoustic_max_m_orthogonality_offdiag`, `acoustic_min_relative_frequency_separation`) for provider fixtures in addition to mode-count/residual controls.

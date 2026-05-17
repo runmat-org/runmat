@@ -53,6 +53,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "contact_frictionless_complex_load_amplification_ratio",
     },
     "acoustic_harmonic_gpu_provider": {
+        "acoustic_max_m_orthogonality_offdiag",
+        "acoustic_min_relative_frequency_separation",
         "acoustic_mode_count",
         "acoustic_residual_warn_threshold",
     },

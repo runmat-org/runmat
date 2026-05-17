@@ -178,6 +178,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "acoustic_max_m_orthogonality_offdiag",
+            "fixture_id": "acoustic_harmonic_gpu_provider",
+            "observed": 0.0052,
+            "reference": 0.0052,
+            "pass": True,
+        },
+        {
+            "name": "acoustic_min_relative_frequency_separation",
+            "fixture_id": "acoustic_harmonic_gpu_provider",
+            "observed": 0.0172,
+            "reference": 0.0172,
+            "pass": True,
+        },
+        {
             "name": "acoustic_residual_warn_threshold",
             "fixture_id": "acoustic_harmonic_gpu_provider",
             "observed": 0.001,

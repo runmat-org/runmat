@@ -2605,6 +2605,38 @@ pub(super) fn run_fixture(
             );
         }
         if spec.id.starts_with("acoustic_harmonic_") {
+            if let Some(max_offdiag) = spec.max_modal_orthogonality_offdiag {
+                push_threshold_assertion(
+                    spec.id,
+                    &mut threshold_assertions,
+                    &mut failures,
+                    "acoustic_max_m_orthogonality_offdiag",
+                    "FEA_MODAL_ORTHOGONALITY",
+                    diagnostic_metric(
+                        &cpu_envelope.data,
+                        "FEA_MODAL_ORTHOGONALITY",
+                        "max_m_orthogonality_offdiag",
+                    ),
+                    None,
+                    Some(max_offdiag),
+                );
+            }
+            if let Some(min_separation) = spec.min_modal_relative_frequency_separation {
+                push_threshold_assertion(
+                    spec.id,
+                    &mut threshold_assertions,
+                    &mut failures,
+                    "acoustic_min_relative_frequency_separation",
+                    "FEA_MODAL_SEPARATION",
+                    diagnostic_metric(
+                        &cpu_envelope.data,
+                        "FEA_MODAL_SEPARATION",
+                        "min_relative_frequency_separation",
+                    ),
+                    Some(min_separation),
+                    None,
+                );
+            }
             push_threshold_assertion(
                 spec.id,
                 &mut threshold_assertions,
