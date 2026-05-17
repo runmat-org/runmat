@@ -145,6 +145,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO": "1e-16",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.95",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM": "0.12",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM": "0.12",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO": "0.6",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX": "0.35",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.65",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.72",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "0.98",
@@ -250,6 +254,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO": "1e-15",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM": "0.18",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM": "0.18",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO": "0.75",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX": "0.5",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.75",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.68",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "1.02",
@@ -355,6 +363,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO": "1e-14",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.7",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.7",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX": "0.75",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.9",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.6",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "1.1",
@@ -1403,6 +1415,39 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO", "1e-15"),
         )
     )
+    em_max_boundary_penalty_real_residual_norm_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM",
+                "0.2",
+            ),
+        )
+    )
+    em_max_boundary_penalty_imag_residual_norm_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM",
+                "0.2",
+            ),
+        )
+    )
+    em_max_phased_source_overlap_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO", "0.75"),
+        )
+    )
+    em_max_phased_source_interference_index_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX",
+                "0.5",
+            ),
+        )
+    )
     plastic_max_nonlinear_severity_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
@@ -1763,6 +1808,10 @@ def evaluate_release_readiness(
     em_min_dispersive_phase_attenuation_mean = None
     em_min_dispersive_phase_conductivity_attenuation_ratio = None
     em_max_dispersive_coupling_ratio = None
+    em_max_boundary_penalty_real_residual_norm = None
+    em_max_boundary_penalty_imag_residual_norm = None
+    em_max_phased_source_overlap_ratio = None
+    em_max_phased_source_interference_index = None
     em_breach_rate = None
     em_energy_imbalance_trend_ratio = None
     em_flux_divergence_trend_ratio = None
@@ -2600,6 +2649,38 @@ def evaluate_release_readiness(
                 "EM heterogeneous dispersive coupling ratio",
                 em_max_dispersive_coupling_ratio_threshold,
             ),
+            (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "em_boundary_penalty_real_residual_norm",
+                "max",
+                "EM_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_HIGH",
+                "EM boundary-penalty real residual norm",
+                em_max_boundary_penalty_real_residual_norm_threshold,
+            ),
+            (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "em_boundary_penalty_imag_residual_norm",
+                "max",
+                "EM_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_HIGH",
+                "EM boundary-penalty imaginary residual norm",
+                em_max_boundary_penalty_imag_residual_norm_threshold,
+            ),
+            (
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "em_phased_source_overlap_ratio",
+                "max",
+                "EM_PHASED_SOURCE_OVERLAP_RATIO_HIGH",
+                "EM phased-source overlap ratio",
+                em_max_phased_source_overlap_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "em_phased_source_interference_index",
+                "max",
+                "EM_PHASED_SOURCE_INTERFERENCE_INDEX_HIGH",
+                "EM phased-source interference index",
+                em_max_phased_source_interference_index_threshold,
+            ),
         ]
         missing_metric_fields = []
         breaches = []
@@ -2680,6 +2761,30 @@ def evaluate_release_readiness(
                     or observed < em_min_boundary_anchor_ratio
                 ):
                     em_min_boundary_anchor_ratio = observed
+            elif assertion_name.endswith("boundary_penalty_real_residual_norm"):
+                if (
+                    em_max_boundary_penalty_real_residual_norm is None
+                    or observed > em_max_boundary_penalty_real_residual_norm
+                ):
+                    em_max_boundary_penalty_real_residual_norm = observed
+            elif assertion_name.endswith("boundary_penalty_imag_residual_norm"):
+                if (
+                    em_max_boundary_penalty_imag_residual_norm is None
+                    or observed > em_max_boundary_penalty_imag_residual_norm
+                ):
+                    em_max_boundary_penalty_imag_residual_norm = observed
+            elif assertion_name.endswith("phased_source_overlap_ratio"):
+                if (
+                    em_max_phased_source_overlap_ratio is None
+                    or observed > em_max_phased_source_overlap_ratio
+                ):
+                    em_max_phased_source_overlap_ratio = observed
+            elif assertion_name.endswith("phased_source_interference_index"):
+                if (
+                    em_max_phased_source_interference_index is None
+                    or observed > em_max_phased_source_interference_index
+                ):
+                    em_max_phased_source_interference_index = observed
 
             breached = observed > threshold if mode == "max" else observed < threshold
             breaches.append(breached)
@@ -4185,6 +4290,14 @@ def evaluate_release_readiness(
         "em_min_dispersive_phase_conductivity_attenuation_ratio_threshold": em_min_dispersive_phase_conductivity_attenuation_ratio_threshold,
         "em_max_dispersive_coupling_ratio": em_max_dispersive_coupling_ratio,
         "em_max_dispersive_coupling_ratio_threshold": em_max_dispersive_coupling_ratio_threshold,
+        "em_max_boundary_penalty_real_residual_norm": em_max_boundary_penalty_real_residual_norm,
+        "em_max_boundary_penalty_real_residual_norm_threshold": em_max_boundary_penalty_real_residual_norm_threshold,
+        "em_max_boundary_penalty_imag_residual_norm": em_max_boundary_penalty_imag_residual_norm,
+        "em_max_boundary_penalty_imag_residual_norm_threshold": em_max_boundary_penalty_imag_residual_norm_threshold,
+        "em_max_phased_source_overlap_ratio": em_max_phased_source_overlap_ratio,
+        "em_max_phased_source_overlap_ratio_threshold": em_max_phased_source_overlap_ratio_threshold,
+        "em_max_phased_source_interference_index": em_max_phased_source_interference_index,
+        "em_max_phased_source_interference_index_threshold": em_max_phased_source_interference_index_threshold,
         "em_breach_rate": em_breach_rate,
         "em_max_breach_rate_threshold": em_max_breach_rate_threshold,
         "em_energy_imbalance_trend_ratio": em_energy_imbalance_trend_ratio,

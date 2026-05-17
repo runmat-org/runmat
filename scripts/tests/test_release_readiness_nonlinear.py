@@ -265,6 +265,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO",
@@ -482,6 +486,42 @@ class ReleaseReadinessTests(unittest.TestCase):
                 ],
             }
         )
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {
+                        "name": "em_boundary_penalty_real_residual_norm",
+                        "observed": 0.75,
+                    },
+                    {
+                        "name": "em_boundary_penalty_imag_residual_norm",
+                        "observed": 0.8,
+                    },
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {
+                        "name": "em_phased_source_overlap_ratio",
+                        "observed": 0.9,
+                    },
+                    {
+                        "name": "em_phased_source_interference_index",
+                        "observed": 0.85,
+                    },
+                ],
+            }
+        )
         rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO"] = "0.2"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY"] = "0.2"
@@ -496,6 +536,16 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO"
         ] = "0.9"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO"] = "1e-7"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM"
+        ] = "0.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM"
+        ] = "0.2"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO"] = "0.3"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX"
+        ] = "0.3"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE"] = "0.2"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
@@ -504,6 +554,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_BOUNDARY_ANCHOR_RATIO_LOW", codes)
         self.assertIn("EM_DISPERSIVE_COUPLING_RATIO_HIGH", codes)
         self.assertIn("EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO_LOW", codes)
+        self.assertIn("EM_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_HIGH", codes)
+        self.assertIn("EM_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_HIGH", codes)
+        self.assertIn("EM_PHASED_SOURCE_OVERLAP_RATIO_HIGH", codes)
+        self.assertIn("EM_PHASED_SOURCE_INTERFERENCE_INDEX_HIGH", codes)
         self.assertIn("EM_BREACH_RATE_HIGH", codes)
 
     def test_em_trend_worsening_reasons_are_emitted(self):
