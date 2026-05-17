@@ -4,7 +4,7 @@ use crate::{Type, VarId};
 use runmat_parser as parser;
 use std::collections::HashMap;
 
-pub fn infer_expr_type_with_env(
+pub(crate) fn infer_expr_type_with_env(
     expr: &HirExpr,
     env: &HashMap<VarId, Type>,
     func_returns: &HashMap<String, Vec<Type>>,
