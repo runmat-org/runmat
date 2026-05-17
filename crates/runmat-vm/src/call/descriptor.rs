@@ -375,15 +375,6 @@ async fn execute_resolved_callable(
             {
                 return result;
             }
-            if matches!(
-                fallback_policy,
-                CallableFallbackPolicy::RuntimeNameResolution
-            ) {
-                if let Some(name) = metadata.display_name.clone() {
-                    return forward_named_fallback(name, args, requested_outputs, fallback_policy)
-                        .await;
-                }
-            }
             Err(semantic_unavailable_error(function.0, &metadata))
         }
         other => match fallback_policy {
@@ -409,7 +400,7 @@ async fn try_execute_resolved_callable(
     identity: CallableIdentity,
     args: Vec<Value>,
     requested_outputs: usize,
-    metadata: CallableMetadata,
+    _metadata: CallableMetadata,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Option<Value>, RuntimeError> {
     match identity {
@@ -425,16 +416,6 @@ async fn try_execute_resolved_callable(
             .await
             {
                 return result.map(Some);
-            }
-            if matches!(
-                fallback_policy,
-                CallableFallbackPolicy::RuntimeNameResolution
-            ) {
-                if let Some(name) = metadata.display_name {
-                    return forward_named_fallback(name, args, requested_outputs, fallback_policy)
-                        .await
-                        .map(Some);
-                }
             }
             Ok(None)
         }
