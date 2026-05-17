@@ -3,8 +3,7 @@ use crate::call::descriptor::{
     try_execute_callable_descriptor, CallableCallKind, CallableDescriptor,
 };
 use crate::call::shared::{
-    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexKind, ObjectIndexOp,
-    ObjectIndexSelector,
+    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexSelector,
 };
 use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan as idx_plan;
@@ -1020,33 +1019,10 @@ where
                 "stack underflow",
             ))?;
             match base {
-                Value::Object(obj) => {
-                    match idx_write_slice::object_subsasgn_paren(
-                        Value::Object(obj.clone()),
-                        &numeric,
-                        rhs.clone(),
-                    )
-                    .await
-                    {
-                        Ok(v) => stack.push(v),
-                        Err(_e) => {
-                            let qualified = format!(
-                                "{}.{}",
-                                obj.class_name,
-                                ObjectIndexOp::Subsasgn.protocol_name()
-                            );
-                            let cell = idx_write_slice::build_subsasgn_paren_cell(&numeric)?;
-                            let args = vec![
-                                Value::Object(obj),
-                                Value::String(ObjectIndexKind::Paren.protocol_name().to_string()),
-                                cell,
-                                rhs,
-                            ];
-                            stack
-                                .push(runmat_runtime::call_builtin_async(&qualified, &args).await?);
-                        }
-                    }
-                }
+                Value::Object(obj) => stack.push(
+                    idx_write_slice::object_subsasgn_paren(Value::Object(obj), &numeric, rhs)
+                        .await?,
+                ),
                 Value::HandleObject(handle) => stack.push(
                     idx_write_slice::object_subsasgn_paren(
                         Value::HandleObject(handle),

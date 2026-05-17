@@ -3,14 +3,8 @@ use crate::call::shared::{
 };
 use crate::indexing::plan::IndexPlan;
 use crate::interpreter::errors::mex;
-use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
+use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
-
-pub fn build_subsasgn_paren_cell(numeric: &[Value]) -> Result<Value, RuntimeError> {
-    let cell = CellArray::new(numeric.to_vec(), 1, numeric.len())
-        .map_err(|e| format!("subsasgn build error: {e}"))?;
-    Ok(Value::Cell(cell))
-}
 
 pub async fn object_subsasgn_paren(
     base: Value,

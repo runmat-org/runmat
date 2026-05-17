@@ -288,6 +288,7 @@ Current state:
 - `ObjectIndexSelector` now distinguishes empty expansion selectors and scalar-index selectors from arbitrary raw value selectors, so obvious object brace/paren paths no longer downcast scalar indices into generic value lists before descriptor serialization.
 - Object protocol dispatch sites now use typed `ObjectIndexDescriptor` constructors for paren/brace `subsref` and `subsasgn`, so call sites no longer assemble operation/kind pairs manually.
 - `ObjectIndexDescriptor` internals and selector/op enums are now crate-scoped, keeping object protocol serialization behind the VM call-layer ABI instead of exposing field-wise construction.
+- Store-slice object assignment now uses the descriptor-backed `object_subsasgn_paren` path directly instead of falling back to manually assembled `Class.subsasgn` arguments.
 
 Target state:
 
