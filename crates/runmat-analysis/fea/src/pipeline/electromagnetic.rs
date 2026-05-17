@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use runmat_analysis_core::{
     validate_model, AnalysisField, AnalysisModel, BoundaryConditionKind, EvidenceConfidence,
     LoadKind,
@@ -26,6 +28,7 @@ pub fn run_electromagnetic_with_options(
     backend: ComputeBackend,
     options: ElectromagneticSolveOptions,
 ) -> Result<FeaElectromagneticRunResult, FeaRunError> {
+    let prepared_start = Instant::now();
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
     let Some(domain) = model.electromagnetic.as_ref() else {
@@ -473,6 +476,8 @@ pub fn run_electromagnetic_with_options(
     };
     let harmonic_max_iters = 96usize;
     let harmonic_tol = 1.0e-7;
+    let prepared_build_ms = prepared_start.elapsed().as_secs_f64() * 1_000.0;
+    let solve_start = Instant::now();
     let harmonic_solve = solve_harmonic_block_system(
         &summary.operator,
         &conductivity_coupling_terms,
@@ -481,6 +486,7 @@ pub fn run_electromagnetic_with_options(
         harmonic_max_iters,
         harmonic_tol,
     );
+    let solve_ms = solve_start.elapsed().as_secs_f64() * 1_000.0;
     let vector_potential_real = harmonic_solve.real_solution.clone();
     let vector_potential_imag = harmonic_solve.imag_solution.clone();
     let mut diagnostics = vec![FeaDiagnostic {
@@ -508,6 +514,14 @@ pub fn run_electromagnetic_with_options(
             ),
         });
     }
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_EM_COST".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "prepared_build_ms={} solve_ms={} fallback_apply_count={}",
+            prepared_build_ms, solve_ms, 0
+        ),
+    });
 
     let vector_potential = vector_potential_real
         .iter()

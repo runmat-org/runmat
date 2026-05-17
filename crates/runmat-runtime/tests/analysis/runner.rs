@@ -3015,6 +3015,13 @@ pub(super) fn run_fixture(
                     .or_else(|| {
                         diagnostic_metric(
                             &gpu_envelope.data,
+                            "FEA_EM_COST",
+                            "prepared_build_ms",
+                        )
+                    })
+                    .or_else(|| {
+                        diagnostic_metric(
+                            &gpu_envelope.data,
                             "FEA_TRANSIENT_COST",
                             "prepared_build_ms",
                         )
@@ -3028,6 +3035,9 @@ pub(super) fn run_fixture(
                     });
                     gpu_solver_solve_ms =
                         diagnostic_metric(&gpu_envelope.data, "FEA_MODAL_COST", "solve_ms")
+                            .or_else(|| {
+                                diagnostic_metric(&gpu_envelope.data, "FEA_EM_COST", "solve_ms")
+                            })
                             .or_else(|| {
                                 diagnostic_metric(
                                     &gpu_envelope.data,
@@ -3048,6 +3058,13 @@ pub(super) fn run_fixture(
                         "FEA_MODAL_COST",
                         "fallback_apply_count",
                     )
+                    .or_else(|| {
+                        diagnostic_metric(
+                            &gpu_envelope.data,
+                            "FEA_EM_COST",
+                            "fallback_apply_count",
+                        )
+                    })
                     .or_else(|| {
                         diagnostic_metric(
                             &gpu_envelope.data,

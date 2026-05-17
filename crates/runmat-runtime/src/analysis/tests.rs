@@ -2600,6 +2600,15 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_EM_STATIC"));
+    let em_cost_diag = envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_EM_COST")
+        .expect("EM cost diagnostic must be present");
+    assert!(em_cost_diag.message.contains("prepared_build_ms="));
+    assert!(em_cost_diag.message.contains("solve_ms="));
     assert!(envelope
         .data
         .run

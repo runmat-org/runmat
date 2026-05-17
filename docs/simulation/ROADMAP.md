@@ -131,3 +131,5 @@ Progress update (2026-05-17):
     acoustic conformance + external-reference governance now enforce acoustic-specific modal quality metrics (`acoustic_max_m_orthogonality_offdiag`, `acoustic_min_relative_frequency_separation`) for provider fixtures in addition to mode-count/residual controls.
 32. [x] EM external-reference fixture coverage expanded beyond core homogeneous/heterogeneous paths:
     added/enforced comparator metrics for sparse-assignments, fallback-heavy, overlap-interference, and boundary-kernel EM provider fixtures, and expanded required metric sets for boundary-penalty/phased-source fixtures in enforce-mode validation.
+33. [x] EM native cost telemetry surfaced for governance evidence:
+    electromagnetic FEA runs now emit `FEA_EM_COST` diagnostics (`prepared_build_ms`, `solve_ms`, `fallback_apply_count`), and benchmark conformance extraction now prefers these EM-native metrics when populating solver-cost telemetry fields.
