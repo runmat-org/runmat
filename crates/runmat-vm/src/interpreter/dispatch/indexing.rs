@@ -919,18 +919,15 @@ where
                         .map_err(|e| format!("slice assign: {e}"))?;
                     stack.push(Value::ComplexTensor(ct));
                 }
-                Value::Cell(ca) if *dims == 1 && numeric.len() == 1 && *colon_mask == 0 => {
-                    let selected = indices_from_value_linear(
-                        &numeric[0],
-                        crate::ops::cells::linear_cell_count(&ca),
-                    )
-                    .await?;
-                    stack.push(crate::ops::cells::assign_cell_paren_linear_indices(
-                        ca, &selected, &rhs,
-                    )?);
-                }
-                Value::Cell(ca) if *dims == 1 && (*colon_mask & 1u32) != 0 => {
-                    let selected = crate::ops::cells::all_linear_cell_indices(&ca);
+                Value::Cell(ca) => {
+                    let selectors =
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ca.shape)
+                            .await
+                            .map_err(|e| format!("cell slice assign: {e}"))?;
+                    let plan = build_index_plan(&selectors, *dims, &ca.shape)
+                        .map_err(|e| map_slice_plan_error("cell slice assign", e))?;
+                    let selected: Vec<usize> =
+                        plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
                     stack.push(crate::ops::cells::assign_cell_paren_linear_indices(
                         ca, &selected, &rhs,
                     )?);

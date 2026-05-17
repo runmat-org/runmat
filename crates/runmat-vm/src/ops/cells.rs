@@ -112,14 +112,6 @@ pub fn expand_all_cell_values(ca: &CellArray) -> Result<Vec<Value>, RuntimeError
         .collect()
 }
 
-pub fn linear_cell_count(ca: &CellArray) -> usize {
-    ca.data.len()
-}
-
-pub fn all_linear_cell_indices(ca: &CellArray) -> Vec<usize> {
-    (1..=linear_cell_count(ca)).collect()
-}
-
 pub fn gather_cell_member(ca: &CellArray, field: &str) -> Result<Value, RuntimeError> {
     let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
     for value in &ca.data {
