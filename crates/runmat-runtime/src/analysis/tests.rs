@@ -119,6 +119,47 @@ fn sample_cfd_domain(
     }
 }
 
+fn sample_cht_model() -> AnalysisModel {
+    let mut model = sample_model();
+    model.steps = vec![
+        AnalysisStep {
+            step_id: "cht_flow".to_string(),
+            kind: AnalysisStepKind::Cfd,
+        },
+        AnalysisStep {
+            step_id: "cht_thermal".to_string(),
+            kind: AnalysisStepKind::Thermal,
+        },
+    ];
+    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::Transient, true));
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 60.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
+                region_id: "tip".to_string(),
+                temperature_delta_k: 70.0,
+            }],
+            time_profile: vec![
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.0,
+                    scale: 0.5,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 1.0,
+                    scale: 1.0,
+                },
+            ],
+        },
+    );
+    model
+}
+
 fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: ThermoMechanicalCouplingOptions) {
     model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
         enabled: coupling.enabled,
@@ -1923,6 +1964,81 @@ fn analysis_run_thermal_rejects_models_without_thermal_step() {
 }
 
 #[test]
+fn analysis_run_cht_rejects_models_without_cfd_step() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "thermal_1".to_string(),
+        kind: AnalysisStepKind::Thermal,
+    }];
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 50.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
+    let err = analysis_run_cht_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("cht run should fail for missing cfd step");
+
+    assert_eq!(err.operation, "analysis.run_cht");
+    assert_eq!(err.op_version, "analysis.run_cht/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_CHT_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_cht_rejects_models_without_thermal_step() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "cfd_1".to_string(),
+        kind: AnalysisStepKind::Cfd,
+    }];
+    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::Transient, true));
+    let err = analysis_run_cht_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("cht run should fail for missing thermal step");
+
+    assert_eq!(err.operation, "analysis.run_cht");
+    assert_eq!(err.op_version, "analysis.run_cht/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_CHT_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_cht_rejects_invalid_cfd_domain_parameters() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_cht_model();
+    model
+        .cfd
+        .as_mut()
+        .expect("cht model should include cfd")
+        .dynamic_viscosity_pa_s = 0.0;
+    let err = analysis_run_cht_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("cht run should fail for invalid cfd domain values");
+
+    assert_eq!(err.operation, "analysis.run_cht");
+    assert_eq!(err.op_version, "analysis.run_cht/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_CHT_INVALID_OPTIONS");
+}
+
+#[test]
 fn analysis_run_electromagnetic_rejects_models_without_em_step() {
     let model = sample_model();
     let err = analysis_run_electromagnetic_op(
@@ -2744,6 +2860,67 @@ fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
         .any(|diag| diag.code == "FEA_CFD_FLOW"
             && diag.message.contains("reynolds_proxy=")
             && diag.message.contains("solve_family=steady_state")));
+}
+
+#[test]
+fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
+    let _guard = analysis_test_guard();
+    let model = sample_cht_model();
+
+    let envelope = analysis_run_cht_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisChtRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            time_step_s: 1.0e-3,
+            step_count: 4,
+            max_linear_iters: 64,
+            tolerance: 1.0e-8,
+            residual_warn_threshold: 1.0e-4,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("cht run should return envelope");
+
+    assert_eq!(envelope.operation, "analysis.run_cht");
+    assert_eq!(envelope.op_version, "analysis.run_cht/v1");
+    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
+    assert!(envelope.data.transient_results.is_some());
+    assert!(envelope.data.thermal_results.is_some());
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_CFD_FLOW" && diag.message.contains("reynolds_proxy=")));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_CHT_COUPLING"
+            && diag.message.contains("applied_temperature_delta_k=60")));
+    let transient = envelope
+        .data
+        .transient_results
+        .as_ref()
+        .expect("transient payload should exist");
+    let thermal = envelope
+        .data
+        .thermal_results
+        .as_ref()
+        .expect("thermal payload should exist");
+    assert_eq!(transient.time_points_s.len(), 5);
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.displacement_snapshots.len()
+    );
+    assert_eq!(thermal.time_points_s.len(), 4);
 }
 
 #[test]

@@ -87,3 +87,5 @@ Progress update (2026-05-17):
    added benchmark harness CFD fixtures (cpu/gpu-provider/gpu-fallback) with `FEA_CFD_FLOW` threshold assertions and promoted runtime trends to classify CFD runs as a first-class run kind (`AnalysisRunKind::Cfd`).
 10. [x] CHT contract kickoff landed:
     added additive `analysis.create_model` profile `cht_coupled` with baseline coupled template defaults (CFD + thermal steps, seeded CFD domain, and thermo-mechanical coupling domain) plus runtime contract tests.
+11. [x] CHT first run-path baseline landed:
+    added additive runtime operation contract `analysis.run_cht/v1` with `AnalysisChtRunOptions`, coupled CFD+thermal model/option validation, typed envelope output including both transient+thermal payloads, and first CHT diagnostics (`FEA_CHT_COUPLING` + `FEA_CFD_FLOW`) backed by runtime tests.

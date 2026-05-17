@@ -17,7 +17,7 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 | Contact depth | Broader contact formulation realism | [~] |
 | Maxwell EM | From scaffolding to governance-backed solver path | [~] |
 | CFD core | Steady/transient fluid foundation | [~] |
-| CHT | Fluid-thermal coupled family | [ ] |
+| CHT | Fluid-thermal coupled family | [~] |
 | FSI | Structural-fluid coupled family | [ ] |
 | Acoustics | Acoustic solver family | [ ] |
 | Meshing/adaptivity | Production meshing/refinement pipeline | [ ] |
@@ -48,5 +48,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - CFD schema/profile kickoff landed: additive core domain contracts plus `analysis.create_model` steady/transient CFD templates are in place as the first Phase C step.
 - CFD first run-path baseline landed: `analysis.run_cfd/v1` now executes through the runtime/FEA stack with typed outputs and first fluid diagnostics (`FEA_CFD_FLOW`) under existing governance posture.
 - CFD benchmark/trend baseline landed: conformance harness now includes CFD fixtures with flow-metric threshold assertions, and runtime trends classify CFD runs as a dedicated run family.
-- CHT contract kickoff landed: additive `analysis.create_model` now supports a `cht_coupled` profile template to seed coupled CFD + thermal model scaffolding while dedicated CHT run/governance paths remain pending.
+- CHT first run-path baseline landed: `analysis.run_cht/v1` now executes coupled CFD + thermal runs with typed transient+thermal payloads and first CHT diagnostics (`FEA_CHT_COUPLING`, `FEA_CFD_FLOW`) under existing quality/provenance posture.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.
