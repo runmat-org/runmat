@@ -1504,6 +1504,62 @@ mod tests {
     }
 
     #[test]
+    fn builtin_by_name_policy_does_not_use_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_target").then_some(45)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 45);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(11.0)) })
+            }),
+        ));
+
+        let request = crate::user_functions::SemanticCallableRequest::named_with_policy(
+            "resolved_target".to_string(),
+            vec![Value::Num(4.0)],
+            1,
+            crate::user_functions::SemanticCallableKind::Other,
+            runmat_hir::CallableFallbackPolicy::BuiltinByName,
+        );
+
+        let result = block_on(crate::user_functions::try_call_semantic_descriptor(request));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn runtime_name_resolution_policy_uses_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_target").then_some(45)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 45);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(11.0)) })
+            }),
+        ));
+
+        let request = crate::user_functions::SemanticCallableRequest::named_with_policy(
+            "resolved_target".to_string(),
+            vec![Value::Num(4.0)],
+            1,
+            crate::user_functions::SemanticCallableKind::Other,
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+        );
+
+        let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
+            .expect("runtime resolution should attempt semantic resolver")
+            .expect("semantic invoker should succeed");
+        assert_eq!(result, Value::Num(11.0));
+    }
+
+    #[test]
     fn notify_semantic_function_handle_uses_semantic_identity() {
         let calls = Arc::new(AtomicUsize::new(0));
         let seen_calls = Arc::clone(&calls);

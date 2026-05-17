@@ -318,6 +318,30 @@ fn undefined_name_error(name: &str, metadata: &CallableMetadata) -> RuntimeError
     )
 }
 
+async fn forward_named_fallback(
+    name: String,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    fallback_policy: CallableFallbackPolicy,
+) -> Result<Value, RuntimeError> {
+    match fallback_policy {
+        CallableFallbackPolicy::RuntimeNameResolution => {
+            forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
+        }
+        CallableFallbackPolicy::BuiltinByName => {
+            if requested_outputs == 1 {
+                runmat_runtime::call_builtin_async(&name, &args).await
+            } else {
+                runmat_runtime::call_builtin_async_with_outputs(&name, &args, requested_outputs)
+                    .await
+            }
+        }
+        CallableFallbackPolicy::None
+        | CallableFallbackPolicy::ObjectDispatch
+        | CallableFallbackPolicy::ExternalBoundary => unreachable!(),
+    }
+}
+
 async fn execute_resolved_callable(
     identity: CallableIdentity,
     args: Vec<Value>,
@@ -342,12 +366,8 @@ async fn execute_resolved_callable(
                     | CallableFallbackPolicy::RuntimeNameResolution
             ) {
                 if let Some(name) = metadata.display_name.clone() {
-                    return forward_builtin_feval(
-                        Value::FunctionHandle(name),
-                        args,
-                        requested_outputs,
-                    )
-                    .await;
+                    return forward_named_fallback(name, args, requested_outputs, fallback_policy)
+                        .await;
                 }
             }
             Err(semantic_unavailable_error(function.0, &metadata))
@@ -358,7 +378,7 @@ async fn execute_resolved_callable(
                 let Some(name) = other.display_name() else {
                     return Err(undefined_name_error("<unnamed callable>", &metadata));
                 };
-                forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
+                forward_named_fallback(name, args, requested_outputs, fallback_policy).await
             }
             CallableFallbackPolicy::None
             | CallableFallbackPolicy::ObjectDispatch
@@ -396,13 +416,9 @@ async fn try_execute_resolved_callable(
                     | CallableFallbackPolicy::RuntimeNameResolution
             ) {
                 if let Some(name) = metadata.display_name {
-                    return forward_builtin_feval(
-                        Value::FunctionHandle(name),
-                        args,
-                        requested_outputs,
-                    )
-                    .await
-                    .map(Some);
+                    return forward_named_fallback(name, args, requested_outputs, fallback_policy)
+                        .await
+                        .map(Some);
                 }
             }
             Ok(None)
@@ -418,7 +434,7 @@ async fn try_execute_resolved_callable(
             let Some(name) = other.display_name() else {
                 return Ok(None);
             };
-            forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs)
+            forward_named_fallback(name, args, requested_outputs, fallback_policy)
                 .await
                 .map(Some)
         }
