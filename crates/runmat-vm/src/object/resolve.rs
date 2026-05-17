@@ -4,7 +4,18 @@ use crate::call::shared::{
 };
 use crate::interpreter::errors::mex;
 use runmat_builtins::{self, Access, Closure, StructValue, Value};
+use runmat_hir::{CallableIdentity, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
+
+fn external_qualified_identity(base: &str, member: &str) -> CallableIdentity {
+    let mut segments: Vec<SymbolName> = base
+        .split('.')
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| SymbolName(segment.to_string()))
+        .collect();
+    segments.push(SymbolName(member.to_string()));
+    CallableIdentity::ExternalName(QualifiedName(segments))
+}
 
 pub async fn load_member(
     base: Value,
@@ -133,7 +144,9 @@ pub fn load_static_member(cls: &str, field: &str) -> Result<Value, RuntimeError>
             captures: vec![],
         }))
     } else {
-        let qualified = format!("{cls}.{field}");
+        let qualified = external_qualified_identity(cls, field)
+            .display_name()
+            .unwrap_or_else(|| format!("{cls}.{field}"));
         if runmat_builtins::builtin_functions()
             .iter()
             .any(|b| b.name == qualified)
