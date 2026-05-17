@@ -264,8 +264,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_ANCHOR_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
@@ -291,8 +293,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_PENALTY_ANCHOR_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_PHASED_SOURCE_REGION_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO",
@@ -545,6 +549,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_boundary_penalty_imag_residual_norm",
                         "observed": 0.8,
                     },
+                    {
+                        "name": "em_boundary_penalty_anchor_ratio",
+                        "observed": 0.2,
+                    },
                 ],
             }
         )
@@ -562,6 +570,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                     {
                         "name": "em_phased_source_interference_index",
                         "observed": 0.85,
+                    },
+                    {
+                        "name": "em_phased_source_region_coverage_ratio",
+                        "observed": 0.6,
                     },
                 ],
             }
@@ -667,10 +679,14 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM"
         ] = "0.2"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_PENALTY_ANCHOR_RATIO"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO"] = "0.3"
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX"
         ] = "0.3"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_PHASED_SOURCE_REGION_COVERAGE_RATIO"
+        ] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO"] = (
             "0.2"
         )
@@ -737,8 +753,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO_LOW", codes)
         self.assertIn("EM_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_HIGH", codes)
         self.assertIn("EM_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_HIGH", codes)
+        self.assertIn("EM_BOUNDARY_PENALTY_ANCHOR_RATIO_LOW", codes)
         self.assertIn("EM_PHASED_SOURCE_OVERLAP_RATIO_HIGH", codes)
         self.assertIn("EM_PHASED_SOURCE_INTERFERENCE_INDEX_HIGH", codes)
+        self.assertIn("EM_PHASED_SOURCE_REGION_COVERAGE_RATIO_LOW", codes)
         self.assertIn("EM_SPARSE_ASSIGNMENT_COVERAGE_RATIO_LOW", codes)
         self.assertIn("EM_SPARSE_FALLBACK_COEFFICIENT_RATIO_HIGH", codes)
         self.assertIn("EM_SPARSE_SOURCE_REGION_COVERAGE_RATIO_LOW", codes)
@@ -860,6 +878,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_boundary_penalty_imag_residual_norm",
                         "observed": 0.28,
                     },
+                    {
+                        "name": "em_boundary_penalty_anchor_ratio",
+                        "observed": 0.2,
+                    },
                 ],
             }
         )
@@ -877,6 +899,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                     {
                         "name": "em_phased_source_interference_index",
                         "observed": 0.45,
+                    },
+                    {
+                        "name": "em_phased_source_region_coverage_ratio",
+                        "observed": 0.2,
                     },
                 ],
             }
@@ -898,6 +924,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_boundary_penalty_imag_residual_norm",
                         "observed": 0.1,
                     },
+                    {
+                        "name": "em_boundary_penalty_anchor_ratio",
+                        "observed": 1.0,
+                    },
                 ],
             }
         )
@@ -916,6 +946,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_phased_source_interference_index",
                         "observed": 0.1,
                     },
+                    {
+                        "name": "em_phased_source_region_coverage_ratio",
+                        "observed": 1.0,
+                    },
                 ],
             }
         )
@@ -926,18 +960,26 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO"
         ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_ANCHOR_DROP_TREND_RATIO"
+        ] = "1.5"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO"] = (
             "1.5"
         )
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO"
         ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO"
+        ] = "1.5"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_WORSENING", codes)
         self.assertIn("EM_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_WORSENING", codes)
+        self.assertIn("EM_BOUNDARY_PENALTY_ANCHOR_TREND_WORSENING", codes)
         self.assertIn("EM_PHASED_SOURCE_OVERLAP_TREND_WORSENING", codes)
         self.assertIn("EM_PHASED_SOURCE_INTERFERENCE_TREND_WORSENING", codes)
+        self.assertIn("EM_PHASED_SOURCE_REGION_COVERAGE_TREND_WORSENING", codes)
 
     def test_em_non_core_assertion_trend_worsening_reasons_are_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

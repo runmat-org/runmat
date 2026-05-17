@@ -144,8 +144,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_ANCHOR_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
@@ -171,8 +173,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM": "0.12",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM": "0.12",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_PENALTY_ANCHOR_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO": "0.6",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX": "0.35",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_PHASED_SOURCE_REGION_COVERAGE_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO": "0.9",
@@ -297,8 +301,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_ANCHOR_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
@@ -324,8 +330,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM": "0.18",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM": "0.18",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_PENALTY_ANCHOR_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO": "0.75",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX": "0.5",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_PHASED_SOURCE_REGION_COVERAGE_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO": "0.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO": "0.85",
@@ -450,8 +458,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_ANCHOR_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.35",
@@ -477,8 +487,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.7",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_PENALTY_ANCHOR_RATIO": "0.6",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX": "0.75",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_PHASED_SOURCE_REGION_COVERAGE_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO": "0.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO": "0.8",
@@ -1557,6 +1569,24 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_max_boundary_penalty_anchor_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_ANCHOR_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_ANCHOR_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_phased_source_region_coverage_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
     em_max_sparse_assignment_coverage_drop_trend_ratio_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO",
@@ -1790,6 +1820,21 @@ def evaluate_release_readiness(
             profile_default(
                 "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX",
                 "0.5",
+            ),
+        )
+    )
+    em_min_boundary_penalty_anchor_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_PENALTY_ANCHOR_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_PENALTY_ANCHOR_RATIO", "0.8"),
+        )
+    )
+    em_min_phased_source_region_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_PHASED_SOURCE_REGION_COVERAGE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_PHASED_SOURCE_REGION_COVERAGE_RATIO",
+                "0.85",
             ),
         )
     )
@@ -2320,8 +2365,10 @@ def evaluate_release_readiness(
     em_max_dispersive_coupling_ratio = None
     em_max_boundary_penalty_real_residual_norm = None
     em_max_boundary_penalty_imag_residual_norm = None
+    em_min_boundary_penalty_anchor_ratio = None
     em_max_phased_source_overlap_ratio = None
     em_max_phased_source_interference_index = None
+    em_min_phased_source_region_coverage_ratio = None
     em_min_sparse_assignment_coverage_ratio = None
     em_max_sparse_fallback_coefficient_ratio = None
     em_min_sparse_source_region_coverage_ratio = None
@@ -2349,8 +2396,10 @@ def evaluate_release_readiness(
     em_dispersive_phase_conductivity_attenuation_trend_ratio = None
     em_boundary_penalty_real_residual_norm_trend_ratio = None
     em_boundary_penalty_imag_residual_norm_trend_ratio = None
+    em_boundary_penalty_anchor_drop_trend_ratio = None
     em_phased_source_overlap_trend_ratio = None
     em_phased_source_interference_trend_ratio = None
+    em_phased_source_region_coverage_drop_trend_ratio = None
     em_sparse_assignment_coverage_drop_trend_ratio = None
     em_sparse_fallback_coefficient_trend_ratio = None
     em_sparse_source_region_coverage_drop_trend_ratio = None
@@ -3220,6 +3269,14 @@ def evaluate_release_readiness(
                 em_max_boundary_penalty_imag_residual_norm_threshold,
             ),
             (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "em_boundary_penalty_anchor_ratio",
+                "min",
+                "EM_BOUNDARY_PENALTY_ANCHOR_RATIO_LOW",
+                "EM boundary-penalty anchor ratio",
+                em_min_boundary_penalty_anchor_ratio_threshold,
+            ),
+            (
                 "electromagnetic_reference_multi_region_phased_source_gpu_provider",
                 "em_phased_source_overlap_ratio",
                 "max",
@@ -3234,6 +3291,14 @@ def evaluate_release_readiness(
                 "EM_PHASED_SOURCE_INTERFERENCE_INDEX_HIGH",
                 "EM phased-source interference index",
                 em_max_phased_source_interference_index_threshold,
+            ),
+            (
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "em_phased_source_region_coverage_ratio",
+                "min",
+                "EM_PHASED_SOURCE_REGION_COVERAGE_RATIO_LOW",
+                "EM phased-source region coverage ratio",
+                em_min_phased_source_region_coverage_ratio_threshold,
             ),
             (
                 "electromagnetic_reference_sparse_assignments_gpu_provider",
@@ -3487,6 +3552,12 @@ def evaluate_release_readiness(
                     or observed > em_max_boundary_penalty_imag_residual_norm
                 ):
                     em_max_boundary_penalty_imag_residual_norm = observed
+            elif assertion_name.endswith("boundary_penalty_anchor_ratio"):
+                if (
+                    em_min_boundary_penalty_anchor_ratio is None
+                    or observed < em_min_boundary_penalty_anchor_ratio
+                ):
+                    em_min_boundary_penalty_anchor_ratio = observed
             elif assertion_name.endswith("phased_source_overlap_ratio"):
                 if (
                     em_max_phased_source_overlap_ratio is None
@@ -3499,6 +3570,12 @@ def evaluate_release_readiness(
                     or observed > em_max_phased_source_interference_index
                 ):
                     em_max_phased_source_interference_index = observed
+            elif assertion_name.endswith("phased_source_region_coverage_ratio"):
+                if (
+                    em_min_phased_source_region_coverage_ratio is None
+                    or observed < em_min_phased_source_region_coverage_ratio
+                ):
+                    em_min_phased_source_region_coverage_ratio = observed
             elif assertion_name.endswith("sparse_assignment_coverage_ratio"):
                 if (
                     em_min_sparse_assignment_coverage_ratio is None
@@ -4637,6 +4714,26 @@ def evaluate_release_readiness(
                 )
             )
 
+        em_boundary_penalty_anchor_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_boundary_penalty_anchor_ratio"
+        )
+        if (
+            em_boundary_penalty_anchor_drop_trend_ratio is not None
+            and em_boundary_penalty_anchor_drop_trend_ratio
+            > em_max_boundary_penalty_anchor_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_BOUNDARY_PENALTY_ANCHOR_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM boundary-penalty anchor drop trend ratio "
+                        f"{em_boundary_penalty_anchor_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_boundary_penalty_anchor_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         em_phased_source_overlap_trend_ratio = fixture_assertion_trend_ratio(
             "em_phased_source_overlap_ratio",
             ratio_mode="increase",
@@ -4675,6 +4772,26 @@ def evaluate_release_readiness(
                         "EM phased-source interference trend ratio "
                         f"{em_phased_source_interference_trend_ratio:.3f} exceeds threshold "
                         f"{em_max_phased_source_interference_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_phased_source_region_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_phased_source_region_coverage_ratio"
+        )
+        if (
+            em_phased_source_region_coverage_drop_trend_ratio is not None
+            and em_phased_source_region_coverage_drop_trend_ratio
+            > em_max_phased_source_region_coverage_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_PHASED_SOURCE_REGION_COVERAGE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM phased-source region coverage drop trend ratio "
+                        f"{em_phased_source_region_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_phased_source_region_coverage_drop_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
@@ -5627,10 +5744,14 @@ def evaluate_release_readiness(
         "em_max_boundary_penalty_real_residual_norm_threshold": em_max_boundary_penalty_real_residual_norm_threshold,
         "em_max_boundary_penalty_imag_residual_norm": em_max_boundary_penalty_imag_residual_norm,
         "em_max_boundary_penalty_imag_residual_norm_threshold": em_max_boundary_penalty_imag_residual_norm_threshold,
+        "em_min_boundary_penalty_anchor_ratio": em_min_boundary_penalty_anchor_ratio,
+        "em_min_boundary_penalty_anchor_ratio_threshold": em_min_boundary_penalty_anchor_ratio_threshold,
         "em_max_phased_source_overlap_ratio": em_max_phased_source_overlap_ratio,
         "em_max_phased_source_overlap_ratio_threshold": em_max_phased_source_overlap_ratio_threshold,
         "em_max_phased_source_interference_index": em_max_phased_source_interference_index,
         "em_max_phased_source_interference_index_threshold": em_max_phased_source_interference_index_threshold,
+        "em_min_phased_source_region_coverage_ratio": em_min_phased_source_region_coverage_ratio,
+        "em_min_phased_source_region_coverage_ratio_threshold": em_min_phased_source_region_coverage_ratio_threshold,
         "em_min_sparse_assignment_coverage_ratio": em_min_sparse_assignment_coverage_ratio,
         "em_min_sparse_assignment_coverage_ratio_threshold": em_min_sparse_assignment_coverage_ratio_threshold,
         "em_max_sparse_fallback_coefficient_ratio": em_max_sparse_fallback_coefficient_ratio,
@@ -5685,10 +5806,14 @@ def evaluate_release_readiness(
         "em_max_boundary_penalty_real_residual_norm_trend_ratio_threshold": em_max_boundary_penalty_real_residual_norm_trend_ratio_threshold,
         "em_boundary_penalty_imag_residual_norm_trend_ratio": em_boundary_penalty_imag_residual_norm_trend_ratio,
         "em_max_boundary_penalty_imag_residual_norm_trend_ratio_threshold": em_max_boundary_penalty_imag_residual_norm_trend_ratio_threshold,
+        "em_boundary_penalty_anchor_drop_trend_ratio": em_boundary_penalty_anchor_drop_trend_ratio,
+        "em_max_boundary_penalty_anchor_drop_trend_ratio_threshold": em_max_boundary_penalty_anchor_drop_trend_ratio_threshold,
         "em_phased_source_overlap_trend_ratio": em_phased_source_overlap_trend_ratio,
         "em_max_phased_source_overlap_trend_ratio_threshold": em_max_phased_source_overlap_trend_ratio_threshold,
         "em_phased_source_interference_trend_ratio": em_phased_source_interference_trend_ratio,
         "em_max_phased_source_interference_trend_ratio_threshold": em_max_phased_source_interference_trend_ratio_threshold,
+        "em_phased_source_region_coverage_drop_trend_ratio": em_phased_source_region_coverage_drop_trend_ratio,
+        "em_max_phased_source_region_coverage_drop_trend_ratio_threshold": em_max_phased_source_region_coverage_drop_trend_ratio_threshold,
         "em_sparse_assignment_coverage_drop_trend_ratio": em_sparse_assignment_coverage_drop_trend_ratio,
         "em_max_sparse_assignment_coverage_drop_trend_ratio_threshold": em_max_sparse_assignment_coverage_drop_trend_ratio_threshold,
         "em_sparse_fallback_coefficient_trend_ratio": em_sparse_fallback_coefficient_trend_ratio,
@@ -6115,12 +6240,20 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_max_boundary_penalty_real_residual_norm_threshold') if result.get('em_max_boundary_penalty_real_residual_norm_threshold') is not None else '-'}`/`{result.get('em_max_boundary_penalty_imag_residual_norm_threshold') if result.get('em_max_boundary_penalty_imag_residual_norm_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM boundary-penalty anchor ratio/threshold: "
+        f"`{result.get('em_min_boundary_penalty_anchor_ratio') if result.get('em_min_boundary_penalty_anchor_ratio') is not None else '-'}`/`{result.get('em_min_boundary_penalty_anchor_ratio_threshold') if result.get('em_min_boundary_penalty_anchor_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- Max EM phased-source overlap/interference: "
         f"`{result.get('em_max_phased_source_overlap_ratio') if result.get('em_max_phased_source_overlap_ratio') is not None else '-'}`/`{result.get('em_max_phased_source_interference_index') if result.get('em_max_phased_source_interference_index') is not None else '-'}`"
     )
     lines.append(
         "- EM phased-source overlap/interference thresholds: "
         f"`{result.get('em_max_phased_source_overlap_ratio_threshold') if result.get('em_max_phased_source_overlap_ratio_threshold') is not None else '-'}`/`{result.get('em_max_phased_source_interference_index_threshold') if result.get('em_max_phased_source_interference_index_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM phased-source region coverage ratio/threshold: "
+        f"`{result.get('em_min_phased_source_region_coverage_ratio') if result.get('em_min_phased_source_region_coverage_ratio') is not None else '-'}`/`{result.get('em_min_phased_source_region_coverage_ratio_threshold') if result.get('em_min_phased_source_region_coverage_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- EM sparse assignment/fallback: "
@@ -6183,8 +6316,8 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_breach_rate') if result.get('em_breach_rate') is not None else '-'}`/`{result.get('em_max_breach_rate_threshold') if result.get('em_max_breach_rate_threshold') is not None else '-'}`"
     )
     lines.append(
-        "- EM boundary/phased trend ratios (penalty real, penalty imag, overlap, interference): "
-        f"`{result.get('em_boundary_penalty_real_residual_norm_trend_ratio') if result.get('em_boundary_penalty_real_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_penalty_imag_residual_norm_trend_ratio') if result.get('em_boundary_penalty_imag_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_overlap_trend_ratio') if result.get('em_phased_source_overlap_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_interference_trend_ratio') if result.get('em_phased_source_interference_trend_ratio') is not None else '-'}`"
+        "- EM boundary/phased trend ratios (penalty real, penalty imag, penalty anchor, phased overlap, phased interference, phased region coverage): "
+        f"`{result.get('em_boundary_penalty_real_residual_norm_trend_ratio') if result.get('em_boundary_penalty_real_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_penalty_imag_residual_norm_trend_ratio') if result.get('em_boundary_penalty_imag_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_penalty_anchor_drop_trend_ratio') if result.get('em_boundary_penalty_anchor_drop_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_overlap_trend_ratio') if result.get('em_phased_source_overlap_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_interference_trend_ratio') if result.get('em_phased_source_interference_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_region_coverage_drop_trend_ratio') if result.get('em_phased_source_region_coverage_drop_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- EM non-core trend ratios (sparse assignment, sparse fallback, sparse source realization, sparse energy imbalance, fallback source realization, fallback energy imbalance, overlap ratio, overlap interference, boundary-kernel leakage): "
