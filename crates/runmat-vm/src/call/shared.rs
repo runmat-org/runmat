@@ -150,8 +150,16 @@ fn build_protocol_index_cell(values: Vec<Value>) -> Result<Value, RuntimeError> 
     Ok(Value::Cell(cell))
 }
 
-async fn call_runtime_method(args: &[Value]) -> Result<Value, RuntimeError> {
-    runmat_runtime::call_method_async(args).await
+async fn call_runtime_method(
+    args: &[Value],
+    requested_outputs: Option<usize>,
+) -> Result<Value, RuntimeError> {
+    match requested_outputs {
+        Some(count) => {
+            runmat_runtime::call_builtin_async_with_outputs("call_method", args, count).await
+        }
+        None => runmat_runtime::call_method_async(args).await,
+    }
 }
 
 pub(crate) async fn call_object_operator_method(
@@ -160,19 +168,20 @@ pub(crate) async fn call_object_operator_method(
     arg: Value,
 ) -> Result<Value, RuntimeError> {
     let args = [base, Value::String(method.to_string()), arg];
-    call_runtime_method(&args).await
+    call_runtime_method(&args, None).await
 }
 
-pub(crate) async fn call_object_named_method(
+pub(crate) async fn call_object_named_method_with_outputs(
     base: Value,
     method: String,
     args: Vec<Value>,
+    requested_outputs: Option<usize>,
 ) -> Result<Value, RuntimeError> {
     let mut method_args = Vec::with_capacity(2 + args.len());
     method_args.push(base);
     method_args.push(Value::String(method));
     method_args.extend(args);
-    call_runtime_method(&method_args).await
+    call_runtime_method(&method_args, requested_outputs).await
 }
 
 async fn call_object_member_method(
@@ -214,7 +223,7 @@ pub(crate) fn class_defines_member_subsasgn(class: &runmat_builtins::ClassDef) -
 pub(crate) async fn call_object_index_descriptor_method(
     descriptor: ObjectIndexDescriptor,
 ) -> Result<Value, RuntimeError> {
-    call_runtime_method(&descriptor.into_runtime_method_args()?).await
+    call_runtime_method(&descriptor.into_runtime_method_args()?, None).await
 }
 
 pub(crate) async fn call_object_subsref_paren_values(

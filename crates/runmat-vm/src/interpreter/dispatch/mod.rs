@@ -754,19 +754,20 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::CallMethod(name, arg_count) => {
-            handle_method_call(stack, name, *arg_count).await?;
+            handle_method_call(stack, name, *arg_count, next_instr).await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::CallMethodOrMemberIndex(name, arg_count) => {
-            handle_method_or_member_index_call(stack, name.clone(), *arg_count).await?;
+            handle_method_or_member_index_call(stack, name.clone(), *arg_count, next_instr).await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::CallMethodOrMemberIndexExpandMulti(name, specs) => {
-            handle_method_or_member_index_expand_multi_call(stack, name.clone(), specs).await?;
+            handle_method_or_member_index_expand_multi_call(stack, name.clone(), specs, next_instr)
+                .await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -811,7 +812,7 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::CallStaticMethod(class_name, method, arg_count) => {
-            handle_static_method_call(stack, class_name, method, *arg_count).await?;
+            handle_static_method_call(stack, class_name, method, *arg_count, next_instr).await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

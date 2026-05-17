@@ -6,6 +6,17 @@ use runmat_builtins::{
 };
 use runmat_runtime::RuntimeError;
 
+async fn call_runtime_builtin(
+    name: &str,
+    args: &[Value],
+    requested_outputs: Option<usize>,
+) -> Result<Value, RuntimeError> {
+    match requested_outputs {
+        Some(count) => runmat_runtime::call_builtin_async_with_outputs(name, args, count).await,
+        None => runmat_runtime::call_builtin_async(name, args).await,
+    }
+}
+
 pub fn create_closure(
     stack: &mut Vec<Value>,
     func_name: String,
@@ -76,7 +87,12 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
     }
 }
 
-pub async fn call_method(base: Value, name: &str, args: Vec<Value>) -> Result<Value, RuntimeError> {
+pub async fn call_method_with_outputs(
+    base: Value,
+    name: &str,
+    args: Vec<Value>,
+    requested_outputs: Option<usize>,
+) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
             if let Some((m, _owner)) = lookup_method(&obj.class_name, name) {
@@ -93,26 +109,27 @@ pub async fn call_method(base: Value, name: &str, args: Vec<Value>) -> Result<Va
                 let mut full_args = Vec::with_capacity(1 + args.len());
                 full_args.push(Value::Object(obj));
                 full_args.extend(args);
-                return runmat_runtime::call_builtin_async(&m.function_name, &full_args).await;
+                return call_runtime_builtin(&m.function_name, &full_args, requested_outputs).await;
             }
             let qualified = format!("{}.{}", obj.class_name, name);
             let mut full_args = Vec::with_capacity(1 + args.len());
             full_args.push(Value::Object(obj));
             full_args.extend(args.clone());
-            if let Ok(v) = runmat_runtime::call_builtin_async(&qualified, &full_args).await {
+            if let Ok(v) = call_runtime_builtin(&qualified, &full_args, requested_outputs).await {
                 Ok(v)
             } else {
-                runmat_runtime::call_builtin_async(name, &full_args).await
+                call_runtime_builtin(name, &full_args, requested_outputs).await
             }
         }
         _ => Err(mex("CallMethod", "CallMethod on non-object")),
     }
 }
 
-pub async fn call_static_method(
+pub async fn call_static_method_with_outputs(
     class_name: &str,
     method: &str,
     args: Vec<Value>,
+    requested_outputs: Option<usize>,
 ) -> Result<Value, RuntimeError> {
     if let Some((m, _owner)) = lookup_method(class_name, method) {
         if !m.is_static {
@@ -121,10 +138,10 @@ pub async fn call_static_method(
         if m.access == Access::Private {
             return Err(format!("Method '{}' is private", method).into());
         }
-        return runmat_runtime::call_builtin_async(&m.function_name, &args).await;
+        return call_runtime_builtin(&m.function_name, &args, requested_outputs).await;
     }
     let qualified = format!("{}.{}", class_name, method);
-    runmat_runtime::call_builtin_async(&qualified, &args).await
+    call_runtime_builtin(&qualified, &args, requested_outputs).await
 }
 
 pub fn load_static_property(class_name: &str, prop: &str) -> Result<Value, RuntimeError> {
@@ -147,10 +164,11 @@ pub fn load_static_property(class_name: &str, prop: &str) -> Result<Value, Runti
     }
 }
 
-pub async fn call_method_or_member_index(
+pub async fn call_method_or_member_index_with_outputs(
     base: Value,
     name: String,
     args: Vec<Value>,
+    requested_outputs: Option<usize>,
 ) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
@@ -168,17 +186,17 @@ pub async fn call_method_or_member_index(
                 let mut full_args = Vec::with_capacity(1 + args.len());
                 full_args.push(Value::Object(obj));
                 full_args.extend(args);
-                return runmat_runtime::call_builtin_async(&m.function_name, &full_args).await;
+                return call_runtime_builtin(&m.function_name, &full_args, requested_outputs).await;
             }
 
             let mut method_args = Vec::with_capacity(1 + args.len());
             method_args.push(Value::Object(obj.clone()));
             method_args.extend(args.iter().cloned());
             let qualified = format!("{}.{}", obj.class_name, name);
-            if let Ok(v) = runmat_runtime::call_builtin_async(&qualified, &method_args).await {
+            if let Ok(v) = call_runtime_builtin(&qualified, &method_args, requested_outputs).await {
                 return Ok(v);
             }
-            if let Ok(v) = runmat_runtime::call_builtin_async(&name, &method_args).await {
+            if let Ok(v) = call_runtime_builtin(&name, &method_args, requested_outputs).await {
                 return Ok(v);
             }
 
@@ -191,13 +209,14 @@ pub async fn call_method_or_member_index(
                     .map_err(|e| format!("getfield idx build: {e}"))?;
                 getfield_args.push(Value::Cell(idx_cell));
             }
-            runmat_runtime::call_builtin_async("getfield", &getfield_args).await
+            call_runtime_builtin("getfield", &getfield_args, requested_outputs).await
         }
         Value::HandleObject(handle) => {
-            if let Ok(v) = crate::call::shared::call_object_named_method(
+            if let Ok(v) = crate::call::shared::call_object_named_method_with_outputs(
                 Value::HandleObject(handle.clone()),
                 name.clone(),
                 args.clone(),
+                requested_outputs,
             )
             .await
             {
@@ -213,18 +232,18 @@ pub async fn call_method_or_member_index(
                     .map_err(|e| format!("getfield idx build: {e}"))?;
                 getfield_args.push(Value::Cell(idx_cell));
             }
-            runmat_runtime::call_builtin_async("getfield", &getfield_args).await
+            call_runtime_builtin("getfield", &getfield_args, requested_outputs).await
         }
         Value::ClassRef(cls) => {
             if let Some((m, _owner)) = lookup_method(&cls, &name) {
                 if !m.is_static {
                     return Err(format!("Method '{}' is not static", name).into());
                 }
-                return runmat_runtime::call_builtin_async(&m.function_name, &args).await;
+                return call_runtime_builtin(&m.function_name, &args, requested_outputs).await;
             }
 
             let qualified = format!("{cls}.{name}");
-            if let Ok(v) = runmat_runtime::call_builtin_async(&qualified, &args).await {
+            if let Ok(v) = call_runtime_builtin(&qualified, &args, requested_outputs).await {
                 return Ok(v);
             }
 
@@ -244,7 +263,7 @@ pub async fn call_method_or_member_index(
                     .map_err(|e| format!("getfield idx build: {e}"))?;
                 getfield_args.push(Value::Cell(idx_cell));
             }
-            runmat_runtime::call_builtin_async("getfield", &getfield_args).await
+            call_runtime_builtin("getfield", &getfield_args, requested_outputs).await
         }
     }
 }

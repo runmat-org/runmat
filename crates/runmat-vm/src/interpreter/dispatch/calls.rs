@@ -449,9 +449,14 @@ pub async fn handle_method_call(
     stack: &mut Vec<Value>,
     name: &str,
     arg_count: usize,
+    next_instr: Option<&Instr>,
 ) -> Result<MethodHandling, RuntimeError> {
     let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
-    let value = call_closures::call_method(base, name, args).await?;
+    let requested_outputs = requested_output_count_from_next(next_instr);
+    let output_hint = output_hint_for_next(next_instr);
+    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
+    let value =
+        call_closures::call_method_with_outputs(base, name, args, requested_outputs).await?;
     stack.push(value);
     Ok(MethodHandling::Completed)
 }
@@ -610,9 +615,19 @@ pub async fn handle_method_or_member_index_call(
     stack: &mut Vec<Value>,
     name: String,
     arg_count: usize,
+    next_instr: Option<&Instr>,
 ) -> Result<MethodHandling, RuntimeError> {
     let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
-    let value = call_closures::call_method_or_member_index(base, name, args).await?;
+    let requested_outputs = requested_output_count_from_next(next_instr);
+    let output_hint = output_hint_for_next(next_instr);
+    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
+    let value = call_closures::call_method_or_member_index_with_outputs(
+        base,
+        name,
+        args,
+        requested_outputs,
+    )
+    .await?;
     stack.push(value);
     Ok(MethodHandling::Completed)
 }
@@ -621,6 +636,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     stack: &mut Vec<Value>,
     name: String,
     specs: &[ArgSpec],
+    next_instr: Option<&Instr>,
 ) -> Result<MethodHandling, RuntimeError> {
     let mut args = build_user_function_expand_multi_args(stack, specs).await?;
     if args.is_empty() {
@@ -630,7 +646,16 @@ pub async fn handle_method_or_member_index_expand_multi_call(
         ));
     }
     let base = args.remove(0);
-    let value = call_closures::call_method_or_member_index(base, name, args).await?;
+    let requested_outputs = requested_output_count_from_next(next_instr);
+    let output_hint = output_hint_for_next(next_instr);
+    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
+    let value = call_closures::call_method_or_member_index_with_outputs(
+        base,
+        name,
+        args,
+        requested_outputs,
+    )
+    .await?;
     stack.push(value);
     Ok(MethodHandling::Completed)
 }
@@ -640,9 +665,20 @@ pub async fn handle_static_method_call(
     class_name: &str,
     method: &str,
     arg_count: usize,
+    next_instr: Option<&Instr>,
 ) -> Result<MethodHandling, RuntimeError> {
     let mut args = crate::call::builtins::collect_call_args(stack, arg_count)?;
-    match call_closures::call_static_method(class_name, method, args.clone()).await {
+    let requested_outputs = requested_output_count_from_next(next_instr);
+    let output_hint = output_hint_for_next(next_instr);
+    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
+    match call_closures::call_static_method_with_outputs(
+        class_name,
+        method,
+        args.clone(),
+        requested_outputs,
+    )
+    .await
+    {
         Ok(v) => {
             stack.push(v);
             Ok(MethodHandling::Completed)
@@ -669,7 +705,13 @@ pub async fn handle_static_method_call(
             );
             if is_type_class {
                 args.push(Value::from(class_name));
-                let v = runmat_runtime::call_builtin_async(method, &args).await?;
+                let v = match requested_outputs {
+                    Some(count) => {
+                        runmat_runtime::call_builtin_async_with_outputs(method, &args, count)
+                            .await?
+                    }
+                    None => runmat_runtime::call_builtin_async(method, &args).await?,
+                };
                 stack.push(v);
                 Ok(MethodHandling::Completed)
             } else {
