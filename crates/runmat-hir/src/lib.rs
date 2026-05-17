@@ -7,11 +7,13 @@ mod ids;
 pub(crate) mod inference;
 pub(crate) mod lowering;
 mod lowering_context;
-pub mod remapping;
 mod span;
 mod validation;
 
 pub mod compatibility {
+    use crate::{LoweringContext, SemanticError};
+    use runmat_parser::Program as AstProgram;
+
     pub use crate::hir::{
         CompatibilityHirClassMember as HirClassMember, CompatibilityHirExpr as HirExpr,
         CompatibilityHirExprKind as HirExprKind, CompatibilityHirLValue as HirLValue,
@@ -21,7 +23,13 @@ pub mod compatibility {
     pub use crate::inference::function_outputs::infer_function_output_types;
     pub use crate::inference::function_vars::infer_function_variable_types;
     pub use crate::inference::globals::infer_global_variable_types;
-    pub use crate::lowering::ctx::lower_compatibility as lower;
+
+    pub fn lower(
+        prog: &AstProgram,
+        context: &LoweringContext<'_>,
+    ) -> Result<LoweringResult, SemanticError> {
+        crate::lowering::ctx::lower_compatibility(prog, context)
+    }
 }
 
 pub use diagnostic::{

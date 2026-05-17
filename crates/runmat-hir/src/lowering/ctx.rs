@@ -74,7 +74,7 @@ pub fn lower(
     })
 }
 
-pub fn lower_compatibility(
+pub(crate) fn lower_compatibility(
     prog: &AstProgram,
     context: &LoweringContext<'_>,
 ) -> Result<crate::hir::CompatibilityLoweringResult, SemanticError> {
