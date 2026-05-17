@@ -39,6 +39,7 @@ Last updated: 2026-05-17
    Baseline increment landed: release-readiness Maxwell posture governance now consumes homogeneous/heterogeneous EM phase attenuation threshold assertions, adding profile-tuned branch readiness reasons for phase-fidelity regressions beyond existing energy/residual/source posture gates.
    Baseline increment landed: release-readiness Maxwell posture governance now also evaluates rolling worsening ratios for homogeneous/heterogeneous EM phase attenuation assertions (mean and conductivity attenuation ratio), so baseline-relative phase-fidelity drift is branch-gated alongside static threshold posture.
    Baseline increment landed: external-reference and nonlinear schema validators now require both EM phase attenuation mean and phase conductivity attenuation ratio metrics for homogeneous/heterogeneous provider fixtures, preventing partial phase-fidelity comparator payloads from passing enforce-mode governance.
+   Baseline increment landed: external-reference and nonlinear schema governance now also requires homogeneous/heterogeneous source-material-alignment assertion comparators, extending EM source-fidelity policy coverage in enforce-mode validation.
 
 ## Next Recommended EM Slice
 
