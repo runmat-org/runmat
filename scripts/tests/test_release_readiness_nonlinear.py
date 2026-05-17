@@ -374,6 +374,78 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("KEY_PERF_TREND_SLOWDOWN", codes)
 
+    def test_key_perf_speedup_low_reason_is_emitted_for_thermo_fixture(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "thermo_gradient_pathological_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 0.85,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO"] = "1.0"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        matches = [
+            reason
+            for reason in result["reasons"]
+            if reason["code"] == "KEY_PERF_SPEEDUP_LOW"
+            and "thermo_gradient_pathological_gpu_provider" in reason["detail"]
+        ]
+        self.assertTrue(matches)
+
+    def test_key_perf_trend_slowdown_reason_is_emitted_for_contact_fixture(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 300.0,
+                "gpu_speedup_ratio": 1.2,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO"] = "1.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        matches = [
+            reason
+            for reason in result["reasons"]
+            if reason["code"] == "KEY_PERF_TREND_SLOWDOWN"
+            and "nonlinear_contact_frictionless_reference_complex_gpu_provider"
+            in reason["detail"]
+        ]
+        self.assertTrue(matches)
+
+    def test_key_perf_fixture_missing_covers_priority_domain_fixtures_when_required(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_REQUIRE_KEY_PERF_FIXTURES"] = "true"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        matches = [
+            reason
+            for reason in result["reasons"]
+            if reason["code"] == "KEY_PERF_FIXTURE_MISSING"
+        ]
+        self.assertTrue(matches)
+        detail = matches[0]["detail"]
+        self.assertIn("thermo_gradient_pathological_gpu_provider", detail)
+        self.assertIn("electro_thermal_joule_pathological_gpu_provider", detail)
+        self.assertNotIn(
+            "nonlinear_plastic_hardening_reference_complex_gpu_provider", detail
+        )
+        self.assertNotIn(
+            "nonlinear_contact_frictionless_reference_complex_gpu_provider", detail
+        )
+
     def test_em_metric_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(

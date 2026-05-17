@@ -173,3 +173,5 @@ Progress update (2026-05-17):
     M6 baseline and validator-required metric sets now include homogeneous/heterogeneous EM dispersive-coupling-ratio assertion comparators, with nonlinear schema governance requiring the corresponding threshold assertions so dispersive-coupling evidence gaps fail benchmark/external-reference enforcement.
 53. [x] EM release-readiness dispersive-coupling gating expanded:
     `release_readiness_nonlinear.py` now evaluates homogeneous/heterogeneous EM dispersive-coupling-ratio threshold assertions with profile-tuned maximum thresholds, promoting excessive coupling-ratio excursions into explicit readiness reasons and breach-rate accounting.
+54. [x] Key-performance release-readiness coverage expanded to additional priority domains:
+    `release_readiness_nonlinear.py` now treats representative thermo/electro/plastic/contact fixtures as key-performance workloads (speedup floor + slowdown trend checks), extending scale-regression gating beyond EM/acoustic/CFD/CHT/FSI.
