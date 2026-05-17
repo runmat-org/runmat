@@ -882,12 +882,6 @@ impl TurbineEngine {
                     class.hash(&mut hasher);
                     prop.hash(&mut hasher);
                 }
-                Instr::CallStaticMethod(class, method, argc) => {
-                    "CallStaticMethod".hash(&mut hasher);
-                    class.hash(&mut hasher);
-                    method.hash(&mut hasher);
-                    argc.hash(&mut hasher);
-                }
                 Instr::EnterTry(catch_pc, catch_var) => {
                     "EnterTry".hash(&mut hasher);
                     catch_pc.hash(&mut hasher);

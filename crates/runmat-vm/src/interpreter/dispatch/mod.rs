@@ -9,7 +9,6 @@ mod stack;
 
 use crate::bytecode::Instr;
 use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
-use crate::call::shared::{call_object_subsref_brace_values, call_object_subsref_paren_values};
 use crate::interpreter::debug;
 use crate::runtime::workspace::refresh_workspace_state;
 use runmat_builtins::Value;
@@ -23,9 +22,8 @@ pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
 };
 pub use calls::{
-    build_builtin_expand_at_args, build_builtin_expand_multi_args, build_feval_expand_multi_args,
+    build_builtin_expand_multi_args, build_feval_expand_multi_args,
     build_user_function_expand_multi_args, handle_builtin_call, handle_builtin_call_multi,
-    handle_builtin_expand_at_call, handle_builtin_expand_last_call,
     handle_builtin_expand_multi_call, handle_create_closure, handle_create_semantic_closure,
     handle_feval_dispatch, handle_load_method, handle_load_static_property,
     handle_method_or_member_index_call, handle_method_or_member_index_expand_multi_call,
@@ -637,49 +635,6 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallBuiltinExpandLast(name, fixed_argc, num_indices) => {
-            handle_builtin_expand_last_call(
-                stack,
-                name,
-                *fixed_argc,
-                *num_indices,
-                next_instr,
-                |base, indices| async move {
-                    let obj = match base {
-                        Value::Object(obj) => obj,
-                        _ => unreachable!(),
-                    };
-                    let v = call_object_subsref_paren_values(Value::Object(obj), indices).await?;
-                    Ok(vec![v])
-                },
-            )
-            .await?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CallBuiltinExpandAt(name, before_count, num_indices, after_count) => {
-            handle_builtin_expand_at_call(
-                stack,
-                name,
-                *before_count,
-                *num_indices,
-                *after_count,
-                next_instr,
-                |base, indices| async move {
-                    let obj = match base {
-                        Value::Object(obj) => obj,
-                        _ => unreachable!(),
-                    };
-                    let v = call_object_subsref_brace_values(Value::Object(obj), indices).await?;
-                    Ok(vec![v])
-                },
-            )
-            .await?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
         Instr::CallBuiltinExpandMulti(name, specs) => {
             handle_builtin_expand_multi_call(stack, name, specs, next_instr).await?;
             Ok(Some(DispatchHandled::Generic(
@@ -692,29 +647,6 @@ pub async fn dispatch_instruction(
             let result =
                 runmat_runtime::call_builtin_async_with_outputs(name, &args, *out_count).await?;
             stack.push(result);
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CallFunctionExpandAt(name, before_count, num_indices, after_count) => {
-            let args = build_builtin_expand_at_args(
-                stack,
-                *before_count,
-                *num_indices,
-                *after_count,
-                "CallFunctionExpandAt requires cell or object cell access",
-                |base, indices| async move {
-                    let obj = match base {
-                        Value::Object(obj) => obj,
-                        _ => unreachable!(),
-                    };
-                    let v = call_object_subsref_brace_values(Value::Object(obj), indices).await?;
-                    Ok(vec![v])
-                },
-            )
-            .await?;
-            let value = invoke_user_for_end_expr(name, args, vars).await?;
-            stack.push(value);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

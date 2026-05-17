@@ -198,10 +198,6 @@ pub enum Instr {
     CallFunctionMulti(String, usize, usize),
     CallSemanticFunctionMulti(FunctionId, usize, usize),
 
-    // Expands one argument position from cell indexing at runtime.
-    CallFunctionExpandAt(String, usize, usize, usize),
-    CallBuiltinExpandLast(String, usize, usize),
-    CallBuiltinExpandAt(String, usize, usize, usize),
     CallFunctionExpandMulti(String, Vec<ArgSpec>),
     CallFunctionExpandMultiOutput(String, Vec<ArgSpec>, usize),
     CallSemanticFunctionExpandMulti(FunctionId, Vec<ArgSpec>),
@@ -366,13 +362,6 @@ impl Instr {
                     Instr::CallFevalExpandMulti(_) | Instr::CallFevalExpandMultiOutput(_, _)
                 ));
                 effect(handle + fixed + expanded, 1)
-            }
-            Instr::CallFunctionExpandAt(_, before, num_indices, after)
-            | Instr::CallBuiltinExpandAt(_, before, num_indices, after) => {
-                effect(before + after + 1 + num_indices, 1)
-            }
-            Instr::CallBuiltinExpandLast(_, fixed_argc, num_indices) => {
-                effect(fixed_argc + 1 + num_indices, 1)
             }
             Instr::PackToRow(n) | Instr::PackToCol(n) => effect(*n, 1),
             Instr::EnterScope(_) | Instr::ExitScope(_) | Instr::Jump(_) | Instr::PopTry => {

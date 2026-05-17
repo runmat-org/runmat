@@ -14,7 +14,6 @@ use crate::object::resolve as obj_resolve;
 use runmat_builtins::{MException, Value};
 use runmat_hir::CallableFallbackPolicy;
 use runmat_runtime::RuntimeError;
-use std::future::Future;
 
 pub enum FevalHandling {
     Completed,
@@ -108,117 +107,6 @@ pub fn handle_feval_dispatch(
 
 fn push_single_result(stack: &mut Vec<Value>, result: Value) {
     stack.push(result);
-}
-
-pub async fn build_builtin_expand_last_args<F, Fut>(
-    stack: &mut Vec<Value>,
-    fixed_argc: usize,
-    num_indices: usize,
-    invalid_expand_msg: &'static str,
-    mut expand_object_indices: F,
-) -> Result<Vec<Value>, RuntimeError>
-where
-    F: FnMut(Value, Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
-    let mut indices = Vec::with_capacity(num_indices);
-    for _ in 0..num_indices {
-        indices.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-            "StackUnderflow",
-            "stack underflow",
-        ))?);
-    }
-    indices.reverse();
-    let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-        "StackUnderflow",
-        "stack underflow",
-    ))?;
-    let mut fixed = Vec::with_capacity(fixed_argc);
-    for _ in 0..fixed_argc {
-        fixed.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-            "StackUnderflow",
-            "stack underflow",
-        ))?);
-    }
-    fixed.reverse();
-
-    let expanded = match (base, indices.len()) {
-        (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices)?,
-        (other, _) => match other {
-            Value::Object(obj) => expand_object_indices(Value::Object(obj), indices).await?,
-            _ => {
-                return Err(crate::interpreter::errors::mex(
-                    "ExpandError",
-                    invalid_expand_msg,
-                ))
-            }
-        },
-    };
-
-    let mut args = fixed;
-    args.extend(expanded);
-    Ok(args)
-}
-
-pub async fn build_builtin_expand_at_args<F, Fut>(
-    stack: &mut Vec<Value>,
-    before_count: usize,
-    num_indices: usize,
-    after_count: usize,
-    invalid_expand_msg: &'static str,
-    mut expand_object_indices: F,
-) -> Result<Vec<Value>, RuntimeError>
-where
-    F: FnMut(Value, Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
-    let mut after = Vec::with_capacity(after_count);
-    for _ in 0..after_count {
-        after.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-            "StackUnderflow",
-            "stack underflow",
-        ))?);
-    }
-    after.reverse();
-
-    let mut indices = Vec::with_capacity(num_indices);
-    for _ in 0..num_indices {
-        indices.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-            "StackUnderflow",
-            "stack underflow",
-        ))?);
-    }
-    indices.reverse();
-
-    let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-        "StackUnderflow",
-        "stack underflow",
-    ))?;
-
-    let mut before = Vec::with_capacity(before_count);
-    for _ in 0..before_count {
-        before.push(stack.pop().ok_or(crate::interpreter::errors::mex(
-            "StackUnderflow",
-            "stack underflow",
-        ))?);
-    }
-    before.reverse();
-
-    let expanded = match (base, indices.len()) {
-        (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices)?,
-        (Value::Object(obj), _) => expand_object_indices(Value::Object(obj), indices).await?,
-        _ => {
-            return Err(crate::interpreter::errors::mex(
-                "ExpandError",
-                invalid_expand_msg,
-            ))
-        }
-    };
-
-    let mut args = before;
-    args.extend(expanded);
-    args.extend(after);
-    Ok(args)
 }
 
 pub async fn build_builtin_expand_multi_args(
@@ -522,60 +410,6 @@ pub async fn handle_user_function_call(
 ) -> Result<UserCallHandling, RuntimeError> {
     let args = crate::call::builtins::collect_call_args(ctx.stack, arg_count)?;
     handle_prepared_user_function_call(ctx, args, refresh_vars).await
-}
-
-pub async fn handle_builtin_expand_last_call<F, Fut>(
-    stack: &mut Vec<Value>,
-    name: &str,
-    fixed_argc: usize,
-    num_indices: usize,
-    next_instr: Option<&Instr>,
-    expand_object_indices: F,
-) -> Result<BuiltinHandling, RuntimeError>
-where
-    F: FnMut(Value, Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
-    let args = build_builtin_expand_last_args(
-        stack,
-        fixed_argc,
-        num_indices,
-        "CallBuiltinExpandLast requires cell or object cell access",
-        expand_object_indices,
-    )
-    .await?;
-    let output_hint = output_hint_for_next(next_instr);
-    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
-    push_single_result(stack, call_builtin_auto(name, &args).await?);
-    Ok(BuiltinHandling::Completed)
-}
-
-pub async fn handle_builtin_expand_at_call<F, Fut>(
-    stack: &mut Vec<Value>,
-    name: &str,
-    before_count: usize,
-    num_indices: usize,
-    after_count: usize,
-    next_instr: Option<&Instr>,
-    expand_object_indices: F,
-) -> Result<BuiltinHandling, RuntimeError>
-where
-    F: FnMut(Value, Vec<Value>) -> Fut,
-    Fut: Future<Output = Result<Vec<Value>, RuntimeError>>,
-{
-    let args = build_builtin_expand_at_args(
-        stack,
-        before_count,
-        num_indices,
-        after_count,
-        "CallBuiltinExpandAt requires cell or object cell access",
-        expand_object_indices,
-    )
-    .await?;
-    let output_hint = output_hint_for_next(next_instr);
-    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
-    push_single_result(stack, call_builtin_auto(name, &args).await?);
-    Ok(BuiltinHandling::Completed)
 }
 
 pub async fn handle_builtin_expand_multi_call(

@@ -495,6 +495,26 @@ impl BytecodeCompiler {
                         let result = Self::call_runtime_builtin_static(builder, name, &args);
                         local_stack.push(result);
                     }
+                    Instr::CallBuiltinMulti(name, arg_count, out_count) => {
+                        if *out_count != 1 {
+                            return Err(execution_error(
+                                "CallBuiltinMulti with out_count > 1 is not supported in JIT; use interpreter"
+                                    .to_string(),
+                            ));
+                        }
+                        if matches!(name.as_str(), "max" | "min") {
+                            return Err(execution_error(format!(
+                                "Builtin '{name}' is not yet supported in Turbine JIT; falling back to interpreter"
+                            )));
+                        }
+                        let mut args = Vec::new();
+                        for _ in 0..*arg_count {
+                            args.push(local_stack.pop()?);
+                        }
+                        args.reverse();
+                        let result = Self::call_runtime_builtin_static(builder, name, &args);
+                        local_stack.push(result);
+                    }
                     Instr::StochasticEvolution => {
                         return Err(execution_error(
                             "StochasticEvolution loops require the interpreter (JIT not yet supported)"
@@ -777,13 +797,14 @@ impl BytecodeCompiler {
                         builder.ins().return_(&[zero]);
                         block_terminated = true;
                     }
-                    Instr::CallBuiltinExpandLast(_, _, _)
-                    | Instr::CallBuiltinExpandAt(_, _, _, _)
-                    | Instr::CallBuiltinExpandMulti(_, _)
+                    Instr::CallBuiltinExpandMulti(_, _)
+                    | Instr::CallBuiltinExpandMultiOutput(_, _, _)
                     | Instr::CallFunctionExpandMulti(_, _)
-                    | Instr::CallFunctionExpandAt(_, _, _, _)
+                    | Instr::CallFunctionExpandMultiOutput(_, _, _)
                     | Instr::CallFevalExpandMulti(_)
-                    | Instr::CallFevalExpandMultiOutput(_, _) => {
+                    | Instr::CallFevalExpandMultiOutput(_, _)
+                    | Instr::CallMethodOrMemberIndexExpandMulti(_, _)
+                    | Instr::CallMethodOrMemberIndexExpandMultiOutput(_, _, _) => {
                         return Self::unsupported_expanded_call_jit();
                     }
                     // Not yet supported in JIT; require interpreter
@@ -791,7 +812,6 @@ impl BytecodeCompiler {
                     | Instr::CreateCell2D(_, _)
                     | Instr::IndexCell(_)
                     | Instr::LoadStaticProperty(_, _)
-                    | Instr::CallStaticMethod(_, _, _)
                     | Instr::EnterTry(_, _)
                     | Instr::PopTry
                     | Instr::UPlus
@@ -812,9 +832,8 @@ impl BytecodeCompiler {
                     | Instr::CreateSemanticFunctionHandle(_, _)
                     | Instr::CreateClosure(_, _)
                     | Instr::CreateSemanticClosure(_, _, _)
-                    | Instr::CallMethod(_, _)
                     | Instr::CallMethodOrMemberIndex(_, _)
-                    | Instr::CallMethodOrMemberIndexExpandMulti(_, _)
+                    | Instr::CallMethodOrMemberIndexMulti(_, _, _)
                     | Instr::IndexCellExpand(_, _)
                     | Instr::IndexCellList(_)
                     | Instr::StoreIndex(_)
