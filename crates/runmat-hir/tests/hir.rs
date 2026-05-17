@@ -1,32 +1,50 @@
 use runmat_hir::{
-    lower, CompatibilityHirExprKind as HirExprKind, CompatibilityHirStmt as HirStmt,
-    LoweringContext, Type,
+    lower, BindingId, BindingRole, HirAssembly, HirExprKind, HirPlace, HirStmtKind, LoweringContext,
 };
 use runmat_parser::parse;
 
+fn lower_assembly(src: &str) -> HirAssembly {
+    let ast = parse(src).unwrap();
+    lower(&ast, &LoweringContext::empty()).unwrap().assembly
+}
+
+fn entry_body(assembly: &HirAssembly) -> &[runmat_hir::HirStmt] {
+    let entry = &assembly.entrypoints[0];
+    &assembly.functions[entry.target.0].body.statements
+}
+
+fn binding_named(assembly: &HirAssembly, name: &str) -> BindingId {
+    assembly
+        .bindings
+        .iter()
+        .find(|binding| binding.name.0 == name)
+        .map(|binding| binding.id)
+        .unwrap_or_else(|| panic!("missing binding {name}"))
+}
+
 #[test]
 fn lower_simple_assignments() {
-    let ast = parse("x=1; y=x+2;").unwrap();
-    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
-    assert_eq!(hir.body.len(), 2);
-    let (x_id, y_id) = match (&hir.body[0], &hir.body[1]) {
-        (HirStmt::Assign(x_id, x_expr, _, _), HirStmt::Assign(y_id, _, _, _)) => {
-            assert!(matches!(x_expr.kind, HirExprKind::Number(_)));
-            (*x_id, *y_id)
+    let assembly = lower_assembly("x=1; y=x+2;");
+    let body = entry_body(&assembly);
+    assert_eq!(body.len(), 2);
+    let x_id = binding_named(&assembly, "x");
+    let y_id = binding_named(&assembly, "y");
+    match &body[0].kind {
+        HirStmtKind::Assign(HirPlace::Binding(id), expr, _) => {
+            assert_eq!(*id, x_id);
+            assert!(matches!(expr.kind, HirExprKind::Number(_)));
         }
-        _ => panic!("unexpected stmt kinds"),
-    };
-    // second assignment should reference first variable
-    if let HirStmt::Assign(_, rhs, _, _) = &hir.body[1] {
-        if let HirExprKind::Binary(left, _, _) = &rhs.kind {
-            if let HirExprKind::Var(id) = left.kind {
-                assert_eq!(id, x_id);
-            } else {
-                panic!("lhs not var");
-            }
-        } else {
-            panic!("rhs not binary");
+        other => panic!("unexpected stmt: {other:?}"),
+    }
+    match &body[1].kind {
+        HirStmtKind::Assign(HirPlace::Binding(id), expr, _) => {
+            assert_eq!(*id, y_id);
+            let HirExprKind::Binary(left, _, _) = &expr.kind else {
+                panic!("rhs not binary");
+            };
+            assert!(matches!(left.kind, HirExprKind::Binding(id) if id == x_id));
         }
+        other => panic!("unexpected stmt: {other:?}"),
     }
     assert_ne!(x_id, y_id);
 }
@@ -39,70 +57,57 @@ fn error_on_undefined_variable() {
 
 #[test]
 fn function_scope_shadows_outer_variable() {
-    let ast = parse("x=1; function y=foo(x); y=x+1; end").unwrap();
-    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
-    // outer assignment defines variable 0
-    let outer_id = match &hir.body[0] {
-        HirStmt::Assign(id, _, _, _) => *id,
-        _ => panic!(),
+    let assembly = lower_assembly("x=1; function y=foo(x); y=x+1; end");
+    let outer_id = assembly
+        .bindings
+        .iter()
+        .find(|binding| binding.name.0 == "x" && matches!(binding.role, BindingRole::Local))
+        .unwrap()
+        .id;
+    let foo = assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "foo")
+        .unwrap();
+    let param_id = foo.params[0];
+    assert_ne!(param_id, outer_id);
+    let HirStmtKind::Assign(_, expr, _) = &foo.body.statements[0].kind else {
+        panic!("expected function assignment");
     };
-    if let HirStmt::Function { params, body, .. } = &hir.body[1] {
-        let param_id = params[0];
-        assert_ne!(param_id, outer_id);
-        if let HirStmt::Assign(_, expr, _, _) = &body[0] {
-            if let HirExprKind::Binary(left, _, _) = &expr.kind {
-                if let HirExprKind::Var(id) = left.kind {
-                    assert_eq!(id, param_id);
-                } else {
-                    panic!();
-                }
-            } else {
-                panic!();
-            }
-        } else {
-            panic!();
-        }
-    } else {
-        panic!();
-    }
+    let HirExprKind::Binary(left, _, _) = &expr.kind else {
+        panic!("expected binary expression");
+    };
+    assert!(matches!(left.kind, HirExprKind::Binding(id) if id == param_id));
 }
 
 #[test]
 fn function_output_reuses_param_binding_when_names_match() {
-    let ast = parse("function x = bump(x); y = x; x = x + 1; end").unwrap();
-    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
-    let HirStmt::Function {
-        params,
-        outputs,
-        body,
-        ..
-    } = &hir.body[0]
-    else {
-        panic!("expected function");
-    };
-    assert_eq!(params.len(), 1);
-    assert_eq!(outputs.len(), 1);
-    assert_eq!(params[0], outputs[0]);
+    let assembly = lower_assembly("function x = bump(x); y = x; x = x + 1; end");
+    let bump = assembly
+        .functions
+        .iter()
+        .find(|function| function.name.0 == "bump")
+        .unwrap();
+    assert_eq!(bump.params.len(), 1);
+    assert_eq!(bump.outputs.len(), 1);
+    assert_eq!(bump.params[0], bump.outputs[0]);
+    let shared = bump.params[0];
 
-    let HirStmt::Assign(_, first_expr, _, _) = &body[0] else {
+    let HirStmtKind::Assign(_, first_expr, _) = &bump.body.statements[0].kind else {
         panic!("expected first assignment");
     };
-    let HirExprKind::Var(first_read) = first_expr.kind else {
-        panic!("expected body read to resolve to shared var");
-    };
-    assert_eq!(first_read, params[0]);
+    assert!(matches!(first_expr.kind, HirExprKind::Binding(id) if id == shared));
 
-    let HirStmt::Assign(assign_id, second_expr, _, _) = &body[1] else {
+    let HirStmtKind::Assign(HirPlace::Binding(assign_id), second_expr, _) =
+        &bump.body.statements[1].kind
+    else {
         panic!("expected second assignment");
     };
-    assert_eq!(*assign_id, params[0]);
+    assert_eq!(*assign_id, shared);
     let HirExprKind::Binary(left, _, _) = &second_expr.kind else {
         panic!("expected binary update");
     };
-    let HirExprKind::Var(update_read) = left.kind else {
-        panic!("expected update to read shared var");
-    };
-    assert_eq!(update_read, params[0]);
+    assert!(matches!(left.kind, HirExprKind::Binding(id) if id == shared));
 }
 
 #[test]
@@ -112,33 +117,14 @@ fn undefined_variable_in_function_errors() {
 }
 
 #[test]
-fn type_inference_propagates_through_assignments() {
-    let ast = parse("x=[1,2]; y=x+1;").unwrap();
-    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
-    let (x_id, y_id) = match (&hir.body[0], &hir.body[1]) {
-        (HirStmt::Assign(x_id, x_expr, _, _), HirStmt::Assign(y_id, y_expr, _, _)) => {
-            assert!(matches!(x_expr.ty, Type::Tensor { .. }));
-            assert!(matches!(y_expr.ty, Type::Tensor { .. }));
-            (*x_id, *y_id)
-        }
-        _ => panic!("unexpected statements"),
-    };
-    assert_ne!(x_id, y_id);
-}
-
-#[test]
-fn reassignment_updates_variable_type() {
-    let ast = parse("x=1; x=[1,2];").unwrap();
-    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
-    if let HirStmt::Assign(id, expr2, _, _) = &hir.body[1] {
-        assert!(matches!(expr2.ty, Type::Tensor { .. }));
-        // ensure variable id is same as first assignment
-        if let HirStmt::Assign(id1, _, _, _) = &hir.body[0] {
-            assert_eq!(*id, *id1);
-        } else {
-            panic!();
-        }
-    } else {
-        panic!();
+fn reassignment_reuses_binding_identity() {
+    let assembly = lower_assembly("x=1; x=[1,2];");
+    let body = entry_body(&assembly);
+    let x_id = binding_named(&assembly, "x");
+    for stmt in body {
+        let HirStmtKind::Assign(HirPlace::Binding(id), _, _) = &stmt.kind else {
+            panic!("expected assignment");
+        };
+        assert_eq!(*id, x_id);
     }
 }

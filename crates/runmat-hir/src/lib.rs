@@ -25,7 +25,7 @@ pub use inference::function_outputs::infer_function_output_types;
 pub use inference::function_vars::infer_function_variable_types;
 pub use inference::globals::infer_global_variable_types;
 pub use inference::shared::eval_const_num;
-pub use lowering::lower;
+pub use lowering::{lower, lower_compatibility};
 pub use lowering_context::LoweringContext;
 pub use span::{merge_span, Span};
 pub use validation::classdefs::validate_classdefs;

@@ -63,6 +63,22 @@ pub fn lower(
     prog: &AstProgram,
     context: &LoweringContext<'_>,
 ) -> Result<LoweringResult, SemanticError> {
+    let _compatibility = lower_compatibility(prog, context)?;
+
+    let (mut assembly, semantic_index) = SemanticCtx::lower_program(prog, context)?;
+    assembly.compatibility_mode = context.compatibility_mode.clone();
+
+    Ok(LoweringResult {
+        assembly,
+        compatibility_mode: context.compatibility_mode.clone(),
+        semantic_index,
+    })
+}
+
+pub fn lower_compatibility(
+    prog: &AstProgram,
+    context: &LoweringContext<'_>,
+) -> Result<crate::CompatibilityLoweringResult, SemanticError> {
     let mut ctx = Ctx::new();
 
     for (name, var_id) in context.variables {
@@ -87,15 +103,14 @@ pub fn lower(
     let var_types = ctx.var_types.clone();
     let hir = HirProgram { body, var_types };
     validate_classdefs(&hir)?;
+    let variables = ctx
+        .var_names
+        .iter()
+        .enumerate()
+        .filter_map(|(id, name)| name.clone().map(|name| (name, id)))
+        .collect();
 
-    let (mut assembly, semantic_index) = SemanticCtx::lower_program(prog, context)?;
-    assembly.compatibility_mode = context.compatibility_mode.clone();
-
-    Ok(LoweringResult {
-        assembly,
-        compatibility_mode: context.compatibility_mode.clone(),
-        semantic_index,
-    })
+    Ok(crate::CompatibilityLoweringResult { hir, variables })
 }
 
 impl SemanticCtx {

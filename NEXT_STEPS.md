@@ -297,6 +297,7 @@ Current state:
 - MIR calls and function-handle operands now carry `CallableIdentity`, while VM lowering still maps known identities onto the existing bytecode instructions.
 - `CallableDescriptor` and runtime `SemanticCallableRequest` now accept resolved `CallableIdentity` instead of open `{function, name}` request fields, while preserving current semantic and name-fallback behavior.
 - VM callback coverage now asserts unresolved external function handles and `cellfun` callbacks fail with `RunMat:UndefinedFunction` rather than entering legacy fallback execution.
+- Stale `runmat-hir` compatibility tests now either assert semantic assembly/index shapes directly or use an explicit `lower_compatibility` helper for the retained compatibility inference APIs; `cargo test -p runmat-hir` is green.
 
 Target state:
 

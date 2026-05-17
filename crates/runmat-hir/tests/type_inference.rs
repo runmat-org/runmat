@@ -8,17 +8,19 @@ use runmat_runtime as _;
 
 fn lower(code: &str) -> HirProgram {
     let ast = runmat_parser::parse(code).unwrap();
-    runmat_hir::lower(&ast, &LoweringContext::empty())
+    runmat_hir::lower_compatibility(&ast, &LoweringContext::empty())
         .map(|result| result.hir)
         .unwrap()
 }
 
-fn lower_result(code: &str) -> runmat_hir::LoweringResult {
+fn lower_result(code: &str) -> runmat_hir::CompatibilityLoweringResult {
     let ast = runmat_parser::parse(code).unwrap();
-    runmat_hir::lower(&ast, &LoweringContext::empty()).unwrap()
+    runmat_hir::lower_compatibility(&ast, &LoweringContext::empty()).unwrap()
 }
 
-fn infer_globals(result: &runmat_hir::LoweringResult) -> std::collections::HashMap<VarId, Type> {
+fn infer_globals(
+    result: &runmat_hir::CompatibilityLoweringResult,
+) -> std::collections::HashMap<VarId, Type> {
     let returns = runmat_hir::infer_function_output_types(&result.hir);
     runmat_hir::infer_global_variable_types(&result.hir, &returns)
 }

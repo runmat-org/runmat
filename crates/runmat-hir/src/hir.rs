@@ -1201,6 +1201,12 @@ pub struct CompatibilityHirProgram {
 }
 
 #[derive(Debug, Clone)]
+pub struct CompatibilityLoweringResult {
+    pub hir: CompatibilityHirProgram,
+    pub variables: std::collections::HashMap<String, usize>,
+}
+
+#[derive(Debug, Clone)]
 pub struct LoweringResult {
     pub assembly: HirAssembly,
     pub compatibility_mode: Option<CompatibilityMode>,
