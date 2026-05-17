@@ -93,10 +93,6 @@ pub fn lower_compatibility(
         }
     }
 
-    for (name, func_stmt) in context.compatibility_functions() {
-        ctx.functions.insert(name.clone(), func_stmt.clone());
-    }
-
     let body = ctx.lower_stmts(&prog.body)?;
     let var_types = ctx.var_types.clone();
     let hir = HirProgram { body, var_types };
