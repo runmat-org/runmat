@@ -130,7 +130,7 @@ mod tests {
     use crate::Instr;
     use futures::executor::block_on;
     use runmat_builtins::Value;
-    use runmat_hir::{lower, LoweringContext, RequestedOutputCount};
+    use runmat_hir::{lower, CallableFallbackPolicy, LoweringContext, RequestedOutputCount};
     use runmat_mir::lowering::lower_assembly;
     use runmat_mir::{MirRvalue, MirStmtKind, MirTerminatorKind};
 
@@ -379,6 +379,23 @@ mod tests {
             .instructions
             .iter()
             .any(|instr| matches!(instr, Instr::CallSemanticFunction(_, _))));
+    }
+
+    #[test]
+    fn primary_compile_lowers_method_calls_with_explicit_object_dispatch_policy() {
+        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        assert!(bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            Instr::CallMethodOrMemberIndexMulti {
+                fallback_policy: CallableFallbackPolicy::ObjectDispatch,
+                ..
+            }
+        )));
     }
 
     #[test]

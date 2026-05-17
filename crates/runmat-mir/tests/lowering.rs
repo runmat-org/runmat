@@ -1,4 +1,6 @@
-use runmat_hir::{lower, CallableIdentity, EnvironmentEffect, LoweringContext};
+use runmat_hir::{
+    lower, CallSyntax, CallableFallbackPolicy, CallableIdentity, EnvironmentEffect, LoweringContext,
+};
 use runmat_mir::{
     analysis::{
         analyze_assembly, analyze_body, analyze_liveness, analyze_spawn_boundaries,
@@ -34,6 +36,21 @@ fn first_local_of_kind(body: &MirBody, kind: MirLocalKind) -> runmat_mir::MirLoc
         .id
 }
 
+fn first_call<'a>(body: &'a MirBody) -> &'a runmat_mir::MirCall {
+    body.blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|stmt| match &stmt.kind {
+            MirStmtKind::Assign {
+                value: MirRvalue::Call(call),
+                ..
+            }
+            | MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call),
+            _ => None,
+        })
+        .expect("expected at least one lowered call")
+}
+
 #[test]
 fn simple_function_lowers_to_single_block_with_binding_locals() {
     let mir = lower_mir("function y = f(x); y = x + 1; end");
@@ -59,6 +76,18 @@ fn simple_function_lowers_to_single_block_with_binding_locals() {
         body.blocks[0].terminator.kind,
         MirTerminatorKind::Return(ref outputs) if outputs.len() == 1
     ));
+}
+
+#[test]
+fn method_syntax_lowers_with_object_dispatch_fallback_policy() {
+    let mir = lower_mir("obj = 1; obj.method(1);");
+    let body = mir.bodies.values().next().expect("body");
+    let call = first_call(body);
+    assert!(matches!(
+        call.syntax,
+        CallSyntax::Method | CallSyntax::DottedInvoke
+    ));
+    assert_eq!(call.fallback_policy, CallableFallbackPolicy::ObjectDispatch);
 }
 
 #[test]

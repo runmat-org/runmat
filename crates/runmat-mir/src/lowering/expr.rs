@@ -285,7 +285,7 @@ fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, SemanticError>
     };
     let callee = MirCallee::Static(identity);
     let semantics = call_semantics(&callee);
-    let fallback_policy = call_fallback_policy(&callee);
+    let fallback_policy = call_fallback_policy(&callee, &runmat_hir::CallSyntax::Command);
     Ok(MirRvalue::Call(MirCall {
         callee,
         args: call
@@ -316,7 +316,7 @@ fn call_rvalue(
     };
     let callee = MirCallee::Static(identity);
     let semantics = call_semantics(&callee);
-    let fallback_policy = call_fallback_policy(&callee);
+    let fallback_policy = call_fallback_policy(&callee, &call.syntax);
     Ok(MirRvalue::Call(MirCall {
         callee,
         args,
@@ -339,7 +339,7 @@ fn dynamic_call_rvalue(
 ) -> MirRvalue {
     let callee = MirCallee::Dynamic(callee);
     let semantics = call_semantics(&callee);
-    let fallback_policy = call_fallback_policy(&callee);
+    let fallback_policy = call_fallback_policy(&callee, &call.syntax);
     MirRvalue::Call(MirCall {
         callee,
         args,
@@ -385,7 +385,19 @@ fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
     }
 }
 
-fn call_fallback_policy(callee: &MirCallee) -> runmat_hir::CallableFallbackPolicy {
+fn call_fallback_policy(
+    callee: &MirCallee,
+    syntax: &runmat_hir::CallSyntax,
+) -> runmat_hir::CallableFallbackPolicy {
+    if matches!(
+        syntax,
+        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
+    ) && !matches!(
+        callee,
+        MirCallee::Static(runmat_hir::CallableIdentity::SemanticFunction(_))
+    ) {
+        return runmat_hir::CallableFallbackPolicy::ObjectDispatch;
+    }
     match callee {
         MirCallee::Static(runmat_hir::CallableIdentity::SemanticFunction(_))
         | MirCallee::Static(runmat_hir::CallableIdentity::Builtin(_))

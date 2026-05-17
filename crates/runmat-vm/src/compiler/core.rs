@@ -1716,12 +1716,7 @@ impl Compiler {
                 ))
             }
         };
-        let fallback_policy = match call.fallback_policy {
-            runmat_hir::CallableFallbackPolicy::None => {
-                runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
-            }
-            other => other,
-        };
+        let fallback_policy = call.fallback_policy;
         if !matches!(
             fallback_policy,
             runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
