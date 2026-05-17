@@ -37,9 +37,13 @@ pub async fn load_member(
                 }
                 if p.is_dependent {
                     let getter = format!("get.{field}");
-                    if let Ok(v) =
-                        runmat_runtime::call_builtin_async(&getter, &[Value::Object(obj.clone())])
-                            .await
+                    if let Ok(v) = crate::call::shared::call_object_named_method_with_outputs(
+                        Value::Object(obj.clone()),
+                        getter,
+                        vec![],
+                        None,
+                    )
+                    .await
                     {
                         return Ok(v);
                     }
@@ -187,9 +191,11 @@ where
                 }
                 if p.is_dependent {
                     let setter = format!("set.{field}");
-                    if let Ok(v) = runmat_runtime::call_builtin_async(
-                        &setter,
-                        &[Value::Object(obj.clone()), rhs.clone()],
+                    if let Ok(v) = crate::call::shared::call_object_named_method_with_outputs(
+                        Value::Object(obj.clone()),
+                        setter,
+                        vec![rhs.clone()],
+                        None,
                     )
                     .await
                     {
