@@ -236,9 +236,7 @@ pub async fn build_builtin_expand_multi_args(
                     let v =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::Object(obj),
-                            ObjectIndexSelector::Empty {
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::Empty,
                         ))
                         .await?;
                     match v {
@@ -258,10 +256,7 @@ pub async fn build_builtin_expand_multi_args(
                     let v =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::Object(obj),
-                            ObjectIndexSelector::IndexValues {
-                                values: indices,
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::IndexValues { values: indices },
                         ))
                         .await?;
                     Ok(vec![v])
@@ -291,9 +286,7 @@ pub async fn build_feval_expand_multi_args(
                     let v =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::Object(obj),
-                            ObjectIndexSelector::Empty {
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::Empty,
                         ))
                         .await?;
                     match v {
@@ -313,10 +306,7 @@ pub async fn build_feval_expand_multi_args(
                     let v =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::Object(obj),
-                            ObjectIndexSelector::IndexValues {
-                                values: indices,
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::IndexValues { values: indices },
                         ))
                         .await?;
                     Ok(vec![v])
@@ -347,9 +337,7 @@ pub async fn build_user_function_expand_multi_args(
                     let v =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::Object(obj),
-                            ObjectIndexSelector::Empty {
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::Empty,
                         ))
                         .await?;
                     match v {
@@ -370,10 +358,7 @@ pub async fn build_user_function_expand_multi_args(
                     let v =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::Object(obj),
-                            ObjectIndexSelector::IndexValues {
-                                values: indices,
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::IndexValues { values: indices },
                         ))
                         .await?;
                     Ok(vec![v])

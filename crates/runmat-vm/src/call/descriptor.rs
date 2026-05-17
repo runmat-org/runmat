@@ -1,7 +1,7 @@
 use crate::bytecode::SemanticFunctionRegistry;
 use crate::call::feval::{forward_builtin_feval, try_closure_builtin_fallback};
 use runmat_builtins::{Closure, Value};
-use runmat_hir::{CallableIdentity, FunctionId};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
 use runmat_runtime::RuntimeError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,7 +55,7 @@ impl CallableMetadata {
 enum CallableTarget {
     Resolved {
         identity: CallableIdentity,
-        name_fallback: bool,
+        fallback_policy: CallableFallbackPolicy,
     },
     NameOnlyBuiltinFallback(String),
     FevalForward(Value),
@@ -78,7 +78,7 @@ impl CallableDescriptor {
         Self::semantic_inner(
             function.0,
             None,
-            false,
+            CallableFallbackPolicy::None,
             args,
             requested_outputs,
             CallableMetadata::default(),
@@ -88,7 +88,7 @@ impl CallableDescriptor {
     fn semantic_inner(
         function: usize,
         name: Option<String>,
-        name_fallback: bool,
+        fallback_policy: CallableFallbackPolicy,
         args: Vec<Value>,
         requested_outputs: usize,
         metadata: CallableMetadata,
@@ -97,7 +97,7 @@ impl CallableDescriptor {
         Self::resolved_inner(
             identity,
             name,
-            name_fallback,
+            fallback_policy,
             args,
             requested_outputs,
             metadata,
@@ -107,7 +107,7 @@ impl CallableDescriptor {
     fn resolved_inner(
         identity: CallableIdentity,
         display_name: Option<String>,
-        name_fallback: bool,
+        fallback_policy: CallableFallbackPolicy,
         args: Vec<Value>,
         requested_outputs: usize,
         mut metadata: CallableMetadata,
@@ -116,7 +116,7 @@ impl CallableDescriptor {
         Self {
             target: CallableTarget::Resolved {
                 identity,
-                name_fallback,
+                fallback_policy,
             },
             args,
             requested_outputs,
@@ -127,14 +127,14 @@ impl CallableDescriptor {
     fn feval_semantic(
         function: usize,
         name: String,
-        name_fallback: bool,
+        fallback_policy: CallableFallbackPolicy,
         args: Vec<Value>,
         requested_outputs: usize,
     ) -> Self {
         Self::semantic_inner(
             function,
             Some(name.clone()),
-            name_fallback,
+            fallback_policy,
             args,
             requested_outputs,
             CallableMetadata::feval(Some(name)),
@@ -177,7 +177,7 @@ impl CallableDescriptor {
         Self::semantic_inner(
             function.0,
             Some(name.clone()),
-            false,
+            CallableFallbackPolicy::None,
             args,
             requested_outputs,
             CallableMetadata {
@@ -204,13 +204,23 @@ impl CallableDescriptor {
             }
             Value::FunctionHandle(name) => {
                 if let Some(function) = semantic_registry.resolve_name(&name) {
-                    return Self::feval_semantic(function.0, name, true, args, requested_outputs);
+                    return Self::feval_semantic(
+                        function.0,
+                        name,
+                        CallableFallbackPolicy::RuntimeNameResolution,
+                        args,
+                        requested_outputs,
+                    );
                 }
                 Self::feval_forward(Value::FunctionHandle(name), args, requested_outputs)
             }
-            Value::SemanticFunctionHandle { name, function } => {
-                Self::feval_semantic(function, name, true, args, requested_outputs)
-            }
+            Value::SemanticFunctionHandle { name, function } => Self::feval_semantic(
+                function,
+                name,
+                CallableFallbackPolicy::RuntimeNameResolution,
+                args,
+                requested_outputs,
+            ),
             other => Self::feval_forward(other, args, requested_outputs),
         }
     }
@@ -225,10 +235,22 @@ impl CallableDescriptor {
         let mut call_args = closure.captures;
         call_args.extend(args);
         if let Some(function) = closure.semantic_function {
-            return Self::feval_semantic(function, name, false, call_args, requested_outputs);
+            return Self::feval_semantic(
+                function,
+                name,
+                CallableFallbackPolicy::None,
+                call_args,
+                requested_outputs,
+            );
         }
         if let Some(function) = semantic_registry.resolve_name(&name) {
-            return Self::feval_semantic(function.0, name, false, call_args, requested_outputs);
+            return Self::feval_semantic(
+                function.0,
+                name,
+                CallableFallbackPolicy::None,
+                call_args,
+                requested_outputs,
+            );
         }
         Self::name_only_builtin_fallback(
             name,
@@ -292,7 +314,7 @@ async fn execute_resolved_callable(
     args: Vec<Value>,
     requested_outputs: usize,
     metadata: CallableMetadata,
-    name_fallback: bool,
+    fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
     match identity {
         CallableIdentity::SemanticFunction(function) => {
@@ -305,19 +327,34 @@ async fn execute_resolved_callable(
             {
                 return result;
             }
-            if name_fallback {
+            if matches!(
+                fallback_policy,
+                CallableFallbackPolicy::BuiltinByName
+                    | CallableFallbackPolicy::RuntimeNameResolution
+            ) {
                 if let Some(name) = metadata.display_name.clone() {
                     return forward_builtin_feval(Value::FunctionHandle(name), args).await;
                 }
             }
             Err(semantic_unavailable_error(function.0, &metadata))
         }
-        other => {
-            let Some(name) = other.display_name() else {
-                return Err(undefined_name_error("<unnamed callable>", &metadata));
-            };
-            forward_builtin_feval(Value::FunctionHandle(name), args).await
-        }
+        other => match fallback_policy {
+            CallableFallbackPolicy::BuiltinByName
+            | CallableFallbackPolicy::RuntimeNameResolution => {
+                let Some(name) = other.display_name() else {
+                    return Err(undefined_name_error("<unnamed callable>", &metadata));
+                };
+                forward_builtin_feval(Value::FunctionHandle(name), args).await
+            }
+            CallableFallbackPolicy::None
+            | CallableFallbackPolicy::ObjectDispatch
+            | CallableFallbackPolicy::ExternalBoundary => {
+                let name = other
+                    .display_name()
+                    .unwrap_or_else(|| "<unnamed callable>".into());
+                Err(undefined_name_error(&name, &metadata))
+            }
+        },
     }
 }
 
@@ -326,7 +363,7 @@ async fn try_execute_resolved_callable(
     args: Vec<Value>,
     requested_outputs: usize,
     metadata: CallableMetadata,
-    name_fallback: bool,
+    fallback_policy: CallableFallbackPolicy,
 ) -> Result<Option<Value>, RuntimeError> {
     match identity {
         CallableIdentity::SemanticFunction(function) => {
@@ -339,7 +376,11 @@ async fn try_execute_resolved_callable(
             {
                 return result.map(Some);
             }
-            if name_fallback {
+            if matches!(
+                fallback_policy,
+                CallableFallbackPolicy::BuiltinByName
+                    | CallableFallbackPolicy::RuntimeNameResolution
+            ) {
                 if let Some(name) = metadata.display_name {
                     return forward_builtin_feval(Value::FunctionHandle(name), args)
                         .await
@@ -349,6 +390,13 @@ async fn try_execute_resolved_callable(
             Ok(None)
         }
         other => {
+            if !matches!(
+                fallback_policy,
+                CallableFallbackPolicy::BuiltinByName
+                    | CallableFallbackPolicy::RuntimeNameResolution
+            ) {
+                return Ok(None);
+            }
             let Some(name) = other.display_name() else {
                 return Ok(None);
             };
@@ -371,9 +419,9 @@ pub(crate) async fn execute_callable_descriptor(
     match target {
         CallableTarget::Resolved {
             identity,
-            name_fallback,
+            fallback_policy,
         } => {
-            execute_resolved_callable(identity, args, requested_outputs, metadata, name_fallback)
+            execute_resolved_callable(identity, args, requested_outputs, metadata, fallback_policy)
                 .await
         }
         CallableTarget::NameOnlyBuiltinFallback(name) => {
@@ -398,14 +446,14 @@ pub(crate) async fn try_execute_callable_descriptor(
     match target {
         CallableTarget::Resolved {
             identity,
-            name_fallback,
+            fallback_policy,
         } => {
             try_execute_resolved_callable(
                 identity,
                 args,
                 requested_outputs,
                 metadata,
-                name_fallback,
+                fallback_policy,
             )
             .await
         }

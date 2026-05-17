@@ -47,5 +47,4 @@ pub struct MirOutputTargetList {
 pub enum MirOutputTarget {
     Place(MirPlace),
     Discard,
-    VarargoutExpansion,
 }

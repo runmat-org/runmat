@@ -15,7 +15,6 @@ pub async fn object_subsref_paren(base: Value, numeric: &[Value]) -> Result<Valu
                 base,
                 ObjectIndexSelector::IndexValues {
                     values: numeric.to_vec(),
-                    context: "subsref build error",
                 },
             ))
             .await

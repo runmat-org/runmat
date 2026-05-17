@@ -1,6 +1,6 @@
 use crate::RuntimeError;
 use runmat_builtins::Value;
-use runmat_hir::CallableIdentity;
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::future::Future;
@@ -23,6 +23,7 @@ pub enum SemanticCallableKind {
 #[derive(Debug, Clone)]
 pub struct SemanticCallableRequest {
     identity: CallableIdentity,
+    fallback_policy: CallableFallbackPolicy,
     args: Vec<Value>,
     requested_outputs: usize,
     kind: SemanticCallableKind,
@@ -37,6 +38,7 @@ impl SemanticCallableRequest {
     ) -> Self {
         Self {
             identity: CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
+            fallback_policy: CallableFallbackPolicy::RuntimeNameResolution,
             args,
             requested_outputs,
             kind,
@@ -52,6 +54,7 @@ impl SemanticCallableRequest {
     ) -> Self {
         Self {
             identity: CallableIdentity::SemanticFunction(runmat_hir::FunctionId(function)),
+            fallback_policy: CallableFallbackPolicy::None,
             args,
             requested_outputs,
             kind,
@@ -60,12 +63,14 @@ impl SemanticCallableRequest {
 
     pub fn resolved(
         identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
         args: Vec<Value>,
         requested_outputs: usize,
         kind: SemanticCallableKind,
     ) -> Self {
         Self {
             identity,
+            fallback_policy,
             args,
             requested_outputs,
             kind,
@@ -149,6 +154,12 @@ pub async fn try_call_semantic_descriptor(
     if let CallableIdentity::SemanticFunction(function) = request.identity {
         return try_call_semantic_function(function.0, &request.args, request.requested_outputs)
             .await;
+    }
+    if !matches!(
+        request.fallback_policy,
+        CallableFallbackPolicy::BuiltinByName | CallableFallbackPolicy::RuntimeNameResolution
+    ) {
+        return None;
     }
     let name = request.identity.display_name()?;
     try_call_semantic_function_by_name(&name, &request.args, request.requested_outputs).await

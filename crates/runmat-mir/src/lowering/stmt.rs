@@ -213,6 +213,5 @@ fn lower_output_target(
             MirOutputTarget::Place(place)
         }
         OutputTarget::Discard => MirOutputTarget::Discard,
-        OutputTarget::VarargoutExpansion => MirOutputTarget::VarargoutExpansion,
     })
 }

@@ -646,10 +646,7 @@ pub async fn dispatch_instruction(
                     let v =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_paren(
                             Value::Object(obj),
-                            ObjectIndexSelector::IndexValues {
-                                values: indices,
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::IndexValues { values: indices },
                         ))
                         .await?;
                     Ok(vec![v])
@@ -676,10 +673,7 @@ pub async fn dispatch_instruction(
                     let v =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::Object(obj),
-                            ObjectIndexSelector::IndexValues {
-                                values: indices,
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::IndexValues { values: indices },
                         ))
                         .await?;
                     Ok(vec![v])
@@ -711,10 +705,7 @@ pub async fn dispatch_instruction(
                     let v =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::Object(obj),
-                            ObjectIndexSelector::IndexValues {
-                                values: indices,
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::IndexValues { values: indices },
                         ))
                         .await?;
                     Ok(vec![v])

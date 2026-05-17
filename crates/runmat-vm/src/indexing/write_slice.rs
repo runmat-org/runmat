@@ -17,7 +17,6 @@ pub async fn object_subsasgn_paren(
                 base,
                 ObjectIndexSelector::IndexValues {
                     values: numeric.to_vec(),
-                    context: "subsasgn build error",
                 },
                 rhs,
             ))

@@ -892,9 +892,6 @@ impl Compiler {
                 self.emit(Instr::Pop);
                 Ok(())
             }
-            MirOutputTarget::VarargoutExpansion => Err(self.compile_error(
-                "MIR bytecode lowering for varargout expansion is not implemented yet",
-            )),
         }
     }
 

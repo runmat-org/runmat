@@ -48,17 +48,9 @@ impl ObjectIndexKind {
 }
 
 pub(crate) enum ObjectIndexSelector {
-    Empty {
-        context: &'static str,
-    },
-    ScalarIndices {
-        indices: Vec<usize>,
-        context: &'static str,
-    },
-    IndexValues {
-        values: Vec<Value>,
-        context: &'static str,
-    },
+    Empty,
+    ScalarIndices { indices: Vec<usize> },
+    IndexValues { values: Vec<Value> },
     Member(String),
 }
 
@@ -128,19 +120,15 @@ impl ObjectIndexDescriptor {
 
     fn into_runtime_method_args(self) -> Result<Vec<Value>, RuntimeError> {
         let selector = match self.selector {
-            ObjectIndexSelector::Empty { context } => {
-                build_protocol_index_cell(Vec::new(), context)?
-            }
-            ObjectIndexSelector::ScalarIndices { indices, context } => {
+            ObjectIndexSelector::Empty => build_protocol_index_cell(Vec::new())?,
+            ObjectIndexSelector::ScalarIndices { indices } => {
                 let values = indices
                     .into_iter()
                     .map(|index| Value::Num(index as f64))
                     .collect();
-                build_protocol_index_cell(values, context)?
+                build_protocol_index_cell(values)?
             }
-            ObjectIndexSelector::IndexValues { values, context } => {
-                build_protocol_index_cell(values, context)?
-            }
+            ObjectIndexSelector::IndexValues { values } => build_protocol_index_cell(values)?,
             ObjectIndexSelector::Member(field) => Value::String(field),
         };
         let mut args = vec![
@@ -156,10 +144,10 @@ impl ObjectIndexDescriptor {
     }
 }
 
-fn build_protocol_index_cell(values: Vec<Value>, context: &str) -> Result<Value, RuntimeError> {
+fn build_protocol_index_cell(values: Vec<Value>) -> Result<Value, RuntimeError> {
     let cols = values.len();
-    let cell =
-        runmat_builtins::CellArray::new(values, 1, cols).map_err(|e| format!("{context}: {e}"))?;
+    let cell = runmat_builtins::CellArray::new(values, 1, cols)
+        .map_err(|e| format!("object index descriptor build error: {e}"))?;
     Ok(Value::Cell(cell))
 }
 
@@ -306,7 +294,6 @@ mod tests {
             Value::Num(1.0),
             ObjectIndexSelector::IndexValues {
                 values: vec![Value::Num(2.0)],
-                context: "test subsref build error",
             },
         );
 

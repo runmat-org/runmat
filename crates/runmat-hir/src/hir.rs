@@ -500,7 +500,6 @@ pub struct OutputTargetList {
 pub enum OutputTarget {
     Place(HirPlace),
     Discard,
-    VarargoutExpansion,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

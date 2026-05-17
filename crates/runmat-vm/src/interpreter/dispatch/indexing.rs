@@ -472,7 +472,6 @@ where
                             base,
                             ObjectIndexSelector::IndexValues {
                                 values: raw_indices.clone(),
-                                context: "subsref build error",
                             },
                         ))
                         .await?,
@@ -522,10 +521,7 @@ where
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::Object(obj),
-                            ObjectIndexSelector::ScalarIndices {
-                                indices,
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::ScalarIndices { indices },
                         ))
                         .await?,
                     );
@@ -535,10 +531,7 @@ where
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::HandleObject(handle),
-                            ObjectIndexSelector::ScalarIndices {
-                                indices,
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::ScalarIndices { indices },
                         ))
                         .await?,
                     );
@@ -592,10 +585,7 @@ where
                     let v =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::Object(obj),
-                            ObjectIndexSelector::IndexValues {
-                                values: indices,
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::IndexValues { values: indices },
                         ))
                         .await?;
                     stack.push(v);
@@ -607,10 +597,7 @@ where
                     let v =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::HandleObject(handle),
-                            ObjectIndexSelector::IndexValues {
-                                values: indices,
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::IndexValues { values: indices },
                         ))
                         .await?;
                     stack.push(v);
@@ -660,10 +647,7 @@ where
                     let value =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::Object(obj),
-                            ObjectIndexSelector::IndexValues {
-                                values: indices,
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::IndexValues { values: indices },
                         ))
                         .await?;
                     stack.push(Value::OutputList(vec![value]));
@@ -672,10 +656,7 @@ where
                     let value =
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                             Value::HandleObject(handle),
-                            ObjectIndexSelector::IndexValues {
-                                values: indices,
-                                context: "subsref build error",
-                            },
+                            ObjectIndexSelector::IndexValues { values: indices },
                         ))
                         .await?;
                     stack.push(Value::OutputList(vec![value]));
@@ -713,10 +694,7 @@ where
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
                             Value::Object(obj),
-                            ObjectIndexSelector::ScalarIndices {
-                                indices,
-                                context: "subsasgn build error",
-                            },
+                            ObjectIndexSelector::ScalarIndices { indices },
                             rhs,
                         ))
                         .await?,
@@ -727,10 +705,7 @@ where
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
                             Value::HandleObject(handle),
-                            ObjectIndexSelector::ScalarIndices {
-                                indices,
-                                context: "subsasgn build error",
-                            },
+                            ObjectIndexSelector::ScalarIndices { indices },
                             rhs,
                         ))
                         .await?,
@@ -783,10 +758,7 @@ where
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
                             Value::Object(obj),
-                            ObjectIndexSelector::ScalarIndices {
-                                indices,
-                                context: "subsasgn build error",
-                            },
+                            ObjectIndexSelector::ScalarIndices { indices },
                             rhs,
                         ))
                         .await?,
@@ -796,10 +768,7 @@ where
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
                             Value::HandleObject(handle),
-                            ObjectIndexSelector::ScalarIndices {
-                                indices,
-                                context: "subsasgn build error",
-                            },
+                            ObjectIndexSelector::ScalarIndices { indices },
                             rhs,
                         ))
                         .await?,
@@ -1776,10 +1745,7 @@ where
                     stack.push(
                         call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
                             Value::Object(obj),
-                            ObjectIndexSelector::IndexValues {
-                                values: idx_values,
-                                context: "subsasgn build error",
-                            },
+                            ObjectIndexSelector::IndexValues { values: idx_values },
                             rhs,
                         ))
                         .await?,
