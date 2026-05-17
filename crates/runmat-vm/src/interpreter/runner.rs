@@ -627,7 +627,6 @@ async fn run_interpreter_inner(
             | Instr::StoreIndexCell(_)
             | Instr::StoreSlice(_, _, _, _)
             | Instr::StoreSliceExpr { .. }
-            | Instr::CallMethodOrMemberIndex(_, _)
             | Instr::CallMethodOrMemberIndexMulti(_, _, _)
             | Instr::CallMethodOrMemberIndexExpandMulti(_, _)
             | Instr::CallMethodOrMemberIndexExpandMultiOutput(_, _, _)
@@ -642,7 +641,6 @@ async fn run_interpreter_inner(
             | Instr::CallFevalMulti(_, _)
             | Instr::CallFevalExpandMulti(_)
             | Instr::CallFevalExpandMultiOutput(_, _)
-            | Instr::CallBuiltin(_, _)
             | Instr::CallBuiltinMulti(_, _, _)
             | Instr::CallSemanticFunction(_, _)
             | Instr::CallSemanticFunctionMulti(_, _, _)

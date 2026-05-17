@@ -783,11 +783,6 @@ impl TurbineEngine {
                     target.hash(&mut hasher);
                 }
                 Instr::Pop => "Pop".hash(&mut hasher),
-                Instr::CallBuiltin(name, argc) => {
-                    "CallBuiltin".hash(&mut hasher);
-                    name.hash(&mut hasher);
-                    argc.hash(&mut hasher);
-                }
                 Instr::CreateMatrix(rows, cols) => {
                     "CreateMatrix".hash(&mut hasher);
                     rows.hash(&mut hasher);

@@ -1182,10 +1182,6 @@ fn builtin_single_output_uses_typed_instruction() {
         runmat_vm::Instr::CallBuiltinMulti(name, argc, out_count)
             if name == "sqrt" && *argc == 1 && *out_count == 1
     )));
-    assert!(!bytecode
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, runmat_vm::Instr::CallBuiltin(_, _))));
 }
 
 #[cfg(any(feature = "test-classes", test))]
@@ -1215,10 +1211,6 @@ fn method_single_output_uses_typed_instruction() {
         runmat_vm::Instr::CallMethodOrMemberIndexMulti(name, argc, out_count)
             if name == "deal" && *argc == 2 && *out_count == 1
     )));
-    assert!(!bytecode
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, runmat_vm::Instr::CallMethodOrMemberIndex(_, _))));
 }
 
 #[test]

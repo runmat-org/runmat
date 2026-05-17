@@ -41,7 +41,7 @@ fn semantic_logical_ops_use_typed_bytecode() {
         .any(|instr| matches!(instr, Instr::LogicalOr)));
     assert!(!bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        Instr::CallBuiltin(name, _) if matches!(name.as_str(), "not" | "ne")
+        Instr::CallBuiltinMulti(name, _, _) if matches!(name.as_str(), "not" | "ne")
     )));
 }
 
@@ -262,7 +262,7 @@ fn atan2_with_rhs_expression_lowers_to_add_then_builtin_call() {
         .iter()
         .position(|instr| matches!(instr, Instr::Add));
     let atan2_index = bytecode.instructions.iter().position(|instr| {
-        matches!(instr, Instr::CallBuiltin(name, 2) if name == "atan2")
+        matches!(instr, Instr::CallBuiltinMulti(name, 2, 1) if name == "atan2")
             || matches!(instr, Instr::CallBuiltinMulti(name, 2, 1) if name == "atan2")
     });
 

@@ -123,7 +123,6 @@ impl<'a> GraphBuilder<'a> {
             Instr::Neg => self.handle_unary_primitive(pc, PrimitiveOp::Neg),
             Instr::UPlus => self.handle_unary_primitive(pc, PrimitiveOp::UPlus),
             Instr::Transpose | Instr::ConjugateTranspose => self.handle_transpose(pc),
-            Instr::CallBuiltin(name, argc) => self.handle_call_builtin(pc, name, *argc),
             Instr::CallBuiltinMulti(name, argc, _) => self.handle_call_builtin(pc, name, *argc),
             Instr::Pop => {
                 let _ = self.pop_value();
@@ -1137,7 +1136,10 @@ mod tests {
 
     #[test]
     fn accel_graph_trapz_is_not_classified_as_generic_reduction() {
-        let instructions = vec![Instr::LoadVar(0), Instr::CallBuiltin("trapz".into(), 1)];
+        let instructions = vec![
+            Instr::LoadVar(0),
+            Instr::CallBuiltinMulti("trapz".into(), 1, 1),
+        ];
         let var_types = vec![Type::Tensor {
             shape: Some(vec![Some(1), Some(3)]),
         }];
@@ -1163,7 +1165,10 @@ mod tests {
 
     #[test]
     fn accel_graph_cumtrapz_is_not_classified_as_generic_reduction() {
-        let instructions = vec![Instr::LoadVar(0), Instr::CallBuiltin("cumtrapz".into(), 1)];
+        let instructions = vec![
+            Instr::LoadVar(0),
+            Instr::CallBuiltinMulti("cumtrapz".into(), 1, 1),
+        ];
         let var_types = vec![Type::Tensor {
             shape: Some(vec![Some(1), Some(3)]),
         }];

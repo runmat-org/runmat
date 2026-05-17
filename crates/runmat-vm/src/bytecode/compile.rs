@@ -194,18 +194,14 @@ mod tests {
         let layout = bytecode.layout.as_ref().expect("layout");
         let export = &layout.entrypoints[&entrypoint].exports[0];
 
-        assert!(
-            matches!(bytecode.instructions.as_slice(), [
-            Instr::LoadConst(9.0),
-            Instr::CallBuiltin(name, 1),
-            Instr::StoreVar(_),
-        ] if name == "sqrt")
-                || matches!(bytecode.instructions.as_slice(), [
+        assert!(matches!(
+            bytecode.instructions.as_slice(),
+            [
                 Instr::LoadConst(9.0),
                 Instr::CallBuiltinMulti(name, 1, 1),
                 Instr::StoreVar(_),
-            ] if name == "sqrt")
-        );
+            ] if name == "sqrt"
+        ));
 
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert_eq!(vars[export.slot.0], Value::Num(3.0));

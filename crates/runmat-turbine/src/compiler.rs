@@ -481,20 +481,6 @@ impl BytecodeCompiler {
                         let result = Self::call_runtime_builtin_static(builder, "or", &[lhs, rhs]);
                         local_stack.push(result);
                     }
-                    Instr::CallBuiltin(name, arg_count) => {
-                        if matches!(name.as_str(), "max" | "min") {
-                            return Err(execution_error(format!(
-                                "Builtin '{name}' is not yet supported in Turbine JIT; falling back to interpreter"
-                            )));
-                        }
-                        let mut args = Vec::new();
-                        for _ in 0..*arg_count {
-                            args.push(local_stack.pop()?);
-                        }
-                        args.reverse();
-                        let result = Self::call_runtime_builtin_static(builder, name, &args);
-                        local_stack.push(result);
-                    }
                     Instr::CallBuiltinMulti(name, arg_count, out_count) => {
                         if *out_count != 1 {
                             return Err(execution_error(
@@ -829,7 +815,6 @@ impl BytecodeCompiler {
                     | Instr::CreateSemanticFunctionHandle(_, _)
                     | Instr::CreateClosure(_, _)
                     | Instr::CreateSemanticClosure(_, _, _)
-                    | Instr::CallMethodOrMemberIndex(_, _)
                     | Instr::CallMethodOrMemberIndexMulti(_, _, _)
                     | Instr::IndexCellExpand(_, _)
                     | Instr::IndexCellList(_)

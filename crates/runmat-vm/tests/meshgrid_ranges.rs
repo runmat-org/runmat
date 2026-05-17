@@ -45,7 +45,7 @@ fn meshgrid_accepts_precomputed_ranges() {
     let source = "a = -2:0.08:2; b = -2:0.08:2; [X, Y] = meshgrid(a, b);";
     let bytecode = compile_semantic_source(source).unwrap();
     assert!(bytecode.instructions.iter().any(|instr| {
-        matches!(instr, Instr::CallBuiltin(name, 2) if name == "meshgrid")
+        matches!(instr, Instr::CallBuiltinMulti(name, 2, 1) if name == "meshgrid")
             || matches!(instr, Instr::CallBuiltinMulti(name, 2, 2) if name == "meshgrid")
             || matches!(instr, Instr::CallBuiltinExpandMulti(name, specs) if name == "meshgrid" && specs.len() == 2)
     }));

@@ -23,13 +23,12 @@ pub use arrays::{
 };
 pub use calls::{
     build_builtin_expand_multi_args, build_feval_expand_multi_args,
-    build_user_function_expand_multi_args, handle_builtin_call, handle_builtin_call_multi,
+    build_user_function_expand_multi_args, handle_builtin_call_multi,
     handle_builtin_expand_multi_call, handle_create_closure, handle_create_semantic_closure,
     handle_feval_dispatch, handle_load_method, handle_load_static_property,
-    handle_method_or_member_index_call, handle_method_or_member_index_expand_multi_call,
-    handle_method_or_member_index_multi_call, handle_prepared_user_function_call,
-    handle_register_class, handle_user_function_call, BuiltinHandling, FevalHandling,
-    UserCallHandling,
+    handle_method_or_member_index_expand_multi_call, handle_method_or_member_index_multi_call,
+    handle_prepared_user_function_call, handle_register_class, handle_user_function_call,
+    BuiltinHandling, FevalHandling, UserCallHandling,
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
 pub use exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -434,47 +433,12 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallBuiltin(name, arg_count) => {
-            match handle_builtin_call(
-                calls::BuiltinCallContext {
-                    stack,
-                    name,
-                    arg_count: *arg_count,
-                    next_instr,
-                    source_id,
-                    call_arg_spans,
-                    imports,
-                    call_counts,
-                    exception: calls::ExceptionRouteContext {
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                    },
-                },
-                refresh_workspace_state,
-            )
-            .await?
-            {
-                BuiltinHandling::Completed => {}
-                BuiltinHandling::Caught => {
-                    return Ok(Some(DispatchHandled::Generic(
-                        DispatchDecision::ContinueLoop,
-                    )))
-                }
-                BuiltinHandling::Uncaught(err) => return Err(*err),
-            }
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
         Instr::CallBuiltinMulti(name, arg_count, out_count) => {
             match handle_builtin_call_multi(
                 calls::BuiltinCallContext {
                     stack,
                     name,
                     arg_count: *arg_count,
-                    next_instr,
                     source_id,
                     call_arg_spans: call_arg_spans.clone(),
                     imports: imports.as_slice(),
@@ -664,12 +628,6 @@ pub async fn dispatch_instruction(
             let args = build_user_function_expand_multi_args(stack, specs).await?;
             let descriptor = CallableDescriptor::semantic(*function, args, *out_count);
             stack.push(execute_callable_descriptor(descriptor).await?);
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CallMethodOrMemberIndex(name, arg_count) => {
-            handle_method_or_member_index_call(stack, name.clone(), *arg_count, next_instr).await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

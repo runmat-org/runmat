@@ -84,9 +84,6 @@ pub enum Instr {
     // Expands a single value into N outputs, padding with zero values when needed.
     Unpack(usize),
 
-    // Direct builtin invocation.
-    CallBuiltin(String, usize),
-
     // Specialized lowering target for the stochastic evolution fast path.
     StochasticEvolution,
 
@@ -156,7 +153,6 @@ pub enum Instr {
     LoadMethod(String),
 
     // Ambiguous `obj.name(...)` shape resolved at runtime as method call or member indexing.
-    CallMethodOrMemberIndex(String, usize),
     CallMethodOrMemberIndexMulti(String, usize, usize),
     CallMethodOrMemberIndexExpandMulti(String, Vec<ArgSpec>),
     CallMethodOrMemberIndexExpandMultiOutput(String, Vec<ArgSpec>, usize),
@@ -291,12 +287,11 @@ impl Instr {
             | Instr::LoadMember(_)
             | Instr::LoadMemberOrInit(_)
             | Instr::LoadMethod(_) => effect(1, 1),
-            Instr::CallBuiltin(_, argc) | Instr::CallSemanticFunction(_, argc) => effect(*argc, 1),
+            Instr::CallSemanticFunction(_, argc) => effect(*argc, 1),
             Instr::CallBuiltinMulti(_, argc, _) => effect(*argc, 1),
             Instr::CallFunctionMulti(_, argc, out_count)
             | Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
-            Instr::CallMethodOrMemberIndex(_, argc)
-            | Instr::CallMethodOrMemberIndexMulti(_, argc, _) => effect(argc + 1, 1),
+            Instr::CallMethodOrMemberIndexMulti(_, argc, _) => effect(argc + 1, 1),
             Instr::CallFeval(argc) => effect(argc + 1, 1),
             Instr::CallFevalMulti(argc, _) => effect(argc + 1, 1),
             Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {

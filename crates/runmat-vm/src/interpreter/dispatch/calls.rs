@@ -46,7 +46,6 @@ pub struct BuiltinCallContext<'a> {
     pub stack: &'a mut Vec<Value>,
     pub name: &'a str,
     pub arg_count: usize,
-    pub next_instr: Option<&'a Instr>,
     pub source_id: Option<runmat_hir::SourceId>,
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
     pub imports: &'a [(Vec<String>, bool)],
@@ -272,15 +271,6 @@ pub fn handle_builtin_outcome(
     }
 }
 
-pub async fn handle_builtin_call(
-    ctx: BuiltinCallContext<'_>,
-    refresh_vars: impl Fn(&[Value]),
-) -> Result<BuiltinHandling, RuntimeError> {
-    let requested_outputs = requested_output_count_from_next(ctx.next_instr);
-    let output_hint = output_hint_for_next(ctx.next_instr);
-    handle_builtin_call_inner(ctx, refresh_vars, requested_outputs, output_hint).await
-}
-
 pub async fn handle_builtin_call_multi(
     ctx: BuiltinCallContext<'_>,
     out_count: usize,
@@ -299,7 +289,6 @@ async fn handle_builtin_call_inner(
         stack,
         name,
         arg_count,
-        next_instr: _,
         source_id,
         call_arg_spans,
         imports,
@@ -427,18 +416,6 @@ pub async fn handle_builtin_expand_multi_call(
     };
     push_single_result(stack, result);
     Ok(BuiltinHandling::Completed)
-}
-
-pub async fn handle_method_or_member_index_call(
-    stack: &mut Vec<Value>,
-    name: String,
-    arg_count: usize,
-    next_instr: Option<&Instr>,
-) -> Result<MethodHandling, RuntimeError> {
-    let requested_outputs = requested_output_count_from_next(next_instr);
-    let output_hint = output_hint_for_next(next_instr);
-    handle_method_or_member_index_call_inner(stack, name, arg_count, requested_outputs, output_hint)
-        .await
 }
 
 pub async fn handle_method_or_member_index_multi_call(

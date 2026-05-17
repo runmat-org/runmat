@@ -341,10 +341,10 @@ fn test_complex_bytecode_compilation() {
             Instr::LoadConst(0.0), // else: result = 0
             Instr::StoreVar(0),    // update x
             // After control flow
-            Instr::CallBuiltin("abs".to_string(), 1), // abs(result)
+            Instr::CallBuiltinMulti("abs".to_string(), 1, 1), // abs(result)
             Instr::LoadConst(10.0),
-            Instr::CallBuiltin("max".to_string(), 2), // max(result, 10)
-            Instr::StoreVar(1),                       // store final result
+            Instr::CallBuiltinMulti("max".to_string(), 2, 1), // max(result, 10)
+            Instr::StoreVar(1),                               // store final result
             // Add 4 elements for a 2x2 matrix
             Instr::LoadConst(1.0),
             Instr::LoadConst(2.0),
@@ -906,7 +906,7 @@ fn test_runtime_functions_available() {
     let bytecode_with_builtin = Bytecode::with_instructions(
         vec![
             Instr::LoadConst(5.0),
-            Instr::CallBuiltin("abs".to_string(), 1), // This should generate a call to runmat_call_builtin
+            Instr::CallBuiltinMulti("abs".to_string(), 1, 1), // This should generate a call to runmat_call_builtin
             Instr::StoreVar(0),
         ],
         1,
