@@ -532,6 +532,7 @@ enum ElectromagneticFixtureKind {
     Heterogeneous,
     SparseAssignments,
     FallbackHeavy,
+    OverlapInterference,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -569,6 +570,13 @@ fn electromagnetic_profile_for_fixture(spec_id: &str) -> Option<ElectromagneticF
                 reference_frequency_hz: 260.0,
                 applied_current_a: 210.0,
                 kind: ElectromagneticFixtureKind::FallbackHeavy,
+            })
+        }
+        "electromagnetic_reference_overlap_interference_gpu_provider" => {
+            Some(ElectromagneticFixtureProfile {
+                reference_frequency_hz: 320.0,
+                applied_current_a: 240.0,
+                kind: ElectromagneticFixtureKind::OverlapInterference,
             })
         }
         _ => None,
@@ -771,6 +779,30 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         }
                     })
                     .collect();
+            }
+            ElectromagneticFixtureKind::OverlapInterference => {
+                if model.material_assignments.is_empty() {
+                    model.material_assignments = model
+                        .materials
+                        .iter()
+                        .enumerate()
+                        .take(3)
+                        .map(|(idx, material)| runmat_analysis_core::MaterialAssignment {
+                            region_id: format!("em_overlap_region_{idx}"),
+                            expected_material_id: material.material_id.clone(),
+                            assigned_material_id: material.material_id.clone(),
+                            confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+                        })
+                        .collect();
+                } else {
+                    for (idx, assignment) in model.material_assignments.iter_mut().enumerate() {
+                        assignment.region_id = format!("em_overlap_region_{}", idx % 3);
+                        let material_id = &model.materials[idx % model.materials.len()].material_id;
+                        assignment.expected_material_id = material_id.clone();
+                        assignment.assigned_material_id = material_id.clone();
+                        assignment.confidence = runmat_analysis_core::EvidenceConfidence::Verified;
+                    }
+                }
             }
         }
 
@@ -1001,6 +1033,59 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         region_id: "em_fallback_region_4".to_string(),
                         kind: runmat_analysis_core::LoadKind::Pressure {
                             magnitude_pa: 2.4e4,
+                        },
+                    },
+                ];
+            }
+            ElectromagneticFixtureKind::OverlapInterference => {
+                model.boundary_conditions = vec![
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_overlap_ground".to_string(),
+                        region_id: "em_overlap_region_0".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_overlap_insulation_0".to_string(),
+                        region_id: "em_overlap_region_1".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_overlap_insulation_1".to_string(),
+                        region_id: "em_overlap_region_2".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
+                    },
+                ];
+                model.loads = vec![
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_overlap_coil_pos".to_string(),
+                        region_id: "em_overlap_region_1".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
+                            current_a: profile.applied_current_a,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_overlap_coil_neg".to_string(),
+                        region_id: "em_overlap_region_1".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
+                            current_a: -profile.applied_current_a * 0.92,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_overlap_cd_pos".to_string(),
+                        region_id: "em_overlap_region_1".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
+                            jx: 1.0,
+                            jy: 0.4,
+                            jz: 0.0,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_overlap_cd_neg".to_string(),
+                        region_id: "em_overlap_region_1".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
+                            jx: -0.8,
+                            jy: -0.35,
+                            jz: 0.0,
                         },
                     },
                 ];
@@ -1661,6 +1746,8 @@ pub(super) fn run_fixture(
     let mut electromagnetic_source_region_coverage_ratio = None;
     let mut electromagnetic_source_material_alignment_ratio = None;
     let mut electromagnetic_source_localization_ratio = None;
+    let mut electromagnetic_source_overlap_ratio = None;
+    let mut electromagnetic_source_interference_index = None;
     let mut electromagnetic_boundary_anchor_ratio = None;
     let mut electromagnetic_flux_divergence_proxy = None;
     let mut electromagnetic_energy_imbalance_ratio = None;
@@ -1762,6 +1849,8 @@ pub(super) fn run_fixture(
                     electromagnetic_source_region_coverage_ratio,
                     electromagnetic_source_material_alignment_ratio,
                     electromagnetic_source_localization_ratio,
+                    electromagnetic_source_overlap_ratio,
+                    electromagnetic_source_interference_index,
                     electromagnetic_boundary_anchor_ratio,
                     electromagnetic_flux_divergence_proxy,
                     electromagnetic_energy_imbalance_ratio,
@@ -4112,6 +4201,64 @@ pub(super) fn run_fixture(
                             Some(1.0),
                         );
                     }
+                    if spec.id == "electromagnetic_reference_overlap_interference_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_overlap_source_region_coverage_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_region_coverage_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_overlap_source_material_alignment_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_material_alignment_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_overlap_source_overlap_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_overlap_ratio",
+                            ),
+                            Some(0.35),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_overlap_source_interference_index",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_interference_index",
+                            ),
+                            Some(0.2),
+                            Some(1.0),
+                        );
+                    }
 
                     let gpu_primary_field_id =
                         gpu_envelope.data.run.displacement_field.field_id.clone();
@@ -4218,6 +4365,8 @@ pub(super) fn run_fixture(
                                 electromagnetic_source_region_coverage_ratio,
                                 electromagnetic_source_material_alignment_ratio,
                                 electromagnetic_source_localization_ratio,
+                                electromagnetic_source_overlap_ratio,
+                                electromagnetic_source_interference_index,
                                 electromagnetic_boundary_anchor_ratio,
                                 electromagnetic_flux_divergence_proxy,
                                 electromagnetic_energy_imbalance_ratio,
@@ -4372,6 +4521,14 @@ pub(super) fn run_fixture(
                         .data
                         .summary
                         .electromagnetic_source_localization_ratio;
+                    electromagnetic_source_overlap_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_source_overlap_ratio;
+                    electromagnetic_source_interference_index = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_source_interference_index;
                     electromagnetic_boundary_anchor_ratio = gpu_results
                         .data
                         .summary
@@ -4589,6 +4746,8 @@ pub(super) fn run_fixture(
                                     electromagnetic_source_region_coverage_ratio,
                                     electromagnetic_source_material_alignment_ratio,
                                     electromagnetic_source_localization_ratio,
+                                    electromagnetic_source_overlap_ratio,
+                                    electromagnetic_source_interference_index,
                                     electromagnetic_boundary_anchor_ratio,
                                     electromagnetic_flux_divergence_proxy,
                                     electromagnetic_energy_imbalance_ratio,
@@ -4739,6 +4898,8 @@ pub(super) fn run_fixture(
         electromagnetic_source_region_coverage_ratio,
         electromagnetic_source_material_alignment_ratio,
         electromagnetic_source_localization_ratio,
+        electromagnetic_source_overlap_ratio,
+        electromagnetic_source_interference_index,
         electromagnetic_boundary_anchor_ratio,
         electromagnetic_flux_divergence_proxy,
         electromagnetic_energy_imbalance_ratio,

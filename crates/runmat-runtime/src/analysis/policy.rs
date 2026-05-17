@@ -11,6 +11,8 @@ pub(crate) const EM_CONDITIONING_MAX_BALANCED: f64 = 2.0e4;
 pub(crate) const EM_SOURCE_REALIZATION_MIN_BALANCED: f64 = 0.55;
 pub(crate) const EM_SOURCE_REGION_COVERAGE_MIN_BALANCED: f64 = 0.85;
 pub(crate) const EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED: f64 = 0.70;
+pub(crate) const EM_SOURCE_OVERLAP_MAX_BALANCED: f64 = 0.75;
+pub(crate) const EM_SOURCE_INTERFERENCE_MAX_BALANCED: f64 = 0.55;
 pub(crate) const EM_BOUNDARY_ANCHOR_MIN_BALANCED: f64 = 0.45;
 pub(crate) const EM_FLUX_DIVERGENCE_MAX_BALANCED: f64 = 0.30;
 pub(crate) const EM_ENERGY_IMBALANCE_MAX_BALANCED: f64 = 0.40;
@@ -59,10 +61,12 @@ pub(crate) fn electromagnetic_thresholds_for_policy(
     f64,
     f64,
     f64,
+    f64,
+    f64,
 ) {
     match policy {
         QualityPolicy::Strict => (
-            1.5, 0.12, 0.95, 0.05, 0.45, 8.0e3, 0.85, 0.95, 0.9, 0.7, 0.18, 0.25, 0.25,
+            1.5, 0.12, 0.95, 0.05, 0.45, 8.0e3, 0.85, 0.95, 0.9, 0.55, 0.35, 0.7, 0.18, 0.25, 0.25,
         ),
         QualityPolicy::Balanced => (
             EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
@@ -74,13 +78,15 @@ pub(crate) fn electromagnetic_thresholds_for_policy(
             EM_SOURCE_REALIZATION_MIN_BALANCED,
             EM_SOURCE_REGION_COVERAGE_MIN_BALANCED,
             EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED,
+            EM_SOURCE_OVERLAP_MAX_BALANCED,
+            EM_SOURCE_INTERFERENCE_MAX_BALANCED,
             EM_BOUNDARY_ANCHOR_MIN_BALANCED,
             EM_FLUX_DIVERGENCE_MAX_BALANCED,
             EM_ENERGY_IMBALANCE_MAX_BALANCED,
             EM_BOUNDARY_ENERGY_MIN_BALANCED,
         ),
         QualityPolicy::Exploratory => (
-            3.0, 0.35, 0.5, 0.65, 1.8, 1.5e5, 0.2, 0.35, 0.25, 0.15, 0.8, 1.2, 0.03,
+            3.0, 0.35, 0.5, 0.65, 1.8, 1.5e5, 0.2, 0.35, 0.25, 0.95, 0.85, 0.15, 0.8, 1.2, 0.03,
         ),
     }
 }

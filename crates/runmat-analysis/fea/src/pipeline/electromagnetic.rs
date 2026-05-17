@@ -87,52 +87,93 @@ pub fn run_electromagnetic_with_options(
     let mut electromagnetic_source_strength = 0.0_f64;
     let mut mapped_source_count = 0usize;
     let mut aligned_source_count = 0usize;
-    let mut localized_source_shape = vec![0.0_f64; node_count];
-    let mut fallback_source_shape = vec![0.0_f64; node_count];
+    let mut per_source_profiles = Vec::new();
+    let mut localized_source_abs_total = 0.0_f64;
     let h = 1.0 / (node_count - 1) as f64;
     for load in &model.loads {
-        let source_scale = match load.kind {
+        let source_inputs = match load.kind {
             LoadKind::CurrentDensity { jx, jy, jz } => {
-                Some((jx * jx + jy * jy + jz * jz).sqrt().clamp(0.0, 2.5))
+                let magnitude = (jx * jx + jy * jy + jz * jz).sqrt().clamp(0.0, 2.5);
+                if magnitude <= 1.0e-12 {
+                    None
+                } else {
+                    let signed_sum = jx + jy + jz;
+                    let polarity = if signed_sum.abs() <= 1.0e-12 {
+                        1.0
+                    } else {
+                        signed_sum.signum()
+                    };
+                    let directional_mix =
+                        (jx.abs() + 2.0 * jy.abs() + 3.0 * jz.abs()) / magnitude.max(1.0e-12);
+                    Some((magnitude, polarity, 0.05 * directional_mix))
+                }
             }
             LoadKind::CoilCurrent { current_a } => {
-                Some((current_a.abs() / domain.applied_current_a.max(1.0e-9)).clamp(0.0, 2.5))
+                let magnitude =
+                    (current_a.abs() / domain.applied_current_a.max(1.0e-9)).clamp(0.0, 2.5);
+                if magnitude <= 1.0e-12 {
+                    None
+                } else {
+                    Some((magnitude, current_a.signum(), 0.0))
+                }
             }
             _ => None,
         };
-        let Some(source_scale) = source_scale else {
+        let Some((source_scale, source_polarity, phase_shift)) = source_inputs else {
             continue;
         };
         electromagnetic_source_count += 1;
         electromagnetic_source_strength += source_scale;
+        let mut source_profile = vec![0.0_f64; node_count];
 
         if let Some(region_index) = region_index_by_id.get(load.region_id.as_str()).copied() {
             mapped_source_count += 1;
-            if let Some(region) = coefficient_profile.region_coefficients.get(region_index) {
+            if let Some(region) = coefficient_profile
+                .region_coefficients
+                .get(region_index)
+                .cloned()
+            {
                 if region.covered && !region.used_fallback {
                     aligned_source_count += 1;
                 }
-            }
-            let (start, end) = region_span_for_index(region_index, region_count, node_count);
-            for i in start..end {
-                let local_x = if end - start <= 1 {
-                    0.5
-                } else {
-                    (i - start) as f64 / (end - start - 1) as f64
-                };
-                localized_source_shape[i] += source_scale
-                    * domain.applied_current_a
-                    * (std::f64::consts::PI * local_x).sin().abs();
+                let gain = regional_source_gain(
+                    &region,
+                    &material_stats,
+                    matches!(load.kind, LoadKind::CoilCurrent { .. }),
+                );
+                let (start, end) = region_span_for_index(region_index, region_count, node_count);
+                for (local_idx, value) in source_profile[start..end].iter_mut().enumerate() {
+                    let local_x = if end - start <= 1 {
+                        0.5
+                    } else {
+                        local_idx as f64 / (end - start - 1) as f64
+                    };
+                    let mode = if matches!(load.kind, LoadKind::CoilCurrent { .. }) {
+                        (std::f64::consts::PI * local_x).sin()
+                    } else {
+                        (std::f64::consts::PI * (local_x + phase_shift)).sin()
+                    };
+                    *value +=
+                        source_polarity * source_scale * domain.applied_current_a * gain * mode;
+                }
             }
         } else {
-            for (i, value) in fallback_source_shape.iter_mut().enumerate() {
+            for (i, value) in source_profile.iter_mut().enumerate() {
                 let x = i as f64 * h;
-                *value += source_scale
+                *value += source_polarity
+                    * source_scale
                     * domain.applied_current_a
                     * 0.35
-                    * (std::f64::consts::PI * x).sin().abs();
+                    * (std::f64::consts::PI * (x + phase_shift)).sin();
             }
         }
+        let source_abs_sum = source_profile.iter().map(|value| value.abs()).sum::<f64>();
+        if region_index_by_id.contains_key(load.region_id.as_str()) {
+            localized_source_abs_total += source_abs_sum;
+        } else {
+            // Keep unmatched-region source deposition observable via interference/coverage metrics.
+        }
+        per_source_profiles.push(source_profile);
     }
     let source_realization_ratio = electromagnetic_source_count as f64 / total_load_count as f64;
     let source_region_coverage_ratio = if electromagnetic_source_count == 0 {
@@ -145,30 +186,32 @@ pub fn run_electromagnetic_with_options(
     } else {
         aligned_source_count as f64 / mapped_source_count as f64
     };
-    let source_distribution = if electromagnetic_source_count == 0 {
+    let source_distribution = if per_source_profiles.is_empty() {
         let mut synthetic = vec![0.0_f64; node_count];
         for (i, value) in synthetic.iter_mut().enumerate() {
             let x = i as f64 * h;
-            *value = domain.applied_current_a * 0.25 * (std::f64::consts::PI * x).sin().abs();
+            *value = domain.applied_current_a * 0.25 * (std::f64::consts::PI * x).sin();
         }
+        per_source_profiles.push(synthetic.clone());
         synthetic
     } else {
-        localized_source_shape
-            .iter()
-            .zip(fallback_source_shape.iter())
-            .map(|(localized, fallback)| localized + fallback)
-            .collect::<Vec<_>>()
+        let mut combined = vec![0.0_f64; node_count];
+        for profile in &per_source_profiles {
+            for (index, value) in profile.iter().enumerate() {
+                combined[index] += value;
+            }
+        }
+        combined
     };
-    let source_distribution_sum = source_distribution
+    let source_distribution_sum = per_source_profiles
         .iter()
+        .flat_map(|profile| profile.iter())
         .map(|value| value.abs())
         .sum::<f64>()
         .max(1.0e-9);
-    let source_localization_ratio = localized_source_shape
-        .iter()
-        .map(|value| value.abs())
-        .sum::<f64>()
-        / source_distribution_sum;
+    let source_localization_ratio = localized_source_abs_total / source_distribution_sum;
+    let source_overlap_ratio = source_overlap_ratio(&per_source_profiles);
+    let source_interference_index = source_interference_index(&per_source_profiles);
     let source_drive_scale = if electromagnetic_source_count == 0 {
         0.25
     } else {
@@ -336,13 +379,15 @@ pub fn run_electromagnetic_with_options(
     let source_material_alignment_imbalance =
         (1.0 - source_material_alignment_ratio).clamp(0.0, 1.0);
     let source_localization_imbalance = (1.0 - source_localization_ratio).clamp(0.0, 1.0);
-    let energy_imbalance_ratio = (0.12 * residual_imbalance
-        + 0.24 * heterogeneity_imbalance
-        + 0.24 * fallback_imbalance
-        + 0.12 * source_imbalance
-        + 0.14 * source_region_coverage_imbalance
+    let energy_imbalance_ratio = (0.10 * residual_imbalance
+        + 0.22 * heterogeneity_imbalance
+        + 0.22 * fallback_imbalance
+        + 0.10 * source_imbalance
+        + 0.12 * source_region_coverage_imbalance
         + 0.10 * source_material_alignment_imbalance
-        + 0.04 * source_localization_imbalance)
+        + 0.04 * source_localization_imbalance
+        + 0.05 * source_overlap_ratio
+        + 0.05 * source_interference_index)
         .clamp(0.0, 1.0);
     let boundary_band = (node_count / 4).max(1);
     let mut boundary_coupling_energy = 0.0_f64;
@@ -389,7 +434,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} boundary_anchor_ratio={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
+            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
             domain.enabled,
             domain.reference_frequency_hz,
             domain.applied_current_a,
@@ -408,6 +453,8 @@ pub fn run_electromagnetic_with_options(
             source_region_coverage_ratio,
             source_material_alignment_ratio,
             source_localization_ratio,
+            source_overlap_ratio,
+            source_interference_index,
             boundary_anchor_ratio,
             flux_divergence_proxy,
             energy_imbalance_ratio,
@@ -702,4 +749,83 @@ fn region_span_for_index(
         end = (start + 1).min(node_count);
     }
     (start.min(node_count), end.min(node_count))
+}
+
+fn regional_source_gain(
+    region: &RegionElectromagneticCoefficients,
+    stats: &ElectromagneticMaterialStats,
+    coil_source: bool,
+) -> f64 {
+    let sigma_norm =
+        (region.conductivity_s_per_m / stats.conductivity_mean.max(1.0e-9)).clamp(0.2, 5.0);
+    let eps_norm = (region.relative_permittivity / stats.relative_permittivity_mean.max(1.0e-9))
+        .clamp(0.2, 5.0);
+    let mu_norm = (region.relative_permeability / stats.relative_permeability_mean.max(1.0e-9))
+        .clamp(0.2, 5.0);
+    if coil_source {
+        (0.65 * mu_norm.sqrt() + 0.35 * sigma_norm.sqrt()).clamp(0.3, 3.0)
+    } else {
+        (0.70 * sigma_norm.sqrt() + 0.30 * eps_norm.sqrt()).clamp(0.3, 3.0)
+    }
+}
+
+fn source_overlap_ratio(per_source_profiles: &[Vec<f64>]) -> f64 {
+    if per_source_profiles.is_empty() {
+        return 0.0;
+    }
+    let node_count = per_source_profiles[0].len();
+    if node_count == 0 {
+        return 0.0;
+    }
+    let mut active_nodes = 0usize;
+    let mut overlap_nodes = 0usize;
+    for node_index in 0..node_count {
+        let mut has_positive = false;
+        let mut has_negative = false;
+        for profile in per_source_profiles {
+            let value = profile[node_index];
+            if value > 1.0e-12 {
+                has_positive = true;
+            } else if value < -1.0e-12 {
+                has_negative = true;
+            }
+        }
+        if has_positive || has_negative {
+            active_nodes += 1;
+            if has_positive && has_negative {
+                overlap_nodes += 1;
+            }
+        }
+    }
+    if active_nodes == 0 {
+        0.0
+    } else {
+        overlap_nodes as f64 / active_nodes as f64
+    }
+}
+
+fn source_interference_index(per_source_profiles: &[Vec<f64>]) -> f64 {
+    if per_source_profiles.is_empty() {
+        return 0.0;
+    }
+    let node_count = per_source_profiles[0].len();
+    if node_count == 0 {
+        return 0.0;
+    }
+    let mut total_abs = 0.0_f64;
+    let mut net_abs = 0.0_f64;
+    for node_index in 0..node_count {
+        let mut net = 0.0_f64;
+        for profile in per_source_profiles {
+            let value = profile[node_index];
+            total_abs += value.abs();
+            net += value;
+        }
+        net_abs += net.abs();
+    }
+    if total_abs <= 1.0e-12 {
+        0.0
+    } else {
+        (1.0 - (net_abs / total_abs)).clamp(0.0, 1.0)
+    }
 }

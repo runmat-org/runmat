@@ -211,6 +211,8 @@ struct FixtureRunRecord {
     electromagnetic_source_region_coverage_ratio: Option<f64>,
     electromagnetic_source_material_alignment_ratio: Option<f64>,
     electromagnetic_source_localization_ratio: Option<f64>,
+    electromagnetic_source_overlap_ratio: Option<f64>,
+    electromagnetic_source_interference_index: Option<f64>,
     electromagnetic_boundary_anchor_ratio: Option<f64>,
     electromagnetic_flux_divergence_proxy: Option<f64>,
     electromagnetic_energy_imbalance_ratio: Option<f64>,
@@ -269,6 +271,7 @@ const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "electromagnetic_reference_heterogeneous_gpu_provider",
     "electromagnetic_reference_sparse_assignments_gpu_provider",
     "electromagnetic_reference_fallback_heavy_gpu_provider",
+    "electromagnetic_reference_overlap_interference_gpu_provider",
 ];
 
 const SYNTHETIC_TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";

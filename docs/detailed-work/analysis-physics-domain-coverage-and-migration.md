@@ -242,6 +242,19 @@ Not required for this milestone:
   - `analysis.results` summary and `analysis.trends` breach rates include the new fields,
   - conformance/baseline checks were extended for the EM fixture family.
 
+### Maxwell EM Phase-10 Status (2026-05-16)
+
+- Upgraded EM source-to-region coupling fidelity:
+  - region-mapped sources now use region-weighted kernels derived from local material coefficients (`sigma`, `epsilon_r`, `mu_r`) instead of uniform deposition gain,
+  - source deposition now preserves signed polarity (coil/current-density direction), enabling cancellation-aware solve forcing.
+- Added multi-source interference diagnostics as first-class EM readiness signals:
+  - `source_overlap_ratio` (opposing-polarity overlap share),
+  - `source_interference_index` (net cancellation index).
+- Extended runtime governance + fixture coverage:
+  - policy thresholds and quality reasons now include overlap/interference controls,
+  - `analysis.results`/`analysis.trends` now surface overlap/interference posture and breach rates,
+  - added EM overlap-interference reference fixture with deterministic thresholded conformance and baseline drift tracking.
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.

@@ -5,6 +5,7 @@ const EM_READINESS_TARGET_FIXTURES: &[&str] = &[
     "electromagnetic_reference_heterogeneous_gpu_provider",
     "electromagnetic_reference_sparse_assignments_gpu_provider",
     "electromagnetic_reference_fallback_heavy_gpu_provider",
+    "electromagnetic_reference_overlap_interference_gpu_provider",
 ];
 const EM_MAX_READINESS_RELATIVE_DRIFT: f64 = 0.25;
 const EM_MAX_READINESS_ABSOLUTE_DRIFT: f64 = 0.05;
@@ -338,6 +339,26 @@ pub(super) fn check_rolling_baseline_drift(
             );
             check_rolling_metric_drift(
                 fixture_id,
+                "electromagnetic_source_overlap_ratio",
+                history,
+                current_record.electromagnetic_source_overlap_ratio,
+                |record| record.electromagnetic_source_overlap_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_source_interference_index",
+                history,
+                current_record.electromagnetic_source_interference_index,
+                |record| record.electromagnetic_source_interference_index,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
                 "electromagnetic_boundary_anchor_ratio",
                 history,
                 current_record.electromagnetic_boundary_anchor_ratio,
@@ -480,6 +501,24 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_source_localization_ratio",
                 baseline_record.electromagnetic_source_localization_ratio,
                 current_record.electromagnetic_source_localization_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_source_overlap_ratio",
+                baseline_record.electromagnetic_source_overlap_ratio,
+                current_record.electromagnetic_source_overlap_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_source_interference_index",
+                baseline_record.electromagnetic_source_interference_index,
+                current_record.electromagnetic_source_interference_index,
                 EM_MAX_READINESS_RELATIVE_DRIFT,
                 EM_MAX_READINESS_ABSOLUTE_DRIFT,
                 failures,

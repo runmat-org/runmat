@@ -135,6 +135,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. Introduced first source-locality readiness signals (`source_region_coverage_ratio`, `source_material_alignment_ratio`, `source_localization_ratio`) in EM diagnostics/results.
 3. Extended runtime governance and conformance/baseline drift gates with source coverage/alignment threshold enforcement and trend breach tracking.
 
+## Maxwell EM Bring-Up Status (Phase 10)
+
+1. Upgraded region-localized source deposition to region-weighted source kernels tied to local electromagnetic material coefficients.
+2. Added cancellation-aware multi-source diagnostics (`source_overlap_ratio`, `source_interference_index`) to quantify overlapping opposing sources.
+3. Added overlap/interference policy thresholds, quality-reason mapping, trend breach rates, and a dedicated overlap reference fixture in conformance/baseline governance.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:
