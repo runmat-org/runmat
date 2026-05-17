@@ -39,8 +39,19 @@ impl Default for CallableMetadata {
     }
 }
 
+impl CallableMetadata {
+    fn feval(display_name: Option<String>) -> Self {
+        Self {
+            call_kind: CallableCallKind::Feval,
+            display_name,
+            source_id: None,
+            span: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub(crate) enum CallableTarget {
+enum CallableTarget {
     Semantic {
         function: usize,
         name: Option<String>,
@@ -52,10 +63,10 @@ pub(crate) enum CallableTarget {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CallableDescriptor {
-    pub(crate) target: CallableTarget,
-    pub(crate) args: Vec<Value>,
-    pub(crate) requested_outputs: usize,
-    pub(crate) metadata: CallableMetadata,
+    target: CallableTarget,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    metadata: CallableMetadata,
 }
 
 impl CallableDescriptor {
@@ -64,15 +75,77 @@ impl CallableDescriptor {
         args: Vec<Value>,
         requested_outputs: usize,
     ) -> Self {
+        Self::semantic_inner(
+            function.0,
+            None,
+            false,
+            args,
+            requested_outputs,
+            CallableMetadata::default(),
+        )
+    }
+
+    fn semantic_inner(
+        function: usize,
+        name: Option<String>,
+        name_fallback: bool,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        metadata: CallableMetadata,
+    ) -> Self {
         Self {
             target: CallableTarget::Semantic {
-                function: function.0,
-                name: None,
-                name_fallback: false,
+                function,
+                name,
+                name_fallback,
             },
             args,
             requested_outputs,
-            metadata: CallableMetadata::default(),
+            metadata,
+        }
+    }
+
+    fn feval_semantic(
+        function: usize,
+        name: String,
+        name_fallback: bool,
+        args: Vec<Value>,
+        requested_outputs: usize,
+    ) -> Self {
+        Self::semantic_inner(
+            function,
+            Some(name.clone()),
+            name_fallback,
+            args,
+            requested_outputs,
+            CallableMetadata::feval(Some(name)),
+        )
+    }
+
+    fn feval_forward(func_value: Value, args: Vec<Value>, requested_outputs: usize) -> Self {
+        Self {
+            target: CallableTarget::FevalForward(func_value),
+            args,
+            requested_outputs,
+            metadata: CallableMetadata::feval(None),
+        }
+    }
+
+    fn name_only_builtin_fallback(
+        name: String,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        call_kind: CallableCallKind,
+    ) -> Self {
+        Self {
+            target: CallableTarget::NameOnlyBuiltinFallback(name.clone()),
+            args,
+            requested_outputs,
+            metadata: CallableMetadata {
+                call_kind,
+                display_name: Some(name),
+                ..CallableMetadata::default()
+            },
         }
     }
 
@@ -82,19 +155,17 @@ impl CallableDescriptor {
         args: Vec<Value>,
         requested_outputs: usize,
     ) -> Self {
-        Self {
-            target: CallableTarget::Semantic {
-                function: function.0,
-                name: Some(name.clone()),
-                name_fallback: false,
-            },
+        Self::semantic_inner(
+            function.0,
+            Some(name.clone()),
+            false,
             args,
             requested_outputs,
-            metadata: CallableMetadata {
+            CallableMetadata {
                 display_name: Some(name),
                 ..CallableMetadata::default()
             },
-        }
+        )
     }
 
     pub(crate) fn with_call_kind(mut self, call_kind: CallableCallKind) -> Self {
@@ -114,56 +185,14 @@ impl CallableDescriptor {
             }
             Value::FunctionHandle(name) => {
                 if let Some(function) = semantic_registry.resolve_name(&name) {
-                    return Self {
-                        target: CallableTarget::Semantic {
-                            function: function.0,
-                            name: Some(name.clone()),
-                            name_fallback: true,
-                        },
-                        args,
-                        requested_outputs,
-                        metadata: CallableMetadata {
-                            call_kind: CallableCallKind::Feval,
-                            display_name: Some(name),
-                            source_id: None,
-                            span: None,
-                        },
-                    };
+                    return Self::feval_semantic(function.0, name, true, args, requested_outputs);
                 }
-                Self {
-                    target: CallableTarget::FevalForward(Value::FunctionHandle(name)),
-                    args,
-                    requested_outputs,
-                    metadata: CallableMetadata {
-                        call_kind: CallableCallKind::Feval,
-                        ..CallableMetadata::default()
-                    },
-                }
+                Self::feval_forward(Value::FunctionHandle(name), args, requested_outputs)
             }
-            Value::SemanticFunctionHandle { name, function } => Self {
-                target: CallableTarget::Semantic {
-                    function,
-                    name: Some(name.clone()),
-                    name_fallback: true,
-                },
-                args,
-                requested_outputs,
-                metadata: CallableMetadata {
-                    call_kind: CallableCallKind::Feval,
-                    display_name: Some(name),
-                    source_id: None,
-                    span: None,
-                },
-            },
-            other => Self {
-                target: CallableTarget::FevalForward(other),
-                args,
-                requested_outputs,
-                metadata: CallableMetadata {
-                    call_kind: CallableCallKind::Feval,
-                    ..CallableMetadata::default()
-                },
-            },
+            Value::SemanticFunctionHandle { name, function } => {
+                Self::feval_semantic(function, name, true, args, requested_outputs)
+            }
+            other => Self::feval_forward(other, args, requested_outputs),
         }
     }
 
@@ -177,50 +206,17 @@ impl CallableDescriptor {
         let mut call_args = closure.captures;
         call_args.extend(args);
         if let Some(function) = closure.semantic_function {
-            return Self {
-                target: CallableTarget::Semantic {
-                    function,
-                    name: Some(name.clone()),
-                    name_fallback: false,
-                },
-                args: call_args,
-                requested_outputs,
-                metadata: CallableMetadata {
-                    call_kind: CallableCallKind::Feval,
-                    display_name: Some(name),
-                    source_id: None,
-                    span: None,
-                },
-            };
+            return Self::feval_semantic(function, name, false, call_args, requested_outputs);
         }
         if let Some(function) = semantic_registry.resolve_name(&name) {
-            return Self {
-                target: CallableTarget::Semantic {
-                    function: function.0,
-                    name: Some(name.clone()),
-                    name_fallback: false,
-                },
-                args: call_args,
-                requested_outputs,
-                metadata: CallableMetadata {
-                    call_kind: CallableCallKind::Feval,
-                    display_name: Some(name),
-                    source_id: None,
-                    span: None,
-                },
-            };
+            return Self::feval_semantic(function.0, name, false, call_args, requested_outputs);
         }
-        Self {
-            target: CallableTarget::NameOnlyBuiltinFallback(name.clone()),
-            args: call_args,
+        Self::name_only_builtin_fallback(
+            name,
+            call_args,
             requested_outputs,
-            metadata: CallableMetadata {
-                call_kind: CallableCallKind::Feval,
-                display_name: Some(name),
-                source_id: None,
-                span: None,
-            },
-        }
+            CallableCallKind::Feval,
+        )
     }
 }
 
