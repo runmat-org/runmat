@@ -111,3 +111,5 @@ Progress update (2026-05-17):
     release-readiness governance unit tests now include `scripts.tests.test_external_reference_baseline` so coupled-family comparator baseline coverage regressions fail CI before artifact generation.
 22. [x] Acoustics contract kickoff landed:
     added additive `analysis.create_model` profile `acoustic_harmonic` that provisions a harmonic-template model scaffold (modal-step placeholder) and corresponding runtime contract/profile tests as the first acoustics family entry point.
+23. [x] EM external-reference comparator coverage expanded and enforced:
+    M6 baseline now includes additional EM threshold-assertion comparators (homogeneous/heterogeneous dispersion and field-quality proxies plus boundary/phased-source metrics), and `validate_external_reference_benchmark.py` now requires core EM fixture metric sets so incomplete EM comparator payloads fail governance validation.

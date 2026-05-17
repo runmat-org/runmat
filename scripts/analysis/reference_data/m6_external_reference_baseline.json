@@ -69,6 +69,26 @@
       "tolerance_rel": 0.8
     },
     {
+      "name": "em_homogeneous_flux_divergence_proxy",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_flux_divergence_proxy",
+      "reference": 0.22654165350351355,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "em_homogeneous_boundary_energy_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_boundary_energy_ratio",
+      "reference": 0.46272666218938885,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.35
+    },
+    {
       "name": "em_heterogeneous_sigma_omega_scale_spread_ratio",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -97,6 +117,46 @@
       "reference": 0.13,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.9
+    },
+    {
+      "name": "em_heterogeneous_region_contrast_index",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_region_contrast_index",
+      "reference": 8.60218958405204,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "em_heterogeneous_source_realization_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_source_realization_ratio",
+      "reference": 0.6666666666666666,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "em_boundary_penalty_conditioning_contribution",
+      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_boundary_penalty_conditioning_contribution",
+      "reference": 0.9177631578947367,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "em_phased_source_energy_consistency_ratio",
+      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_phased_source_energy_consistency_ratio",
+      "reference": 0.20305942581147995,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.4
     },
     {
       "name": "cfd_reference_density_kg_per_m3",
