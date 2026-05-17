@@ -1847,6 +1847,61 @@ fn analysis_results_by_run_id_future_artifact_extra_fields_are_ignored() {
 }
 
 #[test]
+fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("family-op-version");
+    let _ = fs::remove_dir_all(&root);
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem {
+        root: root.clone(),
+    })
+    .expect("configure filesystem artifact store");
+
+    let mut cfd_model = sample_model();
+    cfd_model.steps[0].kind = AnalysisStepKind::Cfd;
+    cfd_model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+    let cfd = analysis_run_cfd_op(
+        &cfd_model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("cfd run should succeed");
+
+    let cht = analysis_run_cht_op(
+        &sample_cht_model(),
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("cht run should succeed");
+
+    let fsi = analysis_run_fsi_op(
+        &sample_fsi_model(),
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("fsi run should succeed");
+
+    let read_op_version = |run_id: &str| -> String {
+        let path = root.join("runs").join(format!("{run_id}.json"));
+        let raw = fs::read_to_string(path).expect("read wrapped artifact");
+        let wrapped: serde_json::Value =
+            serde_json::from_str(&raw).expect("parse wrapped artifact");
+        wrapped
+            .get("op_version")
+            .and_then(|value| value.as_str())
+            .expect("wrapped artifact should include op_version")
+            .to_string()
+    };
+
+    assert_eq!(read_op_version(&cfd.data.run_id), "analysis.run_cfd/v1");
+    assert_eq!(read_op_version(&cht.data.run_id), "analysis.run_cht/v1");
+    assert_eq!(read_op_version(&fsi.data.run_id), "analysis.run_fsi/v1");
+
+    storage::reset_artifact_store_for_tests();
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
 fn analysis_artifact_retention_prunes_old_runs_per_kind() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();

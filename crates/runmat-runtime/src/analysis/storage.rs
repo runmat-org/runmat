@@ -179,6 +179,27 @@ fn run_operation_version(run: &AnalysisRunResult) -> String {
             .any(|diag| diag.code == "FEA_EM_PLACEHOLDER")
     {
         "analysis.run_electromagnetic/v1".to_string()
+    } else if run
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_CHT_COUPLING")
+    {
+        "analysis.run_cht/v1".to_string()
+    } else if run
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_FSI_COUPLING")
+    {
+        "analysis.run_fsi/v1".to_string()
+    } else if run
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_CFD_FLOW")
+    {
+        "analysis.run_cfd/v1".to_string()
     } else if run.nonlinear_results.is_some() {
         "analysis.run_nonlinear/v1".to_string()
     } else if run.transient_results.is_some() {
