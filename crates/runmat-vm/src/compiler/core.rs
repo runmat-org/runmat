@@ -1095,11 +1095,7 @@ impl Compiler {
                         output_count,
                     ));
                 } else {
-                    if output_count == 1 {
-                        self.emit(Instr::CallBuiltin(name, call.args.len()));
-                    } else {
-                        self.emit(Instr::CallBuiltinMulti(name, call.args.len(), output_count));
-                    }
+                    self.emit(Instr::CallBuiltinMulti(name, call.args.len(), output_count));
                 }
             }
             MirCallee::Static(identity) => {
@@ -1627,11 +1623,7 @@ impl Compiler {
                     }
                 } else {
                     if let Some(output_count) = requested_outputs {
-                        if output_count == 1 {
-                            self.emit(Instr::CallBuiltin(name, call.args.len()));
-                        } else {
-                            self.emit(Instr::CallBuiltinMulti(name, call.args.len(), output_count));
-                        }
+                        self.emit(Instr::CallBuiltinMulti(name, call.args.len(), output_count));
                     } else {
                         self.emit(Instr::CallBuiltin(name, call.args.len()));
                     }
@@ -1784,7 +1776,7 @@ impl Compiler {
         }
         let argc = call.args.len().saturating_sub(1);
         match self.call_requested_output_count(call) {
-            Some(1) | None => self.emit(Instr::CallMethodOrMemberIndex(name, argc)),
+            None => self.emit(Instr::CallMethodOrMemberIndex(name, argc)),
             Some(output_count) => self.emit(Instr::CallMethodOrMemberIndexMulti(
                 name,
                 argc,

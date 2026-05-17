@@ -1173,6 +1173,17 @@ fn builtin_multi_output_uses_typed_instruction() {
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
 }
 
+#[test]
+fn builtin_single_output_uses_typed_instruction() {
+    let source = "a = sqrt(9);";
+    let bytecode = compile_semantic_source(source).expect("compile builtin single-output");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallBuiltinMulti(name, argc, out_count)
+            if name == "sqrt" && *argc == 1 && *out_count == 1
+    )));
+}
+
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_multi_output_uses_typed_instruction() {
@@ -1188,6 +1199,18 @@ fn method_multi_output_uses_typed_instruction() {
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
+}
+
+#[cfg(any(feature = "test-classes", test))]
+#[test]
+fn method_single_output_uses_typed_instruction() {
+    let source = "obj = new_object('Point'); a = obj.deal(7,3);";
+    let bytecode = compile_semantic_source(source).expect("compile method single-output");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallMethodOrMemberIndexMulti(name, argc, out_count)
+            if name == "deal" && *argc == 2 && *out_count == 1
+    )));
 }
 
 #[test]
