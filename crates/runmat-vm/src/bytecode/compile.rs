@@ -130,9 +130,12 @@ mod tests {
     use crate::Instr;
     use futures::executor::block_on;
     use runmat_builtins::Value;
-    use runmat_hir::{lower, CallableFallbackPolicy, LoweringContext, RequestedOutputCount};
+    use runmat_hir::{
+        lower, CallableFallbackPolicy, FunctionId, LoweringContext, RequestedOutputCount,
+    };
     use runmat_mir::lowering::lower_assembly;
     use runmat_mir::{MirRvalue, MirStmtKind, MirTerminatorKind};
+    use std::collections::HashMap;
 
     #[test]
     fn primary_compile_attaches_derived_layout() {
@@ -666,5 +669,22 @@ mod tests {
             .instructions
             .iter()
             .any(|instr| matches!(instr, Instr::Return)));
+    }
+
+    #[test]
+    fn primary_compile_external_semantic_function_handle_keeps_identity() {
+        let ast = runmat_parser::parse("h = @remote_inc; y = feval(h, 2);").expect("parse");
+        let mut semantic_functions = HashMap::new();
+        semantic_functions.insert("remote_inc".to_string(), FunctionId(9001));
+        let context = LoweringContext::empty().with_semantic_functions(&semantic_functions);
+        let hir = lower(&ast, &context).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        assert!(bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            Instr::CreateSemanticFunctionHandle(FunctionId(9001), _)
+        )));
     }
 }

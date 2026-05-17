@@ -2521,16 +2521,20 @@ impl Compiler {
                 Ok(())
             }
             CallableIdentity::SemanticFunction(function) => {
-                let (captures, display_name) = self
+                let Some((captures, display_name)) = self
                     .layout
                     .as_ref()
                     .and_then(|layout| layout.functions.get(function))
-                    .ok_or_else(|| {
-                        self.compile_error(format!(
-                            "missing VM layout for function handle target {function:?}"
-                        ))
-                    })
-                    .map(|layout| (layout.captures.clone(), layout.display_name.clone()))?;
+                    .map(|layout| (layout.captures.clone(), layout.display_name.clone()))
+                else {
+                    // External semantic function identities may not have a local VM layout in the
+                    // current compilation unit. Keep the identity and emit a simple semantic handle.
+                    self.emit(Instr::CreateSemanticFunctionHandle(
+                        *function,
+                        format!("semantic_function_{}", function.0),
+                    ));
+                    return Ok(());
+                };
                 if captures.is_empty() {
                     self.emit(Instr::CreateSemanticFunctionHandle(*function, display_name));
                     return Ok(());
