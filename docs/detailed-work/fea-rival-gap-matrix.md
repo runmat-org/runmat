@@ -153,6 +153,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. Added normalized coupled residual posture and harmonic-coupling diagnostics while preserving existing runtime contract interfaces.
 3. Stabilized publishability signaling by preventing intermediate sub-solve convergence warnings from dominating top-level EM quality gates.
 
+## Maxwell EM Bring-Up Status (Phase 13)
+
+1. Migrated harmonic EM solving from split staged passes to a true block-coupled real/imag system iteration.
+2. Added block-Jacobi preconditioning and block-operator residual evaluation for stronger harmonic solve posture.
+3. Preserved runtime governance/result interfaces while advancing internal solver fidelity toward production Maxwell-form behavior.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

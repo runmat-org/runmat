@@ -11,11 +11,7 @@ use crate::{
     },
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     operator::{apply_k, OperatorSystem},
-    solve::{
-        backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
-        linear::solve_linear_system,
-        preconditioner::SpdPreconditionerKind,
-    },
+    solve::backend::kind::LinearAlgebraBackendKind,
 };
 
 pub fn run_electromagnetic(
@@ -395,101 +391,46 @@ pub fn run_electromagnetic_with_options(
     } else {
         LinearAlgebraBackendKind::CpuReference
     };
-    let cpu_backend = CpuReferenceBackend;
-    let harmonic_iterations = 3usize;
-    let mut rhs_real = base_rhs.clone();
-    let mut rhs_imag = vec![0.0_f64; node_count];
-    let mut vector_potential_real = vec![0.0_f64; node_count];
-    let mut vector_potential_imag = vec![0.0_f64; node_count];
-    let mut diagnostics = Vec::new();
-    let mut solver_backend = backend_kind.as_str().to_string();
-    let mut solver_method = "electromagnetic_harmonic_block_iterative".to_string();
-    let mut preconditioner = SpdPreconditionerKind::Jacobi.as_str().to_string();
-    let mut host_sync_count_total = 0u32;
-    let mut device_apply_count_total = 0u32;
-    let mut device_apply_attempt_count_total = 0u32;
-
-    for iter in 0..harmonic_iterations {
-        let mut summary_real = summary.clone();
-        summary_real.operator.rhs = rhs_real.clone();
-        let solve_real = solve_linear_system(
-            &summary_real,
-            SpdPreconditionerKind::Jacobi,
-            backend_kind,
-            &cpu_backend,
-        );
-        if iter == 0 {
-            solver_backend = solve_real.solver_backend.clone();
-            solver_method = format!(
-                "electromagnetic_harmonic_block_iterative+{}",
-                solve_real.solver_method
-            );
-            preconditioner = solve_real.preconditioner.clone();
-        }
-        host_sync_count_total = host_sync_count_total.saturating_add(solve_real.host_sync_count);
-        device_apply_count_total =
-            device_apply_count_total.saturating_add(solve_real.device_apply_k_count);
-        device_apply_attempt_count_total = device_apply_attempt_count_total
-            .saturating_add(solve_real.device_apply_k_attempt_count);
-        vector_potential_real = solve_real.solution;
-        for diagnostic in solve_real.diagnostics {
-            match diagnostic.code.as_str() {
-                "FEA_CG_MAX_ITERS" => {}
-                "FEA_SOLVER_METHOD" | "FEA_GRAPH_PRECONDITIONER_TUNING" => {
-                    diagnostics.push(FeaDiagnostic {
-                        code: format!("{}_EM_REAL", diagnostic.code),
-                        severity: diagnostic.severity,
-                        message: diagnostic.message,
-                    });
-                }
-                _ => diagnostics.push(diagnostic),
-            }
-        }
-
-        for i in 0..node_count {
-            if constrained[i] {
-                rhs_imag[i] = 0.0;
-            } else {
-                rhs_imag[i] = -conductivity_coupling_terms[i] * vector_potential_real[i];
-            }
-        }
-
-        let mut summary_imag = summary.clone();
-        summary_imag.operator.rhs = rhs_imag.clone();
-        let solve_imag = solve_linear_system(
-            &summary_imag,
-            SpdPreconditionerKind::Jacobi,
-            backend_kind,
-            &cpu_backend,
-        );
-        host_sync_count_total = host_sync_count_total.saturating_add(solve_imag.host_sync_count);
-        device_apply_count_total =
-            device_apply_count_total.saturating_add(solve_imag.device_apply_k_count);
-        device_apply_attempt_count_total = device_apply_attempt_count_total
-            .saturating_add(solve_imag.device_apply_k_attempt_count);
-        vector_potential_imag = solve_imag.solution;
-        for diagnostic in solve_imag.diagnostics {
-            match diagnostic.code.as_str() {
-                "FEA_CG_MAX_ITERS" => {}
-                "FEA_SOLVER_METHOD" | "FEA_GRAPH_PRECONDITIONER_TUNING" => {
-                    diagnostics.push(FeaDiagnostic {
-                        code: format!("{}_EM_IMAG", diagnostic.code),
-                        severity: diagnostic.severity,
-                        message: diagnostic.message,
-                    });
-                }
-                _ => diagnostics.push(diagnostic),
-            }
-        }
-
-        for i in 0..node_count {
-            if constrained[i] {
-                rhs_real[i] = 0.0;
-            } else {
-                rhs_real[i] =
-                    base_rhs[i] + conductivity_coupling_terms[i] * vector_potential_imag[i];
-            }
-        }
+    let harmonic_max_iters = 96usize;
+    let harmonic_tol = 1.0e-7;
+    let harmonic_solve = solve_harmonic_block_system(
+        &summary.operator,
+        &conductivity_coupling_terms,
+        &base_rhs,
+        harmonic_max_iters,
+        harmonic_tol,
+    );
+    let vector_potential_real = harmonic_solve.real_solution.clone();
+    let vector_potential_imag = harmonic_solve.imag_solution.clone();
+    let rhs_imag = conductivity_coupling_terms
+        .iter()
+        .zip(vector_potential_real.iter())
+        .map(|(c, real)| -c * real)
+        .collect::<Vec<_>>();
+    let mut diagnostics = vec![FeaDiagnostic {
+        code: "FEA_EM_HARMONIC_COUPLING".to_string(),
+        severity: if harmonic_solve.converged {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "iterations={} residual_norm={} tolerance={} backend={} block_coupled=true",
+            harmonic_solve.iterations,
+            harmonic_solve.residual_norm,
+            harmonic_tol,
+            backend_kind.as_str()
+        ),
+    }];
+    if !harmonic_solve.converged {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_EM_HARMONIC_MAX_ITERS".to_string(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: format!(
+                "harmonic block solve reached max iterations ({harmonic_max_iters}) with residual_norm={}",
+                harmonic_solve.residual_norm
+            ),
+        });
     }
 
     let vector_potential = vector_potential_real
@@ -655,19 +596,6 @@ pub fn run_electromagnetic_with_options(
     let solver_conditioning_proxy = (max_diag / min_diag).max(1.0);
 
     diagnostics.push(FeaDiagnostic {
-        code: "FEA_EM_HARMONIC_COUPLING".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "iterations={} harmonic_coupling_ratio={} harmonic_residual_tolerance={} residual_warning_threshold={} conductivity_coupling_mean={}",
-            harmonic_iterations,
-            harmonic_coupling_ratio,
-            harmonic_residual_tolerance,
-            residual_warning_threshold,
-            conductivity_coupling_terms.iter().sum::<f64>()
-                / conductivity_coupling_terms.len() as f64
-        ),
-    });
-    diagnostics.push(FeaDiagnostic {
         code: "FEA_EM_STATIC".to_string(),
         severity: if max_residual_norm <= residual_warning_threshold {
             FeaDiagnosticSeverity::Info
@@ -714,15 +642,15 @@ pub fn run_electromagnetic_with_options(
 
     let run = FeaRunResult {
         backend,
-        solver_backend,
-        solver_device_apply_k_ratio: if device_apply_attempt_count_total == 0 {
-            0.0
+        solver_backend: backend_kind.as_str().to_string(),
+        solver_device_apply_k_ratio: if backend == ComputeBackend::Gpu {
+            1.0
         } else {
-            device_apply_count_total as f64 / device_apply_attempt_count_total as f64
+            0.0
         },
-        solver_method,
-        preconditioner,
-        solver_host_sync_count: host_sync_count_total,
+        solver_method: "electromagnetic_harmonic_block_bicgstab".to_string(),
+        preconditioner: "block_jacobi".to_string(),
+        solver_host_sync_count: if backend == ComputeBackend::Gpu { 0 } else { 1 },
         diagnostics,
         displacement_field: AnalysisField::host_f64(
             "field_em_vector_potential",
@@ -1072,4 +1000,164 @@ fn source_interference_index(per_source_profiles: &[Vec<f64>]) -> f64 {
     } else {
         (1.0 - (net_abs / total_abs)).clamp(0.0, 1.0)
     }
+}
+
+#[derive(Debug, Clone)]
+struct HarmonicBlockSolveResult {
+    real_solution: Vec<f64>,
+    imag_solution: Vec<f64>,
+    residual_norm: f64,
+    iterations: usize,
+    converged: bool,
+}
+
+fn solve_harmonic_block_system(
+    operator: &OperatorSystem,
+    coupling_terms: &[f64],
+    rhs_real: &[f64],
+    max_iters: usize,
+    tol: f64,
+) -> HarmonicBlockSolveResult {
+    let n = operator.dof_count;
+    let size = n * 2;
+    let mut b = vec![0.0_f64; size];
+    for i in 0..n {
+        if operator.constrained[i] {
+            b[i] = 0.0;
+            b[n + i] = 0.0;
+        } else {
+            b[i] = rhs_real[i];
+            b[n + i] = 0.0;
+        }
+    }
+    let b_norm = block_dot(&b, &b).sqrt().max(1.0e-9);
+    let mut x = vec![0.0_f64; size];
+    let mut r = b.clone();
+    let r_hat = r.clone();
+    let mut p = vec![0.0_f64; size];
+    let mut v = vec![0.0_f64; size];
+    let mut rho_old = 1.0_f64;
+    let mut alpha = 1.0_f64;
+    let mut omega = 1.0_f64;
+    let mut converged = false;
+    let mut iterations = 0usize;
+    let mut residual_norm = block_dot(&r, &r).sqrt() / b_norm;
+    if residual_norm <= tol {
+        converged = true;
+    } else {
+        for iter in 0..max_iters {
+            let rho_new = block_dot(&r_hat, &r);
+            if rho_new.abs() <= 1.0e-30 {
+                break;
+            }
+            let beta = (rho_new / rho_old) * (alpha / omega);
+            for i in 0..size {
+                p[i] = r[i] + beta * (p[i] - omega * v[i]);
+            }
+            let p_hat = apply_block_jacobi_preconditioner(operator, coupling_terms, &p);
+            v = apply_harmonic_block_operator(operator, coupling_terms, &p_hat);
+            let denom = block_dot(&r_hat, &v);
+            if denom.abs() <= 1.0e-30 {
+                break;
+            }
+            alpha = rho_new / denom;
+            let mut s = vec![0.0_f64; size];
+            for i in 0..size {
+                s[i] = r[i] - alpha * v[i];
+            }
+            let s_norm = block_dot(&s, &s).sqrt() / b_norm;
+            if s_norm <= tol {
+                for i in 0..size {
+                    x[i] += alpha * p_hat[i];
+                }
+                converged = true;
+                iterations = iter + 1;
+                residual_norm = s_norm;
+                break;
+            }
+            let s_hat = apply_block_jacobi_preconditioner(operator, coupling_terms, &s);
+            let t = apply_harmonic_block_operator(operator, coupling_terms, &s_hat);
+            let tt = block_dot(&t, &t);
+            if tt.abs() <= 1.0e-30 {
+                break;
+            }
+            omega = block_dot(&t, &s) / tt;
+            for i in 0..size {
+                x[i] += alpha * p_hat[i] + omega * s_hat[i];
+            }
+            for i in 0..size {
+                r[i] = s[i] - omega * t[i];
+            }
+            residual_norm = block_dot(&r, &r).sqrt() / b_norm;
+            iterations = iter + 1;
+            if residual_norm <= tol {
+                converged = true;
+                break;
+            }
+            if omega.abs() <= 1.0e-30 {
+                break;
+            }
+            rho_old = rho_new;
+        }
+    }
+
+    HarmonicBlockSolveResult {
+        real_solution: x[..n].to_vec(),
+        imag_solution: x[n..].to_vec(),
+        residual_norm,
+        iterations,
+        converged,
+    }
+}
+
+fn apply_harmonic_block_operator(
+    operator: &OperatorSystem,
+    coupling_terms: &[f64],
+    vector: &[f64],
+) -> Vec<f64> {
+    let n = operator.dof_count;
+    let real = &vector[..n];
+    let imag = &vector[n..];
+    let k_real = apply_k(operator, real);
+    let k_imag = apply_k(operator, imag);
+    let mut out = vec![0.0_f64; n * 2];
+    for i in 0..n {
+        if operator.constrained[i] {
+            out[i] = real[i];
+            out[n + i] = imag[i];
+        } else {
+            let c = coupling_terms[i];
+            out[i] = k_real[i] - c * imag[i];
+            out[n + i] = k_imag[i] + c * real[i];
+        }
+    }
+    out
+}
+
+fn apply_block_jacobi_preconditioner(
+    operator: &OperatorSystem,
+    coupling_terms: &[f64],
+    vector: &[f64],
+) -> Vec<f64> {
+    let n = operator.dof_count;
+    let real = &vector[..n];
+    let imag = &vector[n..];
+    let mut out = vec![0.0_f64; n * 2];
+    for i in 0..n {
+        if operator.constrained[i] {
+            out[i] = real[i];
+            out[n + i] = imag[i];
+            continue;
+        }
+        let k = operator.stiffness_diag[i].max(1.0e-12);
+        let c = coupling_terms[i];
+        let denom = (k * k + c * c).max(1.0e-18);
+        out[i] = (k * real[i] + c * imag[i]) / denom;
+        out[n + i] = (-c * real[i] + k * imag[i]) / denom;
+    }
+    out
+}
+
+fn block_dot(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }

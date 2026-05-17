@@ -276,6 +276,16 @@ Not required for this milestone:
   - intermediate sub-solve max-iteration warnings are suppressed from top-level quality gating to avoid false negatives.
 - Kept runtime contracts stable while recalibrating solver-quality mapping so homogeneous control fixtures remain publishable and stress fixtures remain policy-governed via readiness breaches.
 
+### Maxwell EM Phase-13 Status (2026-05-16)
+
+- Replaced split harmonic staging with a single block-coupled harmonic solve core:
+  - one coupled real/imag system solve (`[K -C; C K]`) using block BiCGStab iteration,
+  - block-Jacobi preconditioning from per-node `2x2` diagonal harmonic blocks.
+- Added explicit block-operator and coupled residual posture in the EM pipeline while preserving existing runtime/result contract shapes.
+- Maintained governance compatibility:
+  - EM contract tests and conformance harness pass on re-run,
+  - residual quality signaling remains calibrated for control-fixture publishability and stress-fixture degradation behavior.
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.
