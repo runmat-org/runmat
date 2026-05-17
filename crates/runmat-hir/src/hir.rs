@@ -318,6 +318,42 @@ impl HirCallableRef {
     }
 }
 
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum CallableIdentity {
+    SemanticFunction(FunctionId),
+    Builtin(BuiltinId),
+    Imported(DefPath),
+    Method(MethodId),
+    ClassConstructor(ClassId),
+    AnonymousFunction(FunctionId),
+    DynamicName(SymbolName),
+    ExternalName(QualifiedName),
+}
+
+impl CallableIdentity {
+    pub fn display_name(&self) -> Option<String> {
+        match self {
+            CallableIdentity::SemanticFunction(_)
+            | CallableIdentity::ClassConstructor(_)
+            | CallableIdentity::AnonymousFunction(_) => None,
+            CallableIdentity::Builtin(id) => Some(id.0.clone()),
+            CallableIdentity::Imported(path) => path.display_name(),
+            CallableIdentity::Method(id) => Some(id.0.clone()),
+            CallableIdentity::DynamicName(name) => Some(name.0.clone()),
+            CallableIdentity::ExternalName(name) => name.display_name(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+pub enum CallableFallbackPolicy {
+    None,
+    BuiltinByName,
+    RuntimeNameResolution,
+    ObjectDispatch,
+    ExternalBoundary,
+}
+
 pub const FEVAL_BUILTIN_NAME: &str = "feval";
 pub const NARGIN_BUILTIN_NAME: &str = "nargin";
 pub const NARGOUT_BUILTIN_NAME: &str = "nargout";
@@ -500,6 +536,23 @@ pub enum FunctionHandleTarget {
     Anonymous(FunctionId),
     DefPath(DefPath),
     DynamicName(SymbolName),
+}
+
+impl FunctionHandleTarget {
+    pub fn identity(&self) -> CallableIdentity {
+        match self {
+            FunctionHandleTarget::Function(function) => {
+                CallableIdentity::SemanticFunction(*function)
+            }
+            FunctionHandleTarget::Builtin(builtin) => CallableIdentity::Builtin(builtin.clone()),
+            FunctionHandleTarget::Method(method) => CallableIdentity::Method(method.clone()),
+            FunctionHandleTarget::Anonymous(function) => {
+                CallableIdentity::AnonymousFunction(*function)
+            }
+            FunctionHandleTarget::DefPath(path) => CallableIdentity::Imported(path.clone()),
+            FunctionHandleTarget::DynamicName(name) => CallableIdentity::DynamicName(name.clone()),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -871,6 +924,12 @@ pub struct DefPath {
     pub item: Vec<DefPathSegment>,
 }
 
+impl DefPath {
+    pub fn display_name(&self) -> Option<String> {
+        self.item.last().map(DefPathSegment::display_name)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub enum DefPathSegment {
     Function(SymbolName),
@@ -881,8 +940,37 @@ pub enum DefPathSegment {
     Synthetic(SyntheticName),
 }
 
+impl DefPathSegment {
+    pub fn display_name(&self) -> String {
+        match self {
+            DefPathSegment::Function(name)
+            | DefPathSegment::Class(name)
+            | DefPathSegment::Method(name)
+            | DefPathSegment::Property(name) => name.0.clone(),
+            DefPathSegment::Entrypoint(name) => name.0.clone(),
+            DefPathSegment::Synthetic(name) => name.0.clone(),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct QualifiedName(pub Vec<SymbolName>);
+
+impl QualifiedName {
+    pub fn display_name(&self) -> Option<String> {
+        if self.0.is_empty() {
+            None
+        } else {
+            Some(
+                self.0
+                    .iter()
+                    .map(|segment| segment.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            )
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct SymbolName(pub String);
