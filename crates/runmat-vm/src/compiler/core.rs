@@ -1700,46 +1700,7 @@ impl Compiler {
         callee: &CallableIdentity,
     ) -> Result<Option<String>, CompileError> {
         match callee {
-            CallableIdentity::ExternalName(name) => {
-                let Some(display) = name.display_name() else {
-                    return Ok(None);
-                };
-                if name.0.len() != 1 {
-                    return Ok(Some(display));
-                }
-                let candidate = &name.0[0].0;
-                let specific: Vec<&Vec<String>> = self
-                    .imports
-                    .iter()
-                    .filter(|(path, wildcard)| {
-                        !*wildcard && path.last().map(String::as_str) == Some(candidate.as_str())
-                    })
-                    .map(|(path, _)| path)
-                    .collect();
-                if specific.len() > 1 {
-                    return Err(CompileError::new(format!(
-                        "ambiguous runtime call target '{candidate}' via imports"
-                    )));
-                }
-                if let Some(path) = specific.first() {
-                    return Ok(Some(path.join(".")));
-                }
-                let wildcard_matches: Vec<&Vec<String>> = self
-                    .imports
-                    .iter()
-                    .filter(|(path, wildcard)| *wildcard && !path.is_empty())
-                    .map(|(path, _)| path)
-                    .collect();
-                if wildcard_matches.len() > 1 {
-                    return Err(CompileError::new(format!(
-                        "ambiguous runtime call target '{candidate}' via wildcard imports"
-                    )));
-                }
-                if let Some(path) = wildcard_matches.first() {
-                    return Ok(Some(format!("{}.{}", path.join("."), candidate)));
-                }
-                Ok(Some(display))
-            }
+            CallableIdentity::ExternalName(name) => Ok(name.display_name()),
             CallableIdentity::DynamicName(name) => Ok(Some(name.0.clone())),
             CallableIdentity::Imported(path) => {
                 Ok(path.module.display_name().or_else(|| path.display_name()))

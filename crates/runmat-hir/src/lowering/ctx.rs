@@ -1175,7 +1175,7 @@ impl SemanticCtx {
                         CallSyntax::Plain,
                         requested_outputs,
                         span,
-                    ))
+                    )?)
                 } else if let Some(binding) = self.binding_for_read(name, span) {
                     let base = HirExpr {
                         id: self.alloc_expr_id(),
@@ -1197,7 +1197,7 @@ impl SemanticCtx {
                         CallSyntax::Plain,
                         requested_outputs,
                         span,
-                    ))
+                    )?)
                 }
             }
             AstExpr::CommandCall(name, args, _) => HirExprKind::CommandCall(HirCommandCall {
@@ -1208,7 +1208,7 @@ impl SemanticCtx {
                         CallSyntax::Plain,
                         RequestedOutputCount::Zero,
                         span,
-                    )
+                    )?
                     .callee,
                 args: args.iter().map(command_argument).collect(),
             }),
@@ -1330,7 +1330,7 @@ impl SemanticCtx {
             AstExpr::EndKeyword(_) => HirExprKind::End,
             AstExpr::Member(base, name, _) => {
                 let lowered_base = if let AstExpr::MetaClass(class_name, _) = &**base {
-                    self.classref_expr(class_name, base.span())
+                    self.classref_expr(class_name, base.span())?
                 } else {
                     self.lower_expr_semantic(base)?
                 };
@@ -1343,7 +1343,7 @@ impl SemanticCtx {
             AstExpr::DottedInvoke(base, name, args, _)
             | AstExpr::MethodCall(base, name, args, _) => {
                 if let AstExpr::MetaClass(class_name, _) = &**base {
-                    let mut call_args = vec![self.classref_expr(class_name, base.span())];
+                    let mut call_args = vec![self.classref_expr(class_name, base.span())?];
                     call_args.extend(
                         args.iter()
                             .map(|arg| self.lower_call_argument(arg, RequestedOutputCount::One))
@@ -1357,7 +1357,7 @@ impl SemanticCtx {
                             CallSyntax::Method,
                             RequestedOutputCount::One,
                             span,
-                        )),
+                        )?),
                         span,
                     });
                 }
@@ -1389,7 +1389,7 @@ impl SemanticCtx {
                                 CallSyntax::Plain,
                                 RequestedOutputCount::One,
                                 span,
-                            )),
+                            )?),
                             span,
                         });
                     }
@@ -1405,7 +1405,7 @@ impl SemanticCtx {
                                 CallSyntax::Plain,
                                 RequestedOutputCount::One,
                                 span,
-                            )),
+                            )?),
                             span,
                         });
                     }
@@ -1422,7 +1422,7 @@ impl SemanticCtx {
                     CallSyntax::Method,
                     RequestedOutputCount::One,
                     span,
-                ))
+                )?)
             }
             AstExpr::MetaClass(name, _) => {
                 HirExprKind::MetaClass(QualifiedName(vec![SymbolName(name.clone())]))
@@ -1563,13 +1563,13 @@ impl SemanticCtx {
         })
     }
 
-    fn classref_expr(&mut self, class_name: &str, span: Span) -> HirExpr {
+    fn classref_expr(&mut self, class_name: &str, span: Span) -> Result<HirExpr, SemanticError> {
         let arg = HirExpr {
             id: self.alloc_expr_id(),
             kind: HirExprKind::String(StringLiteral(class_name.to_string())),
             span,
         };
-        HirExpr {
+        Ok(HirExpr {
             id: self.alloc_expr_id(),
             kind: HirExprKind::Call(self.call_for_name(
                 "classref",
@@ -1577,9 +1577,9 @@ impl SemanticCtx {
                 CallSyntax::Plain,
                 RequestedOutputCount::One,
                 span,
-            )),
+            )?),
             span,
-        }
+        })
     }
 
     fn call_for_name(
@@ -1589,7 +1589,7 @@ impl SemanticCtx {
         syntax: CallSyntax,
         requested_outputs: RequestedOutputCount,
         span: Span,
-    ) -> HirCall {
+    ) -> Result<HirCall, SemanticError> {
         let (callee, kind) = if let Some(function) = self.function_names.get(name) {
             (
                 HirCallableRef::Function(*function),
@@ -1606,6 +1606,11 @@ impl SemanticCtx {
                 HirCallableRef::Builtin(builtin.clone()),
                 CallKind::Builtin(builtin),
             )
+        } else if let Some(def_path) = self.resolve_imported_call_target(name, span)? {
+            (
+                HirCallableRef::Imported(def_path.clone()),
+                CallKind::PackageFunction(def_path),
+            )
         } else {
             (
                 HirCallableRef::Unresolved(QualifiedName(vec![SymbolName(name.to_string())])),
@@ -1619,12 +1624,58 @@ impl SemanticCtx {
             requested_outputs: requested_outputs.clone(),
             span,
         });
-        HirCall {
+        Ok(HirCall {
             callee,
             args,
             syntax,
             requested_outputs,
+        })
+    }
+
+    fn resolve_imported_call_target(
+        &self,
+        name: &str,
+        span: Span,
+    ) -> Result<Option<DefPath>, SemanticError> {
+        let imports = &self.assembly.modules[self.module.0].imports;
+        let specific_matches: Vec<&HirImport> = imports
+            .iter()
+            .filter(|import| {
+                !import.wildcard && import.path.0.last().map(|part| part.0.as_str()) == Some(name)
+            })
+            .collect();
+        if specific_matches.len() == 1 {
+            return Ok(Some(def_path_for_import_path(&specific_matches[0].path)));
         }
+        if specific_matches.len() > 1 {
+            return Err(
+                SemanticError::new(format!("ambiguous call target '{name}' via imports"))
+                    .with_span(span),
+            );
+        }
+        let wildcard_matches: Vec<String> = imports
+            .iter()
+            .filter(|import| import.wildcard)
+            .filter_map(|import| import.path.display_name())
+            .map(|prefix| format!("{prefix}.{name}"))
+            .filter(|qualified| is_builtin(qualified))
+            .collect();
+        if wildcard_matches.len() == 1 {
+            let qualified = &wildcard_matches[0];
+            return Ok(Some(def_path_for_import_path(&qualified_name(
+                &qualified
+                    .split('.')
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+            ))));
+        }
+        if wildcard_matches.len() > 1 {
+            return Err(SemanticError::new(format!(
+                "ambiguous call target '{name}' via wildcard imports"
+            ))
+            .with_span(span));
+        }
+        Ok(None)
     }
 
     fn resolve_function_handle_target(

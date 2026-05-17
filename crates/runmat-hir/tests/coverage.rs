@@ -190,6 +190,19 @@ fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
 }
 
 #[test]
+fn imported_call_lowers_to_package_function_identity() {
+    let src = "import Point.origin; __register_test_classes(); o = origin();";
+    let ast = parse(src).unwrap();
+    let result = lower(&ast, &LoweringContext::empty()).unwrap();
+    assert!(result.semantic_index.calls.iter().any(|call| matches!(
+        &call.kind,
+        CallKind::PackageFunction(path)
+            if path.module.display_name().as_deref() == Some("Point.origin")
+                && matches!(path.item.as_slice(), [DefPathSegment::Function(_)])
+    )));
+}
+
+#[test]
 fn lvalue_semantic_shapes_cover_paren_brace_and_member() {
     let prog = lower_assembly("A=1; A(1)=2; A{1}=3; s = struct(); s.f = 4;");
     let body = entry_body(&prog);
