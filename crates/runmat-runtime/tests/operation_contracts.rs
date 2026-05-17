@@ -4,17 +4,17 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::EntityKind;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
-    analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_compare_op,
-    analysis_results_op, analysis_run_electromagnetic_op, analysis_run_fsi_op,
-    analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_run_modal_op,
-    analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
-    analysis_run_nonlinear_with_options_op, analysis_run_transient_op,
+    analysis_create_model_op, analysis_plan_study_op, analysis_results_by_run_id_op,
+    analysis_results_compare_op, analysis_results_op, analysis_run_electromagnetic_op,
+    analysis_run_fsi_op, analysis_run_linear_static_op, analysis_run_linear_static_with_options,
+    analysis_run_modal_op, analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
+    analysis_run_nonlinear_with_options_op, analysis_run_study_op, analysis_run_transient_op,
     analysis_run_transient_with_options_op, analysis_trends_op, analysis_validate,
-    AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisModalRunOptions,
-    AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
-    AnalysisRunKind, AnalysisRunOptions, AnalysisTransientRunOptions, AnalysisTrendsQuery,
-    ModalFrequencyBasis, ModalFrequencyUnits, PrecisionMode, PreconditionerMode, QualityPolicy,
-    QualityReasonCode, RunStatus,
+    analysis_validate_study_op, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
+    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery,
+    AnalysisResultsQuery, AnalysisRunKind, AnalysisRunOptions, AnalysisStudySpec,
+    AnalysisTransientRunOptions, AnalysisTrendsQuery, ModalFrequencyBasis, ModalFrequencyUnits,
+    PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode, RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -30,6 +30,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Base_Mount','',(#1));\n#11=PRODUCT('Tip_Load','',(#1));\n#20=MATERIAL_DESIGNATION('Aluminum 6061');\nENDSEC;\nEND-ISO-10303-21;\n";
+
+struct EnvVarRestoreGuard {
+    key: &'static str,
+    previous: Option<String>,
+}
+
+impl Drop for EnvVarRestoreGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.as_ref() {
+            std::env::set_var(self.key, previous);
+        } else {
+            std::env::remove_var(self.key);
+        }
+    }
+}
 
 fn sorted_object_keys(value: &Value) -> Vec<String> {
     let mut keys = value
@@ -307,6 +322,76 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         electromagnetic.data.steps[0].kind,
         runmat_analysis_core::AnalysisStepKind::Electromagnetic
     );
+}
+
+#[test]
+fn analysis_study_workflow_contract_persists_evidence_artifacts() {
+    static NEXT_TMP_ID: AtomicU64 = AtomicU64::new(1);
+    let evidence_root = std::env::temp_dir().join(format!(
+        "runmat-study-contract-artifacts-{}-{}",
+        std::process::id(),
+        NEXT_TMP_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = fs::remove_dir_all(&evidence_root);
+    let env_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+    };
+    std::env::set_var(
+        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        evidence_root.display().to_string(),
+    );
+
+    let geometry = geometry_load_op(
+        "/part.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some("trace-contract-study-1".to_string()), None),
+    )
+    .expect("geometry load should succeed");
+    let spec = AnalysisStudySpec {
+        study_id: "contract_study_linear_static".to_string(),
+        geometry: geometry.data.clone(),
+        create_model_intent: AnalysisCreateModelIntentSpec {
+            model_id: "contract_study_model".to_string(),
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            prep_context: None,
+        },
+        run_kind: AnalysisRunKind::LinearStatic,
+        backend: ComputeBackend::Cpu,
+    };
+
+    let validate = analysis_validate_study_op(
+        &spec,
+        OperationContext::new(Some("trace-contract-study-2".to_string()), None),
+    )
+    .expect("validate study should succeed");
+    assert_eq!(validate.operation, "analysis.validate_study");
+    assert_eq!(validate.op_version, "analysis.validate_study/v1");
+    assert!(validate.data.valid);
+    assert!(PathBuf::from(&validate.data.evidence_artifact_path).exists());
+
+    let plan = analysis_plan_study_op(
+        &spec,
+        OperationContext::new(Some("trace-contract-study-3".to_string()), None),
+    )
+    .expect("plan study should succeed");
+    assert_eq!(plan.operation, "analysis.plan_study");
+    assert_eq!(plan.op_version, "analysis.plan_study/v1");
+    assert!(plan.data.study_fingerprint.starts_with("sha256:"));
+    assert!(PathBuf::from(&plan.data.evidence_artifact_path).exists());
+
+    let run = analysis_run_study_op(
+        &spec,
+        OperationContext::new(Some("trace-contract-study-4".to_string()), None),
+    )
+    .expect("run study should succeed");
+    assert_eq!(run.operation, "analysis.run_study");
+    assert_eq!(run.op_version, "analysis.run_study/v1");
+    assert_eq!(run.data.study_fingerprint, plan.data.study_fingerprint);
+    assert!(PathBuf::from(&run.data.evidence_artifact_path).exists());
+
+    drop(env_guard);
+    let _ = fs::remove_dir_all(&evidence_root);
 }
 
 #[test]
