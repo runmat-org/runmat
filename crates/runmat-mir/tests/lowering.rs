@@ -1,5 +1,6 @@
 use runmat_hir::{
-    lower, CallSyntax, CallableFallbackPolicy, CallableIdentity, EnvironmentEffect, LoweringContext,
+    lower, CallSyntax, CallableFallbackPolicy, CallableIdentity, EnvironmentEffect,
+    LoweringContext, RequestedOutputCount,
 };
 use runmat_mir::{
     analysis::{
@@ -51,6 +52,39 @@ fn first_call<'a>(body: &'a MirBody) -> &'a runmat_mir::MirCall {
         .expect("expected at least one lowered call")
 }
 
+fn patch_entrypoint_call_requested_outputs(
+    source: &str,
+    requested_outputs: RequestedOutputCount,
+) -> runmat_hir::LoweringResult {
+    let ast = runmat_parser::parse(source).expect("parse");
+    let mut hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+    let entry_target = hir.assembly.entrypoints[0].target;
+    let function = hir
+        .assembly
+        .functions
+        .iter_mut()
+        .find(|function| function.id == entry_target)
+        .expect("entrypoint target function");
+
+    let mut patched = false;
+    for stmt in &mut function.body.statements {
+        match &mut stmt.kind {
+            runmat_hir::HirStmtKind::Assign(_, expr, _)
+            | runmat_hir::HirStmtKind::ExprStmt(expr, _)
+            | runmat_hir::HirStmtKind::MultiAssign(_, expr, _) => {
+                if let runmat_hir::HirExprKind::Call(call) = &mut expr.kind {
+                    call.requested_outputs = requested_outputs.clone();
+                    patched = true;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    assert!(patched, "expected entrypoint to contain a call expression");
+    hir
+}
+
 #[test]
 fn simple_function_lowers_to_single_block_with_binding_locals() {
     let mir = lower_mir("function y = f(x); y = x + 1; end");
@@ -88,6 +122,24 @@ fn method_syntax_lowers_with_object_dispatch_fallback_policy() {
         CallSyntax::Method | CallSyntax::DottedInvoke
     ));
     assert_eq!(call.fallback_policy, CallableFallbackPolicy::ObjectDispatch);
+}
+
+#[test]
+fn lower_assembly_rejects_at_least_requested_outputs() {
+    let hir =
+        patch_entrypoint_call_requested_outputs("y = sqrt(9);", RequestedOutputCount::AtLeast(1));
+    let err = lower_assembly(&hir.assembly).expect_err("lower should fail");
+    assert!(err.message.contains("AtLeast is unsupported"));
+}
+
+#[test]
+fn lower_assembly_rejects_unknown_dynamic_requested_outputs() {
+    let hir = patch_entrypoint_call_requested_outputs(
+        "y = sqrt(9);",
+        RequestedOutputCount::UnknownDynamic,
+    );
+    let err = lower_assembly(&hir.assembly).expect_err("lower should fail");
+    assert!(err.message.contains("UnknownDynamic is unsupported"));
 }
 
 #[test]
