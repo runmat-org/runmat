@@ -167,13 +167,40 @@ pub async fn call_runtime_method(args: &[Value]) -> Result<Value, RuntimeError> 
     runmat_runtime::call_method_async(args).await
 }
 
-pub(crate) async fn call_object_member_method(
+async fn call_object_member_method(
     base: Value,
     op: ObjectIndexOp,
     field: String,
     rhs: Option<Value>,
 ) -> Result<Value, RuntimeError> {
     call_object_index_descriptor_method(ObjectIndexDescriptor::member(base, op, field, rhs)).await
+}
+
+pub(crate) async fn call_object_member_subsref(
+    base: Value,
+    field: String,
+) -> Result<Value, RuntimeError> {
+    call_object_member_method(base, ObjectIndexOp::Subsref, field, None).await
+}
+
+pub(crate) async fn call_object_member_subsasgn(
+    base: Value,
+    field: String,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    call_object_member_method(base, ObjectIndexOp::Subsasgn, field, Some(rhs)).await
+}
+
+pub(crate) fn class_defines_member_subsref(class: &runmat_builtins::ClassDef) -> bool {
+    class
+        .methods
+        .contains_key(ObjectIndexOp::Subsref.protocol_name())
+}
+
+pub(crate) fn class_defines_member_subsasgn(class: &runmat_builtins::ClassDef) -> bool {
+    class
+        .methods
+        .contains_key(ObjectIndexOp::Subsasgn.protocol_name())
 }
 
 pub(crate) async fn call_object_index_descriptor_method(

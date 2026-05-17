@@ -1,4 +1,7 @@
-use crate::call::shared::{call_object_member_method, ObjectIndexOp};
+use crate::call::shared::{
+    call_object_member_subsasgn, call_object_member_subsref, class_defines_member_subsasgn,
+    class_defines_member_subsref,
+};
 use crate::interpreter::errors::mex;
 use runmat_builtins::{self, Access, Closure, StructValue, Value};
 use runmat_runtime::RuntimeError;
@@ -47,17 +50,8 @@ pub async fn load_member(
                 )
                 .into())
             } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                if cls
-                    .methods
-                    .contains_key(ObjectIndexOp::Subsref.protocol_name())
-                {
-                    call_object_member_method(
-                        Value::Object(obj),
-                        ObjectIndexOp::Subsref,
-                        field,
-                        None,
-                    )
-                    .await
+                if class_defines_member_subsref(&cls) {
+                    call_object_member_subsref(Value::Object(obj), field).await
                 } else {
                     Err(format!(
                         "Undefined property '{}' for class {}",
@@ -70,13 +64,7 @@ pub async fn load_member(
             }
         }
         Value::HandleObject(handle) => {
-            call_object_member_method(
-                Value::HandleObject(handle),
-                ObjectIndexOp::Subsref,
-                field,
-                None,
-            )
-            .await
+            call_object_member_subsref(Value::HandleObject(handle), field).await
         }
         Value::ClassRef(cls) => load_static_member(&cls, &field),
         Value::Struct(st) => {
@@ -201,17 +189,8 @@ where
                 obj.properties.insert(field, rhs);
                 Ok(Value::Object(obj))
             } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                if cls
-                    .methods
-                    .contains_key(ObjectIndexOp::Subsasgn.protocol_name())
-                {
-                    call_object_member_method(
-                        Value::Object(obj),
-                        ObjectIndexOp::Subsasgn,
-                        field,
-                        Some(rhs),
-                    )
-                    .await
+                if class_defines_member_subsasgn(&cls) {
+                    call_object_member_subsasgn(Value::Object(obj), field, rhs).await
                 } else {
                     Err(format!("Undefined property '{}' for class {}", field, cls.name).into())
                 }
@@ -234,13 +213,7 @@ where
             }
         }
         Value::HandleObject(handle) => {
-            call_object_member_method(
-                Value::HandleObject(handle),
-                ObjectIndexOp::Subsasgn,
-                field,
-                Some(rhs),
-            )
-            .await
+            call_object_member_subsasgn(Value::HandleObject(handle), field, rhs).await
         }
         Value::Struct(mut st) => {
             if let Some(oldv) = st.fields.get(&field) {
