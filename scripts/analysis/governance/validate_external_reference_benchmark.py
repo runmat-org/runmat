@@ -4,6 +4,22 @@ import os
 from pathlib import Path
 
 
+REQUIRED_METRICS_BY_FIXTURE = {
+    "cfd_steady_gpu_provider": {
+        "cfd_reference_density_kg_per_m3",
+        "cfd_reynolds_proxy",
+    },
+    "cht_coupled_gpu_provider": {
+        "cht_applied_temperature_delta_k",
+        "cht_reynolds_proxy",
+    },
+    "fsi_coupled_gpu_provider": {
+        "fsi_reynolds_proxy",
+        "fsi_structural_step_count",
+    },
+}
+
+
 def is_true(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
@@ -40,12 +56,16 @@ def main() -> int:
     if not isinstance(metrics, list) or not metrics:
         errors.append("metrics must be a non-empty list")
     else:
+        metric_names_by_fixture = {}
         for idx, metric in enumerate(metrics):
             if not isinstance(metric, dict):
                 errors.append(f"metrics[{idx}] must be an object")
                 continue
             if not isinstance(metric.get("name"), str):
                 errors.append(f"metrics[{idx}].name missing or invalid")
+                continue
+            if not isinstance(metric.get("fixture_id"), str):
+                errors.append(f"metrics[{idx}].fixture_id missing or invalid")
             if "source" in metric and metric.get("source") not in {
                 "field",
                 "threshold_assertion",
@@ -57,6 +77,18 @@ def main() -> int:
                 errors.append(f"metrics[{idx}].reference missing or invalid")
             if not isinstance(metric.get("pass"), bool):
                 errors.append(f"metrics[{idx}].pass missing or invalid")
+            fixture_id = metric.get("fixture_id")
+            if isinstance(fixture_id, str):
+                metric_names_by_fixture.setdefault(fixture_id, set()).add(metric["name"])
+
+        for fixture_id, required_names in REQUIRED_METRICS_BY_FIXTURE.items():
+            observed_names = metric_names_by_fixture.get(fixture_id, set())
+            missing = sorted(name for name in required_names if name not in observed_names)
+            if missing:
+                errors.append(
+                    f"fixture {fixture_id} missing required external-reference metrics: "
+                    + ", ".join(missing)
+                )
 
     if require_pass and isinstance(metrics, list):
         failing = [m.get("name", f"index_{i}") for i, m in enumerate(metrics) if isinstance(m, dict) and m.get("pass") is False]

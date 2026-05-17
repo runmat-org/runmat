@@ -105,3 +105,5 @@ Progress update (2026-05-17):
     release/nonlinear benchmark schema validation now requires CFD/CHT/FSI provider fixture threshold-assertion sets (`cfd_steady_gpu_provider`, `cht_coupled_gpu_provider`, `fsi_coupled_gpu_provider`) so coupled-family conformance regressions fail policy validation instead of silently passing.
 19. [x] Coupled-family external-reference comparator metrics expanded:
     M6 baseline external-reference data now includes threshold-assertion metrics for CFD/CHT/FSI provider fixtures (`cfd_steady_gpu_provider`, `cht_coupled_gpu_provider`, `fsi_coupled_gpu_provider`) so coupled-family regressions are evaluated by governance reference comparisons.
+20. [x] External-reference artifact validator coverage hardened for coupled families:
+    `validate_external_reference_benchmark.py` now requires coupled CFD/CHT/FSI metric sets to be present in generated comparator artifacts so incomplete payloads fail governance validation in enforce mode.
