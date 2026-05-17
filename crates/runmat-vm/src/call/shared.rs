@@ -1,6 +1,5 @@
 use crate::bytecode::ArgSpec;
 use crate::bytecode::EndExpr;
-use crate::object::{BRACE_SELECTOR_NAME, MEMBER_SELECTOR_NAME, PAREN_SELECTOR_NAME};
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
 use std::future::Future;
@@ -41,9 +40,9 @@ pub(crate) enum ObjectIndexKind {
 impl ObjectIndexKind {
     pub(crate) fn protocol_name(self) -> &'static str {
         match self {
-            Self::Paren => PAREN_SELECTOR_NAME,
-            Self::Brace => BRACE_SELECTOR_NAME,
-            Self::Member => MEMBER_SELECTOR_NAME,
+            Self::Paren => "()",
+            Self::Brace => "{}",
+            Self::Member => ".",
         }
     }
 }
@@ -397,6 +396,53 @@ fn build_end_range_descriptor(
     Ok(Value::Cell(cell))
 }
 
+fn normalize_object_numeric_selector(selector: &Value) -> Result<Value, RuntimeError> {
+    match selector {
+        Value::Num(n) => Ok(Value::Num(*n)),
+        Value::Int(i) => Ok(Value::Num(i.to_f64())),
+        Value::Tensor(t) => Ok(Value::Tensor(t.clone())),
+        other => Err(format!("Unsupported index type for object selector: {other:?}").into()),
+    }
+}
+
+fn validate_object_range_selector_plan(
+    dims: usize,
+    range_dims: &[usize],
+    range_params: &[(f64, f64)],
+    range_start_exprs: &[Option<EndExpr>],
+    range_step_exprs: &[Option<EndExpr>],
+    range_end_exprs: &[EndExpr],
+) -> Result<Vec<Option<usize>>, RuntimeError> {
+    let count = range_dims.len();
+    if range_params.len() != count
+        || range_start_exprs.len() != count
+        || range_step_exprs.len() != count
+        || range_end_exprs.len() != count
+    {
+        return Err(crate::interpreter::errors::mex(
+            "InvalidRangeSelectorPlan",
+            "inconsistent object range selector metadata",
+        ));
+    }
+
+    let mut range_pos_by_dim = vec![None; dims];
+    for (pos, &dim) in range_dims.iter().enumerate() {
+        if dim >= dims {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidRangeSelectorDim",
+                "object range selector dimension is out of bounds",
+            ));
+        }
+        if range_pos_by_dim[dim].replace(pos).is_some() {
+            return Err(crate::interpreter::errors::mex(
+                "DuplicateRangeSelectorDim",
+                "object range selector dimension appears more than once",
+            ));
+        }
+    }
+    Ok(range_pos_by_dim)
+}
+
 pub(crate) fn build_object_paren_selector_values(
     dims: usize,
     colon_mask: u32,
@@ -445,9 +491,16 @@ pub(crate) fn build_object_paren_expr_selector_values(
     range_end_exprs: &[EndExpr],
     numeric: &[Value],
 ) -> Result<Vec<Value>, RuntimeError> {
+    let range_pos_by_dim = validate_object_range_selector_plan(
+        dims,
+        range_dims,
+        range_params,
+        range_start_exprs,
+        range_step_exprs,
+        range_end_exprs,
+    )?;
     let mut values = Vec::with_capacity(dims);
     let mut num_iter = 0usize;
-    let mut rp_iter = 0usize;
     for d in 0..dims {
         let is_colon = (colon_mask & (1u32 << d)) != 0;
         let is_end = (end_mask & (1u32 << d)) != 0;
@@ -459,19 +512,18 @@ pub(crate) fn build_object_paren_expr_selector_values(
             values.push(Value::String("end".to_string()));
             continue;
         }
-        if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-            let (raw_st, raw_sp) = range_params[rp_iter];
-            let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+        if let Some(pos) = range_pos_by_dim[d] {
+            let (raw_st, raw_sp) = range_params[pos];
+            let st = if let Some(expr) = &range_start_exprs[pos] {
                 encode_end_expr_value(expr)?
             } else {
                 Value::Num(raw_st)
             };
-            let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+            let sp = if let Some(expr) = &range_step_exprs[pos] {
                 encode_end_expr_value(expr)?
             } else {
                 Value::Num(raw_sp)
             };
-            rp_iter += 1;
             let off = &range_end_exprs[pos];
             values.push(build_end_range_descriptor(st, sp, off)?);
             continue;
@@ -483,14 +535,7 @@ pub(crate) fn build_object_paren_expr_selector_values(
                 "missing numeric index",
             ))?;
         num_iter += 1;
-        match selector {
-            Value::Num(n) => values.push(Value::Num(*n)),
-            Value::Int(i) => values.push(Value::Num(i.to_f64())),
-            Value::Tensor(t) => values.push(Value::Tensor(t.clone())),
-            other => {
-                return Err(format!("Unsupported index type for object selector: {other:?}").into())
-            }
-        }
+        values.push(normalize_object_numeric_selector(selector)?);
     }
     if num_iter != numeric.len() {
         return Err(crate::interpreter::errors::mex(
@@ -666,5 +711,39 @@ mod tests {
             other => panic!("expected range descriptor cell, got {other:?}"),
         }
         assert_eq!(selectors[1], Value::Num(4.0));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_invalid_range_plan_metadata() {
+        let err = build_object_paren_expr_selector_values(
+            2,
+            0,
+            0,
+            &[0],
+            &[(1.0, 2.0)],
+            &[None],
+            &[None],
+            &[],
+            &[Value::Num(4.0)],
+        )
+        .expect_err("inconsistent range metadata should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_duplicate_range_dims() {
+        let err = build_object_paren_expr_selector_values(
+            2,
+            0,
+            0,
+            &[0, 0],
+            &[(1.0, 1.0), (2.0, 1.0)],
+            &[None, None],
+            &[None, None],
+            &[EndExpr::End, EndExpr::End],
+            &[],
+        )
+        .expect_err("duplicate range dimensions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:DuplicateRangeSelectorDim"));
     }
 }
