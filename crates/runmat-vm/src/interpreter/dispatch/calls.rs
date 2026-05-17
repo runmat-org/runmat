@@ -5,9 +5,7 @@ use crate::call::closures as call_closures;
 use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
 use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
-    build_expanded_args_from_specs, call_object_index_descriptor_method,
-    call_object_subsref_brace_values, expand_cell_indices, ObjectIndexDescriptor,
-    ObjectIndexSelector,
+    build_expanded_args_from_specs, call_object_subsref_brace_values, expand_cell_indices,
 };
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -234,12 +232,7 @@ pub async fn build_builtin_expand_multi_args(
         |base| async move {
             match base {
                 Value::Object(obj) => {
-                    let v =
-                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-                            Value::Object(obj),
-                            ObjectIndexSelector::Empty,
-                        ))
-                        .await?;
+                    let v = call_object_subsref_brace_values(Value::Object(obj), vec![]).await?;
                     match v {
                         Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                         other => Ok(vec![other]),
@@ -279,12 +272,7 @@ pub async fn build_feval_expand_multi_args(
         |base| async move {
             match base {
                 Value::Object(obj) => {
-                    let v =
-                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-                            Value::Object(obj),
-                            ObjectIndexSelector::Empty,
-                        ))
-                        .await?;
+                    let v = call_object_subsref_brace_values(Value::Object(obj), vec![]).await?;
                     match v {
                         Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                         other => Ok(vec![other]),
@@ -325,12 +313,7 @@ pub async fn build_user_function_expand_multi_args(
             match base {
                 Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                 Value::Object(obj) => {
-                    let v =
-                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-                            Value::Object(obj),
-                            ObjectIndexSelector::Empty,
-                        ))
-                        .await?;
+                    let v = call_object_subsref_brace_values(Value::Object(obj), vec![]).await?;
                     match v {
                         Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
                         other => Ok(vec![other]),

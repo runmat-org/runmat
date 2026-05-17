@@ -49,7 +49,6 @@ impl ObjectIndexKind {
 }
 
 pub(crate) enum ObjectIndexSelector {
-    Empty,
     ScalarIndices { indices: Vec<usize> },
     IndexValues { values: Vec<Value> },
     Member(String),
@@ -121,7 +120,6 @@ impl ObjectIndexDescriptor {
 
     fn into_runtime_method_args(self) -> Result<Vec<Value>, RuntimeError> {
         let selector = match self.selector {
-            ObjectIndexSelector::Empty => build_protocol_index_cell(Vec::new())?,
             ObjectIndexSelector::ScalarIndices { indices } => {
                 let values = indices
                     .into_iter()
@@ -237,6 +235,56 @@ pub(crate) async fn call_object_subsref_brace_values(
     call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
         base,
         ObjectIndexSelector::IndexValues { values },
+    ))
+    .await
+}
+
+pub(crate) async fn call_object_subsref_brace_scalar_indices(
+    base: Value,
+    indices: Vec<usize>,
+) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+        base,
+        ObjectIndexSelector::ScalarIndices { indices },
+    ))
+    .await
+}
+
+pub(crate) async fn call_object_subsasgn_paren_values(
+    base: Value,
+    values: Vec<Value>,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
+        base,
+        ObjectIndexSelector::IndexValues { values },
+        rhs,
+    ))
+    .await
+}
+
+pub(crate) async fn call_object_subsasgn_paren_scalar_indices(
+    base: Value,
+    indices: Vec<usize>,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
+        base,
+        ObjectIndexSelector::ScalarIndices { indices },
+        rhs,
+    ))
+    .await
+}
+
+pub(crate) async fn call_object_subsasgn_brace_scalar_indices(
+    base: Value,
+    indices: Vec<usize>,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
+        base,
+        ObjectIndexSelector::ScalarIndices { indices },
+        rhs,
     ))
     .await
 }
