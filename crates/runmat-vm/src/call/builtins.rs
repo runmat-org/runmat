@@ -1,6 +1,7 @@
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::pop_args;
 use runmat_builtins::Value;
+use runmat_hir::{QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
 
 #[derive(Clone, Copy)]
@@ -86,6 +87,28 @@ pub enum ImportedBuiltinResolution {
     NotFound,
 }
 
+fn imported_builtin_qualified_name(path: &[String], leaf: Option<&str>) -> String {
+    let mut segments: Vec<SymbolName> = path
+        .iter()
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| SymbolName(segment.clone()))
+        .collect();
+    if let Some(leaf) = leaf {
+        segments.push(SymbolName(leaf.to_string()));
+    }
+    QualifiedName(segments).display_name().unwrap_or_else(|| {
+        if let Some(leaf) = leaf {
+            if path.is_empty() {
+                leaf.to_string()
+            } else {
+                format!("{}.{}", path.join("."), leaf)
+            }
+        } else {
+            path.join(".")
+        }
+    })
+}
+
 pub async fn resolve_imported_builtin(
     name: &str,
     imports: &[(Vec<String>, bool)],
@@ -98,7 +121,7 @@ pub async fn resolve_imported_builtin(
             continue;
         }
         if path.last().map(|s| s.as_str()) == Some(name) {
-            let qual = path.join(".");
+            let qual = imported_builtin_qualified_name(path, None);
             let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
             let result = match requested_outputs {
                 Some(count) => {
@@ -131,7 +154,7 @@ pub async fn resolve_imported_builtin(
         if !*wildcard || path.is_empty() {
             continue;
         }
-        let qual = format!("{}.{}", path.join("."), name);
+        let qual = imported_builtin_qualified_name(path, Some(name));
         let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
         let result = match requested_outputs {
             Some(count) => {
