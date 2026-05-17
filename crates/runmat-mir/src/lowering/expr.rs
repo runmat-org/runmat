@@ -285,6 +285,7 @@ fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, SemanticError>
     };
     let callee = MirCallee::Static(identity);
     let semantics = call_semantics(&callee);
+    let fallback_policy = call_fallback_policy(&callee);
     Ok(MirRvalue::Call(MirCall {
         callee,
         args: call
@@ -294,6 +295,7 @@ fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, SemanticError>
             .collect(),
         syntax: runmat_hir::CallSyntax::Command,
         requested_outputs: RequestedOutputCount::Zero,
+        fallback_policy,
         async_behavior: map_async_behavior(semantics.async_behavior),
         effects: semantics.effects,
         workspace_effect: semantics.workspace_effect,
@@ -314,11 +316,13 @@ fn call_rvalue(
     };
     let callee = MirCallee::Static(identity);
     let semantics = call_semantics(&callee);
+    let fallback_policy = call_fallback_policy(&callee);
     Ok(MirRvalue::Call(MirCall {
         callee,
         args,
         syntax: call.syntax.clone(),
         requested_outputs: call.requested_outputs.clone(),
+        fallback_policy,
         async_behavior: map_async_behavior(semantics.async_behavior),
         effects: semantics.effects,
         workspace_effect: semantics.workspace_effect,
@@ -335,11 +339,13 @@ fn dynamic_call_rvalue(
 ) -> MirRvalue {
     let callee = MirCallee::Dynamic(callee);
     let semantics = call_semantics(&callee);
+    let fallback_policy = call_fallback_policy(&callee);
     MirRvalue::Call(MirCall {
         callee,
         args,
         syntax: call.syntax.clone(),
         requested_outputs: call.requested_outputs.clone(),
+        fallback_policy,
         async_behavior: map_async_behavior(semantics.async_behavior),
         effects: semantics.effects,
         workspace_effect: semantics.workspace_effect,
@@ -376,6 +382,24 @@ fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
             purity: runmat_builtins::BuiltinPurity::Impure,
             semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
         },
+    }
+}
+
+fn call_fallback_policy(callee: &MirCallee) -> runmat_hir::CallableFallbackPolicy {
+    match callee {
+        MirCallee::Static(runmat_hir::CallableIdentity::SemanticFunction(_))
+        | MirCallee::Static(runmat_hir::CallableIdentity::Builtin(_))
+        | MirCallee::Static(runmat_hir::CallableIdentity::ClassConstructor(_)) => {
+            runmat_hir::CallableFallbackPolicy::None
+        }
+        MirCallee::Static(
+            runmat_hir::CallableIdentity::ExternalName(_)
+            | runmat_hir::CallableIdentity::DynamicName(_)
+            | runmat_hir::CallableIdentity::Imported(_)
+            | runmat_hir::CallableIdentity::Method(_)
+            | runmat_hir::CallableIdentity::AnonymousFunction(_),
+        )
+        | MirCallee::Dynamic(_) => runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
     }
 }
 

@@ -1103,6 +1103,15 @@ impl Compiler {
                 }
             }
             MirCallee::Static(identity) => {
+                if !matches!(
+                    call.fallback_policy,
+                    runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+                ) {
+                    return Err(self.compile_error(format!(
+                        "MIR call fallback policy {:?} is not supported for static callee {:?}",
+                        call.fallback_policy, identity
+                    )));
+                }
                 let Some(name) = self.mir_runtime_name_callee(identity)? else {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this call callee is not implemented yet",
@@ -1616,6 +1625,15 @@ impl Compiler {
                 }
             }
             MirCallee::Static(identity) => {
+                if !matches!(
+                    call.fallback_policy,
+                    runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+                ) {
+                    return Err(self.compile_error(format!(
+                        "MIR call fallback policy {:?} is not supported for static callee {:?}",
+                        call.fallback_policy, identity
+                    )));
+                }
                 let Some(name) = self.mir_runtime_name_callee(identity)? else {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this call callee is not implemented yet",
@@ -1740,6 +1758,15 @@ impl Compiler {
         let name = match &call.callee {
             MirCallee::Static(CallableIdentity::Builtin(id)) => id.0.clone(),
             MirCallee::Static(identity) => {
+                if !matches!(
+                    call.fallback_policy,
+                    runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+                ) {
+                    return Err(self.compile_error(format!(
+                        "MIR method-call fallback policy {:?} is not supported for callee {:?}",
+                        call.fallback_policy, identity
+                    )));
+                }
                 let Some(name) = self.mir_runtime_name_callee(identity)? else {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this method callee is not implemented yet",

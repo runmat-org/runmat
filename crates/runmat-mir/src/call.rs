@@ -3,7 +3,7 @@ use runmat_builtins::{
     BuiltinEffects, BuiltinEnvironmentEffect, BuiltinPurity, BuiltinSemanticKind,
     BuiltinWorkspaceEffect,
 };
-use runmat_hir::{CallSyntax, CallableIdentity, RequestedOutputCount};
+use runmat_hir::{CallSyntax, CallableFallbackPolicy, CallableIdentity, RequestedOutputCount};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -12,6 +12,7 @@ pub struct MirCall {
     pub args: Vec<MirCallArg>,
     pub syntax: CallSyntax,
     pub requested_outputs: RequestedOutputCount,
+    pub fallback_policy: CallableFallbackPolicy,
     pub async_behavior: AsyncBehaviorFact,
     pub effects: BuiltinEffects,
     pub workspace_effect: Option<BuiltinWorkspaceEffect>,
