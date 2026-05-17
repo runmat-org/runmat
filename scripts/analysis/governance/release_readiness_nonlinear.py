@@ -39,6 +39,17 @@ KEY_PERFORMANCE_FIXTURES = {
     "fsi_coupled_gpu_provider",
 }
 
+EM_FIXTURES = {
+    "electromagnetic_reference_homogeneous_gpu_provider",
+    "electromagnetic_reference_heterogeneous_gpu_provider",
+    "electromagnetic_reference_sparse_assignments_gpu_provider",
+    "electromagnetic_reference_fallback_heavy_gpu_provider",
+    "electromagnetic_reference_overlap_interference_gpu_provider",
+    "electromagnetic_reference_boundary_kernel_gpu_provider",
+    "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+    "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+}
+
 
 @dataclass
 class Reason:
@@ -113,6 +124,17 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN": "1.25",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO": "1.15",
+            "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "true",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.25",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM": "0.15",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM": "0.15",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.55",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.55",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.55",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.15",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.65",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.72",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "0.98",
@@ -201,6 +223,17 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN": "1.3",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.45",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM": "0.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM": "0.2",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.45",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.45",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.45",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.25",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.75",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.68",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "1.02",
@@ -289,6 +322,17 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN": "1.5",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.5",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.6",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.5",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.9",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.6",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "1.1",
@@ -1199,6 +1243,79 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO", "1.2"),
         )
     )
+    em_require_metrics = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS", "false"),
+        )
+    )
+    em_max_energy_imbalance_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO", "0.35"),
+        )
+    )
+    em_max_flux_divergence_proxy_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY", "0.45"),
+        )
+    )
+    em_max_real_residual_norm_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM", "0.2"),
+        )
+    )
+    em_max_imag_residual_norm_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM", "0.2"),
+        )
+    )
+    em_min_source_realization_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO", "0.45"),
+        )
+    )
+    em_min_source_region_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO", "0.45"),
+        )
+    )
+    em_min_source_material_alignment_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+                "0.45",
+            ),
+        )
+    )
+    em_max_breach_rate_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE", "0.25"),
+        )
+    )
+    em_max_energy_imbalance_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO", "1.2"
+            ),
+        )
+    )
+    em_max_flux_divergence_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO", "1.25"
+            ),
+        )
+    )
     plastic_max_nonlinear_severity_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
@@ -1548,6 +1665,16 @@ def evaluate_release_readiness(
     electro_joule_trend_ratio = None
     electro_spread_trend_ratio = None
     electro_time_scale_trend_ratio = None
+    em_max_energy_imbalance_ratio = None
+    em_max_flux_divergence_proxy = None
+    em_max_real_residual_norm = None
+    em_max_imag_residual_norm = None
+    em_min_source_realization_ratio = None
+    em_min_source_region_coverage_ratio = None
+    em_min_source_material_alignment_ratio = None
+    em_breach_rate = None
+    em_energy_imbalance_trend_ratio = None
+    em_flux_divergence_trend_ratio = None
     plastic_max_nonlinear_severity = None
     plastic_load_realization_ratio_min = None
     plastic_load_realization_ratio_max = None
@@ -2241,6 +2368,143 @@ def evaluate_release_readiness(
                             "electro-thermal time-scale mean outside threshold envelope: "
                             f"min={electro_min_time_scale_mean:.3f} max={electro_max_time_scale_mean:.3f} "
                             f"allowed=[{electro_min_time_scale_mean_threshold:.3f}, {electro_max_time_scale_mean_threshold:.3f}]"
+                        ),
+                    )
+                )
+
+    em_records = [
+        rec
+        for rec in report_records(latest)
+        if (
+            isinstance(rec.get("fixture_id"), str) and rec.get("fixture_id") in EM_FIXTURES
+        )
+        or isinstance(rec.get("electromagnetic_enabled"), bool)
+        or isinstance(rec.get("electromagnetic_energy_imbalance_ratio"), (int, float))
+    ]
+    if not em_records:
+        if protected or em_require_metrics:
+            reasons.append(
+                Reason(
+                    code="EM_METRICS_MISSING",
+                    severity="warn",
+                    detail="electromagnetic posture metrics missing from report records",
+                )
+            )
+    else:
+        metric_specs = [
+            (
+                "electromagnetic_energy_imbalance_ratio",
+                "max",
+                em_max_energy_imbalance_ratio_threshold,
+                "EM_ENERGY_IMBALANCE_RATIO_HIGH",
+                "max EM energy imbalance ratio",
+            ),
+            (
+                "electromagnetic_flux_divergence_proxy",
+                "max",
+                em_max_flux_divergence_proxy_threshold,
+                "EM_FLUX_DIVERGENCE_PROXY_HIGH",
+                "max EM flux divergence proxy",
+            ),
+            (
+                "electromagnetic_real_residual_norm",
+                "max",
+                em_max_real_residual_norm_threshold,
+                "EM_REAL_RESIDUAL_NORM_HIGH",
+                "max EM real residual norm",
+            ),
+            (
+                "electromagnetic_imag_residual_norm",
+                "max",
+                em_max_imag_residual_norm_threshold,
+                "EM_IMAG_RESIDUAL_NORM_HIGH",
+                "max EM imaginary residual norm",
+            ),
+            (
+                "electromagnetic_source_realization_ratio",
+                "min",
+                em_min_source_realization_ratio_threshold,
+                "EM_SOURCE_REALIZATION_RATIO_LOW",
+                "min EM source realization ratio",
+            ),
+            (
+                "electromagnetic_source_region_coverage_ratio",
+                "min",
+                em_min_source_region_coverage_ratio_threshold,
+                "EM_SOURCE_REGION_COVERAGE_RATIO_LOW",
+                "min EM source-region coverage ratio",
+            ),
+            (
+                "electromagnetic_source_material_alignment_ratio",
+                "min",
+                em_min_source_material_alignment_ratio_threshold,
+                "EM_SOURCE_MATERIAL_ALIGNMENT_RATIO_LOW",
+                "min EM source-material alignment ratio",
+            ),
+        ]
+        missing_metric_fields = []
+        breaches = []
+        for field, mode, threshold, code, label in metric_specs:
+            values = []
+            for rec in em_records:
+                raw_value = rec.get(field)
+                if isinstance(raw_value, (int, float)):
+                    value = float(raw_value)
+                    if math.isfinite(value):
+                        values.append(value)
+            if not values:
+                missing_metric_fields.append(field)
+                continue
+            observed = max(values) if mode == "max" else min(values)
+            if field == "electromagnetic_energy_imbalance_ratio":
+                em_max_energy_imbalance_ratio = observed
+            elif field == "electromagnetic_flux_divergence_proxy":
+                em_max_flux_divergence_proxy = observed
+            elif field == "electromagnetic_real_residual_norm":
+                em_max_real_residual_norm = observed
+            elif field == "electromagnetic_imag_residual_norm":
+                em_max_imag_residual_norm = observed
+            elif field == "electromagnetic_source_realization_ratio":
+                em_min_source_realization_ratio = observed
+            elif field == "electromagnetic_source_region_coverage_ratio":
+                em_min_source_region_coverage_ratio = observed
+            elif field == "electromagnetic_source_material_alignment_ratio":
+                em_min_source_material_alignment_ratio = observed
+
+            breached = observed > threshold if mode == "max" else observed < threshold
+            breaches.append(breached)
+            if breached:
+                comparator = "exceeds" if mode == "max" else "below"
+                reasons.append(
+                    Reason(
+                        code=code,
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"{label} {observed:.3f} {comparator} threshold {threshold:.3f}"
+                        ),
+                    )
+                )
+
+        if missing_metric_fields and (protected or em_require_metrics):
+            reasons.append(
+                Reason(
+                    code="EM_CORE_METRICS_MISSING",
+                    severity="warn",
+                    detail=(
+                        "missing EM metric fields: " + ", ".join(sorted(missing_metric_fields))
+                    ),
+                )
+            )
+        if breaches:
+            em_breach_rate = sum(1 for breached in breaches if breached) / len(breaches)
+            if em_breach_rate > em_max_breach_rate_threshold:
+                reasons.append(
+                    Reason(
+                        code="EM_BREACH_RATE_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"EM metric breach rate {em_breach_rate:.3f} exceeds threshold "
+                            f"{em_max_breach_rate_threshold:.3f}"
                         ),
                     )
                 )
@@ -3046,6 +3310,43 @@ def evaluate_release_readiness(
                     )
                 )
 
+        em_energy_imbalance_trend_ratio = fixture_trend_ratio(
+            "electromagnetic_energy_imbalance_ratio"
+        )
+        if (
+            em_energy_imbalance_trend_ratio is not None
+            and em_energy_imbalance_trend_ratio
+            > em_max_energy_imbalance_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_ENERGY_IMBALANCE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"EM energy-imbalance trend ratio {em_energy_imbalance_trend_ratio:.3f} exceeds "
+                        f"threshold {em_max_energy_imbalance_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_flux_divergence_trend_ratio = fixture_trend_ratio(
+            "electromagnetic_flux_divergence_proxy"
+        )
+        if (
+            em_flux_divergence_trend_ratio is not None
+            and em_flux_divergence_trend_ratio > em_max_flux_divergence_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_FLUX_DIVERGENCE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"EM flux-divergence trend ratio {em_flux_divergence_trend_ratio:.3f} exceeds "
+                        f"threshold {em_max_flux_divergence_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         plastic_trend_ratio = fixture_trend_ratio("plastic_nonlinear_severity")
         if (
             plastic_trend_ratio is not None
@@ -3563,6 +3864,26 @@ def evaluate_release_readiness(
         "electro_max_joule_trend_ratio_threshold": electro_max_joule_trend_ratio_threshold,
         "electro_max_spread_trend_ratio_threshold": electro_max_spread_trend_ratio_threshold,
         "electro_max_time_scale_trend_ratio_threshold": electro_max_time_scale_trend_ratio_threshold,
+        "em_max_energy_imbalance_ratio": em_max_energy_imbalance_ratio,
+        "em_max_energy_imbalance_ratio_threshold": em_max_energy_imbalance_ratio_threshold,
+        "em_max_flux_divergence_proxy": em_max_flux_divergence_proxy,
+        "em_max_flux_divergence_proxy_threshold": em_max_flux_divergence_proxy_threshold,
+        "em_max_real_residual_norm": em_max_real_residual_norm,
+        "em_max_real_residual_norm_threshold": em_max_real_residual_norm_threshold,
+        "em_max_imag_residual_norm": em_max_imag_residual_norm,
+        "em_max_imag_residual_norm_threshold": em_max_imag_residual_norm_threshold,
+        "em_min_source_realization_ratio": em_min_source_realization_ratio,
+        "em_min_source_realization_ratio_threshold": em_min_source_realization_ratio_threshold,
+        "em_min_source_region_coverage_ratio": em_min_source_region_coverage_ratio,
+        "em_min_source_region_coverage_ratio_threshold": em_min_source_region_coverage_ratio_threshold,
+        "em_min_source_material_alignment_ratio": em_min_source_material_alignment_ratio,
+        "em_min_source_material_alignment_ratio_threshold": em_min_source_material_alignment_ratio_threshold,
+        "em_breach_rate": em_breach_rate,
+        "em_max_breach_rate_threshold": em_max_breach_rate_threshold,
+        "em_energy_imbalance_trend_ratio": em_energy_imbalance_trend_ratio,
+        "em_max_energy_imbalance_trend_ratio_threshold": em_max_energy_imbalance_trend_ratio_threshold,
+        "em_flux_divergence_trend_ratio": em_flux_divergence_trend_ratio,
+        "em_max_flux_divergence_trend_ratio_threshold": em_max_flux_divergence_trend_ratio_threshold,
         "plastic_max_nonlinear_severity": plastic_max_nonlinear_severity,
         "plastic_max_nonlinear_severity_threshold": plastic_max_nonlinear_severity_threshold,
         "plastic_load_realization_ratio_min": plastic_load_realization_ratio_min,

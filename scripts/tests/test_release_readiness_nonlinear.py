@@ -248,6 +248,17 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO",
@@ -357,6 +368,67 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("KEY_PERF_TREND_SLOWDOWN", codes)
+
+    def test_em_metric_breaches_emit_reasons(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_energy_imbalance_ratio": 0.9,
+                "electromagnetic_flux_divergence_proxy": 0.9,
+                "electromagnetic_real_residual_norm": 0.9,
+                "electromagnetic_imag_residual_norm": 0.9,
+                "electromagnetic_source_realization_ratio": 0.1,
+                "electromagnetic_source_region_coverage_ratio": 0.1,
+                "electromagnetic_source_material_alignment_ratio": 0.1,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO"] = "0.2"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY"] = "0.2"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM"] = "0.2"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM"] = "0.2"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO"] = "0.8"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO"] = "0.8"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO"] = "0.8"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE"] = "0.2"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_ENERGY_IMBALANCE_RATIO_HIGH", codes)
+        self.assertIn("EM_BREACH_RATE_HIGH", codes)
+
+    def test_em_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_energy_imbalance_ratio": 0.4,
+                "electromagnetic_flux_divergence_proxy": 0.4,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_energy_imbalance_ratio": 0.1,
+                "electromagnetic_flux_divergence_proxy": 0.1,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO"] = "1.5"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO"] = "1.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_ENERGY_IMBALANCE_TREND_WORSENING", codes)
+        self.assertIn("EM_FLUX_DIVERGENCE_TREND_WORSENING", codes)
 
     def test_prep_health_count_warns_non_protected(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

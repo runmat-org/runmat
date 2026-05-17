@@ -133,3 +133,5 @@ Progress update (2026-05-17):
     added/enforced comparator metrics for sparse-assignments, fallback-heavy, overlap-interference, and boundary-kernel EM provider fixtures, and expanded required metric sets for boundary-penalty/phased-source fixtures in enforce-mode validation.
 33. [x] EM native cost telemetry surfaced for governance evidence:
     electromagnetic FEA runs now emit `FEA_EM_COST` diagnostics (`prepared_build_ms`, `solve_ms`, `fallback_apply_count`), and benchmark conformance extraction now prefers these EM-native metrics when populating solver-cost telemetry fields.
+34. [x] Release-readiness Maxwell posture gating expanded:
+    `release_readiness_nonlinear.py` now enforces profile-tuned EM readiness thresholds and trend checks (energy imbalance, flux divergence, residual norms, source realization/coverage/alignment, and EM breach-rate/trend-ratio limits), with regression coverage in `scripts.tests.test_release_readiness_nonlinear`.
