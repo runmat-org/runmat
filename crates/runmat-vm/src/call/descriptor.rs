@@ -1,6 +1,7 @@
 use crate::bytecode::SemanticFunctionRegistry;
 use crate::call::feval::{forward_builtin_feval, try_closure_builtin_fallback};
 use runmat_builtins::{Closure, Value};
+use runmat_hir::{CallableIdentity, FunctionId};
 use runmat_runtime::RuntimeError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,9 +53,8 @@ impl CallableMetadata {
 
 #[derive(Debug, Clone)]
 enum CallableTarget {
-    Semantic {
-        function: usize,
-        name: Option<String>,
+    Resolved {
+        identity: CallableIdentity,
         name_fallback: bool,
     },
     NameOnlyBuiltinFallback(String),
@@ -71,7 +71,7 @@ pub(crate) struct CallableDescriptor {
 
 impl CallableDescriptor {
     pub(crate) fn semantic(
-        function: runmat_hir::FunctionId,
+        function: FunctionId,
         args: Vec<Value>,
         requested_outputs: usize,
     ) -> Self {
@@ -93,10 +93,29 @@ impl CallableDescriptor {
         requested_outputs: usize,
         metadata: CallableMetadata,
     ) -> Self {
+        let identity = CallableIdentity::SemanticFunction(FunctionId(function));
+        Self::resolved_inner(
+            identity,
+            name,
+            name_fallback,
+            args,
+            requested_outputs,
+            metadata,
+        )
+    }
+
+    fn resolved_inner(
+        identity: CallableIdentity,
+        display_name: Option<String>,
+        name_fallback: bool,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        mut metadata: CallableMetadata,
+    ) -> Self {
+        metadata.display_name = metadata.display_name.or(display_name);
         Self {
-            target: CallableTarget::Semantic {
-                function,
-                name,
+            target: CallableTarget::Resolved {
+                identity,
                 name_fallback,
             },
             args,
@@ -150,7 +169,7 @@ impl CallableDescriptor {
     }
 
     pub(crate) fn semantic_named(
-        function: runmat_hir::FunctionId,
+        function: FunctionId,
         name: String,
         args: Vec<Value>,
         requested_outputs: usize,
@@ -268,6 +287,78 @@ fn undefined_name_error(name: &str, metadata: &CallableMetadata) -> RuntimeError
     )
 }
 
+async fn execute_resolved_callable(
+    identity: CallableIdentity,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    metadata: CallableMetadata,
+    name_fallback: bool,
+) -> Result<Value, RuntimeError> {
+    match identity {
+        CallableIdentity::SemanticFunction(function) => {
+            if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
+                function.0,
+                &args,
+                requested_outputs,
+            )
+            .await
+            {
+                return result;
+            }
+            if name_fallback {
+                if let Some(name) = metadata.display_name.clone() {
+                    return forward_builtin_feval(Value::FunctionHandle(name), args).await;
+                }
+            }
+            Err(semantic_unavailable_error(function.0, &metadata))
+        }
+        other => {
+            let Some(name) = other.display_name() else {
+                return Err(undefined_name_error("<unnamed callable>", &metadata));
+            };
+            forward_builtin_feval(Value::FunctionHandle(name), args).await
+        }
+    }
+}
+
+async fn try_execute_resolved_callable(
+    identity: CallableIdentity,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    metadata: CallableMetadata,
+    name_fallback: bool,
+) -> Result<Option<Value>, RuntimeError> {
+    match identity {
+        CallableIdentity::SemanticFunction(function) => {
+            if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
+                function.0,
+                &args,
+                requested_outputs,
+            )
+            .await
+            {
+                return result.map(Some);
+            }
+            if name_fallback {
+                if let Some(name) = metadata.display_name {
+                    return forward_builtin_feval(Value::FunctionHandle(name), args)
+                        .await
+                        .map(Some);
+                }
+            }
+            Ok(None)
+        }
+        other => {
+            let Some(name) = other.display_name() else {
+                return Ok(None);
+            };
+            forward_builtin_feval(Value::FunctionHandle(name), args)
+                .await
+                .map(Some)
+        }
+    }
+}
+
 pub(crate) async fn execute_callable_descriptor(
     descriptor: CallableDescriptor,
 ) -> Result<Value, RuntimeError> {
@@ -278,26 +369,12 @@ pub(crate) async fn execute_callable_descriptor(
         metadata,
     } = descriptor;
     match target {
-        CallableTarget::Semantic {
-            function,
-            name,
+        CallableTarget::Resolved {
+            identity,
             name_fallback,
         } => {
-            if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
-                function,
-                &args,
-                requested_outputs,
-            )
-            .await
-            {
-                return result;
-            }
-            if name_fallback {
-                if let Some(name) = name {
-                    return forward_builtin_feval(Value::FunctionHandle(name), args).await;
-                }
-            }
-            Err(semantic_unavailable_error(function, &metadata))
+            execute_resolved_callable(identity, args, requested_outputs, metadata, name_fallback)
+                .await
         }
         CallableTarget::NameOnlyBuiltinFallback(name) => {
             if let Some(result) = try_closure_builtin_fallback(&name, &args).await? {
@@ -319,28 +396,18 @@ pub(crate) async fn try_execute_callable_descriptor(
         metadata,
     } = descriptor;
     match target {
-        CallableTarget::Semantic {
-            function,
-            name,
+        CallableTarget::Resolved {
+            identity,
             name_fallback,
         } => {
-            if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
-                function,
-                &args,
+            try_execute_resolved_callable(
+                identity,
+                args,
                 requested_outputs,
+                metadata,
+                name_fallback,
             )
             .await
-            {
-                return result.map(Some);
-            }
-            if name_fallback {
-                if let Some(name) = name {
-                    return forward_builtin_feval(Value::FunctionHandle(name), args)
-                        .await
-                        .map(Some);
-                }
-            }
-            Ok(None)
         }
         CallableTarget::NameOnlyBuiltinFallback(name) => {
             if let Some(result) = try_closure_builtin_fallback(&name, &args).await? {

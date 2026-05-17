@@ -1,5 +1,6 @@
 use crate::RuntimeError;
 use runmat_builtins::Value;
+use runmat_hir::CallableIdentity;
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::future::Future;
@@ -21,8 +22,7 @@ pub enum SemanticCallableKind {
 
 #[derive(Debug, Clone)]
 pub struct SemanticCallableRequest {
-    function: Option<usize>,
-    name: Option<String>,
+    identity: CallableIdentity,
     args: Vec<Value>,
     requested_outputs: usize,
     kind: SemanticCallableKind,
@@ -36,8 +36,7 @@ impl SemanticCallableRequest {
         kind: SemanticCallableKind,
     ) -> Self {
         Self {
-            function: None,
-            name: Some(name),
+            identity: CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
             args,
             requested_outputs,
             kind,
@@ -46,14 +45,27 @@ impl SemanticCallableRequest {
 
     pub fn semantic(
         function: usize,
-        name: String,
+        _name: String,
         args: Vec<Value>,
         requested_outputs: usize,
         kind: SemanticCallableKind,
     ) -> Self {
         Self {
-            function: Some(function),
-            name: Some(name),
+            identity: CallableIdentity::SemanticFunction(runmat_hir::FunctionId(function)),
+            args,
+            requested_outputs,
+            kind,
+        }
+    }
+
+    pub fn resolved(
+        identity: CallableIdentity,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        kind: SemanticCallableKind,
+    ) -> Self {
+        Self {
+            identity,
             args,
             requested_outputs,
             kind,
@@ -134,10 +146,10 @@ pub async fn try_call_semantic_descriptor(
     request: SemanticCallableRequest,
 ) -> Option<Result<Value, RuntimeError>> {
     let _kind = request.kind;
-    if let Some(function) = request.function {
-        return try_call_semantic_function(function, &request.args, request.requested_outputs)
+    if let CallableIdentity::SemanticFunction(function) = request.identity {
+        return try_call_semantic_function(function.0, &request.args, request.requested_outputs)
             .await;
     }
-    let name = request.name.as_deref()?;
-    try_call_semantic_function_by_name(name, &request.args, request.requested_outputs).await
+    let name = request.identity.display_name()?;
+    try_call_semantic_function_by_name(&name, &request.args, request.requested_outputs).await
 }
