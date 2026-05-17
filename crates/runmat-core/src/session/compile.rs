@@ -220,7 +220,6 @@ fn remap_semantic_function_instr(
         | runmat_vm::Instr::CreateSemanticFunctionHandle(function, _)
         | runmat_vm::Instr::CallSemanticFunction(function, _)
         | runmat_vm::Instr::CallSemanticFunctionMulti(function, _, _)
-        | runmat_vm::Instr::CallSemanticFunctionExpandMulti(function, _)
         | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(function, _, _) => {
             if let Some(new_id) = remap.get(function).copied() {
                 *function = new_id;
@@ -300,7 +299,7 @@ fn bind_semantic_callback_literals(
 
     for (pc, instr) in bytecode.instructions.iter().enumerate() {
         match instr {
-            runmat_vm::Instr::CallBuiltin(name, argc)
+            runmat_vm::Instr::CallBuiltinMulti(name, argc, _)
                 if matches!(name.as_str(), "cellfun" | "arrayfun") && *argc > 0 =>
             {
                 if stack.len() >= *argc {
@@ -312,7 +311,7 @@ fn bind_semantic_callback_literals(
                     }
                 }
             }
-            runmat_vm::Instr::CallFeval(argc) | runmat_vm::Instr::CallFevalMulti(argc, _) => {
+            runmat_vm::Instr::CallFevalMulti(argc, _) => {
                 let pops = *argc + 1;
                 if stack.len() >= pops {
                     let producer = stack[stack.len() - pops];
@@ -323,8 +322,7 @@ fn bind_semantic_callback_literals(
                     }
                 }
             }
-            runmat_vm::Instr::CallFevalExpandMulti(_)
-            | runmat_vm::Instr::CallFevalExpandMultiOutput(_, _) => {
+            runmat_vm::Instr::CallFevalExpandMultiOutput(_, _) => {
                 if let Some(effect) = instr.stack_effect() {
                     if stack.len() >= effect.pops {
                         let producer = stack[stack.len() - effect.pops];
