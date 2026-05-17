@@ -379,6 +379,18 @@ async fn execute_resolved_callable(
         }
         other => match fallback_policy {
             CallableFallbackPolicy::RuntimeNameResolution => {
+                let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
+                    other.clone(),
+                    fallback_policy,
+                    args.clone(),
+                    requested_outputs,
+                    runmat_runtime::user_functions::SemanticCallableKind::Other,
+                );
+                if let Some(result) =
+                    runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
+                {
+                    return result;
+                }
                 let Some(name) = other.display_name() else {
                     return Err(undefined_name_error("<unnamed callable>", &metadata));
                 };
@@ -425,6 +437,18 @@ async fn try_execute_resolved_callable(
                 CallableFallbackPolicy::RuntimeNameResolution
             ) {
                 return Ok(None);
+            }
+            let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
+                other.clone(),
+                fallback_policy,
+                args.clone(),
+                requested_outputs,
+                runmat_runtime::user_functions::SemanticCallableKind::Other,
+            );
+            if let Some(result) =
+                runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
+            {
+                return result.map(Some);
             }
             let Some(name) = other.display_name() else {
                 return Ok(None);
