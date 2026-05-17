@@ -47,7 +47,8 @@ fn meshgrid_accepts_precomputed_ranges() {
     assert!(bytecode.instructions.iter().any(|instr| {
         matches!(instr, Instr::CallBuiltinMulti(name, 2, 1) if name == "meshgrid")
             || matches!(instr, Instr::CallBuiltinMulti(name, 2, 2) if name == "meshgrid")
-            || matches!(instr, Instr::CallBuiltinExpandMulti(name, specs) if name == "meshgrid" && specs.len() == 2)
+            || matches!(instr, Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
+                if name == "meshgrid" && *out_count == 1 && specs.len() == 2)
     }));
     let vars = execute_semantic_source(source).unwrap();
     let shapes: Vec<Vec<usize>> = vars

@@ -19,9 +19,7 @@ struct CompileContext<'a> {
     module: &'a mut JITModule,
     runmat_call_semantic_function_id: FuncId,
     runmat_call_semantic_function_outputs_id: FuncId,
-    runmat_call_semantic_function_value_id: FuncId,
     runmat_call_semantic_function_values_id: FuncId,
-    runmat_call_semantic_function_expanded_value_id: FuncId,
     runmat_call_semantic_function_expanded_values_id: FuncId,
 }
 
@@ -236,9 +234,9 @@ impl BytecodeCompiler {
         module: &mut JITModule,
         runmat_call_semantic_function_id: FuncId,
         runmat_call_semantic_function_outputs_id: FuncId,
-        runmat_call_semantic_function_value_id: FuncId,
+        _runmat_call_semantic_function_value_id: FuncId,
         runmat_call_semantic_function_values_id: FuncId,
-        runmat_call_semantic_function_expanded_value_id: FuncId,
+        _runmat_call_semantic_function_expanded_value_id: FuncId,
         runmat_call_semantic_function_expanded_values_id: FuncId,
     ) -> Result<()> {
         let mut builder_context = FunctionBuilderContext::new();
@@ -274,9 +272,7 @@ impl BytecodeCompiler {
             module,
             runmat_call_semantic_function_id,
             runmat_call_semantic_function_outputs_id,
-            runmat_call_semantic_function_value_id,
             runmat_call_semantic_function_values_id,
-            runmat_call_semantic_function_expanded_value_id,
             runmat_call_semantic_function_expanded_values_id,
         };
 
@@ -681,37 +677,15 @@ impl BytecodeCompiler {
                             pc += 1;
                         }
                     }
-                    Instr::CallSemanticFunctionExpandMulti(function, specs) => {
-                        let result = if specs.iter().any(|spec| spec.is_expand) {
-                            let args =
-                                Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
-                            Self::call_semantic_function_expanded_value_jit(
-                                builder,
-                                ctx.module,
-                                ctx.runmat_call_semantic_function_expanded_value_id,
-                                function.0,
-                                &args,
-                                specs,
-                            )?
-                        } else {
-                            let args = Self::pop_non_expanding_call_args(&mut local_stack, specs)?;
-                            Self::call_semantic_function_value_jit(
-                                builder,
-                                ctx.module,
-                                ctx.runmat_call_semantic_function_value_id,
-                                function.0,
-                                &args,
-                            )?
-                        };
-                        local_stack.push(result);
-                    }
                     Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
-                        match instructions.get(pc + 1) {
-                            Some(Instr::Unpack(count)) if count == out_count => {}
-                            _ => {
-                                return Err(execution_error(
-                                    "Semantic expanded multi-output JIT calls require a following Unpack",
-                                ))
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => {
+                                    return Err(execution_error(
+                                        "Semantic expanded multi-output JIT calls require a following Unpack",
+                                    ))
+                                }
                             }
                         }
                         let results = if specs.iter().any(|spec| spec.is_expand) {
@@ -740,7 +714,9 @@ impl BytecodeCompiler {
                         for result in results {
                             local_stack.push(result);
                         }
-                        pc += 1;
+                        if *out_count > 1 {
+                            pc += 1;
+                        }
                     }
                     Instr::LoadLocal(offset) => {
                         // Load from local variable slot
@@ -781,12 +757,9 @@ impl BytecodeCompiler {
                         builder.ins().return_(&[zero]);
                         block_terminated = true;
                     }
-                    Instr::CallBuiltinExpandMulti(_, _)
-                    | Instr::CallBuiltinExpandMultiOutput(_, _, _)
+                    Instr::CallBuiltinExpandMultiOutput(_, _, _)
                     | Instr::CallFunctionExpandMultiOutput(_, _, _)
-                    | Instr::CallFevalExpandMulti(_)
                     | Instr::CallFevalExpandMultiOutput(_, _)
-                    | Instr::CallMethodOrMemberIndexExpandMulti(_, _)
                     | Instr::CallMethodOrMemberIndexExpandMultiOutput(_, _, _) => {
                         return Self::unsupported_expanded_call_jit();
                     }
@@ -826,7 +799,6 @@ impl BytecodeCompiler {
                     | Instr::RegisterImport { .. }
                     | Instr::DeclareGlobal(_)
                     | Instr::DeclarePersistent(_)
-                    | Instr::CallFeval(_)
                     | Instr::CallFevalMulti(_, _) => {
                         return Err(execution_error(
                             "Unsupported instruction in JIT; use interpreter".to_string(),
@@ -1225,53 +1197,6 @@ impl BytecodeCompiler {
         Some(specs_ptr)
     }
 
-    fn call_semantic_function_value_jit(
-        builder: &mut FunctionBuilder,
-        module: &mut JITModule,
-        runmat_call_semantic_function_value_id: FuncId,
-        function_id: usize,
-        args: &[Value],
-    ) -> Result<Value> {
-        let args_ptr = Self::store_turbine_value_num_args(builder, args)
-            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
-        let runtime_fn =
-            module.declare_func_in_func(runmat_call_semantic_function_value_id, builder.func);
-        let result_slot =
-            builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 16, 8));
-        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
-        let function_id = builder.ins().iconst(types::I64, function_id as i64);
-        let arg_count = builder.ins().iconst(types::I32, args.len() as i64);
-        let call = builder
-            .ins()
-            .call(runtime_fn, &[function_id, args_ptr, arg_count, result_ptr]);
-        let status = builder.inst_results(call)[0];
-        let zero = builder.ins().iconst(types::I32, 0);
-        let is_error = builder.ins().icmp(IntCC::NotEqual, status, zero);
-        let error_block = builder.create_block();
-        let success_block = builder.create_block();
-        let after_block = builder.create_block();
-        builder
-            .ins()
-            .brif(is_error, error_block, &[], success_block, &[]);
-        builder.switch_to_block(error_block);
-        let error_result = builder.ins().f64const(0.0);
-        builder.ins().jump(after_block, &[error_result]);
-        builder.switch_to_block(success_block);
-        let payload_offset = builder.ins().iconst(types::I64, 8);
-        let payload_ptr = builder.ins().iadd(result_ptr, payload_offset);
-        let success_result = builder
-            .ins()
-            .load(types::F64, MemFlags::new(), payload_ptr, 0);
-        builder.ins().jump(after_block, &[success_result]);
-        builder.switch_to_block(after_block);
-        builder.append_block_param(after_block, types::F64);
-        let result = builder.block_params(after_block)[0];
-        builder.seal_block(error_block);
-        builder.seal_block(success_block);
-        builder.seal_block(after_block);
-        Ok(result)
-    }
-
     fn call_semantic_function_values_jit(
         builder: &mut FunctionBuilder,
         module: &mut JITModule,
@@ -1341,43 +1266,6 @@ impl BytecodeCompiler {
         Ok(results)
     }
 
-    fn call_semantic_function_expanded_value_jit(
-        builder: &mut FunctionBuilder,
-        module: &mut JITModule,
-        runmat_call_semantic_function_expanded_value_id: FuncId,
-        function_id: usize,
-        args: &[StackEntry],
-        specs: &[ArgSpec],
-    ) -> Result<Value> {
-        let args_ptr = Self::store_turbine_value_arg_entries(builder, args)
-            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
-        let specs_ptr = Self::store_turbine_arg_specs(builder, specs)
-            .unwrap_or_else(|| builder.ins().iconst(types::I64, 0));
-        let runtime_fn = module.declare_func_in_func(
-            runmat_call_semantic_function_expanded_value_id,
-            builder.func,
-        );
-        let result_slot =
-            builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 16, 8));
-        let result_ptr = builder.ins().stack_addr(types::I64, result_slot, 0);
-        let function_id = builder.ins().iconst(types::I64, function_id as i64);
-        let arg_count = builder.ins().iconst(types::I32, args.len() as i64);
-        let spec_count = builder.ins().iconst(types::I32, specs.len() as i64);
-        let call = builder.ins().call(
-            runtime_fn,
-            &[
-                function_id,
-                args_ptr,
-                arg_count,
-                specs_ptr,
-                spec_count,
-                result_ptr,
-            ],
-        );
-        let status = builder.inst_results(call)[0];
-        Self::load_turbine_value_payload_or_zero(builder, status, result_ptr)
-    }
-
     fn call_semantic_function_expanded_values_jit(
         builder: &mut FunctionBuilder,
         module: &mut JITModule,
@@ -1419,14 +1307,6 @@ impl BytecodeCompiler {
         );
         let status = builder.inst_results(call)[0];
         Self::load_turbine_value_payloads_or_zero(builder, status, result_ptr, out_count)
-    }
-
-    fn load_turbine_value_payload_or_zero(
-        builder: &mut FunctionBuilder,
-        status: Value,
-        result_ptr: Value,
-    ) -> Result<Value> {
-        Ok(Self::load_turbine_value_payloads_or_zero(builder, status, result_ptr, 1)?[0])
     }
 
     fn load_turbine_value_payloads_or_zero(

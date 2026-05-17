@@ -288,12 +288,12 @@ fn atan2_multi_output_argument_path_unpacks_before_call() {
 
     let bytecode = compile_semantic_source(input).expect("compile atan2 multi-output script");
     let has_output_list_expansion = bytecode.instructions.iter().any(|instr| {
-        matches!(instr, Instr::CallBuiltinExpandMulti(name, specs)
-            if name == "atan2" && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all)
+        matches!(instr, Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
+            if name == "atan2" && *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all)
     });
     assert!(
         has_output_list_expansion,
-        "expected semantic CallBuiltinExpandMulti(atan2) expansion in bytecode"
+        "expected semantic CallBuiltinExpandMultiOutput(atan2) expansion in bytecode"
     );
 }
 

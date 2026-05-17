@@ -154,7 +154,6 @@ pub enum Instr {
 
     // Ambiguous `obj.name(...)` shape resolved at runtime as method call or member indexing.
     CallMethodOrMemberIndexMulti(String, usize, usize),
-    CallMethodOrMemberIndexExpandMulti(String, Vec<ArgSpec>),
     CallMethodOrMemberIndexExpandMultiOutput(String, Vec<ArgSpec>, usize),
 
     // Closure and static class dispatch.
@@ -173,9 +172,7 @@ pub enum Instr {
     },
 
     // `feval` keeps the callable value on the stack instead of naming the target statically.
-    CallFeval(usize),
     CallFevalMulti(usize, usize),
-    CallFevalExpandMulti(Vec<ArgSpec>),
     CallFevalExpandMultiOutput(Vec<ArgSpec>, usize),
 
     // Stack and exception-control operations.
@@ -194,9 +191,7 @@ pub enum Instr {
     CallSemanticFunctionMulti(FunctionId, usize, usize),
 
     CallFunctionExpandMultiOutput(String, Vec<ArgSpec>, usize),
-    CallSemanticFunctionExpandMulti(FunctionId, Vec<ArgSpec>),
     CallSemanticFunctionExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
-    CallBuiltinExpandMulti(String, Vec<ArgSpec>),
     CallBuiltinExpandMultiOutput(String, Vec<ArgSpec>, usize),
 
     // Packs the top N values into row or column tensor form.
@@ -292,7 +287,6 @@ impl Instr {
             Instr::CallFunctionMulti(_, argc, out_count)
             | Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
             Instr::CallMethodOrMemberIndexMulti(_, argc, _) => effect(argc + 1, 1),
-            Instr::CallFeval(argc) => effect(argc + 1, 1),
             Instr::CallFevalMulti(argc, _) => effect(argc + 1, 1),
             Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {
                 effect(rows * cols, 1)
@@ -332,14 +326,10 @@ impl Instr {
             | Instr::CreateSemanticClosure(_, _, capture_count) => effect(*capture_count, 1),
             Instr::LoadStaticProperty(_, _) => effect(0, 1),
             Instr::RegisterClass { .. } => effect(0, 0),
-            Instr::CallFevalExpandMulti(specs)
-            | Instr::CallFevalExpandMultiOutput(specs, _)
+            Instr::CallFevalExpandMultiOutput(specs, _)
             | Instr::CallFunctionExpandMultiOutput(_, specs, _)
-            | Instr::CallSemanticFunctionExpandMulti(_, specs)
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
-            | Instr::CallBuiltinExpandMulti(_, specs)
             | Instr::CallBuiltinExpandMultiOutput(_, specs, _)
-            | Instr::CallMethodOrMemberIndexExpandMulti(_, specs)
             | Instr::CallMethodOrMemberIndexExpandMultiOutput(_, specs, _) => {
                 let fixed = specs.iter().filter(|s| !s.is_expand).count();
                 let expanded: usize = specs
@@ -347,10 +337,7 @@ impl Instr {
                     .filter(|s| s.is_expand)
                     .map(|s| 1 + s.num_indices)
                     .sum();
-                let handle = usize::from(matches!(
-                    self,
-                    Instr::CallFevalExpandMulti(_) | Instr::CallFevalExpandMultiOutput(_, _)
-                ));
+                let handle = usize::from(matches!(self, Instr::CallFevalExpandMultiOutput(_, _)));
                 effect(handle + fixed + expanded, 1)
             }
             Instr::PackToRow(n) | Instr::PackToCol(n) => effect(*n, 1),

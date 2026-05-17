@@ -1321,13 +1321,14 @@ fn test_jit_semantic_expand_multi_uses_value_abi_for_scalar_args() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(11.0),
-                Instr::CallSemanticFunctionExpandMulti(
+                Instr::CallSemanticFunctionExpandMultiOutput(
                     function,
                     vec![ArgSpec {
                         is_expand: false,
                         num_indices: 0,
                         expand_all: false,
                     }],
+                    1,
                 ),
                 Instr::StoreVar(0),
             ],
@@ -1455,13 +1456,14 @@ fn test_jit_semantic_expand_multi_expands_cell_args_through_value_abi() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadVar(0),
-                Instr::CallSemanticFunctionExpandMulti(
+                Instr::CallSemanticFunctionExpandMultiOutput(
                     function,
                     vec![ArgSpec {
                         is_expand: true,
                         num_indices: 0,
                         expand_all: true,
                     }],
+                    1,
                 ),
                 Instr::StoreVar(1),
             ],

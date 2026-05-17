@@ -821,11 +821,6 @@ impl TurbineEngine {
                     argc.hash(&mut hasher);
                     out_count.hash(&mut hasher);
                 }
-                Instr::CallSemanticFunctionExpandMulti(function, specs) => {
-                    "CallSemanticFunctionExpandMulti".hash(&mut hasher);
-                    function.0.hash(&mut hasher);
-                    Self::hash_arg_specs(&mut hasher, specs);
-                }
                 Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
                     "CallSemanticFunctionExpandMultiOutput".hash(&mut hasher);
                     function.0.hash(&mut hasher);
@@ -881,10 +876,6 @@ impl TurbineEngine {
                 }
                 Instr::PopTry => {
                     "PopTry".hash(&mut hasher);
-                }
-                Instr::CallFeval(argc) => {
-                    "CallFeval".hash(&mut hasher);
-                    argc.hash(&mut hasher);
                 }
                 _ => {
                     "Other".hash(&mut hasher);

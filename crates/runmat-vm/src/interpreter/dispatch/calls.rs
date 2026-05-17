@@ -1,9 +1,8 @@
-use crate::bytecode::{ArgSpec, Instr, SemanticFunctionRegistry};
+use crate::bytecode::{ArgSpec, SemanticFunctionRegistry};
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
-use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
     build_expanded_args_from_specs, call_object_subsref_brace_values, expand_cell_indices,
 };
@@ -14,10 +13,6 @@ use crate::object::resolve as obj_resolve;
 use runmat_builtins::{MException, Value};
 use runmat_hir::CallableFallbackPolicy;
 use runmat_runtime::RuntimeError;
-
-pub enum FevalHandling {
-    Completed,
-}
 
 pub enum BuiltinHandling {
     Completed,
@@ -59,49 +54,6 @@ pub struct UserCallContext<'a> {
     pub out_count: usize,
     pub semantic_registry: &'a SemanticFunctionRegistry,
     pub exception: ExceptionRouteContext<'a>,
-}
-
-#[cfg(feature = "native-accel")]
-async fn accel_prepare_args(name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
-    Ok(runmat_accelerate::prepare_builtin_args(name, args)
-        .await
-        .map_err(|e| e.to_string())?)
-}
-
-#[cfg(not(feature = "native-accel"))]
-async fn accel_prepare_args(_name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
-    Ok(args.to_vec())
-}
-
-async fn call_builtin_auto(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
-    let prepared = accel_prepare_args(name, args).await?;
-    runmat_runtime::call_builtin_async(name, &prepared).await
-}
-
-pub(crate) fn output_hint_for_next(next_instr: Option<&Instr>) -> usize {
-    match next_instr {
-        Some(Instr::Pop) | Some(Instr::EmitStackTop { .. }) => 0,
-        _ => 1,
-    }
-}
-
-pub(crate) fn requested_output_count_from_next(next_instr: Option<&Instr>) -> Option<usize> {
-    match next_instr {
-        Some(Instr::Unpack(count)) => Some(*count),
-        _ => None,
-    }
-}
-
-pub fn handle_feval_dispatch(
-    dispatch: Result<FevalDispatch, RuntimeError>,
-    stack: &mut Vec<Value>,
-) -> Result<FevalHandling, RuntimeError> {
-    match dispatch? {
-        FevalDispatch::Completed(result) => {
-            stack.push(result);
-            Ok(FevalHandling::Completed)
-        }
-    }
 }
 
 fn push_single_result(stack: &mut Vec<Value>, result: Value) {
@@ -399,23 +351,6 @@ pub async fn handle_user_function_call(
 ) -> Result<UserCallHandling, RuntimeError> {
     let args = crate::call::builtins::collect_call_args(ctx.stack, arg_count)?;
     handle_prepared_user_function_call(ctx, args, refresh_vars).await
-}
-
-pub async fn handle_builtin_expand_multi_call(
-    stack: &mut Vec<Value>,
-    name: &str,
-    specs: &[ArgSpec],
-    next_instr: Option<&Instr>,
-) -> Result<BuiltinHandling, RuntimeError> {
-    let args = build_builtin_expand_multi_args(stack, specs).await?;
-    let output_hint = output_hint_for_next(next_instr);
-    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
-    let result = match requested_output_count_from_next(next_instr) {
-        Some(count) => runmat_runtime::call_builtin_async_with_outputs(name, &args, count).await?,
-        None => call_builtin_auto(name, &args).await?,
-    };
-    push_single_result(stack, result);
-    Ok(BuiltinHandling::Completed)
 }
 
 pub async fn handle_method_or_member_index_multi_call(

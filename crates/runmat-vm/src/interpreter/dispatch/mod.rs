@@ -23,12 +23,11 @@ pub use arrays::{
 };
 pub use calls::{
     build_builtin_expand_multi_args, build_feval_expand_multi_args,
-    build_user_function_expand_multi_args, handle_builtin_call_multi,
-    handle_builtin_expand_multi_call, handle_create_closure, handle_create_semantic_closure,
-    handle_feval_dispatch, handle_load_method, handle_load_static_property,
+    build_user_function_expand_multi_args, handle_builtin_call_multi, handle_create_closure,
+    handle_create_semantic_closure, handle_load_method, handle_load_static_property,
     handle_method_or_member_index_expand_multi_call, handle_method_or_member_index_multi_call,
     handle_prepared_user_function_call, handle_register_class, handle_user_function_call,
-    BuiltinHandling, FevalHandling, UserCallHandling,
+    BuiltinHandling, UserCallHandling,
 };
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
 pub use exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -58,7 +57,6 @@ pub struct DispatchMeta<'a> {
     pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
     pub call_counts: &'a [(usize, usize)],
     pub current_function_name: &'a str,
-    pub next_instr: Option<&'a Instr>,
 }
 
 pub struct DispatchState<'a> {
@@ -130,7 +128,6 @@ pub async fn dispatch_instruction(
         call_arg_spans,
         call_counts,
         current_function_name,
-        next_instr,
     } = meta;
     let DispatchState {
         stack,
@@ -467,19 +464,6 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallFeval(argc) => {
-            let args = crate::call::builtins::collect_call_args(stack, *argc)?;
-            let func_val = crate::interpreter::stack::pop_value(stack)?;
-            match handle_feval_dispatch(
-                crate::call::feval::execute_feval(func_val, args, 1, semantic_registry).await,
-                stack,
-            )? {
-                FevalHandling::Completed => {}
-            }
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
         Instr::CallFevalMulti(argc, out_count) => {
             let args = crate::call::builtins::collect_call_args(stack, *argc)?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
@@ -489,19 +473,6 @@ pub async fn dispatch_instruction(
                 crate::call::feval::FevalDispatch::Completed(result) => {
                     stack.push(result);
                 }
-            }
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CallFevalExpandMulti(specs) => {
-            let args = build_feval_expand_multi_args(stack, specs).await?;
-            let func_val = crate::interpreter::stack::pop_value(stack)?;
-            match handle_feval_dispatch(
-                crate::call::feval::execute_feval(func_val, args, 1, semantic_registry).await,
-                stack,
-            )? {
-                FevalHandling::Completed => {}
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -568,12 +539,6 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallBuiltinExpandMulti(name, specs) => {
-            handle_builtin_expand_multi_call(stack, name, specs, next_instr).await?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
         Instr::CallBuiltinExpandMultiOutput(name, specs, out_count) => {
             let args = build_builtin_expand_multi_args(stack, specs).await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
@@ -616,14 +581,6 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallSemanticFunctionExpandMulti(function, specs) => {
-            let args = build_user_function_expand_multi_args(stack, specs).await?;
-            let descriptor = CallableDescriptor::semantic(*function, args, 1);
-            stack.push(execute_callable_descriptor(descriptor).await?);
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
         Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
             let descriptor = CallableDescriptor::semantic(*function, args, *out_count);
@@ -635,19 +592,6 @@ pub async fn dispatch_instruction(
         Instr::CallMethodOrMemberIndexMulti(name, arg_count, out_count) => {
             handle_method_or_member_index_multi_call(stack, name.clone(), *arg_count, *out_count)
                 .await?;
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
-        Instr::CallMethodOrMemberIndexExpandMulti(name, specs) => {
-            handle_method_or_member_index_expand_multi_call(
-                stack,
-                name.clone(),
-                specs,
-                calls::requested_output_count_from_next(next_instr),
-                calls::output_hint_for_next(next_instr),
-            )
-            .await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

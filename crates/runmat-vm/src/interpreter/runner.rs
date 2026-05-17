@@ -464,7 +464,6 @@ async fn run_interpreter_inner(
             &bytecode.instructions[pc],
             stack.len(),
         );
-        let next_instr = bytecode.instructions.get(pc + 1);
         let call_counts_snapshot = CALL_COUNTS.with(|cc| cc.borrow().clone());
         let store_var_global_aliases = match &bytecode.instructions[pc] {
             Instr::StoreVar(_) => Some(global_aliases.clone()),
@@ -514,7 +513,6 @@ async fn run_interpreter_inner(
                 call_arg_spans: bytecode.call_arg_spans.get(pc).cloned().flatten(),
                 call_counts: &call_counts_snapshot,
                 current_function_name: &current_function_name,
-                next_instr,
             },
             interp_dispatch::DispatchState {
                 stack: &mut stack,
@@ -628,7 +626,6 @@ async fn run_interpreter_inner(
             | Instr::StoreSlice(_, _, _, _)
             | Instr::StoreSliceExpr { .. }
             | Instr::CallMethodOrMemberIndexMulti(_, _, _)
-            | Instr::CallMethodOrMemberIndexExpandMulti(_, _)
             | Instr::CallMethodOrMemberIndexExpandMultiOutput(_, _, _)
             | Instr::LoadMethod(_)
             | Instr::CreateFunctionHandle(_)
@@ -637,18 +634,14 @@ async fn run_interpreter_inner(
             | Instr::CreateSemanticClosure(_, _, _)
             | Instr::LoadStaticProperty(_, _)
             | Instr::RegisterClass { .. }
-            | Instr::CallFeval(_)
             | Instr::CallFevalMulti(_, _)
-            | Instr::CallFevalExpandMulti(_)
             | Instr::CallFevalExpandMultiOutput(_, _)
             | Instr::CallBuiltinMulti(_, _, _)
             | Instr::CallSemanticFunction(_, _)
             | Instr::CallSemanticFunctionMulti(_, _, _)
             | Instr::CallFunctionMulti(_, _, _)
             | Instr::CallFunctionExpandMultiOutput(_, _, _)
-            | Instr::CallSemanticFunctionExpandMulti(_, _)
             | Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
-            | Instr::CallBuiltinExpandMulti(_, _)
             | Instr::CallBuiltinExpandMultiOutput(_, _, _)
             | Instr::ExitScope(_)
             | Instr::RegisterImport { .. }

@@ -1563,7 +1563,9 @@ impl Compiler {
                             output_count,
                         ));
                     } else {
-                        self.emit(Instr::CallSemanticFunctionExpandMulti(*function, specs));
+                        self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
+                            *function, specs, 1,
+                        ));
                     }
                 } else if let Some(output_count) = requested_outputs {
                     if output_count == 1 {
