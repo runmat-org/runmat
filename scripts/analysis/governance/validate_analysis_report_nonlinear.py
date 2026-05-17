@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -174,6 +175,33 @@ CONTACT_REQUIRED_FIELDS = {
     "contact_nonlinear_severity",
 }
 
+PERFORMANCE_REQUIRED_FIELDS = {
+    "nonlinear_assembly_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "thermo_gradient_pathological_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "electro_thermal_joule_pathological_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "cfd_steady_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "cht_coupled_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "fsi_coupled_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+}
+
 
 def is_true(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
@@ -293,6 +321,24 @@ def main() -> int:
             if missing_fields:
                 errors.append(
                     f"fixture {fixture_id} missing contact summary fields: {', '.join(missing_fields)}"
+                )
+
+        if fixture_id in PERFORMANCE_REQUIRED_FIELDS:
+            for field in sorted(PERFORMANCE_REQUIRED_FIELDS[fixture_id]):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    errors.append(
+                        f"fixture {fixture_id} missing finite performance field: {field}"
+                    )
+                    continue
+                if float(value) < 0.0:
+                    errors.append(
+                        f"fixture {fixture_id} has negative performance field: {field}"
+                    )
+            backend = record.get("gpu_solver_backend")
+            if not isinstance(backend, str) or not backend.strip():
+                errors.append(
+                    f"fixture {fixture_id} missing non-empty performance field: gpu_solver_backend"
                 )
 
     if require_thermo_summary:

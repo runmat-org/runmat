@@ -14,6 +14,9 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
             {"name": name, "observed": 1.0, "passed": True}
             for name in sorted(assertion_names)
         ],
+        "gpu_speedup_ratio": 0.25,
+        "gpu_solver_solve_ms": 1.5,
+        "gpu_solver_backend": "runtime_tensor",
     }
 
 
@@ -387,6 +390,18 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         for item in record["threshold_assertions"]
                         if item["name"] != "fsi_structural_step_count"
                     ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_required_performance_field_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "cfd_steady_gpu_provider":
+                    record.pop("gpu_solver_solve_ms", None)
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))
