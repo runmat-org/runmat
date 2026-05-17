@@ -105,6 +105,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. EM run now uses matrix-free PCG solve on the assembled EM operator and computes flux-density proxies from solved vector potential gradients.
 3. Contract interfaces remain stable while internal solver behavior is upgraded from purely synthetic/static mapping to first assembled EM solve posture.
 
+## Maxwell EM Bring-Up Status (Phase 5)
+
+1. EM material coefficients are now explicit in analysis-core (`relative_permeability`, `relative_permittivity`) with additive defaults for backward compatibility.
+2. EM weak-form proxy coefficients now consume material-driven means (`mu_r`, `epsilon_r`, `sigma`) instead of fixed permeability assumptions.
+3. EM diagnostics now include material means/spread ratios to support future heterogeneity governance and reference calibration.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

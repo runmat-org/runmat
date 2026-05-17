@@ -159,6 +159,8 @@ model:
         reference_temperature_k: 293.15
         conductivity_s_per_m: 1.0
         resistive_heating_coefficient: 0.0
+        relative_permittivity: 1.0
+        relative_permeability: 1.0
       plastic:
         yield_strain: 0.002
         hardening_modulus_ratio: 0.02

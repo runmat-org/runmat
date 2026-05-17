@@ -15,13 +15,14 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
+    analysis_run_electromagnetic_with_options_op,
     analysis_run_linear_static_with_options, analysis_run_modal_with_options_op,
     analysis_run_nonlinear_with_options_op, analysis_run_thermal_with_options_op,
     analysis_run_transient_with_options_op,
     analysis_validate, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
-    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisRunOptions,
-    AnalysisThermalRunOptions, AnalysisTransientRunOptions, PrecisionMode, PreconditionerMode,
-    QualityPolicy,
+    AnalysisElectromagneticRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    AnalysisResultsQuery, AnalysisRunOptions, AnalysisThermalRunOptions,
+    AnalysisTransientRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy,
 };
 use runmat_runtime::geometry::geometry_load_op;
 use runmat_runtime::operations::OperationContext;
@@ -46,6 +47,7 @@ enum AnalysisRunKind {
     Thermal,
     Transient,
     Nonlinear,
+    Electromagnetic,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -198,6 +200,10 @@ struct FixtureRunRecord {
     electromagnetic_reference_frequency_hz: Option<f64>,
     electromagnetic_applied_current_a: Option<f64>,
     electromagnetic_placeholder_quality: Option<f64>,
+    electromagnetic_conductivity_spread_ratio: Option<f64>,
+    electromagnetic_relative_permittivity_spread_ratio: Option<f64>,
+    electromagnetic_relative_permeability_spread_ratio: Option<f64>,
+    electromagnetic_material_heterogeneity_index: Option<f64>,
     publishable: Option<bool>,
     parity: Option<ParitySummary>,
     threshold_assertions: Vec<ThresholdAssertionRecord>,
@@ -248,6 +254,8 @@ const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "nonlinear_contact_frictionless_reference_complex_gpu_provider",
     "nonlinear_plastic_hardening_reference_gpu_provider",
     "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+    "electromagnetic_reference_homogeneous_gpu_provider",
+    "electromagnetic_reference_heterogeneous_gpu_provider",
 ];
 
 const SYNTHETIC_TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";

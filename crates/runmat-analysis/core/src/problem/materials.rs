@@ -28,6 +28,14 @@ fn default_resistive_heating_coefficient() -> f64 {
     0.0
 }
 
+fn default_relative_permittivity() -> f64 {
+    1.0
+}
+
+fn default_relative_permeability() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MaterialMechanicalModel {
     pub youngs_modulus_pa: f64,
@@ -68,6 +76,10 @@ pub struct MaterialElectricalModel {
     pub conductivity_s_per_m: f64,
     #[serde(default = "default_resistive_heating_coefficient")]
     pub resistive_heating_coefficient: f64,
+    #[serde(default = "default_relative_permittivity")]
+    pub relative_permittivity: f64,
+    #[serde(default = "default_relative_permeability")]
+    pub relative_permeability: f64,
 }
 
 impl Default for MaterialElectricalModel {
@@ -76,6 +88,8 @@ impl Default for MaterialElectricalModel {
             reference_temperature_k: default_reference_temperature_k(),
             conductivity_s_per_m: default_electrical_conductivity_s_per_m(),
             resistive_heating_coefficient: default_resistive_heating_coefficient(),
+            relative_permittivity: default_relative_permittivity(),
+            relative_permeability: default_relative_permeability(),
         }
     }
 }

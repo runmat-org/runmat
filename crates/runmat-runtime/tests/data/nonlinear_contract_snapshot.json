@@ -85,6 +85,10 @@
     "electromagnetic_enabled": null,
     "electromagnetic_reference_frequency_hz": null,
     "electromagnetic_applied_current_a": null,
-    "electromagnetic_placeholder_quality": null
+    "electromagnetic_placeholder_quality": null,
+    "electromagnetic_conductivity_spread_ratio": null,
+    "electromagnetic_relative_permittivity_spread_ratio": null,
+    "electromagnetic_relative_permeability_spread_ratio": null,
+    "electromagnetic_material_heterogeneity_index": null
   }
 }

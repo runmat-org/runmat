@@ -180,6 +180,16 @@ Not required for this milestone:
   - post-solve flux-density proxy derived from vector-potential gradient.
 - Runtime EM operation remains contract-stable and now consumes this FEA-backed static EM solve path end-to-end (typed payloads, summary metrics, trends/governance signals unchanged at interface level).
 
+### Maxwell EM Phase-5 Status (2026-05-16)
+
+- Added explicit EM material coefficients in analysis-core electrical material schema:
+  - `MaterialElectricalModel.relative_permittivity` (default `1.0`),
+  - `MaterialElectricalModel.relative_permeability` (default `1.0`).
+- Upgraded EM assembly proxy terms to be material-driven instead of fixed constants:
+  - reluctivity now uses averaged material `relative_permeability`,
+  - frequency mass-like term now includes conductivity and permittivity contribution (`omega*sigma + omega^2*epsilon`).
+- Expanded `FEA_EM_STATIC` diagnostic posture with EM material means and spread ratios so governance/triage can distinguish homogeneous vs heterogeneous EM material setups.
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.

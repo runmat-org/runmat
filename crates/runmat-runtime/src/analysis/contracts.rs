@@ -208,6 +208,8 @@ pub enum QualityReasonCode {
     ElectroThermalTransientStress,
     ElectroThermalNonlinearStress,
     ElectromagneticPlaceholder,
+    ElectromagneticConductivitySpreadHigh,
+    ElectromagneticMaterialHeterogeneityHigh,
     PlasticityNonlinearStress,
     ContactNonlinearStress,
     NonlinearResidualExceeded,
@@ -764,6 +766,10 @@ pub struct AnalysisResultsSummary {
     pub electromagnetic_reference_frequency_hz: Option<f64>,
     pub electromagnetic_applied_current_a: Option<f64>,
     pub electromagnetic_placeholder_quality: Option<f64>,
+    pub electromagnetic_conductivity_spread_ratio: Option<f64>,
+    pub electromagnetic_relative_permittivity_spread_ratio: Option<f64>,
+    pub electromagnetic_relative_permeability_spread_ratio: Option<f64>,
+    pub electromagnetic_material_heterogeneity_index: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -854,6 +860,8 @@ pub struct AnalysisTrendKindSummary {
     pub thermal_constitutive_warn_rate: Option<f64>,
     pub thermal_spread_breach_rate: Option<f64>,
     pub electromagnetic_placeholder_warn_rate: Option<f64>,
+    pub electromagnetic_spread_breach_rate: Option<f64>,
+    pub electromagnetic_heterogeneity_breach_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

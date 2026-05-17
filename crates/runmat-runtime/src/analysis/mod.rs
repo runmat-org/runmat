@@ -73,6 +73,8 @@ const ANALYSIS_TRENDS_OP_VERSION: &str = "analysis.trends/v1";
 const TRANSIENT_RESIDUAL_WARN_THRESHOLD: f64 = 1.0e-4;
 const THERMO_SPREAD_THRESHOLD_BALANCED: f64 = 1.25;
 const THERMO_HETEROGENEITY_THRESHOLD_BALANCED: f64 = 0.2;
+const EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED: f64 = 2.0;
+const EM_HETEROGENEITY_THRESHOLD_BALANCED: f64 = 0.2;
 
 pub fn analysis_create_model_op(
     geometry: &GeometryAsset,
@@ -2604,7 +2606,7 @@ pub fn analysis_run_electromagnetic_with_options_op(
     } else {
         QualityGate::Warn
     };
-    let result_quality = if em_run.solve_quality >= 0.85 {
+    let mut result_quality = if em_run.solve_quality >= 0.85 {
         QualityGate::Pass
     } else if em_run.solve_quality >= 0.6 {
         QualityGate::Warn
@@ -2612,6 +2614,24 @@ pub fn analysis_run_electromagnetic_with_options_op(
         QualityGate::Fail
     };
     let mut quality_reasons = Vec::new();
+    let em_conductivity_spread_ratio =
+        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "conductivity_spread_ratio");
+    let em_assignment_heterogeneity_index = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "electromagnetic_material_heterogeneity_index",
+    );
+    let (em_spread_threshold, em_heterogeneity_threshold) =
+        electromagnetic_thresholds_for_policy(options.quality_policy);
+    let em_spread_breach = em_conductivity_spread_ratio
+        .map(|value| value > em_spread_threshold)
+        .unwrap_or(false);
+    let em_heterogeneity_breach = em_assignment_heterogeneity_index
+        .map(|value| value > em_heterogeneity_threshold)
+        .unwrap_or(false);
+    if (em_spread_breach || em_heterogeneity_breach) && result_quality == QualityGate::Pass {
+        result_quality = QualityGate::Warn;
+    }
     if solver_convergence == QualityGate::Warn {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverNotConverged,
@@ -2622,6 +2642,26 @@ pub fn analysis_run_electromagnetic_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ElectromagneticPlaceholder,
             detail: "electromagnetic static solve quality below production target".to_string(),
+        });
+    }
+    if em_spread_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticConductivitySpreadHigh,
+            detail: format!(
+                "electromagnetic conductivity spread ratio {} exceeds threshold {}",
+                em_conductivity_spread_ratio.unwrap_or(0.0),
+                em_spread_threshold
+            ),
+        });
+    }
+    if em_heterogeneity_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticMaterialHeterogeneityHigh,
+            detail: format!(
+                "electromagnetic material heterogeneity index {} exceeds threshold {}",
+                em_assignment_heterogeneity_index.unwrap_or(0.0),
+                em_heterogeneity_threshold
+            ),
         });
     }
 
@@ -3133,6 +3173,26 @@ pub fn analysis_results_op(
             "placeholder_quality",
         )
     });
+    let electromagnetic_conductivity_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "conductivity_spread_ratio",
+    );
+    let electromagnetic_relative_permittivity_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "relative_permittivity_spread_ratio",
+    );
+    let electromagnetic_relative_permeability_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "relative_permeability_spread_ratio",
+    );
+    let electromagnetic_material_heterogeneity_index = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "electromagnetic_material_heterogeneity_index",
+    );
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -3205,6 +3265,10 @@ pub fn analysis_results_op(
         electromagnetic_reference_frequency_hz,
         electromagnetic_applied_current_a,
         electromagnetic_placeholder_quality,
+        electromagnetic_conductivity_spread_ratio,
+        electromagnetic_relative_permittivity_spread_ratio,
+        electromagnetic_relative_permeability_spread_ratio,
+        electromagnetic_material_heterogeneity_index,
     };
 
     let modal_results = if query.include_modal_results {
@@ -3880,6 +3944,57 @@ pub fn analysis_trends_op(
         } else {
             None
         };
+        let electromagnetic_spread_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_STATIC",
+                        "conductivity_spread_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                None
+            } else {
+                Some(
+                    values
+                        .iter()
+                        .filter(|value| **value > EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED)
+                        .count() as f64
+                        / values.len() as f64,
+                )
+            }
+        } else {
+            None
+        };
+        let electromagnetic_heterogeneity_breach_rate =
+            if kind == AnalysisRunKind::Electromagnetic {
+                let values = entries
+                    .iter()
+                    .filter_map(|run| {
+                        diagnostic_metric(
+                            &run.run.diagnostics,
+                            "FEA_EM_STATIC",
+                            "electromagnetic_material_heterogeneity_index",
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if values.is_empty() {
+                    None
+                } else {
+                    Some(
+                        values
+                            .iter()
+                            .filter(|value| **value > EM_HETEROGENEITY_THRESHOLD_BALANCED)
+                            .count() as f64
+                            / values.len() as f64,
+                    )
+                }
+            } else {
+                None
+            };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -3908,6 +4023,8 @@ pub fn analysis_trends_op(
             thermal_constitutive_warn_rate,
             thermal_spread_breach_rate,
             electromagnetic_placeholder_warn_rate,
+            electromagnetic_spread_breach_rate,
+            electromagnetic_heterogeneity_breach_rate,
         });
     }
 
@@ -5404,6 +5521,17 @@ fn thermo_field_quality_thresholds_for_policy(policy: QualityPolicy) -> (f64, f6
         QualityPolicy::Strict => (0.55, 0.02),
         QualityPolicy::Balanced => (0.45, 0.08),
         QualityPolicy::Exploratory => (0.30, 0.18),
+    }
+}
+
+fn electromagnetic_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
+    match policy {
+        QualityPolicy::Strict => (1.5, 0.12),
+        QualityPolicy::Balanced => (
+            EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
+            EM_HETEROGENEITY_THRESHOLD_BALANCED,
+        ),
+        QualityPolicy::Exploratory => (3.0, 0.35),
     }
 }
 

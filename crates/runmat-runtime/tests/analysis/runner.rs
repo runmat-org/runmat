@@ -526,7 +526,176 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ElectromagneticFixtureProfile {
+    reference_frequency_hz: f64,
+    applied_current_a: f64,
+    heterogeneous: bool,
+}
+
+fn electromagnetic_profile_for_fixture(spec_id: &str) -> Option<ElectromagneticFixtureProfile> {
+    match spec_id {
+        "electromagnetic_reference_homogeneous_gpu_provider" => Some(ElectromagneticFixtureProfile {
+            reference_frequency_hz: 60.0,
+            applied_current_a: 120.0,
+            heterogeneous: false,
+        }),
+        "electromagnetic_reference_heterogeneous_gpu_provider" => Some(ElectromagneticFixtureProfile {
+            reference_frequency_hz: 400.0,
+            applied_current_a: 250.0,
+            heterogeneous: true,
+        }),
+        _ => None,
+    }
+}
+
 fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
+    if let Some(profile) = electromagnetic_profile_for_fixture(spec_id) {
+        model.steps = vec![runmat_analysis_core::AnalysisStep {
+            step_id: format!("step_em_{}", spec_id),
+            kind: runmat_analysis_core::AnalysisStepKind::Electromagnetic,
+        }];
+        model.thermo_mechanical = None;
+        model.electro_thermal = None;
+        model.interfaces.clear();
+
+        if profile.heterogeneous {
+            if model.materials.len() < 3 {
+                let base = model.materials.first().cloned().unwrap_or_else(|| {
+                    runmat_analysis_core::MaterialModel {
+                        material_id: "mat_default".to_string(),
+                        name: "Default".to_string(),
+                        mechanical: runmat_analysis_core::MaterialMechanicalModel {
+                            youngs_modulus_pa: 110e9,
+                            poisson_ratio: 0.31,
+                        },
+                        thermal: runmat_analysis_core::MaterialThermalModel::default(),
+                        electrical: None,
+                        plastic: None,
+                    }
+                });
+                model.materials = vec![
+                    runmat_analysis_core::MaterialModel {
+                        material_id: "mat_em_copper".to_string(),
+                        name: "EM Copper".to_string(),
+                        electrical: Some(runmat_analysis_core::MaterialElectricalModel {
+                            reference_temperature_k: 293.15,
+                            conductivity_s_per_m: 5.8e7,
+                            resistive_heating_coefficient: 0.0039,
+                            relative_permittivity: 2.0,
+                            relative_permeability: 1.0,
+                        }),
+                        ..base.clone()
+                    },
+                    runmat_analysis_core::MaterialModel {
+                        material_id: "mat_em_ferrite".to_string(),
+                        name: "EM Ferrite".to_string(),
+                        electrical: Some(runmat_analysis_core::MaterialElectricalModel {
+                            reference_temperature_k: 293.15,
+                            conductivity_s_per_m: 8.0e4,
+                            resistive_heating_coefficient: 0.0020,
+                            relative_permittivity: 14.0,
+                            relative_permeability: 90.0,
+                        }),
+                        ..base.clone()
+                    },
+                    runmat_analysis_core::MaterialModel {
+                        material_id: "mat_em_polymer".to_string(),
+                        name: "EM Polymer".to_string(),
+                        electrical: Some(runmat_analysis_core::MaterialElectricalModel {
+                            reference_temperature_k: 293.15,
+                            conductivity_s_per_m: 0.2,
+                            resistive_heating_coefficient: 0.0010,
+                            relative_permittivity: 3.5,
+                            relative_permeability: 1.05,
+                        }),
+                        ..base
+                    },
+                ];
+            } else {
+                for (idx, material) in model.materials.iter_mut().enumerate() {
+                    let (sigma, eps_r, mu_r) = match idx % 3 {
+                        0 => (5.8e7, 2.0, 1.0),
+                        1 => (8.0e4, 14.0, 90.0),
+                        _ => (0.2, 3.5, 1.05),
+                    };
+                    material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
+                        reference_temperature_k: 293.15,
+                        conductivity_s_per_m: sigma,
+                        resistive_heating_coefficient: 0.0025,
+                        relative_permittivity: eps_r,
+                        relative_permeability: mu_r,
+                    });
+                }
+            }
+
+            if model.material_assignments.is_empty() {
+                model.material_assignments = model
+                    .materials
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, material)| runmat_analysis_core::MaterialAssignment {
+                        region_id: format!("em_region_{idx}"),
+                        expected_material_id: material.material_id.clone(),
+                        assigned_material_id: material.material_id.clone(),
+                        confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+                    })
+                    .collect();
+            } else {
+                for (idx, assignment) in model.material_assignments.iter_mut().enumerate() {
+                    let material_id = &model.materials[idx % model.materials.len()].material_id;
+                    assignment.expected_material_id = material_id.clone();
+                    assignment.assigned_material_id = material_id.clone();
+                    assignment.confidence = match idx % 3 {
+                        0 => runmat_analysis_core::EvidenceConfidence::Verified,
+                        1 => runmat_analysis_core::EvidenceConfidence::Probable,
+                        _ => runmat_analysis_core::EvidenceConfidence::Inferred,
+                    };
+                }
+            }
+        } else {
+            for material in &mut model.materials {
+                material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
+                    reference_temperature_k: 293.15,
+                    conductivity_s_per_m: 5.8e7,
+                    resistive_heating_coefficient: 0.0039,
+                    relative_permittivity: 2.1,
+                    relative_permeability: 1.0,
+                });
+            }
+            if model.material_assignments.is_empty() {
+                let material_id = model
+                    .materials
+                    .first()
+                    .map(|material| material.material_id.clone())
+                    .unwrap_or_else(|| "mat_default".to_string());
+                model.material_assignments.push(runmat_analysis_core::MaterialAssignment {
+                    region_id: "em_region_homogeneous".to_string(),
+                    expected_material_id: material_id.clone(),
+                    assigned_material_id: material_id,
+                    confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+                });
+            } else {
+                for assignment in &mut model.material_assignments {
+                    let material_id = model
+                        .materials
+                        .first()
+                        .map(|material| material.material_id.clone())
+                        .unwrap_or_else(|| "mat_default".to_string());
+                    assignment.expected_material_id = material_id.clone();
+                    assignment.assigned_material_id = material_id;
+                    assignment.confidence = runmat_analysis_core::EvidenceConfidence::Verified;
+                }
+            }
+        }
+
+        model.electromagnetic = Some(runmat_analysis_core::ElectromagneticDomain {
+            enabled: true,
+            reference_frequency_hz: profile.reference_frequency_hz,
+            applied_current_a: profile.applied_current_a,
+        });
+    }
+
     let mut thermo = thermo_coupling_for_fixture(spec_id);
     if thermo.is_none() && spec_id == "nonlinear_load_path_mix_gpu_provider" {
         thermo = Some(ThermoMechanicalCouplingOptions {
@@ -647,6 +816,8 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 reference_temperature_k: electro.reference_temperature_k,
                 conductivity_s_per_m: electro.base_electrical_conductivity_s_per_m,
                 resistive_heating_coefficient: electro.resistive_heating_coefficient,
+                relative_permittivity: 1.0,
+                relative_permeability: 1.0,
             });
         }
         model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
@@ -848,6 +1019,19 @@ fn run_fixture_cpu(
             nonlinear_options_for_spec(spec),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
+        AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
+            model,
+            ComputeBackend::Cpu,
+            AnalysisElectromagneticRunOptions {
+                deterministic_mode: true,
+                precision_mode: PrecisionMode::Fp64,
+                quality_policy: QualityPolicy::Balanced,
+                prep_context: None,
+                prep_artifact_id: None,
+                prep_calibration_profile: None,
+            },
+            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+        ),
     }
 }
 
@@ -912,6 +1096,19 @@ fn run_fixture_gpu(
             model,
             ComputeBackend::Gpu,
             nonlinear_options_for_spec(spec),
+            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+        ),
+        AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
+            model,
+            ComputeBackend::Gpu,
+            AnalysisElectromagneticRunOptions {
+                deterministic_mode: true,
+                precision_mode: PrecisionMode::Fp64,
+                quality_policy: QualityPolicy::Balanced,
+                prep_context: None,
+                prep_artifact_id: None,
+                prep_calibration_profile: None,
+            },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
     };
@@ -1134,6 +1331,10 @@ pub(super) fn run_fixture(
     let mut electromagnetic_reference_frequency_hz = None;
     let mut electromagnetic_applied_current_a = None;
     let mut electromagnetic_placeholder_quality = None;
+    let mut electromagnetic_conductivity_spread_ratio = None;
+    let mut electromagnetic_relative_permittivity_spread_ratio = None;
+    let mut electromagnetic_relative_permeability_spread_ratio = None;
+    let mut electromagnetic_material_heterogeneity_index = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -1219,6 +1420,10 @@ pub(super) fn run_fixture(
                     electromagnetic_reference_frequency_hz,
                     electromagnetic_applied_current_a,
                     electromagnetic_placeholder_quality,
+                    electromagnetic_conductivity_spread_ratio,
+                    electromagnetic_relative_permittivity_spread_ratio,
+                    electromagnetic_relative_permeability_spread_ratio,
+                    electromagnetic_material_heterogeneity_index,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -3067,11 +3272,73 @@ pub(super) fn run_fixture(
                             Some(1.43),
                         );
                     }
+                    if spec.id == "electromagnetic_reference_homogeneous_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_conductivity_spread_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "conductivity_spread_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.05),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_material_heterogeneity_index",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "electromagnetic_material_heterogeneity_index",
+                            ),
+                            Some(0.0),
+                            Some(0.02),
+                        );
+                    }
+                    if spec.id == "electromagnetic_reference_heterogeneous_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_conductivity_spread_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "conductivity_spread_ratio",
+                            ),
+                            Some(10.0),
+                            Some(1.0e9),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_material_heterogeneity_index",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "electromagnetic_material_heterogeneity_index",
+                            ),
+                            Some(0.25),
+                            Some(2.0),
+                        );
+                    }
 
+                    let gpu_primary_field_id =
+                        gpu_envelope.data.run.displacement_field.field_id.clone();
                     let gpu_results = analysis_results_op(
                         &gpu_envelope.data,
                         AnalysisResultsQuery {
-                            include_fields: vec!["displacement".to_string()],
+                            include_fields: vec![gpu_primary_field_id.clone()],
                             include_diagnostics: false,
                             diagnostic_codes: Vec::new(),
                             include_modal_results: false,
@@ -3159,6 +3426,10 @@ pub(super) fn run_fixture(
                                 electromagnetic_reference_frequency_hz,
                                 electromagnetic_applied_current_a,
                                 electromagnetic_placeholder_quality,
+                                electromagnetic_conductivity_spread_ratio,
+                                electromagnetic_relative_permittivity_spread_ratio,
+                                electromagnetic_relative_permeability_spread_ratio,
+                                electromagnetic_material_heterogeneity_index,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -3261,6 +3532,20 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.electromagnetic_applied_current_a;
                     electromagnetic_placeholder_quality =
                         gpu_results.data.summary.electromagnetic_placeholder_quality;
+                    electromagnetic_conductivity_spread_ratio =
+                        gpu_results.data.summary.electromagnetic_conductivity_spread_ratio;
+                    electromagnetic_relative_permittivity_spread_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_relative_permittivity_spread_ratio;
+                    electromagnetic_relative_permeability_spread_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_relative_permeability_spread_ratio;
+                    electromagnetic_material_heterogeneity_index = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_material_heterogeneity_index;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -3273,7 +3558,7 @@ pub(super) fn run_fixture(
                         let persisted = analysis_results_by_run_id_op(
                             &gpu_envelope.data.run_id,
                             AnalysisResultsQuery {
-                                include_fields: vec!["displacement".to_string()],
+                                include_fields: vec![gpu_primary_field_id],
                                 include_diagnostics: false,
                                 diagnostic_codes: Vec::new(),
                                 include_modal_results: false,
@@ -3354,7 +3639,12 @@ pub(super) fn run_fixture(
                         let cpu_results = analysis_results_op(
                             &cpu_envelope.data,
                             AnalysisResultsQuery {
-                                include_fields: vec!["displacement".to_string()],
+                                include_fields: vec![cpu_envelope
+                                    .data
+                                    .run
+                                    .displacement_field
+                                    .field_id
+                                    .clone()],
                                 include_diagnostics: false,
                                 diagnostic_codes: Vec::new(),
                                 include_modal_results: false,
@@ -3445,6 +3735,10 @@ pub(super) fn run_fixture(
                                     electromagnetic_reference_frequency_hz,
                                     electromagnetic_applied_current_a,
                                     electromagnetic_placeholder_quality,
+                                    electromagnetic_conductivity_spread_ratio,
+                                    electromagnetic_relative_permittivity_spread_ratio,
+                                    electromagnetic_relative_permeability_spread_ratio,
+                                    electromagnetic_material_heterogeneity_index,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -3579,6 +3873,10 @@ pub(super) fn run_fixture(
         electromagnetic_reference_frequency_hz,
         electromagnetic_applied_current_a,
         electromagnetic_placeholder_quality,
+        electromagnetic_conductivity_spread_ratio,
+        electromagnetic_relative_permittivity_spread_ratio,
+        electromagnetic_relative_permeability_spread_ratio,
+        electromagnetic_material_heterogeneity_index,
         publishable,
         parity,
         threshold_assertions,

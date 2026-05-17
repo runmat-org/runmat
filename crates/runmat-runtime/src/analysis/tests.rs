@@ -10,8 +10,8 @@ use runmat_accelerate_api::{
 use runmat_analysis_core::{
     AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
     BoundaryCondition, BoundaryConditionKind, EvidenceConfidence, LoadCase, LoadKind,
-    ElectromagneticDomain, MaterialAssignment, MaterialMechanicalModel, MaterialModel,
-    MaterialThermalModel,
+    ElectromagneticDomain, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
+    MaterialModel, MaterialThermalModel,
     ReferenceFrame,
 };
 use runmat_analysis_fea::ComputeBackend;
@@ -149,6 +149,8 @@ fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: ElectroTherma
             reference_temperature_k: coupling.reference_temperature_k,
             conductivity_s_per_m: coupling.base_electrical_conductivity_s_per_m,
             resistive_heating_coefficient: coupling.resistive_heating_coefficient,
+            relative_permittivity: 1.0,
+            relative_permeability: 1.0,
         });
     }
     model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
@@ -1708,6 +1710,13 @@ fn analysis_run_electromagnetic_rejects_models_without_em_step() {
 fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
     let mut model = sample_model();
     model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    model.materials[0].electrical = Some(MaterialElectricalModel {
+        reference_temperature_k: 293.15,
+        conductivity_s_per_m: 5.8e7,
+        resistive_heating_coefficient: 0.0039,
+        relative_permittivity: 3.2,
+        relative_permeability: 1.8,
+    });
     model.electromagnetic = Some(ElectromagneticDomain {
         enabled: true,
         reference_frequency_hz: 60.0,
@@ -1730,6 +1739,15 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_EM_STATIC"));
+    let em_diag = envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_EM_STATIC")
+        .expect("EM static diagnostic must be present");
+    assert!(em_diag.message.contains("relative_permittivity_mean="));
+    assert!(em_diag.message.contains("relative_permeability_mean="));
 }
 
 #[test]
