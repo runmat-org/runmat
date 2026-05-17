@@ -1088,6 +1088,22 @@ fn expand_all_elements_in_args() {
 }
 
 #[test]
+fn builtin_expand_multi_output_uses_typed_instruction() {
+    let source = "C = deal(7,3); [a,b] = deal(C{:}); s = a + b;";
+    let bytecode = compile_semantic_source(source).expect("compile builtin expand multi-output");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
+            if name == "deal" && *out_count == 2 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+
+    let vars = interpret(&bytecode).expect("execute builtin expand multi-output");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
+}
+
+#[test]
 fn builtin_vector_index_expansion() {
     let program = "C = deal(9, 2); r = max(C{[1 2]});";
     let vars = execute_semantic_source(program);

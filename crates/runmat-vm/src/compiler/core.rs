@@ -1097,7 +1097,15 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    self.emit(Instr::CallBuiltinExpandMulti(name, specs));
+                    if output_count == 1 {
+                        self.emit(Instr::CallBuiltinExpandMulti(name, specs));
+                    } else {
+                        self.emit(Instr::CallBuiltinExpandMultiOutput(
+                            name,
+                            specs,
+                            output_count,
+                        ));
+                    }
                 } else {
                     self.emit(Instr::CallBuiltin(name, call.args.len()));
                 }
@@ -1628,7 +1636,19 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    self.emit(Instr::CallBuiltinExpandMulti(name, specs));
+                    if let Some(output_count) = requested_outputs {
+                        if output_count == 1 {
+                            self.emit(Instr::CallBuiltinExpandMulti(name, specs));
+                        } else {
+                            self.emit(Instr::CallBuiltinExpandMultiOutput(
+                                name,
+                                specs,
+                                output_count,
+                            ));
+                        }
+                    } else {
+                        self.emit(Instr::CallBuiltinExpandMulti(name, specs));
+                    }
                 } else {
                     self.emit(Instr::CallBuiltin(name, call.args.len()));
                 }

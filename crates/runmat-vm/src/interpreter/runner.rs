@@ -654,6 +654,7 @@ async fn run_interpreter_inner(
             | Instr::CallBuiltinExpandLast(_, _, _)
             | Instr::CallBuiltinExpandAt(_, _, _, _)
             | Instr::CallBuiltinExpandMulti(_, _)
+            | Instr::CallBuiltinExpandMultiOutput(_, _, _)
             | Instr::CallFunctionExpandAt(_, _, _, _)
             | Instr::ExitScope(_)
             | Instr::RegisterImport { .. }

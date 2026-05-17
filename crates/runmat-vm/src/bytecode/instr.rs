@@ -206,6 +206,7 @@ pub enum Instr {
     CallSemanticFunctionExpandMulti(FunctionId, Vec<ArgSpec>),
     CallSemanticFunctionExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
     CallBuiltinExpandMulti(String, Vec<ArgSpec>),
+    CallBuiltinExpandMultiOutput(String, Vec<ArgSpec>, usize),
 
     // Packs the top N values into row or column tensor form.
     PackToRow(usize),
@@ -351,6 +352,7 @@ impl Instr {
             | Instr::CallSemanticFunctionExpandMulti(_, specs)
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
             | Instr::CallBuiltinExpandMulti(_, specs)
+            | Instr::CallBuiltinExpandMultiOutput(_, specs, _)
             | Instr::CallMethodOrMemberIndexExpandMulti(_, specs) => {
                 let fixed = specs.iter().filter(|s| !s.is_expand).count();
                 let expanded: usize = specs

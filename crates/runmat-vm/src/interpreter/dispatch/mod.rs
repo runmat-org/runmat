@@ -23,7 +23,7 @@ pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
 };
 pub use calls::{
-    build_builtin_expand_at_args, build_feval_expand_multi_args,
+    build_builtin_expand_at_args, build_builtin_expand_multi_args, build_feval_expand_multi_args,
     build_user_function_expand_multi_args, handle_builtin_call, handle_builtin_expand_at_call,
     handle_builtin_expand_last_call, handle_builtin_expand_multi_call, handle_create_closure,
     handle_create_semantic_closure, handle_feval_dispatch, handle_load_method,
@@ -646,6 +646,16 @@ pub async fn dispatch_instruction(
         }
         Instr::CallBuiltinExpandMulti(name, specs) => {
             handle_builtin_expand_multi_call(stack, name, specs, next_instr).await?;
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallBuiltinExpandMultiOutput(name, specs, out_count) => {
+            let args = build_builtin_expand_multi_args(stack, specs).await?;
+            let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let result =
+                runmat_runtime::call_builtin_async_with_outputs(name, &args, *out_count).await?;
+            stack.push(result);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
