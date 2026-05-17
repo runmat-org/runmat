@@ -1,24 +1,14 @@
 use crate::hir::{CompatibilityHirProgram as HirProgram, CompatibilityHirStmt as HirStmt};
 use crate::SemanticError;
 
-pub fn collect_imports(prog: &HirProgram) -> Vec<(Vec<String>, bool)> {
-    let mut imports = Vec::new();
-    for stmt in &prog.body {
-        if let HirStmt::Import { path, wildcard, .. } = stmt {
-            imports.push((path.clone(), *wildcard));
-        }
-    }
-    imports
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NormalizedImport {
+struct NormalizedImport {
     pub path: String,
     pub wildcard: bool,
     pub unqualified: Option<String>,
 }
 
-pub fn normalize_imports(prog: &HirProgram) -> Vec<NormalizedImport> {
+fn normalize_imports(prog: &HirProgram) -> Vec<NormalizedImport> {
     let mut out = Vec::new();
     for stmt in &prog.body {
         if let HirStmt::Import { path, wildcard, .. } = stmt {

@@ -22,12 +22,9 @@ pub mod compatibility {
     pub use crate::inference::function_outputs::infer_function_output_types;
     pub use crate::inference::function_vars::infer_function_variable_types;
     pub use crate::inference::globals::infer_global_variable_types;
-    pub use crate::inference::shared::eval_const_num;
     pub use crate::lowering::lower_compatibility as lower;
     pub use crate::validation::classdefs::validate_classdefs;
-    pub use crate::validation::imports::{
-        collect_imports, normalize_imports, validate_imports, NormalizedImport,
-    };
+    pub use crate::validation::imports::validate_imports;
 }
 
 pub use diagnostic::{
