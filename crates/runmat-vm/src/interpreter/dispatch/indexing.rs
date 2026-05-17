@@ -113,6 +113,151 @@ fn resolve_cell_indices(
         .collect()
 }
 
+fn pop_index_values(stack: &mut Vec<Value>, count: usize) -> Result<Vec<Value>, RuntimeError> {
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        let value = stack.pop().ok_or(crate::interpreter::errors::mex(
+            "StackUnderflow",
+            "stack underflow",
+        ))?;
+        values.push(value);
+    }
+    values.reverse();
+    Ok(values)
+}
+
+fn pop_index_base(stack: &mut Vec<Value>) -> Result<Value, RuntimeError> {
+    stack.pop().ok_or(crate::interpreter::errors::mex(
+        "StackUnderflow",
+        "stack underflow",
+    ))
+}
+
+async fn execute_brace_read_single(
+    base: Value,
+    raw_indices: &[Value],
+) -> Result<Value, RuntimeError> {
+    match base {
+        Value::Object(obj) => {
+            let indices = numeric_indices_from_values(raw_indices)?;
+            call_object_subsref_brace_scalar_indices(Value::Object(obj), indices).await
+        }
+        Value::HandleObject(handle) => {
+            let indices = numeric_indices_from_values(raw_indices)?;
+            call_object_subsref_brace_scalar_indices(Value::HandleObject(handle), indices).await
+        }
+        Value::Cell(ca) => {
+            let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;
+            crate::ops::cells::index_cell_value(&ca, &indices)
+        }
+        _ => Err(crate::interpreter::errors::mex(
+            "CellIndexingOnNonCell",
+            "Cell indexing on non-cell",
+        )),
+    }
+}
+
+async fn execute_brace_expand(
+    base: Value,
+    raw_indices: &[Value],
+    out_count: usize,
+) -> Result<Vec<Value>, RuntimeError> {
+    match base {
+        Value::Cell(ca) => {
+            let mut values = if raw_indices.is_empty() {
+                crate::ops::cells::expand_cell_values(&ca, &[], out_count)?
+            } else {
+                crate::call::shared::expand_cell_indices(&ca, raw_indices)?
+            };
+            if values.len() > out_count {
+                values.truncate(out_count);
+            } else {
+                values.resize(out_count, Value::Num(0.0));
+            }
+            Ok(values)
+        }
+        Value::Object(obj) => {
+            let value =
+                call_object_subsref_brace_values(Value::Object(obj), raw_indices.to_vec()).await?;
+            let mut out = vec![value];
+            out.resize(out_count, Value::Num(0.0));
+            Ok(out)
+        }
+        Value::HandleObject(handle) => {
+            let value =
+                call_object_subsref_brace_values(Value::HandleObject(handle), raw_indices.to_vec())
+                    .await?;
+            let mut out = vec![value];
+            out.resize(out_count, Value::Num(0.0));
+            Ok(out)
+        }
+        _ => Err(crate::interpreter::errors::mex(
+            "CellExpansionOnNonCell",
+            "Cell expansion on non-cell",
+        )),
+    }
+}
+
+async fn execute_brace_list(base: Value, raw_indices: &[Value]) -> Result<Value, RuntimeError> {
+    match base {
+        Value::Cell(ca) => {
+            let values = if raw_indices.is_empty() {
+                crate::ops::cells::expand_all_cell_values(&ca)?
+            } else {
+                crate::call::shared::expand_cell_indices(&ca, raw_indices)?
+            };
+            if values.len() == 1 {
+                Ok(values.into_iter().next().unwrap_or(Value::Num(0.0)))
+            } else {
+                Ok(Value::OutputList(values))
+            }
+        }
+        Value::Object(obj) => {
+            let value =
+                call_object_subsref_brace_values(Value::Object(obj), raw_indices.to_vec()).await?;
+            Ok(Value::OutputList(vec![value]))
+        }
+        Value::HandleObject(handle) => {
+            let value =
+                call_object_subsref_brace_values(Value::HandleObject(handle), raw_indices.to_vec())
+                    .await?;
+            Ok(Value::OutputList(vec![value]))
+        }
+        _ => Err(crate::interpreter::errors::mex(
+            "CellExpansionOnNonCell",
+            "Cell expansion on non-cell",
+        )),
+    }
+}
+
+async fn execute_brace_store(
+    base: Value,
+    raw_indices: &[Value],
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
+    match base {
+        Value::Object(obj) => {
+            let indices = numeric_indices_from_values(raw_indices)?;
+            call_object_subsasgn_brace_scalar_indices(Value::Object(obj), indices, rhs).await
+        }
+        Value::HandleObject(handle) => {
+            let indices = numeric_indices_from_values(raw_indices)?;
+            call_object_subsasgn_brace_scalar_indices(Value::HandleObject(handle), indices, rhs)
+                .await
+        }
+        Value::Cell(ca) => {
+            let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;
+            crate::ops::cells::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
+                runmat_gc::gc_record_write(oldv, newv);
+            })
+        }
+        _ => Err(crate::interpreter::errors::mex(
+            "CellAssignmentOnNonCell",
+            "Cell assignment on non-cell",
+        )),
+    }
+}
+
 #[derive(Clone, Copy)]
 struct IndexContext<'a> {
     dims: usize,
@@ -389,153 +534,23 @@ where
             Ok(true)
         }
         crate::bytecode::Instr::IndexCell(num_indices) => {
-            let mut raw_indices = Vec::with_capacity(*num_indices);
-            for _ in 0..*num_indices {
-                let v = stack.pop().ok_or(crate::interpreter::errors::mex(
-                    "StackUnderflow",
-                    "stack underflow",
-                ))?;
-                raw_indices.push(v);
-            }
-            raw_indices.reverse();
-            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            match base {
-                Value::Object(obj) => {
-                    let indices = numeric_indices_from_values(&raw_indices)?;
-                    stack.push(
-                        call_object_subsref_brace_scalar_indices(Value::Object(obj), indices)
-                            .await?,
-                    );
-                }
-                Value::HandleObject(handle) => {
-                    let indices = numeric_indices_from_values(&raw_indices)?;
-                    stack.push(
-                        call_object_subsref_brace_scalar_indices(
-                            Value::HandleObject(handle),
-                            indices,
-                        )
-                        .await?,
-                    );
-                }
-                Value::Cell(ca) => {
-                    let indices = resolve_cell_indices(&raw_indices, ca.rows, ca.cols)?;
-                    stack.push(crate::ops::cells::index_cell_value(&ca, &indices)?);
-                }
-                _ => {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellIndexingOnNonCell",
-                        "Cell indexing on non-cell",
-                    ))
-                }
-            }
+            let raw_indices = pop_index_values(stack, *num_indices)?;
+            let base = pop_index_base(stack)?;
+            stack.push(execute_brace_read_single(base, &raw_indices).await?);
             Ok(true)
         }
         crate::bytecode::Instr::IndexCellExpand(num_indices, out_count) => {
-            let mut indices = Vec::with_capacity(*num_indices);
-            if *num_indices > 0 {
-                for _ in 0..*num_indices {
-                    let v = stack.pop().ok_or(crate::interpreter::errors::mex(
-                        "StackUnderflow",
-                        "stack underflow",
-                    ))?;
-                    indices.push(v);
-                }
-                indices.reverse();
-            }
-            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            match base {
-                Value::Cell(ca) => {
-                    let mut values = if indices.is_empty() {
-                        crate::ops::cells::expand_cell_values(&ca, &[], *out_count)?
-                    } else {
-                        crate::call::shared::expand_cell_indices(&ca, &indices)?
-                    };
-                    if values.len() > *out_count {
-                        values.truncate(*out_count);
-                    } else {
-                        values.resize(*out_count, Value::Num(0.0));
-                    }
-                    for v in values {
-                        stack.push(v);
-                    }
-                }
-                Value::Object(obj) => {
-                    let v = call_object_subsref_brace_values(Value::Object(obj), indices).await?;
-                    stack.push(v);
-                    for _ in 1..*out_count {
-                        stack.push(Value::Num(0.0));
-                    }
-                }
-                Value::HandleObject(handle) => {
-                    let v = call_object_subsref_brace_values(Value::HandleObject(handle), indices)
-                        .await?;
-                    stack.push(v);
-                    for _ in 1..*out_count {
-                        stack.push(Value::Num(0.0));
-                    }
-                }
-                _ => {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellExpansionOnNonCell",
-                        "Cell expansion on non-cell",
-                    ))
-                }
+            let raw_indices = pop_index_values(stack, *num_indices)?;
+            let base = pop_index_base(stack)?;
+            for value in execute_brace_expand(base, &raw_indices, *out_count).await? {
+                stack.push(value);
             }
             Ok(true)
         }
         crate::bytecode::Instr::IndexCellList(num_indices) => {
-            let mut indices = Vec::with_capacity(*num_indices);
-            if *num_indices > 0 {
-                for _ in 0..*num_indices {
-                    let v = stack.pop().ok_or(crate::interpreter::errors::mex(
-                        "StackUnderflow",
-                        "stack underflow",
-                    ))?;
-                    indices.push(v);
-                }
-                indices.reverse();
-            }
-            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            match base {
-                Value::Cell(ca) => {
-                    let values = if indices.is_empty() {
-                        crate::ops::cells::expand_all_cell_values(&ca)?
-                    } else {
-                        crate::call::shared::expand_cell_indices(&ca, &indices)?
-                    };
-                    if values.len() == 1 {
-                        stack.push(values.into_iter().next().unwrap_or(Value::Num(0.0)));
-                    } else {
-                        stack.push(Value::OutputList(values));
-                    }
-                }
-                Value::Object(obj) => {
-                    let value =
-                        call_object_subsref_brace_values(Value::Object(obj), indices).await?;
-                    stack.push(Value::OutputList(vec![value]));
-                }
-                Value::HandleObject(handle) => {
-                    let value =
-                        call_object_subsref_brace_values(Value::HandleObject(handle), indices)
-                            .await?;
-                    stack.push(Value::OutputList(vec![value]));
-                }
-                _ => {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellExpansionOnNonCell",
-                        "Cell expansion on non-cell",
-                    ))
-                }
-            }
+            let raw_indices = pop_index_values(stack, *num_indices)?;
+            let base = pop_index_base(stack)?;
+            stack.push(execute_brace_list(base, &raw_indices).await?);
             Ok(true)
         }
         crate::bytecode::Instr::StoreIndexCell(num_indices) => {
@@ -543,53 +558,9 @@ where
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let mut raw_indices = Vec::new();
-            for _ in 0..*num_indices {
-                let v = stack.pop().ok_or(crate::interpreter::errors::mex(
-                    "StackUnderflow",
-                    "stack underflow",
-                ))?;
-                raw_indices.push(v);
-            }
-            raw_indices.reverse();
-            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            match base {
-                Value::Object(obj) => {
-                    let indices = numeric_indices_from_values(&raw_indices)?;
-                    stack.push(
-                        call_object_subsasgn_brace_scalar_indices(Value::Object(obj), indices, rhs)
-                            .await?,
-                    );
-                }
-                Value::HandleObject(handle) => {
-                    let indices = numeric_indices_from_values(&raw_indices)?;
-                    stack.push(
-                        call_object_subsasgn_brace_scalar_indices(
-                            Value::HandleObject(handle),
-                            indices,
-                            rhs,
-                        )
-                        .await?,
-                    );
-                }
-                Value::Cell(ca) => {
-                    let indices = resolve_cell_indices(&raw_indices, ca.rows, ca.cols)?;
-                    let updated =
-                        crate::ops::cells::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
-                            runmat_gc::gc_record_write(oldv, newv);
-                        })?;
-                    stack.push(updated);
-                }
-                _ => {
-                    return Err(crate::interpreter::errors::mex(
-                        "CellAssignmentOnNonCell",
-                        "Cell assignment on non-cell",
-                    ))
-                }
-            }
+            let raw_indices = pop_index_values(stack, *num_indices)?;
+            let base = pop_index_base(stack)?;
+            stack.push(execute_brace_store(base, &raw_indices, rhs).await?);
             Ok(true)
         }
         crate::bytecode::Instr::StoreIndex(num_indices) => {
