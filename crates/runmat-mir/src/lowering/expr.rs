@@ -145,7 +145,7 @@ fn lower_call_arg(
 ) -> Result<MirCallArg, SemanticError> {
     if let HirExprKind::Call(call) = &arg.kind {
         let requested_count = match &call.requested_outputs {
-            RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count) => *count,
+            RequestedOutputCount::Exactly(count) => *count,
             _ => 1,
         };
         if requested_count > 1 {

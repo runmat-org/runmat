@@ -431,6 +431,72 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_at_least_requested_outputs() {
+        let ast = runmat_parser::parse("y = sqrt(9);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint_target = hir.assembly.entrypoints[0].target;
+        let body = mir
+            .bodies
+            .get_mut(&entrypoint_target)
+            .expect("entrypoint body");
+
+        let mut patched = false;
+        for stmt in &mut body.blocks[0].statements {
+            if let MirStmtKind::Assign {
+                value: MirRvalue::Call(call),
+                ..
+            } = &mut stmt.kind
+            {
+                call.requested_outputs = RequestedOutputCount::AtLeast(1);
+                patched = true;
+                break;
+            }
+        }
+        assert!(
+            patched,
+            "expected entrypoint block to contain call assignment"
+        );
+
+        let err = compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).expect_err("error");
+        assert!(err.message.contains("AtLeast is unsupported"));
+    }
+
+    #[test]
+    fn primary_compile_rejects_multi_assign_call_with_at_least_requested_outputs() {
+        let ast = runmat_parser::parse("[x,y] = deal(1,2);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint_target = hir.assembly.entrypoints[0].target;
+        let body = mir
+            .bodies
+            .get_mut(&entrypoint_target)
+            .expect("entrypoint body");
+
+        let mut patched = false;
+        for stmt in &mut body.blocks[0].statements {
+            if let MirStmtKind::MultiAssign {
+                value: MirRvalue::Call(call),
+                ..
+            } = &mut stmt.kind
+            {
+                call.requested_outputs = RequestedOutputCount::AtLeast(2);
+                patched = true;
+                break;
+            }
+        }
+        assert!(
+            patched,
+            "expected entrypoint block to contain multi-assign call"
+        );
+
+        let err = compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).expect_err("error");
+        assert!(err
+            .message
+            .contains("MIR multi-assign calls must carry a fixed requested output count"));
+    }
+
+    #[test]
     fn primary_compile_interprets_simple_indexed_assignment() {
         let ast = runmat_parser::parse("x = [1 2; 3 4]; x(1, 2) = 9;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
