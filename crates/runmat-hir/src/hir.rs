@@ -316,6 +316,21 @@ impl HirCallableRef {
             _ => false,
         }
     }
+
+    pub fn identity(&self) -> Option<CallableIdentity> {
+        match self {
+            HirCallableRef::Function(function) => {
+                Some(CallableIdentity::SemanticFunction(*function))
+            }
+            HirCallableRef::ClassConstructor(class) => {
+                Some(CallableIdentity::ClassConstructor(*class))
+            }
+            HirCallableRef::Builtin(builtin) => Some(CallableIdentity::Builtin(builtin.clone())),
+            HirCallableRef::Imported(path) => Some(CallableIdentity::Imported(path.clone())),
+            HirCallableRef::DynamicExpr(_) => None,
+            HirCallableRef::Unresolved(name) => Some(CallableIdentity::ExternalName(name.clone())),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

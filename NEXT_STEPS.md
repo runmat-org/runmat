@@ -294,6 +294,7 @@ Current state:
 - `CallableDescriptor` construction now routes through internal semantic, `feval` forwarding, and name-only fallback constructors, narrowing direct access to callable target fields.
 - Runtime semantic callback bridge construction now goes through `SemanticCallableRequest` constructors instead of open field assembly at `feval`/`cellfun`/`arrayfun` call sites.
 - Semantic HIR now has a shared `CallableIdentity` and explicit `CallableFallbackPolicy` vocabulary over existing `DefPath`, builtin, semantic-function, method, dynamic-name, and external-name identities.
+- MIR calls and function-handle operands now carry `CallableIdentity`, while VM lowering still maps known identities onto the existing bytecode instructions.
 
 Target state:
 

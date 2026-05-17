@@ -3,7 +3,7 @@ use runmat_builtins::{
     BuiltinEffects, BuiltinEnvironmentEffect, BuiltinPurity, BuiltinSemanticKind,
     BuiltinWorkspaceEffect,
 };
-use runmat_hir::{CallSyntax, HirCallableRef, RequestedOutputCount};
+use runmat_hir::{CallSyntax, CallableIdentity, RequestedOutputCount};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -22,7 +22,7 @@ pub struct MirCall {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MirCallee {
-    Static(HirCallableRef),
+    Static(CallableIdentity),
     Dynamic(MirOperand),
 }
 

@@ -4,9 +4,9 @@ use crate::{
 };
 use runmat_builtins::{BuiltinAsyncBehavior, BuiltinSemantics};
 use runmat_hir::{
-    CommandArgument, ExprId, HirCallableRef, HirCommandCall, HirExpr, HirExprKind, IndexComponent,
-    IndexKind, IndexResultContext, IndexingSemantics, RequestedOutputCount, SemanticError,
-    StringLiteral,
+    CallableIdentity, CommandArgument, ExprId, HirCallableRef, HirCommandCall, HirExpr,
+    HirExprKind, IndexComponent, IndexKind, IndexResultContext, IndexingSemantics,
+    RequestedOutputCount, SemanticError, StringLiteral,
 };
 use std::collections::HashMap;
 
@@ -124,10 +124,10 @@ pub(crate) fn lower_expr_with_replacements(
             await_replacements,
         )?),
         HirExprKind::FunctionHandle(target) => {
-            MirRvalue::Use(MirOperand::FunctionHandle(target.clone()))
+            MirRvalue::Use(MirOperand::FunctionHandle(target.identity()))
         }
         HirExprKind::AnonymousFunction(function) => MirRvalue::Use(MirOperand::FunctionHandle(
-            runmat_hir::FunctionHandleTarget::Anonymous(*function),
+            CallableIdentity::AnonymousFunction(*function),
         )),
         HirExprKind::Await(_) => {
             return Err(SemanticError::new(
@@ -278,7 +278,10 @@ fn lower_index_component(
 }
 
 fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
-    let callee = MirCallee::Static(call.command.clone());
+    let callee =
+        MirCallee::Static(call.command.identity().unwrap_or_else(|| {
+            CallableIdentity::ExternalName(runmat_hir::QualifiedName(Vec::new()))
+        }));
     let semantics = call_semantics(&callee);
     MirRvalue::Call(MirCall {
         callee,
@@ -299,7 +302,10 @@ fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
 }
 
 fn call_rvalue(call: &runmat_hir::HirCall, args: Vec<MirCallArg>) -> MirRvalue {
-    let callee = MirCallee::Static(call.callee.clone());
+    let callee =
+        MirCallee::Static(call.callee.identity().unwrap_or_else(|| {
+            CallableIdentity::ExternalName(runmat_hir::QualifiedName(Vec::new()))
+        }));
     let semantics = call_semantics(&callee);
     MirRvalue::Call(MirCall {
         callee,
@@ -338,29 +344,31 @@ fn dynamic_call_rvalue(
 
 fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
     match callee {
-        MirCallee::Static(HirCallableRef::Builtin(id)) => {
+        MirCallee::Static(CallableIdentity::Builtin(id)) => {
             runmat_builtins::builtin_function_by_name(&id.0)
                 .map(|builtin| builtin.semantics())
                 .or_else(|| runmat_builtins::builtin_semantics_for_name(&id.0))
                 .unwrap_or_else(BuiltinSemantics::unknown)
         }
-        MirCallee::Static(HirCallableRef::Unresolved(_)) | MirCallee::Dynamic(_) => {
-            BuiltinSemantics::unknown()
-        }
-        MirCallee::Static(HirCallableRef::DynamicExpr(_) | HirCallableRef::Imported(_)) => {
-            BuiltinSemantics::unknown()
-        }
-        MirCallee::Static(HirCallableRef::Function(_) | HirCallableRef::ClassConstructor(_)) => {
-            BuiltinSemantics {
-                compatibility: runmat_builtins::BuiltinCompatibility::Matlab,
-                async_behavior: BuiltinAsyncBehavior::NeverSuspends,
-                effects: runmat_builtins::BuiltinEffects::none(),
-                workspace_effect: None,
-                environment_effect: None,
-                purity: runmat_builtins::BuiltinPurity::Impure,
-                semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
-            }
-        }
+        MirCallee::Static(
+            CallableIdentity::ExternalName(_)
+            | CallableIdentity::DynamicName(_)
+            | CallableIdentity::Imported(_)
+            | CallableIdentity::Method(_)
+            | CallableIdentity::AnonymousFunction(_),
+        )
+        | MirCallee::Dynamic(_) => BuiltinSemantics::unknown(),
+        MirCallee::Static(
+            CallableIdentity::SemanticFunction(_) | CallableIdentity::ClassConstructor(_),
+        ) => BuiltinSemantics {
+            compatibility: runmat_builtins::BuiltinCompatibility::Matlab,
+            async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+            effects: runmat_builtins::BuiltinEffects::none(),
+            workspace_effect: None,
+            environment_effect: None,
+            purity: runmat_builtins::BuiltinPurity::Impure,
+            semantic_kind: runmat_builtins::BuiltinSemanticKind::General,
+        },
     }
 }
 
@@ -428,7 +436,7 @@ pub(crate) fn lower_simple_operand(
         HirExprKind::String(value) => MirOperand::Constant(MirConstant::String(value.clone())),
         HirExprKind::Constant(name) => MirOperand::Constant(MirConstant::Symbol(name.clone())),
         HirExprKind::Binding(binding) => MirOperand::Local(ctx.local_for_binding(*binding)?),
-        HirExprKind::FunctionHandle(target) => MirOperand::FunctionHandle(target.clone()),
+        HirExprKind::FunctionHandle(target) => MirOperand::FunctionHandle(target.identity()),
         _ => return Ok(None),
     }))
 }

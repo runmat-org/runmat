@@ -4,7 +4,7 @@ use crate::instr::{ArgSpec, EndExpr, Instr};
 use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
-    BindingId, CallSyntax, EntrypointId, FunctionId, HirAssembly, HirCallableRef, IndexKind,
+    BindingId, CallSyntax, CallableIdentity, EntrypointId, FunctionId, HirAssembly, IndexKind,
     IndexResultContext, OperatorKind, RequestedOutputCount,
 };
 use runmat_mir::{
@@ -105,10 +105,11 @@ fn mir_operand_is_one(operand: &MirOperand) -> bool {
 
 fn call_name(call: &MirCall) -> Option<&str> {
     match &call.callee {
-        MirCallee::Static(HirCallableRef::Builtin(id)) => Some(id.0.as_str()),
-        MirCallee::Static(HirCallableRef::Unresolved(name)) if name.0.len() == 1 => {
+        MirCallee::Static(CallableIdentity::Builtin(id)) => Some(id.0.as_str()),
+        MirCallee::Static(CallableIdentity::ExternalName(name)) if name.0.len() == 1 => {
             Some(name.0[0].0.as_str())
         }
+        MirCallee::Static(CallableIdentity::DynamicName(name)) => Some(name.0.as_str()),
         _ => None,
     }
 }
@@ -1033,7 +1034,7 @@ impl Compiler {
             return self.compile_mir_method_call(call, has_expansion);
         }
         match &call.callee {
-            MirCallee::Static(HirCallableRef::Function(function)) => {
+            MirCallee::Static(CallableIdentity::SemanticFunction(function)) => {
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -1599,7 +1600,7 @@ impl Compiler {
             return self.compile_mir_method_call(call, has_expansion);
         }
         match &call.callee {
-            MirCallee::Static(HirCallableRef::Function(function)) => {
+            MirCallee::Static(CallableIdentity::SemanticFunction(function)) => {
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -1680,9 +1681,10 @@ impl Compiler {
 
     fn mir_unresolved_single_call_name(&self, call: &MirCall) -> Option<String> {
         match &call.callee {
-            MirCallee::Static(HirCallableRef::Unresolved(name)) if name.0.len() == 1 => {
+            MirCallee::Static(CallableIdentity::ExternalName(name)) if name.0.len() == 1 => {
                 Some(name.0[0].0.clone())
             }
+            MirCallee::Static(CallableIdentity::DynamicName(name)) => Some(name.0.clone()),
             _ => None,
         }
     }
@@ -1693,10 +1695,11 @@ impl Compiler {
         has_expansion: bool,
     ) -> Result<(), CompileError> {
         let name = match &call.callee {
-            MirCallee::Static(HirCallableRef::Unresolved(name)) if name.0.len() == 1 => {
+            MirCallee::Static(CallableIdentity::ExternalName(name)) if name.0.len() == 1 => {
                 name.0[0].0.clone()
             }
-            MirCallee::Static(HirCallableRef::Builtin(id)) => id.0.clone(),
+            MirCallee::Static(CallableIdentity::DynamicName(name)) => name.0.clone(),
+            MirCallee::Static(CallableIdentity::Builtin(id)) => id.0.clone(),
             _ => {
                 return Err(self.compile_error(
                     "MIR bytecode lowering for this method callee is not implemented yet",
@@ -1763,10 +1766,11 @@ impl Compiler {
 
     fn mir_builtin_call_name(&self, call: &MirCall) -> Result<String, CompileError> {
         let candidate = match &call.callee {
-            MirCallee::Static(HirCallableRef::Builtin(id)) => id.0.clone(),
-            MirCallee::Static(HirCallableRef::Unresolved(name)) if name.0.len() == 1 => {
+            MirCallee::Static(CallableIdentity::Builtin(id)) => id.0.clone(),
+            MirCallee::Static(CallableIdentity::ExternalName(name)) if name.0.len() == 1 => {
                 name.0[0].0.clone()
             }
+            MirCallee::Static(CallableIdentity::DynamicName(name)) => name.0.clone(),
             _ => {
                 return Err(CompileError::new(
                     "MIR bytecode lowering for this call callee is not implemented yet",
@@ -2355,19 +2359,20 @@ impl Compiler {
 
     fn mir_call_end_expr_internal(&self, call: &MirCall) -> Option<(EndExpr, bool)> {
         let semantic_function = match &call.callee {
-            MirCallee::Static(HirCallableRef::Function(function)) => Some(*function),
+            MirCallee::Static(CallableIdentity::SemanticFunction(function)) => Some(*function),
             _ => None,
         };
         let name = match &call.callee {
-            MirCallee::Static(HirCallableRef::Function(function)) => self
+            MirCallee::Static(CallableIdentity::SemanticFunction(function)) => self
                 .layout
                 .as_ref()
                 .and_then(|layout| layout.functions.get(function))
                 .map(|layout| layout.display_name.clone())?,
-            MirCallee::Static(HirCallableRef::Builtin(id)) => id.0.clone(),
-            MirCallee::Static(HirCallableRef::Unresolved(name)) if name.0.len() == 1 => {
+            MirCallee::Static(CallableIdentity::Builtin(id)) => id.0.clone(),
+            MirCallee::Static(CallableIdentity::ExternalName(name)) if name.0.len() == 1 => {
                 name.0[0].0.clone()
             }
+            MirCallee::Static(CallableIdentity::DynamicName(name)) => name.0.clone(),
             _ => return None,
         };
         let mut args = Vec::with_capacity(call.args.len());
@@ -2465,18 +2470,31 @@ impl Compiler {
 
     fn compile_mir_function_handle(
         &mut self,
-        target: &runmat_hir::FunctionHandleTarget,
+        target: &CallableIdentity,
     ) -> Result<(), CompileError> {
         match target {
-            runmat_hir::FunctionHandleTarget::Builtin(builtin) => {
+            CallableIdentity::Builtin(builtin) => {
                 self.emit(Instr::CreateFunctionHandle(builtin.0.clone()));
                 Ok(())
             }
-            runmat_hir::FunctionHandleTarget::DynamicName(name) => {
+            CallableIdentity::DynamicName(name) => {
                 self.emit(Instr::CreateFunctionHandle(name.0.clone()));
                 Ok(())
             }
-            runmat_hir::FunctionHandleTarget::Anonymous(function) => {
+            CallableIdentity::ExternalName(name) if name.0.len() == 1 => {
+                self.emit(Instr::CreateFunctionHandle(name.0[0].0.clone()));
+                Ok(())
+            }
+            CallableIdentity::Imported(path) => {
+                let Some(name) = path.display_name() else {
+                    return Err(self.compile_error(
+                        "MIR bytecode lowering for this imported function handle target is not implemented yet",
+                    ));
+                };
+                self.emit(Instr::CreateFunctionHandle(name));
+                Ok(())
+            }
+            CallableIdentity::AnonymousFunction(function) => {
                 let (captures, display_name) = self
                     .layout
                     .as_ref()
@@ -2498,7 +2516,7 @@ impl Compiler {
                 ));
                 Ok(())
             }
-            runmat_hir::FunctionHandleTarget::Function(function) => {
+            CallableIdentity::SemanticFunction(function) => {
                 let (captures, display_name) = self
                     .layout
                     .as_ref()

@@ -5,8 +5,8 @@ use crate::{
 };
 use runmat_builtins::{BuiltinEffects, BuiltinPurity, BuiltinSemanticKind};
 use runmat_hir::{
-    AsyncValueFact, BindingId, FunctionHandleTarget, FunctionId, HirCallableRef,
-    RequestedOutputCount, ShapeFact, SpawnSafetyFact, TypeFact, ValueFlowFact, WorkspaceEffect,
+    AsyncValueFact, BindingId, CallableIdentity, FunctionId, RequestedOutputCount, ShapeFact,
+    SpawnSafetyFact, TypeFact, ValueFlowFact, WorkspaceEffect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -32,7 +32,7 @@ pub struct FunctionSummary {
     pub writes_persistents: BTreeSet<BindingId>,
     pub may_call_unknown: bool,
     pub place_mutations: Vec<crate::MirPlaceMutation>,
-    pub function_handles: Vec<FunctionHandleTarget>,
+    pub function_handles: Vec<CallableIdentity>,
     pub calls: Vec<CallSummary>,
     pub spawn_safety: SpawnSafetyFact,
     pub fusibility: FusibilityFact,
@@ -297,7 +297,7 @@ pub fn propagate_function_summaries(store: &mut AnalysisStore) {
 
 fn call_function_id(call: &CallSummary) -> Option<FunctionId> {
     match &call.callee {
-        MirCallee::Static(HirCallableRef::Function(function)) => Some(*function),
+        MirCallee::Static(CallableIdentity::SemanticFunction(function)) => Some(*function),
         _ => None,
     }
 }
@@ -486,8 +486,8 @@ fn operand_output_fact(body: &MirBody, store: &AnalysisStore, operand: &MirOpera
         MirOperand::Constant(crate::MirConstant::String(_)) => {
             scalar_output_fact(TypeFact::CharArray)
         }
-        MirOperand::FunctionHandle(runmat_hir::FunctionHandleTarget::Function(function))
-        | MirOperand::FunctionHandle(runmat_hir::FunctionHandleTarget::Anonymous(function)) => {
+        MirOperand::FunctionHandle(CallableIdentity::SemanticFunction(function))
+        | MirOperand::FunctionHandle(CallableIdentity::AnonymousFunction(function)) => {
             scalar_output_fact(TypeFact::Function(*function))
         }
         _ => OutputFact::default(),
@@ -554,7 +554,7 @@ fn scan_rvalue(
     async_behavior: &mut AsyncBehaviorFact,
     calls: &mut Vec<CallSummary>,
     may_call_unknown: &mut bool,
-    function_handles: &mut Vec<FunctionHandleTarget>,
+    function_handles: &mut Vec<CallableIdentity>,
 ) {
     match value {
         MirRvalue::Use(operand) | MirRvalue::Unary(_, operand) => {
@@ -640,7 +640,7 @@ fn is_unknown_call(callee: &MirCallee) -> bool {
     matches!(callee, MirCallee::Dynamic(_))
         || matches!(
             callee,
-            MirCallee::Static(HirCallableRef::DynamicExpr(_) | HirCallableRef::Unresolved(_))
+            MirCallee::Static(CallableIdentity::DynamicName(_) | CallableIdentity::ExternalName(_))
         )
 }
 
@@ -668,7 +668,7 @@ fn future_call_summary(
     requested_outputs: RequestedOutputCount,
 ) -> CallSummary {
     CallSummary {
-        callee: MirCallee::Static(HirCallableRef::Function(function)),
+        callee: MirCallee::Static(CallableIdentity::SemanticFunction(function)),
         requested_outputs,
         arg_count: args.len(),
         expansion_arg_count: args
@@ -685,18 +685,21 @@ fn future_call_summary(
 
 fn dispatch_hook(call: &MirCall) -> NominalDispatchHook {
     match (&call.callee, &call.syntax) {
-        (MirCallee::Static(HirCallableRef::Function(_)), _) => NominalDispatchHook::DirectFunction,
-        (MirCallee::Static(HirCallableRef::Builtin(_)), _) => NominalDispatchHook::Builtin,
-        (MirCallee::Static(HirCallableRef::ClassConstructor(_)), _) => {
+        (MirCallee::Static(CallableIdentity::SemanticFunction(_)), _) => {
+            NominalDispatchHook::DirectFunction
+        }
+        (MirCallee::Static(CallableIdentity::Builtin(_)), _) => NominalDispatchHook::Builtin,
+        (MirCallee::Static(CallableIdentity::ClassConstructor(_)), _) => {
             NominalDispatchHook::Constructor
         }
         (_, runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke) => {
             NominalDispatchHook::MethodSyntax
         }
         (MirCallee::Dynamic(_), _)
-        | (MirCallee::Static(HirCallableRef::DynamicExpr(_) | HirCallableRef::Unresolved(_)), _) => {
-            NominalDispatchHook::Dynamic
-        }
+        | (
+            MirCallee::Static(CallableIdentity::DynamicName(_) | CallableIdentity::ExternalName(_)),
+            _,
+        ) => NominalDispatchHook::Dynamic,
         _ => NominalDispatchHook::None,
     }
 }
@@ -749,7 +752,7 @@ fn scan_indexing(
     body: &MirBody,
     indexing: &MirIndexing,
     reads_captures: &mut BTreeSet<BindingId>,
-    function_handles: &mut Vec<FunctionHandleTarget>,
+    function_handles: &mut Vec<CallableIdentity>,
 ) {
     for component in &indexing.components {
         match component {
@@ -775,7 +778,7 @@ fn scan_operand(
     body: &MirBody,
     operand: &MirOperand,
     reads_captures: &mut BTreeSet<BindingId>,
-    function_handles: &mut Vec<FunctionHandleTarget>,
+    function_handles: &mut Vec<CallableIdentity>,
 ) {
     match operand {
         MirOperand::Local(local) => {

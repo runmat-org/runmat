@@ -4,7 +4,7 @@ use crate::{
     MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
 };
 use runmat_hir::{
-    AsyncValueFact, DimFact, EmptyArrayRole, ExpansionSemantics, FunctionHandleTarget, FutureFact,
+    AsyncValueFact, CallableIdentity, DimFact, EmptyArrayRole, ExpansionSemantics, FutureFact,
     FutureStateFact, NumericClass, NumericDomain, OperatorKind, ShapeFact, Span, SpawnSafetyFact,
     TaskHandleFact, TensorElementDomainFact, TensorTypeFact, TypeFact, ValueFlowFact,
 };
@@ -365,8 +365,8 @@ fn simple_operand_fact(operand: &MirOperand) -> SimpleValueFact {
         MirOperand::Constant(crate::MirConstant::String(_)) => {
             scalar_single_fact(TypeFact::CharArray)
         }
-        MirOperand::FunctionHandle(FunctionHandleTarget::Function(function))
-        | MirOperand::FunctionHandle(FunctionHandleTarget::Anonymous(function)) => {
+        MirOperand::FunctionHandle(CallableIdentity::SemanticFunction(function))
+        | MirOperand::FunctionHandle(CallableIdentity::AnonymousFunction(function)) => {
             scalar_single_fact(TypeFact::Function(*function))
         }
         _ => SimpleValueFact::default(),
