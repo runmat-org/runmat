@@ -511,7 +511,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector};
+    use super::{
+        build_object_paren_expr_selector_values, build_object_paren_selector_values,
+        ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector,
+    };
+    use crate::bytecode::EndExpr;
     use runmat_builtins::Value;
 
     #[test]
@@ -550,5 +554,60 @@ mod tests {
         assert_eq!(args[2], Value::String(".".to_string()));
         assert_eq!(args[3], Value::String("field".to_string()));
         assert_eq!(args[4], Value::Num(9.0));
+    }
+
+    #[test]
+    fn object_paren_selector_values_preserve_colon_end_and_numeric_order() {
+        let selectors = build_object_paren_selector_values(3, 0b001, 0b010, &[Value::Num(9.0)])
+            .expect("selector values");
+        assert_eq!(selectors.len(), 3);
+        assert_eq!(selectors[0], Value::String(":".to_string()));
+        assert_eq!(selectors[1], Value::String("end".to_string()));
+        assert_eq!(selectors[2], Value::Num(9.0));
+    }
+
+    #[test]
+    fn object_paren_selector_values_validate_numeric_arity() {
+        let missing = build_object_paren_selector_values(2, 0, 0, &[Value::Num(1.0)])
+            .expect_err("missing selector should fail");
+        assert_eq!(missing.identifier(), Some("MissingNumericIndex"));
+
+        let extra =
+            build_object_paren_selector_values(2, 0b01, 0, &[Value::Num(2.0), Value::Num(3.0)])
+                .expect_err("extra selector should fail");
+        assert_eq!(extra.identifier(), Some("UnexpectedNumericIndex"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_encode_end_expression_range_descriptors() {
+        let selectors = build_object_paren_expr_selector_values(
+            2,
+            0,
+            0,
+            &[0],
+            &[(1.0, 2.0)],
+            &[Some(EndExpr::Sub(
+                Box::new(EndExpr::End),
+                Box::new(EndExpr::Const(1.0)),
+            ))],
+            &[None],
+            &[EndExpr::End],
+            &[Value::Num(4.0)],
+        )
+        .expect("expr selector values");
+
+        assert_eq!(selectors.len(), 2);
+        match &selectors[0] {
+            Value::Cell(cell) => {
+                assert_eq!(
+                    (*cell.data[2]).clone(),
+                    Value::String("end_expr".to_string())
+                );
+                assert_eq!((*cell.data[1]).clone(), Value::Num(2.0));
+                assert_eq!((*cell.data[3]).clone(), Value::String("end".to_string()));
+            }
+            other => panic!("expected range descriptor cell, got {other:?}"),
+        }
+        assert_eq!(selectors[1], Value::Num(4.0));
     }
 }
