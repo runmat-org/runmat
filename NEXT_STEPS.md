@@ -287,6 +287,7 @@ Current state:
 - `ObjectIndexSelector` can now carry raw index values and serialize protocol cells at the descriptor boundary, removing the generic object selector-cell helper and the older `subsref` selector-cell builders.
 - `ObjectIndexSelector` now distinguishes empty expansion selectors and scalar-index selectors from arbitrary raw value selectors, so obvious object brace/paren paths no longer downcast scalar indices into generic value lists before descriptor serialization.
 - Object protocol dispatch sites now use typed `ObjectIndexDescriptor` constructors for paren/brace `subsref` and `subsasgn`, so call sites no longer assemble operation/kind pairs manually.
+- `ObjectIndexDescriptor` internals and selector/op enums are now crate-scoped, keeping object protocol serialization behind the VM call-layer ABI instead of exposing field-wise construction.
 
 Target state:
 

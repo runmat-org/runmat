@@ -16,7 +16,7 @@ pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Result<Vec<Value>, 
 }
 
 #[derive(Clone, Copy)]
-pub enum ObjectIndexOp {
+pub(crate) enum ObjectIndexOp {
     Subsref,
     Subsasgn,
 }
@@ -31,7 +31,7 @@ impl ObjectIndexOp {
 }
 
 #[derive(Clone, Copy)]
-pub enum ObjectIndexKind {
+pub(crate) enum ObjectIndexKind {
     Paren,
     Brace,
     Member,
@@ -47,7 +47,7 @@ impl ObjectIndexKind {
     }
 }
 
-pub enum ObjectIndexSelector {
+pub(crate) enum ObjectIndexSelector {
     Empty {
         context: &'static str,
     },
@@ -62,12 +62,12 @@ pub enum ObjectIndexSelector {
     Member(String),
 }
 
-pub struct ObjectIndexDescriptor {
-    pub base: Value,
-    pub op: ObjectIndexOp,
-    pub kind: ObjectIndexKind,
-    pub selector: ObjectIndexSelector,
-    pub rhs: Option<Value>,
+pub(crate) struct ObjectIndexDescriptor {
+    base: Value,
+    op: ObjectIndexOp,
+    kind: ObjectIndexKind,
+    selector: ObjectIndexSelector,
+    rhs: Option<Value>,
 }
 
 impl ObjectIndexDescriptor {
@@ -167,7 +167,7 @@ pub async fn call_runtime_method(args: &[Value]) -> Result<Value, RuntimeError> 
     runmat_runtime::call_method_async(args).await
 }
 
-pub async fn call_object_member_method(
+pub(crate) async fn call_object_member_method(
     base: Value,
     op: ObjectIndexOp,
     field: String,
@@ -176,7 +176,7 @@ pub async fn call_object_member_method(
     call_object_index_descriptor_method(ObjectIndexDescriptor::member(base, op, field, rhs)).await
 }
 
-pub async fn call_object_index_descriptor_method(
+pub(crate) async fn call_object_index_descriptor_method(
     descriptor: ObjectIndexDescriptor,
 ) -> Result<Value, RuntimeError> {
     call_runtime_method(&descriptor.into_runtime_method_args()?).await
@@ -249,21 +249,18 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{ObjectIndexDescriptor, ObjectIndexKind, ObjectIndexOp, ObjectIndexSelector};
+    use super::{ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector};
     use runmat_builtins::Value;
 
     #[test]
     fn object_index_descriptor_serializes_protocol_args_once() {
-        let descriptor = ObjectIndexDescriptor {
-            base: Value::Num(1.0),
-            op: ObjectIndexOp::Subsref,
-            kind: ObjectIndexKind::Brace,
-            selector: ObjectIndexSelector::IndexValues {
+        let descriptor = ObjectIndexDescriptor::subsref_brace(
+            Value::Num(1.0),
+            ObjectIndexSelector::IndexValues {
                 values: vec![Value::Num(2.0)],
                 context: "test subsref build error",
             },
-            rhs: None,
-        };
+        );
 
         let args = descriptor
             .into_runtime_method_args()
@@ -278,13 +275,12 @@ mod tests {
 
     #[test]
     fn object_member_descriptor_carries_rhs() {
-        let descriptor = ObjectIndexDescriptor {
-            base: Value::Num(1.0),
-            op: ObjectIndexOp::Subsasgn,
-            kind: ObjectIndexKind::Member,
-            selector: ObjectIndexSelector::Member("field".to_string()),
-            rhs: Some(Value::Num(9.0)),
-        };
+        let descriptor = ObjectIndexDescriptor::member(
+            Value::Num(1.0),
+            ObjectIndexOp::Subsasgn,
+            "field".to_string(),
+            Some(Value::Num(9.0)),
+        );
 
         let args = descriptor
             .into_runtime_method_args()
