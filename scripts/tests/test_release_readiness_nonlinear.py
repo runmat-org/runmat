@@ -283,6 +283,9 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_CALIBRATION",
             "RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS",
             "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION_MAX_AGE_DAYS",
+            "RUNMAT_RELEASE_READINESS_REQUIRE_KEY_PERF_FIXTURES",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
@@ -314,6 +317,46 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn(result["verdict"], {"warn", "fail"})
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("NONLINEAR_TREND_SLOWDOWN", codes)
+
+    def test_key_perf_speedup_low_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 0.9,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO"] = "1.0"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("KEY_PERF_SPEEDUP_LOW", codes)
+
+    def test_key_perf_trend_slowdown_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 300.0,
+                "gpu_speedup_ratio": 1.3,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.3,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO"] = "1.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("KEY_PERF_TREND_SLOWDOWN", codes)
 
     def test_prep_health_count_warns_non_protected(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

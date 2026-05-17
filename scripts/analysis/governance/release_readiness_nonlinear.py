@@ -28,6 +28,17 @@ NONLINEAR_FIXTURES = {
     "nonlinear_load_path_mix_gpu_provider",
 }
 
+KEY_PERFORMANCE_FIXTURES = {
+    "electromagnetic_reference_homogeneous_gpu_provider",
+    "electromagnetic_reference_heterogeneous_gpu_provider",
+    "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+    "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+    "acoustic_harmonic_gpu_provider",
+    "cfd_steady_gpu_provider",
+    "cht_coupled_gpu_provider",
+    "fsi_coupled_gpu_provider",
+}
+
 
 @dataclass
 class Reason:
@@ -136,6 +147,9 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION": "0",
             "RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS": "4",
             "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION_MAX_AGE_DAYS": "7",
+            "RUNMAT_RELEASE_READINESS_REQUIRE_KEY_PERF_FIXTURES": "true",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO": "1.02",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO": "1.25",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -221,6 +235,9 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION": "0",
             "RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS": "2",
             "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION_MAX_AGE_DAYS": "14",
+            "RUNMAT_RELEASE_READINESS_REQUIRE_KEY_PERF_FIXTURES": "false",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO": "1.0",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO": "1.35",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -306,6 +323,9 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION": "1",
             "RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS": "0",
             "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION_MAX_AGE_DAYS": "30",
+            "RUNMAT_RELEASE_READINESS_REQUIRE_KEY_PERF_FIXTURES": "false",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO": "1.5",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -399,12 +419,16 @@ def env_u64(name: str, default: int = 0) -> int:
 
 
 def nonlinear_records(report: dict) -> Dict[str, dict]:
+    return records_for_fixtures(report, NONLINEAR_FIXTURES)
+
+
+def records_for_fixtures(report: dict, fixture_ids: set[str]) -> Dict[str, dict]:
     records: Dict[str, dict] = {}
     for rec in report.get("records", []):
         if not isinstance(rec, dict):
             continue
         fixture_id = rec.get("fixture_id")
-        if isinstance(fixture_id, str) and fixture_id in NONLINEAR_FIXTURES:
+        if isinstance(fixture_id, str) and fixture_id in fixture_ids:
             records[fixture_id] = rec
     return records
 
@@ -500,6 +524,80 @@ def evaluate_release_readiness(
                         detail=(
                             f"{fixture} gpu_run_ms slowdown ratio {ratio:.3f} exceeds "
                             f"{max_slowdown_ratio:.3f}"
+                        ),
+                    )
+                )
+
+    key_perf_require_fixtures = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_REQUIRE_KEY_PERF_FIXTURES",
+            profile_default("RUNMAT_RELEASE_READINESS_REQUIRE_KEY_PERF_FIXTURES", "false"),
+        )
+    )
+    key_perf_min_speedup_ratio = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO", "1.0"),
+        )
+    )
+    key_perf_max_slowdown_ratio = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO", "1.35"),
+        )
+    )
+    key_perf_records = records_for_fixtures(latest, KEY_PERFORMANCE_FIXTURES)
+    if key_perf_require_fixtures:
+        missing_key_perf = sorted(KEY_PERFORMANCE_FIXTURES.difference(key_perf_records.keys()))
+        if missing_key_perf:
+            reasons.append(
+                Reason(
+                    code="KEY_PERF_FIXTURE_MISSING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "missing key-performance fixture records: "
+                        + ", ".join(missing_key_perf)
+                    ),
+                )
+            )
+    for fixture, rec in key_perf_records.items():
+        speedup = rec.get("gpu_speedup_ratio")
+        if isinstance(speedup, (int, float)) and math.isfinite(float(speedup)):
+            if float(speedup) < key_perf_min_speedup_ratio:
+                reasons.append(
+                    Reason(
+                        code="KEY_PERF_SPEEDUP_LOW",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"{fixture} gpu_speedup_ratio {float(speedup):.3f} below "
+                            f"minimum {key_perf_min_speedup_ratio:.3f}"
+                        ),
+                    )
+                )
+    if rolling and key_perf_records:
+        hist = {fixture: [] for fixture in key_perf_records}
+        for report in rolling:
+            for fixture, rec in records_for_fixtures(report, set(hist.keys())).items():
+                value = rec.get("gpu_run_ms")
+                if isinstance(value, (int, float)) and value > 0:
+                    hist[fixture].append(float(value))
+        for fixture, rec in key_perf_records.items():
+            current = rec.get("gpu_run_ms")
+            history = hist.get(fixture, [])
+            if not isinstance(current, (int, float)) or current <= 0 or not history:
+                continue
+            baseline = statistics.median(history)
+            if baseline <= 0:
+                continue
+            ratio = float(current) / baseline
+            if ratio > key_perf_max_slowdown_ratio:
+                reasons.append(
+                    Reason(
+                        code="KEY_PERF_TREND_SLOWDOWN",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"{fixture} gpu_run_ms slowdown ratio {ratio:.3f} exceeds "
+                            f"{key_perf_max_slowdown_ratio:.3f}"
                         ),
                     )
                 )
