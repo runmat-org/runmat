@@ -136,6 +136,7 @@ mod tests {
     use runmat_mir::lowering::lower_assembly;
     use runmat_mir::{MirRvalue, MirStmtKind, MirTerminatorKind};
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     #[test]
     fn primary_compile_attaches_derived_layout() {
@@ -686,5 +687,68 @@ mod tests {
             instr,
             Instr::CreateSemanticFunctionHandle(FunctionId(9001), _)
         )));
+
+        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
+            Some(Arc::new(|name| {
+                if name == "remote_inc" {
+                    Some(9001)
+                } else {
+                    None
+                }
+            })),
+        );
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 9001);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                assert_eq!(requested_outputs, 1);
+                Box::pin(async move { Ok(Value::Num(3.0)) })
+            })),
+        );
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert!(vars
+            .iter()
+            .any(|value| matches!(value, Value::Num(n) if (*n - 3.0).abs() < 1e-12)));
+    }
+
+    #[test]
+    fn primary_compile_external_semantic_direct_call_uses_host_invoker() {
+        let ast = runmat_parser::parse("y = remote_inc(2);").expect("parse");
+        let mut semantic_functions = HashMap::new();
+        semantic_functions.insert("remote_inc".to_string(), FunctionId(9001));
+        let context = LoweringContext::empty().with_semantic_functions(&semantic_functions);
+        let hir = lower(&ast, &context).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::CallSemanticFunction(FunctionId(9001), 1))));
+
+        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
+            Some(Arc::new(|name| {
+                if name == "remote_inc" {
+                    Some(9001)
+                } else {
+                    None
+                }
+            })),
+        );
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 9001);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                assert_eq!(requested_outputs, 1);
+                Box::pin(async move { Ok(Value::Num(3.0)) })
+            })),
+        );
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert!(vars
+            .iter()
+            .any(|value| matches!(value, Value::Num(n) if (*n - 3.0).abs() < 1e-12)));
     }
 }

@@ -290,13 +290,23 @@ async fn run_interpreter_inner(
         bytecode,
     } = state;
     let semantic_registry = Arc::new(bytecode.semantic_registry());
+    let previous_semantic_invoker = user_functions::current_semantic_function_invoker();
     let semantic_registry_for_semantic_invoker = Arc::clone(&semantic_registry);
     let _semantic_function_guard =
         user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |function: usize, args: &[Value], requested_outputs: usize| {
                 let args = args.to_vec();
+                let previous_invoker = previous_semantic_invoker.clone();
                 let semantic_registry = Arc::clone(&semantic_registry_for_semantic_invoker);
                 Box::pin(async move {
+                    let local_function = semantic_registry
+                        .get(runmat_hir::FunctionId(function))
+                        .is_some();
+                    if !local_function {
+                        if let Some(invoker) = previous_invoker {
+                            return invoker(function, &args, requested_outputs).await;
+                        }
+                    }
                     invoke_semantic_function_value(
                         function,
                         &args,
@@ -307,12 +317,16 @@ async fn run_interpreter_inner(
                 })
             },
         )));
+    let previous_semantic_resolver = user_functions::current_semantic_function_resolver();
     let semantic_registry_for_semantic_resolver = Arc::clone(&semantic_registry);
     let _semantic_resolver_guard =
         user_functions::install_semantic_function_resolver(Some(Arc::new(move |name: &str| {
-            semantic_registry_for_semantic_resolver
-                .resolve_name(name)
-                .map(|function| function.0)
+            if let Some(function) = semantic_registry_for_semantic_resolver.resolve_name(name) {
+                return Some(function.0);
+            }
+            previous_semantic_resolver
+                .as_ref()
+                .and_then(|resolver| resolver(name))
         })));
     CALL_COUNTS.with(|cc| {
         *cc.borrow_mut() = call_counts.clone();

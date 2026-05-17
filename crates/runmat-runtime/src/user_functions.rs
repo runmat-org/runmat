@@ -111,6 +111,14 @@ pub fn install_semantic_function_resolver(
     SemanticFunctionResolverGuard { previous }
 }
 
+pub fn current_semantic_function_invoker() -> Option<Arc<SemanticFunctionInvoker>> {
+    SEMANTIC_FUNCTION_INVOKER.with(|slot| slot.borrow().clone())
+}
+
+pub fn current_semantic_function_resolver() -> Option<Arc<SemanticFunctionResolver>> {
+    SEMANTIC_FUNCTION_RESOLVER.with(|slot| slot.borrow().clone())
+}
+
 pub async fn try_call_semantic_function(
     function: usize,
     args: &[Value],
