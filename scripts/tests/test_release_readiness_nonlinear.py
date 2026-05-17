@@ -273,6 +273,21 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_BOUNDARY_ANCHOR_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO",
@@ -526,6 +541,76 @@ class ReleaseReadinessTests(unittest.TestCase):
                 ],
             }
         )
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "em_sparse_assignment_coverage_ratio", "observed": 0.1},
+                    {"name": "em_sparse_fallback_coefficient_ratio", "observed": 0.98},
+                    {"name": "em_sparse_source_region_coverage_ratio", "observed": 0.7},
+                    {"name": "em_sparse_source_material_alignment_ratio", "observed": 0.7},
+                    {"name": "em_sparse_boundary_anchor_ratio", "observed": 0.08},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {
+                        "name": "em_fallback_heavy_assignment_coverage_ratio",
+                        "observed": 0.7,
+                    },
+                    {
+                        "name": "em_fallback_heavy_fallback_coefficient_ratio",
+                        "observed": 0.7,
+                    },
+                    {
+                        "name": "em_fallback_heavy_source_region_coverage_ratio",
+                        "observed": 0.7,
+                    },
+                    {"name": "em_fallback_heavy_boundary_anchor_ratio", "observed": 0.08},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "em_overlap_source_region_coverage_ratio", "observed": 0.7},
+                    {"name": "em_overlap_source_material_alignment_ratio", "observed": 0.7},
+                    {"name": "em_overlap_source_interference_index", "observed": 0.92},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {
+                        "name": "em_boundary_kernel_boundary_localization_ratio",
+                        "observed": 0.07,
+                    },
+                    {
+                        "name": "em_boundary_kernel_ground_anchor_effectiveness_ratio",
+                        "observed": 0.2,
+                    },
+                    {"name": "em_boundary_kernel_insulation_leakage_proxy", "observed": 1.2},
+                ],
+            }
+        )
         rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO"] = "0.2"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY"] = "0.2"
@@ -550,6 +635,49 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX"
         ] = "0.3"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO"] = (
+            "0.2"
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO"] = (
+            "0.85"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO"
+        ] = "0.85"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_MATERIAL_ALIGNMENT_RATIO"
+        ] = "0.85"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_BOUNDARY_ANCHOR_RATIO"] = "0.12"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO"
+        ] = "0.8"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO"
+        ] = "0.8"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO"
+        ] = "0.8"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO"
+        ] = "0.1"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO"] = (
+            "0.8"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO"
+        ] = "0.8"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX"] = (
+            "0.85"
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO"] = (
+            "0.1"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO"
+        ] = "0.35"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY"
+        ] = "1.05"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE"] = "0.2"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
@@ -562,6 +690,21 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_HIGH", codes)
         self.assertIn("EM_PHASED_SOURCE_OVERLAP_RATIO_HIGH", codes)
         self.assertIn("EM_PHASED_SOURCE_INTERFERENCE_INDEX_HIGH", codes)
+        self.assertIn("EM_SPARSE_ASSIGNMENT_COVERAGE_RATIO_LOW", codes)
+        self.assertIn("EM_SPARSE_FALLBACK_COEFFICIENT_RATIO_HIGH", codes)
+        self.assertIn("EM_SPARSE_SOURCE_REGION_COVERAGE_RATIO_LOW", codes)
+        self.assertIn("EM_SPARSE_SOURCE_MATERIAL_ALIGNMENT_RATIO_LOW", codes)
+        self.assertIn("EM_SPARSE_BOUNDARY_ANCHOR_RATIO_LOW", codes)
+        self.assertIn("EM_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO_LOW", codes)
+        self.assertIn("EM_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO_LOW", codes)
+        self.assertIn("EM_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO_LOW", codes)
+        self.assertIn("EM_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO_LOW", codes)
+        self.assertIn("EM_OVERLAP_SOURCE_REGION_COVERAGE_RATIO_LOW", codes)
+        self.assertIn("EM_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO_LOW", codes)
+        self.assertIn("EM_OVERLAP_SOURCE_INTERFERENCE_INDEX_HIGH", codes)
+        self.assertIn("EM_BOUNDARY_KERNEL_LOCALIZATION_RATIO_LOW", codes)
+        self.assertIn("EM_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO_LOW", codes)
+        self.assertIn("EM_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY_HIGH", codes)
         self.assertIn("EM_BREACH_RATE_HIGH", codes)
 
     def test_em_trend_worsening_reasons_are_emitted(self):

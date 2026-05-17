@@ -187,3 +187,5 @@ Progress update (2026-05-17):
     `release_readiness_nonlinear.py` now evaluates boundary-penalty residual norm assertions and phased-source overlap/interference assertions with profile-tuned thresholds, promoting boundary/phased EM fidelity regressions into explicit readiness reasons and EM breach-rate accounting.
 60. [x] EM release-readiness boundary/phased trend gating expanded:
     `release_readiness_nonlinear.py` now evaluates rolling worsening ratios for boundary-penalty residual norm and phased-source overlap/interference assertions, emitting dedicated readiness reasons when boundary/phased EM fidelity posture regresses relative to baseline.
+61. [x] EM release-readiness non-core fixture posture gating expanded:
+    `release_readiness_nonlinear.py` now evaluates sparse/fallback/overlap/boundary-kernel assertion thresholds (assignment/fallback/source coverage/material alignment/boundary anchor/interference/localization/leakage signals), promoting non-core EM fixture regressions into explicit readiness reasons and EM breach-rate accounting.

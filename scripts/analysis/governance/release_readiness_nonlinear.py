@@ -153,6 +153,21 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM": "0.12",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO": "0.6",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX": "0.35",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_BOUNDARY_ANCHOR_RATIO": "0.2",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO": "0.15",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX": "0.7",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO": "0.15",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO": "0.45",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY": "1.0",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.65",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.72",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "0.98",
@@ -266,6 +281,21 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM": "0.18",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO": "0.75",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX": "0.5",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO": "0.25",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_BOUNDARY_ANCHOR_RATIO": "0.18",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO": "0.12",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO": "0.12",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO": "0.4",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY": "1.05",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.75",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.68",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "1.02",
@@ -379,6 +409,21 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_INDEX": "0.75",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO": "0.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO": "0.95",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_BOUNDARY_ANCHOR_RATIO": "0.15",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO": "0.1",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX": "0.95",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO": "0.1",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO": "0.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY": "1.1",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.9",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.6",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "1.1",
@@ -1493,6 +1538,135 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_min_sparse_assignment_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_ASSIGNMENT_COVERAGE_RATIO",
+                "0.25",
+            ),
+        )
+    )
+    em_max_sparse_fallback_coefficient_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_RATIO",
+                "0.85",
+            ),
+        )
+    )
+    em_min_sparse_source_region_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REGION_COVERAGE_RATIO",
+                "0.85",
+            ),
+        )
+    )
+    em_min_sparse_source_material_alignment_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+                "0.85",
+            ),
+        )
+    )
+    em_min_sparse_boundary_anchor_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_BOUNDARY_ANCHOR_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_BOUNDARY_ANCHOR_RATIO", "0.18"),
+        )
+    )
+    em_min_fallback_heavy_assignment_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO",
+                "0.85",
+            ),
+        )
+    )
+    em_min_fallback_heavy_fallback_coefficient_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO",
+                "0.85",
+            ),
+        )
+    )
+    em_min_fallback_heavy_source_region_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO",
+                "0.85",
+            ),
+        )
+    )
+    em_min_fallback_heavy_boundary_anchor_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO",
+                "0.12",
+            ),
+        )
+    )
+    em_min_overlap_source_region_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO",
+                "0.85",
+            ),
+        )
+    )
+    em_min_overlap_source_material_alignment_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+                "0.85",
+            ),
+        )
+    )
+    em_max_overlap_source_interference_index_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_INDEX", "0.8"),
+        )
+    )
+    em_min_boundary_kernel_localization_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_LOCALIZATION_RATIO",
+                "0.12",
+            ),
+        )
+    )
+    em_min_boundary_kernel_ground_anchor_effectiveness_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO",
+                "0.4",
+            ),
+        )
+    )
+    em_max_boundary_kernel_insulation_leakage_proxy_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY",
+                "1.05",
+            ),
+        )
+    )
     plastic_max_nonlinear_severity_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
@@ -1857,6 +2031,21 @@ def evaluate_release_readiness(
     em_max_boundary_penalty_imag_residual_norm = None
     em_max_phased_source_overlap_ratio = None
     em_max_phased_source_interference_index = None
+    em_min_sparse_assignment_coverage_ratio = None
+    em_max_sparse_fallback_coefficient_ratio = None
+    em_min_sparse_source_region_coverage_ratio = None
+    em_min_sparse_source_material_alignment_ratio = None
+    em_min_sparse_boundary_anchor_ratio = None
+    em_min_fallback_heavy_assignment_coverage_ratio = None
+    em_min_fallback_heavy_fallback_coefficient_ratio = None
+    em_min_fallback_heavy_source_region_coverage_ratio = None
+    em_min_fallback_heavy_boundary_anchor_ratio = None
+    em_min_overlap_source_region_coverage_ratio = None
+    em_min_overlap_source_material_alignment_ratio = None
+    em_max_overlap_source_interference_index = None
+    em_min_boundary_kernel_localization_ratio = None
+    em_min_boundary_kernel_ground_anchor_effectiveness_ratio = None
+    em_max_boundary_kernel_insulation_leakage_proxy = None
     em_breach_rate = None
     em_energy_imbalance_trend_ratio = None
     em_flux_divergence_trend_ratio = None
@@ -2730,6 +2919,126 @@ def evaluate_release_readiness(
                 "EM phased-source interference index",
                 em_max_phased_source_interference_index_threshold,
             ),
+            (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "em_sparse_assignment_coverage_ratio",
+                "min",
+                "EM_SPARSE_ASSIGNMENT_COVERAGE_RATIO_LOW",
+                "EM sparse assignment coverage ratio",
+                em_min_sparse_assignment_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "em_sparse_fallback_coefficient_ratio",
+                "max",
+                "EM_SPARSE_FALLBACK_COEFFICIENT_RATIO_HIGH",
+                "EM sparse fallback coefficient ratio",
+                em_max_sparse_fallback_coefficient_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "em_sparse_source_region_coverage_ratio",
+                "min",
+                "EM_SPARSE_SOURCE_REGION_COVERAGE_RATIO_LOW",
+                "EM sparse source-region coverage ratio",
+                em_min_sparse_source_region_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "em_sparse_source_material_alignment_ratio",
+                "min",
+                "EM_SPARSE_SOURCE_MATERIAL_ALIGNMENT_RATIO_LOW",
+                "EM sparse source-material alignment ratio",
+                em_min_sparse_source_material_alignment_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "em_sparse_boundary_anchor_ratio",
+                "min",
+                "EM_SPARSE_BOUNDARY_ANCHOR_RATIO_LOW",
+                "EM sparse boundary-anchor ratio",
+                em_min_sparse_boundary_anchor_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "em_fallback_heavy_assignment_coverage_ratio",
+                "min",
+                "EM_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_RATIO_LOW",
+                "EM fallback-heavy assignment coverage ratio",
+                em_min_fallback_heavy_assignment_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "em_fallback_heavy_fallback_coefficient_ratio",
+                "min",
+                "EM_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_RATIO_LOW",
+                "EM fallback-heavy fallback coefficient ratio",
+                em_min_fallback_heavy_fallback_coefficient_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "em_fallback_heavy_source_region_coverage_ratio",
+                "min",
+                "EM_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_RATIO_LOW",
+                "EM fallback-heavy source-region coverage ratio",
+                em_min_fallback_heavy_source_region_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "em_fallback_heavy_boundary_anchor_ratio",
+                "min",
+                "EM_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO_LOW",
+                "EM fallback-heavy boundary-anchor ratio",
+                em_min_fallback_heavy_boundary_anchor_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_overlap_interference_gpu_provider",
+                "em_overlap_source_region_coverage_ratio",
+                "min",
+                "EM_OVERLAP_SOURCE_REGION_COVERAGE_RATIO_LOW",
+                "EM overlap source-region coverage ratio",
+                em_min_overlap_source_region_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_overlap_interference_gpu_provider",
+                "em_overlap_source_material_alignment_ratio",
+                "min",
+                "EM_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO_LOW",
+                "EM overlap source-material alignment ratio",
+                em_min_overlap_source_material_alignment_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_overlap_interference_gpu_provider",
+                "em_overlap_source_interference_index",
+                "max",
+                "EM_OVERLAP_SOURCE_INTERFERENCE_INDEX_HIGH",
+                "EM overlap source interference index",
+                em_max_overlap_source_interference_index_threshold,
+            ),
+            (
+                "electromagnetic_reference_boundary_kernel_gpu_provider",
+                "em_boundary_kernel_boundary_localization_ratio",
+                "min",
+                "EM_BOUNDARY_KERNEL_LOCALIZATION_RATIO_LOW",
+                "EM boundary-kernel boundary localization ratio",
+                em_min_boundary_kernel_localization_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_boundary_kernel_gpu_provider",
+                "em_boundary_kernel_ground_anchor_effectiveness_ratio",
+                "min",
+                "EM_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_RATIO_LOW",
+                "EM boundary-kernel ground-anchor effectiveness ratio",
+                em_min_boundary_kernel_ground_anchor_effectiveness_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_boundary_kernel_gpu_provider",
+                "em_boundary_kernel_insulation_leakage_proxy",
+                "max",
+                "EM_BOUNDARY_KERNEL_INSULATION_LEAKAGE_PROXY_HIGH",
+                "EM boundary-kernel insulation leakage proxy",
+                em_max_boundary_kernel_insulation_leakage_proxy_threshold,
+            ),
         ]
         missing_metric_fields = []
         breaches = []
@@ -2834,6 +3143,96 @@ def evaluate_release_readiness(
                     or observed > em_max_phased_source_interference_index
                 ):
                     em_max_phased_source_interference_index = observed
+            elif assertion_name.endswith("sparse_assignment_coverage_ratio"):
+                if (
+                    em_min_sparse_assignment_coverage_ratio is None
+                    or observed < em_min_sparse_assignment_coverage_ratio
+                ):
+                    em_min_sparse_assignment_coverage_ratio = observed
+            elif assertion_name.endswith("sparse_fallback_coefficient_ratio"):
+                if (
+                    em_max_sparse_fallback_coefficient_ratio is None
+                    or observed > em_max_sparse_fallback_coefficient_ratio
+                ):
+                    em_max_sparse_fallback_coefficient_ratio = observed
+            elif assertion_name.endswith("sparse_source_region_coverage_ratio"):
+                if (
+                    em_min_sparse_source_region_coverage_ratio is None
+                    or observed < em_min_sparse_source_region_coverage_ratio
+                ):
+                    em_min_sparse_source_region_coverage_ratio = observed
+            elif assertion_name.endswith("sparse_source_material_alignment_ratio"):
+                if (
+                    em_min_sparse_source_material_alignment_ratio is None
+                    or observed < em_min_sparse_source_material_alignment_ratio
+                ):
+                    em_min_sparse_source_material_alignment_ratio = observed
+            elif assertion_name.endswith("sparse_boundary_anchor_ratio"):
+                if (
+                    em_min_sparse_boundary_anchor_ratio is None
+                    or observed < em_min_sparse_boundary_anchor_ratio
+                ):
+                    em_min_sparse_boundary_anchor_ratio = observed
+            elif assertion_name.endswith("fallback_heavy_assignment_coverage_ratio"):
+                if (
+                    em_min_fallback_heavy_assignment_coverage_ratio is None
+                    or observed < em_min_fallback_heavy_assignment_coverage_ratio
+                ):
+                    em_min_fallback_heavy_assignment_coverage_ratio = observed
+            elif assertion_name.endswith("fallback_heavy_fallback_coefficient_ratio"):
+                if (
+                    em_min_fallback_heavy_fallback_coefficient_ratio is None
+                    or observed < em_min_fallback_heavy_fallback_coefficient_ratio
+                ):
+                    em_min_fallback_heavy_fallback_coefficient_ratio = observed
+            elif assertion_name.endswith("fallback_heavy_source_region_coverage_ratio"):
+                if (
+                    em_min_fallback_heavy_source_region_coverage_ratio is None
+                    or observed < em_min_fallback_heavy_source_region_coverage_ratio
+                ):
+                    em_min_fallback_heavy_source_region_coverage_ratio = observed
+            elif assertion_name.endswith("fallback_heavy_boundary_anchor_ratio"):
+                if (
+                    em_min_fallback_heavy_boundary_anchor_ratio is None
+                    or observed < em_min_fallback_heavy_boundary_anchor_ratio
+                ):
+                    em_min_fallback_heavy_boundary_anchor_ratio = observed
+            elif assertion_name.endswith("overlap_source_region_coverage_ratio"):
+                if (
+                    em_min_overlap_source_region_coverage_ratio is None
+                    or observed < em_min_overlap_source_region_coverage_ratio
+                ):
+                    em_min_overlap_source_region_coverage_ratio = observed
+            elif assertion_name.endswith("overlap_source_material_alignment_ratio"):
+                if (
+                    em_min_overlap_source_material_alignment_ratio is None
+                    or observed < em_min_overlap_source_material_alignment_ratio
+                ):
+                    em_min_overlap_source_material_alignment_ratio = observed
+            elif assertion_name.endswith("overlap_source_interference_index"):
+                if (
+                    em_max_overlap_source_interference_index is None
+                    or observed > em_max_overlap_source_interference_index
+                ):
+                    em_max_overlap_source_interference_index = observed
+            elif assertion_name.endswith("boundary_kernel_boundary_localization_ratio"):
+                if (
+                    em_min_boundary_kernel_localization_ratio is None
+                    or observed < em_min_boundary_kernel_localization_ratio
+                ):
+                    em_min_boundary_kernel_localization_ratio = observed
+            elif assertion_name.endswith("boundary_kernel_ground_anchor_effectiveness_ratio"):
+                if (
+                    em_min_boundary_kernel_ground_anchor_effectiveness_ratio is None
+                    or observed < em_min_boundary_kernel_ground_anchor_effectiveness_ratio
+                ):
+                    em_min_boundary_kernel_ground_anchor_effectiveness_ratio = observed
+            elif assertion_name.endswith("boundary_kernel_insulation_leakage_proxy"):
+                if (
+                    em_max_boundary_kernel_insulation_leakage_proxy is None
+                    or observed > em_max_boundary_kernel_insulation_leakage_proxy
+                ):
+                    em_max_boundary_kernel_insulation_leakage_proxy = observed
 
             breached = observed > threshold if mode == "max" else observed < threshold
             breaches.append(breached)
@@ -4441,6 +4840,36 @@ def evaluate_release_readiness(
         "em_max_phased_source_overlap_ratio_threshold": em_max_phased_source_overlap_ratio_threshold,
         "em_max_phased_source_interference_index": em_max_phased_source_interference_index,
         "em_max_phased_source_interference_index_threshold": em_max_phased_source_interference_index_threshold,
+        "em_min_sparse_assignment_coverage_ratio": em_min_sparse_assignment_coverage_ratio,
+        "em_min_sparse_assignment_coverage_ratio_threshold": em_min_sparse_assignment_coverage_ratio_threshold,
+        "em_max_sparse_fallback_coefficient_ratio": em_max_sparse_fallback_coefficient_ratio,
+        "em_max_sparse_fallback_coefficient_ratio_threshold": em_max_sparse_fallback_coefficient_ratio_threshold,
+        "em_min_sparse_source_region_coverage_ratio": em_min_sparse_source_region_coverage_ratio,
+        "em_min_sparse_source_region_coverage_ratio_threshold": em_min_sparse_source_region_coverage_ratio_threshold,
+        "em_min_sparse_source_material_alignment_ratio": em_min_sparse_source_material_alignment_ratio,
+        "em_min_sparse_source_material_alignment_ratio_threshold": em_min_sparse_source_material_alignment_ratio_threshold,
+        "em_min_sparse_boundary_anchor_ratio": em_min_sparse_boundary_anchor_ratio,
+        "em_min_sparse_boundary_anchor_ratio_threshold": em_min_sparse_boundary_anchor_ratio_threshold,
+        "em_min_fallback_heavy_assignment_coverage_ratio": em_min_fallback_heavy_assignment_coverage_ratio,
+        "em_min_fallback_heavy_assignment_coverage_ratio_threshold": em_min_fallback_heavy_assignment_coverage_ratio_threshold,
+        "em_min_fallback_heavy_fallback_coefficient_ratio": em_min_fallback_heavy_fallback_coefficient_ratio,
+        "em_min_fallback_heavy_fallback_coefficient_ratio_threshold": em_min_fallback_heavy_fallback_coefficient_ratio_threshold,
+        "em_min_fallback_heavy_source_region_coverage_ratio": em_min_fallback_heavy_source_region_coverage_ratio,
+        "em_min_fallback_heavy_source_region_coverage_ratio_threshold": em_min_fallback_heavy_source_region_coverage_ratio_threshold,
+        "em_min_fallback_heavy_boundary_anchor_ratio": em_min_fallback_heavy_boundary_anchor_ratio,
+        "em_min_fallback_heavy_boundary_anchor_ratio_threshold": em_min_fallback_heavy_boundary_anchor_ratio_threshold,
+        "em_min_overlap_source_region_coverage_ratio": em_min_overlap_source_region_coverage_ratio,
+        "em_min_overlap_source_region_coverage_ratio_threshold": em_min_overlap_source_region_coverage_ratio_threshold,
+        "em_min_overlap_source_material_alignment_ratio": em_min_overlap_source_material_alignment_ratio,
+        "em_min_overlap_source_material_alignment_ratio_threshold": em_min_overlap_source_material_alignment_ratio_threshold,
+        "em_max_overlap_source_interference_index": em_max_overlap_source_interference_index,
+        "em_max_overlap_source_interference_index_threshold": em_max_overlap_source_interference_index_threshold,
+        "em_min_boundary_kernel_localization_ratio": em_min_boundary_kernel_localization_ratio,
+        "em_min_boundary_kernel_localization_ratio_threshold": em_min_boundary_kernel_localization_ratio_threshold,
+        "em_min_boundary_kernel_ground_anchor_effectiveness_ratio": em_min_boundary_kernel_ground_anchor_effectiveness_ratio,
+        "em_min_boundary_kernel_ground_anchor_effectiveness_ratio_threshold": em_min_boundary_kernel_ground_anchor_effectiveness_ratio_threshold,
+        "em_max_boundary_kernel_insulation_leakage_proxy": em_max_boundary_kernel_insulation_leakage_proxy,
+        "em_max_boundary_kernel_insulation_leakage_proxy_threshold": em_max_boundary_kernel_insulation_leakage_proxy_threshold,
         "em_breach_rate": em_breach_rate,
         "em_max_breach_rate_threshold": em_max_breach_rate_threshold,
         "em_energy_imbalance_trend_ratio": em_energy_imbalance_trend_ratio,
