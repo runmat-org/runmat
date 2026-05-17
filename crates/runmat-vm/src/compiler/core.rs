@@ -1024,9 +1024,9 @@ impl Compiler {
         output_count: usize,
     ) -> Result<(), CompileError> {
         match call.requested_outputs {
-            RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count)
-                if count == output_count => {}
-            RequestedOutputCount::UnknownDynamic => {}
+            RequestedOutputCount::Zero if output_count == 0 => {}
+            RequestedOutputCount::One if output_count == 1 => {}
+            RequestedOutputCount::Exactly(count) if count == output_count => {}
             _ => {
                 return Err(
                     self.compile_error("MIR multi-assign call output count does not match targets")
@@ -1696,8 +1696,12 @@ impl Compiler {
         let count = match targets.requested_outputs {
             RequestedOutputCount::Zero => 0,
             RequestedOutputCount::One => 1,
-            RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count) => count,
-            RequestedOutputCount::UnknownDynamic => expected,
+            RequestedOutputCount::Exactly(count) => count,
+            RequestedOutputCount::AtLeast(_) | RequestedOutputCount::UnknownDynamic => {
+                return Err(self.compile_error(
+                    "MIR multi-assign targets must carry a fixed requested output count",
+                ))
+            }
         };
         if count != expected {
             return Err(self.compile_error(format!(
