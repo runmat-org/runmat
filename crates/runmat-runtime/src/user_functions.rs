@@ -63,7 +63,6 @@ impl SemanticCallableRequest {
 
     pub fn semantic(
         function: usize,
-        _name: String,
         args: Vec<Value>,
         requested_outputs: usize,
         kind: SemanticCallableKind,

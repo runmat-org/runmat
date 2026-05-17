@@ -516,7 +516,6 @@ impl Callable {
                 if let Some(function) = c.semantic_function {
                     let request = user_functions::SemanticCallableRequest::semantic(
                         function,
-                        c.function_name.clone(),
                         captures.clone(),
                         1,
                         user_functions::SemanticCallableKind::Cellfun,
@@ -526,6 +525,13 @@ impl Callable {
                     {
                         return result;
                     }
+                    return Err(cellfun_error_with_identifier(
+                        &format!(
+                            "cellfun: semantic closure '{}' ({function}) is unavailable",
+                            c.function_name
+                        ),
+                        IDENT_INVALID_INPUT,
+                    ));
                 }
                 call_builtin_async(&c.function_name, &captures).await
             }

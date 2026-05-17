@@ -650,7 +650,6 @@ impl Callable {
                 if let Some(function) = c.semantic_function {
                     let request = user_functions::SemanticCallableRequest::semantic(
                         function,
-                        c.function_name.clone(),
                         merged.clone(),
                         1,
                         user_functions::SemanticCallableKind::Arrayfun,
@@ -660,6 +659,10 @@ impl Callable {
                     {
                         return result;
                     }
+                    return Err(arrayfun_flow(&format!(
+                        "arrayfun: semantic closure '{}' ({function}) is unavailable",
+                        c.function_name
+                    )));
                 }
                 crate::call_builtin_async(&c.function_name, &merged).await
             }

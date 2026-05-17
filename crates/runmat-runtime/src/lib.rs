@@ -1151,7 +1151,6 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         Value::SemanticFunctionHandle { name, function } => {
             let request = crate::user_functions::SemanticCallableRequest::semantic(
                 function,
-                name.clone(),
                 rest.clone(),
                 requested_outputs,
                 crate::user_functions::SemanticCallableKind::Feval,
@@ -1160,7 +1159,10 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             {
                 return result;
             }
-            call_by_name(&name, &rest, requested_outputs).await
+            Err(
+                (format!("feval: semantic function handle '{name}' ({function}) is unavailable"))
+                    .into(),
+            )
         }
         Value::Closure(c) => {
             let mut args = c.captures.clone();
@@ -1168,7 +1170,6 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             if let Some(function) = c.semantic_function {
                 let request = crate::user_functions::SemanticCallableRequest::semantic(
                     function,
-                    c.function_name.clone(),
                     args.clone(),
                     requested_outputs,
                     crate::user_functions::SemanticCallableKind::Feval,
@@ -1178,6 +1179,11 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                 {
                     return result;
                 }
+                return Err((format!(
+                    "feval: semantic closure '{}' ({function}) is unavailable",
+                    c.function_name
+                ))
+                .into());
             }
             call_by_name(&c.function_name, &args, requested_outputs).await
         }
@@ -1530,6 +1536,24 @@ mod tests {
     }
 
     #[test]
+    fn feval_semantic_function_handle_errors_when_semantic_invoker_unavailable() {
+        let _guard = crate::user_functions::install_semantic_function_invoker(None);
+        let handle = Value::SemanticFunctionHandle {
+            name: "semantic_target".to_string(),
+            function: 9043,
+        };
+
+        let err = block_on(feval_builtin(handle, vec![Value::Num(3.0)])).expect_err(
+            "semantic function handle should not fall back to name-based dispatch when unavailable",
+        );
+        assert!(
+            err.message()
+                .contains("semantic function handle 'semantic_target' (9043) is unavailable"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
     fn feval_name_only_handle_uses_semantic_resolver() {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
@@ -1706,6 +1730,24 @@ mod tests {
         assert_eq!(
             result,
             Value::OutputList(vec![Value::Num(1.0), Value::Num(2.0)])
+        );
+    }
+
+    #[test]
+    fn feval_semantic_closure_errors_when_semantic_invoker_unavailable() {
+        let _guard = crate::user_functions::install_semantic_function_invoker(None);
+        let closure = Value::Closure(runmat_builtins::Closure {
+            function_name: "semantic_target".to_string(),
+            semantic_function: Some(9044),
+            captures: vec![Value::Num(1.0)],
+        });
+
+        let err = block_on(feval_builtin(closure, vec![Value::Num(2.0)]))
+            .expect_err("semantic closure should not fall back to name-based dispatch");
+        assert!(
+            err.message()
+                .contains("semantic closure 'semantic_target' (9044) is unavailable"),
+            "unexpected error: {err:?}"
         );
     }
 }

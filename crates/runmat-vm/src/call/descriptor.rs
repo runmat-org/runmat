@@ -231,7 +231,7 @@ impl CallableDescriptor {
                     return Self::feval_semantic(
                         function.0,
                         name,
-                        CallableFallbackPolicy::RuntimeNameResolution,
+                        CallableFallbackPolicy::None,
                         args,
                         requested_outputs,
                     );
@@ -247,7 +247,7 @@ impl CallableDescriptor {
             Value::SemanticFunctionHandle { name, function } => Self::feval_semantic(
                 function,
                 name,
-                CallableFallbackPolicy::RuntimeNameResolution,
+                CallableFallbackPolicy::None,
                 args,
                 requested_outputs,
             ),
