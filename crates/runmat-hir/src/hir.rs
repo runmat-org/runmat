@@ -352,7 +352,9 @@ impl CallableIdentity {
             | CallableIdentity::ClassConstructor(_)
             | CallableIdentity::AnonymousFunction(_) => None,
             CallableIdentity::Builtin(id) => Some(id.0.clone()),
-            CallableIdentity::Imported(path) => path.display_name(),
+            CallableIdentity::Imported(path) => {
+                path.module.display_name().or_else(|| path.display_name())
+            }
             CallableIdentity::Method(id) => Some(id.0.clone()),
             CallableIdentity::DynamicName(name) => Some(name.0.clone()),
             CallableIdentity::ExternalName(name) => name.display_name(),
@@ -1390,6 +1392,21 @@ mod tests {
         assert_eq!(function_id, FunctionId(0));
         assert_eq!(path.package.0, "pkg");
         assert!(matches!(path.item[0], DefPathSegment::Function(_)));
+    }
+
+    #[test]
+    fn imported_callable_identity_prefers_qualified_display_name() {
+        let path = DefPath {
+            package: PackageName("pkg".into()),
+            module: QualifiedName(vec![
+                SymbolName("pkg".into()),
+                SymbolName("demo".into()),
+                SymbolName("f".into()),
+            ]),
+            item: vec![DefPathSegment::Function(SymbolName("f".into()))],
+        };
+        let identity = CallableIdentity::Imported(path);
+        assert_eq!(identity.display_name().as_deref(), Some("pkg.demo.f"));
     }
 
     #[test]
