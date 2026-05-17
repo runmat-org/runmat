@@ -6,7 +6,6 @@ use crate::call::shared::{
     call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexSelector,
 };
 use crate::indexing::end_expr as idx_end_expr;
-use crate::indexing::plan as idx_plan;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
 use crate::indexing::read_linear as idx_read_linear;
 use crate::indexing::read_slice as idx_read_slice;
@@ -22,14 +21,6 @@ use std::pin::Pin;
 
 fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
     format!("{context}: {}", err.message()).into()
-}
-
-fn total_len_from_shape(shape: &[usize]) -> usize {
-    if runmat_runtime::builtins::common::shape::is_scalar_shape(shape) {
-        1
-    } else {
-        shape.iter().copied().product()
-    }
 }
 
 fn numeric_indices_from_values(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
@@ -1179,232 +1170,33 @@ where
                 };
             }
             if let Value::GpuTensor(handle) = &base {
-                let attempt = async {
-                    let rank = handle.shape.len();
-                    #[derive(Clone)]
-                    enum Sel {
-                        Colon,
-                        Scalar(usize),
-                        Indices(Vec<usize>),
-                        Range {
-                            start: i64,
-                            step: i64,
-                            end_off: EndExpr,
-                        },
-                    }
-                    let full_shape: Vec<usize> = if *dims == 1 {
-                        vec![total_len_from_shape(&handle.shape)]
-                    } else if rank < *dims {
-                        let mut s = handle.shape.clone();
-                        s.resize(*dims, 1);
-                        s
-                    } else {
-                        handle.shape.clone()
-                    };
-                    let mut selectors: Vec<Sel> = Vec::with_capacity(*dims);
-                    let mut num_iter = 0usize;
-                    let mut rp_iter = 0usize;
-                    for d in 0..*dims {
-                        let is_colon = (*colon_mask & (1u32 << d)) != 0;
-                        let is_end = (*end_mask & (1u32 << d)) != 0;
-                        if is_colon {
-                            selectors.push(Sel::Colon);
-                        } else if is_end {
-                            selectors.push(Sel::Scalar(*full_shape.get(d).unwrap_or(&1)));
-                        } else if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-                            let (raw_st, raw_sp) = range_params[rp_iter];
-                            let dim_len = *full_shape.get(d).unwrap_or(&1);
-                            let st = if let Some(expr) = &range_start_exprs[rp_iter] {
-                                resolve_range_end_index(dim_len, expr, &*vars, call_user).await?
-                                    as f64
-                            } else {
-                                raw_st
-                            };
-                            let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
-                                resolve_range_end_index(dim_len, expr, &*vars, call_user).await?
-                                    as f64
-                            } else {
-                                raw_sp
-                            };
-                            rp_iter += 1;
-                            let off = range_end_exprs[pos].clone();
-                            selectors.push(Sel::Range {
-                                start: st as i64,
-                                step: if sp >= 0.0 {
-                                    sp as i64
-                                } else {
-                                    -(sp.abs() as i64)
-                                },
-                                end_off: off,
-                            });
-                        } else {
-                            let v =
-                                numeric
-                                    .get(num_iter)
-                                    .ok_or(crate::interpreter::errors::mex(
-                                        "MissingNumericIndex",
-                                        "missing numeric index",
-                                    ))?;
-                            num_iter += 1;
-                            if let Value::Int(idx_val) = v {
-                                let idx = idx_val.to_i64();
-                                if idx < 1 {
-                                    return Err(crate::interpreter::errors::mex(
-                                        "IndexOutOfBounds",
-                                        "Index out of bounds",
-                                    ));
-                                }
-                                selectors.push(Sel::Scalar(idx as usize));
-                            } else {
-                                match v {
-                                    Value::Tensor(idx_t) => {
-                                        let dim_len = *full_shape.get(d).unwrap_or(&1);
-                                        let len = idx_t.shape.iter().product::<usize>();
-                                        if len == dim_len {
-                                            let mut vv = Vec::new();
-                                            for (i, &val) in idx_t.data.iter().enumerate() {
-                                                if val != 0.0 {
-                                                    vv.push(i + 1);
-                                                }
-                                            }
-                                            selectors.push(Sel::Indices(vv));
-                                        } else {
-                                            let mut vv = Vec::with_capacity(len);
-                                            for &val in &idx_t.data {
-                                                let idx = val as isize;
-                                                if idx < 1 {
-                                                    return Err(crate::interpreter::errors::mex(
-                                                        "IndexOutOfBounds",
-                                                        "Index out of bounds",
-                                                    ));
-                                                }
-                                                vv.push(idx as usize);
-                                            }
-                                            selectors.push(Sel::Indices(vv));
-                                        }
-                                    }
-                                    _ => {
-                                        return Err(crate::interpreter::errors::mex(
-                                            "UnsupportedIndexType",
-                                            "Unsupported index type",
-                                        ))
-                                    }
-                                }
-                            }
+                let vm_plan = build_expr_index_plan(
+                    ExprPlanSpec {
+                        dims: *dims,
+                        colon_mask: *colon_mask,
+                        end_mask: *end_mask,
+                        range_dims,
+                        range_params: &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        numeric: &numeric,
+                        shape: &handle.shape,
+                    },
+                    |dim_len, expr| {
+                        let expr = expr.clone();
+                        let vars_ref = &*vars;
+                        let call_user_ref = call_user;
+                        async move {
+                            resolve_range_end_index(dim_len, &expr, vars_ref, call_user_ref).await
                         }
-                    }
-                    let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(*dims);
-                    for (d, sel) in selectors.iter().enumerate().take(*dims) {
-                        let dim_len = *full_shape.get(d).unwrap_or(&1) as i64;
-                        let idxs: Vec<usize> = match sel {
-                            Sel::Colon => (1..=dim_len as usize).collect(),
-                            Sel::Scalar(i) => vec![*i],
-                            Sel::Indices(v) => v.clone(),
-                            Sel::Range {
-                                start,
-                                step,
-                                end_off,
-                            } => {
-                                let mut vv = Vec::new();
-                                let mut cur = *start;
-                                let end_i = resolve_range_end_index(
-                                    dim_len as usize,
-                                    end_off,
-                                    &*vars,
-                                    call_user,
-                                )
-                                .await?;
-                                if *step == 0 {
-                                    return Err(crate::interpreter::errors::mex(
-                                        "IndexStepZero",
-                                        "Index step cannot be zero",
-                                    ));
-                                }
-                                if *step > 0 {
-                                    while cur <= end_i {
-                                        if cur < 1 || cur > dim_len {
-                                            break;
-                                        }
-                                        vv.push(cur as usize);
-                                        cur += *step;
-                                    }
-                                } else {
-                                    while cur >= end_i {
-                                        if cur < 1 || cur > dim_len {
-                                            break;
-                                        }
-                                        vv.push(cur as usize);
-                                        cur += *step;
-                                    }
-                                }
-                                vv
-                            }
-                        };
-                        if idxs.iter().any(|&i| i == 0 || i > dim_len as usize) {
-                            return Err(crate::interpreter::errors::mex(
-                                "IndexOutOfBounds",
-                                "Index out of bounds",
-                            ));
-                        }
-                        per_dim_indices.push(idxs);
-                    }
-                    let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
-                    if total_out == 0 {
-                        return Ok((Vec::new(), vec![0, 0]));
-                    }
-                    let mut strides: Vec<usize> = vec![0; *dims];
-                    let mut acc = 1usize;
-                    for (d, stride) in strides.iter_mut().enumerate().take(*dims) {
-                        *stride = acc;
-                        acc *= full_shape[d];
-                    }
-                    let mut indices: Vec<u32> = Vec::with_capacity(total_out);
-                    let mut idx = vec![0usize; *dims];
-                    loop {
-                        let mut lin = 0usize;
-                        for d in 0..*dims {
-                            let i0 = per_dim_indices[d][idx[d]] - 1;
-                            lin += i0 * strides[d];
-                        }
-                        indices.push(lin as u32);
-                        let mut d = 0usize;
-                        while d < *dims {
-                            idx[d] += 1;
-                            if idx[d] < per_dim_indices[d].len() {
-                                break;
-                            }
-                            idx[d] = 0;
-                            d += 1;
-                        }
-                        if d == *dims {
-                            break;
-                        }
-                    }
-                    let output_shape = if *dims == 1 {
-                        if total_out <= 1 {
-                            vec![1, 1]
-                        } else {
-                            vec![total_out, 1]
-                        }
-                    } else {
-                        per_dim_indices.iter().map(|v| v.len().max(1)).collect()
-                    };
-                    Ok((indices, output_shape))
-                }
-                .await;
+                    },
+                )
+                .await?;
 
-                if let Ok((indices, output_shape)) = attempt {
-                    let vm_plan = idx_plan::IndexPlan::new(
-                        indices,
-                        output_shape,
-                        Vec::new(),
-                        *dims,
-                        handle.shape.clone(),
-                    );
-                    if let Ok(result) = idx_read_slice::read_gpu_slice_from_plan(handle, &vm_plan) {
-                        stack.push(result);
-                        return Ok(true);
-                    }
+                if let Ok(result) = idx_read_slice::read_gpu_slice_from_plan(handle, &vm_plan) {
+                    stack.push(result);
+                    return Ok(true);
                 }
 
                 let provider = runmat_accelerate_api::provider().ok_or_else(|| {
