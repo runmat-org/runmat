@@ -290,6 +290,7 @@ Current state:
 - `ObjectIndexDescriptor` internals and selector/op enums are now crate-scoped, keeping object protocol serialization behind the VM call-layer ABI instead of exposing field-wise construction.
 - Store-slice object assignment now uses the descriptor-backed `object_subsasgn_paren` path directly instead of falling back to manually assembled `Class.subsasgn` arguments.
 - Member load/store object fallback checks now use descriptor-layer helpers for `subsref`/`subsasgn` membership and dispatch instead of importing object protocol operation names into resolver code.
+- Object operator and handle-method dispatch now go through typed VM call-layer helpers instead of exposing raw `call_method` argument-vector assembly to dispatch modules.
 
 Target state:
 

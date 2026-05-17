@@ -8,8 +8,7 @@ use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
 
 async fn call_operator_method(obj: Value, method: &str, arg: Value) -> Result<Value, RuntimeError> {
-    let args = vec![obj, Value::String(method.to_string()), arg];
-    crate::call::shared::call_runtime_method(&args).await
+    crate::call::shared::call_object_operator_method(obj, method, arg).await
 }
 
 pub async fn dispatch_arithmetic(

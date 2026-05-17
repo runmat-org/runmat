@@ -194,11 +194,13 @@ pub async fn call_method_or_member_index(
             runmat_runtime::call_builtin_async("getfield", &getfield_args).await
         }
         Value::HandleObject(handle) => {
-            let mut method_args = Vec::with_capacity(2 + args.len());
-            method_args.push(Value::HandleObject(handle.clone()));
-            method_args.push(Value::String(name.clone()));
-            method_args.extend(args.iter().cloned());
-            if let Ok(v) = crate::call::shared::call_runtime_method(&method_args).await {
+            if let Ok(v) = crate::call::shared::call_object_named_method(
+                Value::HandleObject(handle.clone()),
+                name.clone(),
+                args.clone(),
+            )
+            .await
+            {
                 return Ok(v);
             }
 

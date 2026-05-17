@@ -163,8 +163,29 @@ fn build_protocol_index_cell(values: Vec<Value>, context: &str) -> Result<Value,
     Ok(Value::Cell(cell))
 }
 
-pub async fn call_runtime_method(args: &[Value]) -> Result<Value, RuntimeError> {
+async fn call_runtime_method(args: &[Value]) -> Result<Value, RuntimeError> {
     runmat_runtime::call_method_async(args).await
+}
+
+pub(crate) async fn call_object_operator_method(
+    base: Value,
+    method: &str,
+    arg: Value,
+) -> Result<Value, RuntimeError> {
+    let args = [base, Value::String(method.to_string()), arg];
+    call_runtime_method(&args).await
+}
+
+pub(crate) async fn call_object_named_method(
+    base: Value,
+    method: String,
+    args: Vec<Value>,
+) -> Result<Value, RuntimeError> {
+    let mut method_args = Vec::with_capacity(2 + args.len());
+    method_args.push(base);
+    method_args.push(Value::String(method));
+    method_args.extend(args);
+    call_runtime_method(&method_args).await
 }
 
 async fn call_object_member_method(
