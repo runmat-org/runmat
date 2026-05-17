@@ -761,6 +761,16 @@ fn analysis_create_model_supports_fsi_coupled_profile_template() {
 #[test]
 fn analysis_validate_study_reports_invalid_study_id() {
     let _guard = analysis_test_guard();
+    let root = temp_artifact_root("validate-study-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let env_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+    };
+    std::env::set_var(
+        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        root.display().to_string(),
+    );
     let mut spec = sample_linear_static_study_spec();
     spec.study_id = "   ".to_string();
 
@@ -775,11 +785,27 @@ fn analysis_validate_study_reports_invalid_study_id() {
         .issue_codes
         .iter()
         .any(|code| code == "ANALYSIS_STUDY_ID_EMPTY"));
+    assert!(envelope
+        .data
+        .evidence_artifact_path
+        .ends_with("validate.json"));
+    drop(env_guard);
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn analysis_plan_study_returns_canonical_linear_static_sequence() {
     let _guard = analysis_test_guard();
+    let root = temp_artifact_root("plan-study-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let env_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+    };
+    std::env::set_var(
+        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        root.display().to_string(),
+    );
     let spec = sample_linear_static_study_spec();
 
     let envelope = analysis_plan_study_op(&spec, OperationContext::new(None, None))
@@ -798,12 +824,25 @@ fn analysis_plan_study_returns_canonical_linear_static_sequence() {
         ]
     );
     assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
+    assert!(envelope.data.evidence_artifact_path.ends_with("plan.json"));
+    drop(env_guard);
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn analysis_run_study_executes_linear_static_path() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("run-study-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let env_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+    };
+    std::env::set_var(
+        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        root.display().to_string(),
+    );
     let spec = sample_linear_static_study_spec();
 
     let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
@@ -815,7 +854,17 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
     assert_eq!(envelope.data.run_kind, AnalysisRunKind::LinearStatic);
     assert_eq!(envelope.data.backend, ComputeBackend::Cpu);
+    assert_eq!(
+        envelope.data.operation_sequence,
+        vec![
+            "analysis.create_model/v1".to_string(),
+            "analysis.validate/v1".to_string(),
+            "analysis.run_linear_static/v1".to_string(),
+        ]
+    );
+    assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
     assert!(envelope.data.run_id.starts_with("run_"));
+    assert!(envelope.data.evidence_artifact_path.ends_with("run.json"));
 
     let persisted = storage::load_run_result(&envelope.data.run_id)
         .expect("run load should succeed")
@@ -823,6 +872,8 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(persisted.run_id, envelope.data.run_id);
     assert_eq!(persisted.run_status, envelope.data.run_status);
     assert_eq!(persisted.publishable, envelope.data.publishable);
+    drop(env_guard);
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]

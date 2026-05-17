@@ -97,3 +97,5 @@ Progress update (2026-05-17):
     added additive high-level runtime operations `analysis.validate_study/v1`, `analysis.plan_study/v1`, and `analysis.run_study/v1` with typed study contracts, deterministic study fingerprinting, canonical linear-static operation sequencing, and runtime coverage tests.
 15. [x] FSI first run-path and governance baseline landed:
     added additive runtime operation contract `analysis.run_fsi/v1` with `AnalysisFsiRunOptions`, transient+CFD model/domain validation, FSI diagnostics (`FEA_FSI_COUPLING` + `FEA_CFD_FLOW`), study/trend classification wiring (`AnalysisRunKind::Fsi`), and conformance harness fixtures (`fsi_coupled_cpu`, `fsi_coupled_gpu_provider`, `fsi_coupled_gpu_fallback`) with threshold assertions.
+16. [x] Study workflow canonical evidence baseline landed:
+    `analysis.validate_study/v1`, `analysis.plan_study/v1`, and `analysis.run_study/v1` now persist canonical study evidence artifacts (`validate.json`, `plan.json`, `run.json`) keyed by deterministic study fingerprint under a configurable study artifact root (`RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT`), with typed payload fields exposing evidence artifact paths.

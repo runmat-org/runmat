@@ -1002,6 +1002,7 @@ pub struct AnalysisStudySpec {
 pub struct AnalysisStudyValidateResult {
     pub valid: bool,
     pub issue_codes: Vec<String>,
+    pub evidence_artifact_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1012,6 +1013,7 @@ pub struct AnalysisStudyPlanData {
     pub backend: ComputeBackend,
     pub operation_sequence: Vec<String>,
     pub study_fingerprint: String,
+    pub evidence_artifact_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1020,9 +1022,12 @@ pub struct AnalysisStudyRunData {
     pub model_id: String,
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
+    pub study_fingerprint: String,
+    pub operation_sequence: Vec<String>,
     pub run_id: String,
     pub run_status: RunStatus,
     pub publishable: bool,
+    pub evidence_artifact_path: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
+use chrono::Utc;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisInterfaceKind, AnalysisModel, AnalysisModelId,
     AnalysisStep, AnalysisStepKind, AnalysisValidationError, BoundaryCondition,
@@ -667,6 +668,33 @@ pub fn analysis_validate_study_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisStudyValidateResult>, OperationErrorEnvelope> {
     let issue_codes = validate_study_issue_codes(spec);
+    let study_fingerprint = study_fingerprint(spec);
+    let evidence_artifact_path = persist_study_evidence(
+        &study_fingerprint,
+        "validate",
+        serde_json::json!({
+            "schema_version": "analysis_study_validate_artifact/v1",
+            "study_id": spec.study_id.clone(),
+            "study_fingerprint": study_fingerprint.clone(),
+            "valid": issue_codes.is_empty(),
+            "issue_codes": issue_codes.clone(),
+        }),
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_VALIDATE_STUDY_OPERATION,
+            ANALYSIS_VALIDATE_STUDY_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist study validation evidence artifact: {err}"),
+            BTreeMap::from([("study_id".to_string(), spec.study_id.clone())]),
+        )
+    })?;
     Ok(OperationEnvelope::new(
         ANALYSIS_VALIDATE_STUDY_OPERATION,
         ANALYSIS_VALIDATE_STUDY_OP_VERSION,
@@ -674,6 +702,7 @@ pub fn analysis_validate_study_op(
         AnalysisStudyValidateResult {
             valid: issue_codes.is_empty(),
             issue_codes,
+            evidence_artifact_path,
         },
     ))
 }
@@ -699,6 +728,40 @@ pub fn analysis_plan_study_op(
         ));
     }
 
+    let study_fingerprint = study_fingerprint(spec);
+    let operation_sequence = vec![
+        ANALYSIS_CREATE_MODEL_OP_VERSION.to_string(),
+        ANALYSIS_VALIDATE_OP_VERSION.to_string(),
+        run_operation_version_for_kind(spec.run_kind).to_string(),
+    ];
+    let evidence_artifact_path = persist_study_evidence(
+        &study_fingerprint,
+        "plan",
+        serde_json::json!({
+            "schema_version": "analysis_study_plan_artifact/v1",
+            "study_id": spec.study_id.clone(),
+            "model_id": spec.create_model_intent.model_id.clone(),
+            "run_kind": spec.run_kind,
+            "backend": spec.backend,
+            "study_fingerprint": study_fingerprint.clone(),
+            "operation_sequence": operation_sequence.clone(),
+        }),
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_PLAN_STUDY_OPERATION,
+            ANALYSIS_PLAN_STUDY_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist study plan evidence artifact: {err}"),
+            BTreeMap::from([("study_id".to_string(), spec.study_id.clone())]),
+        )
+    })?;
     Ok(OperationEnvelope::new(
         ANALYSIS_PLAN_STUDY_OPERATION,
         ANALYSIS_PLAN_STUDY_OP_VERSION,
@@ -708,12 +771,9 @@ pub fn analysis_plan_study_op(
             model_id: spec.create_model_intent.model_id.clone(),
             run_kind: spec.run_kind,
             backend: spec.backend,
-            operation_sequence: vec![
-                ANALYSIS_CREATE_MODEL_OP_VERSION.to_string(),
-                ANALYSIS_VALIDATE_OP_VERSION.to_string(),
-                run_operation_version_for_kind(spec.run_kind).to_string(),
-            ],
-            study_fingerprint: study_fingerprint(spec),
+            operation_sequence,
+            study_fingerprint,
+            evidence_artifact_path,
         },
     ))
 }
@@ -738,6 +798,13 @@ pub fn analysis_run_study_op(
             BTreeMap::from([("issue_codes".to_string(), issue_codes.join(","))]),
         ));
     }
+
+    let study_fingerprint = study_fingerprint(spec);
+    let operation_sequence = vec![
+        ANALYSIS_CREATE_MODEL_OP_VERSION.to_string(),
+        ANALYSIS_VALIDATE_OP_VERSION.to_string(),
+        run_operation_version_for_kind(spec.run_kind).to_string(),
+    ];
 
     let created = analysis_create_model_op(
         &spec.geometry,
@@ -775,6 +842,41 @@ pub fn analysis_run_study_op(
         }
     }?;
 
+    let evidence_artifact_path = persist_study_evidence(
+        &study_fingerprint,
+        "run",
+        serde_json::json!({
+            "schema_version": "analysis_study_run_artifact/v1",
+            "study_id": spec.study_id.clone(),
+            "model_id": created.data.model_id.0.clone(),
+            "run_kind": spec.run_kind,
+            "backend": spec.backend,
+            "study_fingerprint": study_fingerprint.clone(),
+            "operation_sequence": operation_sequence.clone(),
+            "run_id": run_envelope.data.run_id.clone(),
+            "run_status": run_envelope.data.run_status,
+            "publishable": run_envelope.data.publishable,
+        }),
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist study run evidence artifact: {err}"),
+            BTreeMap::from([
+                ("study_id".to_string(), spec.study_id.clone()),
+                ("run_id".to_string(), run_envelope.data.run_id.clone()),
+            ]),
+        )
+    })?;
+
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_STUDY_OPERATION,
         ANALYSIS_RUN_STUDY_OP_VERSION,
@@ -784,9 +886,12 @@ pub fn analysis_run_study_op(
             model_id: created.data.model_id.0.clone(),
             run_kind: spec.run_kind,
             backend: spec.backend,
+            study_fingerprint,
+            operation_sequence,
             run_id: run_envelope.data.run_id,
             run_status: run_envelope.data.run_status,
             publishable: run_envelope.data.publishable,
+            evidence_artifact_path,
         },
     ))
 }
@@ -6964,6 +7069,45 @@ fn study_fingerprint(spec: &AnalysisStudySpec) -> String {
     let mut hasher = Sha256::new();
     hasher.update(payload);
     format!("sha256:{:x}", hasher.finalize())
+}
+
+fn study_evidence_root() -> PathBuf {
+    std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/runmat-analysis-artifacts/studies")
+        })
+}
+
+fn persist_study_evidence(
+    study_fingerprint: &str,
+    stage: &str,
+    payload: serde_json::Value,
+) -> Result<String, String> {
+    let study_key = study_fingerprint.replace(':', "_");
+    let root = study_evidence_root().join(study_key);
+    fs::create_dir_all(&root)
+        .map_err(|err| format!("failed to create study evidence directory: {err}"))?;
+    let path = root.join(format!("{stage}.json"));
+    let bytes = serde_json::to_vec_pretty(&payload)
+        .map_err(|err| format!("failed to encode study evidence payload: {err}"))?;
+    atomic_write_bytes(&path, &bytes)?;
+    Ok(path.display().to_string())
+}
+
+fn atomic_write_bytes(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
+    let tmp = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ));
+    fs::write(&tmp, bytes)
+        .map_err(|err| format!("failed to write temporary study evidence file: {err}"))?;
+    fs::rename(&tmp, path).map_err(|err| {
+        let _ = fs::remove_file(&tmp);
+        format!("failed to atomically persist study evidence file: {err}")
+    })
 }
 
 fn to_fea_prep_context(
