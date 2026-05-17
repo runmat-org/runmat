@@ -1076,11 +1076,7 @@ impl Compiler {
                 if has_expansion {
                     self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
                 } else {
-                    if output_count == 1 {
-                        self.emit(Instr::CallFeval(call.args.len()));
-                    } else {
-                        self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
-                    }
+                    self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
                 }
             }
             MirCallee::Static(CallableIdentity::Builtin(id)) => {
@@ -1595,15 +1591,16 @@ impl Compiler {
                 if let Some(output_count) = requested_outputs {
                     if has_expansion {
                         self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
-                    } else if output_count == 1 {
-                        self.emit(Instr::CallFeval(call.args.len()));
                     } else {
                         self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
                     }
-                } else if has_expansion {
-                    self.emit(Instr::CallFevalExpandMulti(specs));
                 } else {
-                    self.emit(Instr::CallFeval(call.args.len()));
+                    let fallback_count = 1;
+                    if has_expansion {
+                        self.emit(Instr::CallFevalExpandMultiOutput(specs, fallback_count));
+                    } else {
+                        self.emit(Instr::CallFevalMulti(call.args.len(), fallback_count));
+                    }
                 }
             }
             MirCallee::Static(CallableIdentity::Builtin(id)) => {
@@ -1619,13 +1616,13 @@ impl Compiler {
                             output_count,
                         ));
                     } else {
-                        self.emit(Instr::CallBuiltinExpandMulti(name, specs));
+                        self.emit(Instr::CallBuiltinExpandMultiOutput(name, specs, 1));
                     }
                 } else {
                     if let Some(output_count) = requested_outputs {
                         self.emit(Instr::CallBuiltinMulti(name, call.args.len(), output_count));
                     } else {
-                        self.emit(Instr::CallBuiltin(name, call.args.len()));
+                        self.emit(Instr::CallBuiltinMulti(name, call.args.len(), 1));
                     }
                 }
             }
@@ -1665,10 +1662,17 @@ impl Compiler {
                             ));
                         }
                     }
-                } else if has_expansion {
-                    self.emit(Instr::CallFunctionExpandMulti(name, specs));
                 } else {
-                    self.emit(Instr::CallFunction(name, call.args.len()));
+                    let fallback_count = 1;
+                    if has_expansion {
+                        self.emit(Instr::CallFunctionExpandMultiOutput(
+                            name,
+                            specs,
+                            fallback_count,
+                        ));
+                    } else {
+                        self.emit(Instr::CallFunction(name, call.args.len()));
+                    }
                 }
             }
         }
@@ -1763,26 +1767,21 @@ impl Compiler {
         }
         if has_expansion {
             let (specs, _) = self.mir_call_arg_specs(&call.args);
-            if let Some(output_count) = self.call_requested_output_count(call) {
-                self.emit(Instr::CallMethodOrMemberIndexExpandMultiOutput(
-                    name,
-                    specs,
-                    output_count,
-                ));
-            } else {
-                self.emit(Instr::CallMethodOrMemberIndexExpandMulti(name, specs));
-            }
+            let output_count = self.call_requested_output_count(call).unwrap_or(1);
+            self.emit(Instr::CallMethodOrMemberIndexExpandMultiOutput(
+                name,
+                specs,
+                output_count,
+            ));
             return Ok(());
         }
         let argc = call.args.len().saturating_sub(1);
-        match self.call_requested_output_count(call) {
-            None => self.emit(Instr::CallMethodOrMemberIndex(name, argc)),
-            Some(output_count) => self.emit(Instr::CallMethodOrMemberIndexMulti(
-                name,
-                argc,
-                output_count,
-            )),
-        };
+        let output_count = self.call_requested_output_count(call).unwrap_or(1);
+        self.emit(Instr::CallMethodOrMemberIndexMulti(
+            name,
+            argc,
+            output_count,
+        ));
         Ok(())
     }
 
