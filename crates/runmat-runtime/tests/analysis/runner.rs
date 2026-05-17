@@ -641,6 +641,23 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         resistive_heating_coefficient: 0.0039,
                         relative_permittivity: 2.0,
                         relative_permeability: 1.0,
+                        conductivity_frequency_response: vec![
+                            runmat_analysis_core::ConductivityFrequencyPoint {
+                                frequency_hz: 50.0,
+                                conductivity_scale: 1.05,
+                                dispersive_loss_scale: Some(0.02),
+                            },
+                            runmat_analysis_core::ConductivityFrequencyPoint {
+                                frequency_hz: 200.0,
+                                conductivity_scale: 1.0,
+                                dispersive_loss_scale: Some(0.025),
+                            },
+                            runmat_analysis_core::ConductivityFrequencyPoint {
+                                frequency_hz: 1_000.0,
+                                conductivity_scale: 0.94,
+                                dispersive_loss_scale: Some(0.03),
+                            },
+                        ],
                     }),
                     ..base.clone()
                 },
@@ -653,6 +670,23 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         resistive_heating_coefficient: 0.0020,
                         relative_permittivity: 14.0,
                         relative_permeability: 90.0,
+                        conductivity_frequency_response: vec![
+                            runmat_analysis_core::ConductivityFrequencyPoint {
+                                frequency_hz: 50.0,
+                                conductivity_scale: 1.32,
+                                dispersive_loss_scale: Some(0.08),
+                            },
+                            runmat_analysis_core::ConductivityFrequencyPoint {
+                                frequency_hz: 200.0,
+                                conductivity_scale: 1.0,
+                                dispersive_loss_scale: Some(0.11),
+                            },
+                            runmat_analysis_core::ConductivityFrequencyPoint {
+                                frequency_hz: 1_000.0,
+                                conductivity_scale: 0.72,
+                                dispersive_loss_scale: Some(0.16),
+                            },
+                        ],
                     }),
                     ..base.clone()
                 },
@@ -665,6 +699,23 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         resistive_heating_coefficient: 0.0010,
                         relative_permittivity: 3.5,
                         relative_permeability: 1.05,
+                        conductivity_frequency_response: vec![
+                            runmat_analysis_core::ConductivityFrequencyPoint {
+                                frequency_hz: 50.0,
+                                conductivity_scale: 0.88,
+                                dispersive_loss_scale: Some(0.24),
+                            },
+                            runmat_analysis_core::ConductivityFrequencyPoint {
+                                frequency_hz: 200.0,
+                                conductivity_scale: 1.0,
+                                dispersive_loss_scale: Some(0.26),
+                            },
+                            runmat_analysis_core::ConductivityFrequencyPoint {
+                                frequency_hz: 1_000.0,
+                                conductivity_scale: 1.24,
+                                dispersive_loss_scale: Some(0.29),
+                            },
+                        ],
                     }),
                     ..base
                 },
@@ -676,12 +727,66 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                     1 => (8.0e4, 14.0, 90.0),
                     _ => (0.2, 3.5, 1.05),
                 };
+                let conductivity_frequency_response = match idx % 3 {
+                    0 => vec![
+                        runmat_analysis_core::ConductivityFrequencyPoint {
+                            frequency_hz: 50.0,
+                            conductivity_scale: 1.05,
+                            dispersive_loss_scale: Some(0.02),
+                        },
+                        runmat_analysis_core::ConductivityFrequencyPoint {
+                            frequency_hz: 200.0,
+                            conductivity_scale: 1.0,
+                            dispersive_loss_scale: Some(0.025),
+                        },
+                        runmat_analysis_core::ConductivityFrequencyPoint {
+                            frequency_hz: 1_000.0,
+                            conductivity_scale: 0.94,
+                            dispersive_loss_scale: Some(0.03),
+                        },
+                    ],
+                    1 => vec![
+                        runmat_analysis_core::ConductivityFrequencyPoint {
+                            frequency_hz: 50.0,
+                            conductivity_scale: 1.32,
+                            dispersive_loss_scale: Some(0.08),
+                        },
+                        runmat_analysis_core::ConductivityFrequencyPoint {
+                            frequency_hz: 200.0,
+                            conductivity_scale: 1.0,
+                            dispersive_loss_scale: Some(0.11),
+                        },
+                        runmat_analysis_core::ConductivityFrequencyPoint {
+                            frequency_hz: 1_000.0,
+                            conductivity_scale: 0.72,
+                            dispersive_loss_scale: Some(0.16),
+                        },
+                    ],
+                    _ => vec![
+                        runmat_analysis_core::ConductivityFrequencyPoint {
+                            frequency_hz: 50.0,
+                            conductivity_scale: 0.88,
+                            dispersive_loss_scale: Some(0.24),
+                        },
+                        runmat_analysis_core::ConductivityFrequencyPoint {
+                            frequency_hz: 200.0,
+                            conductivity_scale: 1.0,
+                            dispersive_loss_scale: Some(0.26),
+                        },
+                        runmat_analysis_core::ConductivityFrequencyPoint {
+                            frequency_hz: 1_000.0,
+                            conductivity_scale: 1.24,
+                            dispersive_loss_scale: Some(0.29),
+                        },
+                    ],
+                };
                 material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
                     reference_temperature_k: 293.15,
                     conductivity_s_per_m: sigma,
                     resistive_heating_coefficient: 0.0025,
                     relative_permittivity: eps_r,
                     relative_permeability: mu_r,
+                    conductivity_frequency_response,
                 });
             }
         }
@@ -695,6 +800,23 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         resistive_heating_coefficient: 0.0039,
                         relative_permittivity: 2.1,
                         relative_permeability: 1.0,
+                        conductivity_frequency_response: vec![
+                            runmat_analysis_core::ConductivityFrequencyPoint {
+                                frequency_hz: 50.0,
+                                conductivity_scale: 1.02,
+                                dispersive_loss_scale: Some(0.015),
+                            },
+                            runmat_analysis_core::ConductivityFrequencyPoint {
+                                frequency_hz: 60.0,
+                                conductivity_scale: 1.0,
+                                dispersive_loss_scale: Some(0.017),
+                            },
+                            runmat_analysis_core::ConductivityFrequencyPoint {
+                                frequency_hz: 1_000.0,
+                                conductivity_scale: 0.95,
+                                dispersive_loss_scale: Some(0.03),
+                            },
+                        ],
                     });
                 }
                 let material_id = model
@@ -1511,6 +1633,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                 resistive_heating_coefficient: electro.resistive_heating_coefficient,
                 relative_permittivity: 1.0,
                 relative_permeability: 1.0,
+                conductivity_frequency_response: Vec::new(),
             });
         }
         model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
@@ -4016,6 +4139,48 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "em_homogeneous_sigma_omega_scale_mean",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "conductivity_frequency_scale_mean",
+                            ),
+                            Some(0.95),
+                            Some(1.05),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_sigma_omega_scale_spread_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "conductivity_frequency_scale_spread_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.15),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_sigma_omega_response_coverage_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "conductivity_frequency_response_coverage_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "em_homogeneous_conductivity_spread_ratio",
                             "FEA_EM_STATIC",
                             diagnostic_metric(
@@ -4168,6 +4333,48 @@ pub(super) fn run_fixture(
                         );
                     }
                     if spec.id == "electromagnetic_reference_heterogeneous_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_sigma_omega_scale_mean",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "conductivity_frequency_scale_mean",
+                            ),
+                            Some(0.85),
+                            Some(1.35),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_sigma_omega_scale_spread_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "conductivity_frequency_scale_spread_ratio",
+                            ),
+                            Some(1.2),
+                            Some(2.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_sigma_omega_response_coverage_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "conductivity_frequency_response_coverage_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
                         push_threshold_assertion(
                             spec.id,
                             &mut threshold_assertions,

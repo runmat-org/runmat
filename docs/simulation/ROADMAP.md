@@ -64,3 +64,8 @@ Exit criteria:
 2. EM stronger external-reference comparator metrics.
 3. Thermal/thermo benchmark tightening where drift remains permissive.
 4. Plastic/contact constitutive realism increment with benchmark lock-in.
+
+Progress update (2026-05-17):
+
+1. [x] EM frequency-dependent material coefficients baseline landed:
+   additive `conductivity_frequency_response` schema, FEA `sigma(omega)` interpolation, and EM fixture governance thresholds.

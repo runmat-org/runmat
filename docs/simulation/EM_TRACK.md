@@ -19,10 +19,11 @@ Last updated: 2026-05-17
 ## Remaining to EM Completion
 
 1. Frequency-dependent constitutive modeling in EM solve coefficients.
+   Baseline complete: material `sigma(omega)` interpolation from additive frequency-response points with EM governance thresholds.
 2. Higher-fidelity Maxwell-form implementation depth beyond current proxy approximations.
 3. Stronger external-reference EM comparators integrated into protected-branch policy.
 4. Continued robustness/performance hardening under larger EM workloads.
 
 ## Next Recommended EM Slice
 
-- Add region/material frequency-dependent EM coefficients (starting with `sigma(omega)`), wire to solve assembly, and gate with new reference fixture thresholds.
+- Extend from the landed `sigma(omega)` baseline into stronger dispersive terms and external-reference comparator depth.

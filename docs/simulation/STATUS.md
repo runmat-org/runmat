@@ -38,4 +38,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - The system is beyond scaffolding and in governed solver deepening.
 - Structural baseline is stable.
 - EM is advanced but not final industrial Maxwell parity.
+- EM now includes additive material frequency-response support (`sigma(omega)` baseline) with fixture-level governance thresholds.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.

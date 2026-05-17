@@ -51,7 +51,8 @@ pub fn run_electromagnetic_with_options(
 
     let mut summary = assemble_linear_system(model, options.prep_context, None, None);
     let node_count = summary.dof_count.max(8);
-    let coefficient_profile = electromagnetic_coefficient_profile(model);
+    let coefficient_profile =
+        electromagnetic_coefficient_profile(model, domain.reference_frequency_hz);
     let material_stats = coefficient_profile.stats;
     let total_bc_count = model.boundary_conditions.len().max(1);
     let mut magnetic_insulation_count = 0usize;
@@ -711,7 +712,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_proxy={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} boundary_penalty_conditioning_contribution={} source_region_energy_consistency_ratio={} real_residual_norm={} imag_residual_norm={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
+            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} conductivity_frequency_scale_mean={} conductivity_frequency_scale_spread_ratio={} conductivity_frequency_response_coverage_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_proxy={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} boundary_penalty_conditioning_contribution={} source_region_energy_consistency_ratio={} real_residual_norm={} imag_residual_norm={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
             domain.enabled,
             domain.reference_frequency_hz,
             domain.applied_current_a,
@@ -719,6 +720,9 @@ pub fn run_electromagnetic_with_options(
             material_stats.relative_permittivity_mean,
             material_stats.relative_permeability_mean,
             material_stats.conductivity_spread_ratio,
+            material_stats.conductivity_frequency_scale_mean,
+            material_stats.conductivity_frequency_scale_spread_ratio,
+            material_stats.conductivity_frequency_response_coverage_ratio,
             material_stats.relative_permittivity_spread_ratio,
             material_stats.relative_permeability_spread_ratio,
             material_stats.assignment_heterogeneity_index,
@@ -801,6 +805,9 @@ struct ElectromagneticMaterialStats {
     relative_permittivity_mean: f64,
     relative_permeability_mean: f64,
     conductivity_spread_ratio: f64,
+    conductivity_frequency_scale_mean: f64,
+    conductivity_frequency_scale_spread_ratio: f64,
+    conductivity_frequency_response_coverage_ratio: f64,
     relative_permittivity_spread_ratio: f64,
     relative_permeability_spread_ratio: f64,
     assignment_heterogeneity_index: f64,
@@ -813,11 +820,13 @@ struct ElectromagneticMaterialStats {
 struct RegionElectromagneticCoefficients {
     region_id: String,
     conductivity_s_per_m: f64,
+    conductivity_frequency_scale: f64,
     relative_permittivity: f64,
     relative_permeability: f64,
     weight: f64,
     covered: bool,
     used_fallback: bool,
+    has_frequency_response: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -826,7 +835,10 @@ struct ElectromagneticCoefficientProfile {
     stats: ElectromagneticMaterialStats,
 }
 
-fn electromagnetic_coefficient_profile(model: &AnalysisModel) -> ElectromagneticCoefficientProfile {
+fn electromagnetic_coefficient_profile(
+    model: &AnalysisModel,
+    reference_frequency_hz: f64,
+) -> ElectromagneticCoefficientProfile {
     let material_by_id = model
         .materials
         .iter()
@@ -843,36 +855,51 @@ fn electromagnetic_coefficient_profile(model: &AnalysisModel) -> Electromagnetic
         let expected = material_by_id
             .get(assignment.expected_material_id.as_str())
             .and_then(|material| material.electrical.as_ref());
-        let (conductivity, permittivity, permeability, covered, used_fallback) =
-            if let Some(electrical) = assigned {
-                (
-                    electrical.conductivity_s_per_m.max(1.0e-9),
-                    electrical.relative_permittivity.max(1.0e-9),
-                    electrical.relative_permeability.max(1.0e-9),
-                    true,
-                    false,
-                )
-            } else if let Some(electrical) = expected {
-                (
-                    electrical.conductivity_s_per_m.max(1.0e-9),
-                    electrical.relative_permittivity.max(1.0e-9),
-                    electrical.relative_permeability.max(1.0e-9),
-                    true,
-                    true,
-                )
-            } else {
-                (1.0, 1.0, 1.0, false, true)
-            };
+        let (
+            conductivity,
+            conductivity_frequency_scale,
+            permittivity,
+            permeability,
+            covered,
+            used_fallback,
+            has_frequency_response,
+        ) = if let Some(electrical) = assigned {
+            let freq_sample = conductivity_frequency_sample(electrical, reference_frequency_hz);
+            (
+                (electrical.conductivity_s_per_m * freq_sample.scale).max(1.0e-9),
+                freq_sample.scale,
+                electrical.relative_permittivity.max(1.0e-9),
+                electrical.relative_permeability.max(1.0e-9),
+                true,
+                false,
+                freq_sample.has_frequency_response,
+            )
+        } else if let Some(electrical) = expected {
+            let freq_sample = conductivity_frequency_sample(electrical, reference_frequency_hz);
+            (
+                (electrical.conductivity_s_per_m * freq_sample.scale).max(1.0e-9),
+                freq_sample.scale,
+                electrical.relative_permittivity.max(1.0e-9),
+                electrical.relative_permeability.max(1.0e-9),
+                true,
+                true,
+                freq_sample.has_frequency_response,
+            )
+        } else {
+            (1.0, 1.0, 1.0, 1.0, false, true, false)
+        };
         covered_assignments += usize::from(covered);
         fallback_coefficients += usize::from(used_fallback);
         samples.push(RegionElectromagneticCoefficients {
             region_id: assignment.region_id.clone(),
             conductivity_s_per_m: conductivity,
+            conductivity_frequency_scale,
             relative_permittivity: permittivity,
             relative_permeability: permeability,
             weight: confidence_weight(assignment.confidence),
             covered,
             used_fallback,
+            has_frequency_response,
         });
     }
 
@@ -881,14 +908,18 @@ fn electromagnetic_coefficient_profile(model: &AnalysisModel) -> Electromagnetic
             let Some(electrical) = material.electrical.as_ref() else {
                 continue;
             };
+            let freq_sample = conductivity_frequency_sample(electrical, reference_frequency_hz);
             samples.push(RegionElectromagneticCoefficients {
                 region_id: format!("material_region_{}", material.material_id),
-                conductivity_s_per_m: electrical.conductivity_s_per_m.max(1.0e-9),
+                conductivity_s_per_m: (electrical.conductivity_s_per_m * freq_sample.scale)
+                    .max(1.0e-9),
+                conductivity_frequency_scale: freq_sample.scale,
                 relative_permittivity: electrical.relative_permittivity.max(1.0e-9),
                 relative_permeability: electrical.relative_permeability.max(1.0e-9),
                 weight: 1.0,
                 covered: true,
                 used_fallback: false,
+                has_frequency_response: freq_sample.has_frequency_response,
             });
         }
     }
@@ -897,11 +928,13 @@ fn electromagnetic_coefficient_profile(model: &AnalysisModel) -> Electromagnetic
         samples.push(RegionElectromagneticCoefficients {
             region_id: "default_region_0".to_string(),
             conductivity_s_per_m: 1.0,
+            conductivity_frequency_scale: 1.0,
             relative_permittivity: 1.0,
             relative_permeability: 1.0,
             weight: 1.0,
             covered: false,
             used_fallback: true,
+            has_frequency_response: false,
         });
     }
 
@@ -916,6 +949,10 @@ fn electromagnetic_coefficient_profile(model: &AnalysisModel) -> Electromagnetic
     let relative_permeability_values = samples
         .iter()
         .map(|sample| sample.relative_permeability)
+        .collect::<Vec<_>>();
+    let conductivity_frequency_scale_values = samples
+        .iter()
+        .map(|sample| sample.conductivity_frequency_scale)
         .collect::<Vec<_>>();
 
     let weighted_mean = |values: &[f64]| -> f64 {
@@ -945,6 +982,14 @@ fn electromagnetic_coefficient_profile(model: &AnalysisModel) -> Electromagnetic
     let relative_permittivity_mean = weighted_mean(&relative_permittivity_values);
     let relative_permeability_mean = weighted_mean(&relative_permeability_values);
     let conductivity_spread_ratio = spread_ratio(&conductivity_values);
+    let conductivity_frequency_scale_mean = weighted_mean(&conductivity_frequency_scale_values);
+    let conductivity_frequency_scale_spread_ratio =
+        spread_ratio(&conductivity_frequency_scale_values);
+    let conductivity_frequency_response_coverage_ratio = samples
+        .iter()
+        .filter(|sample| sample.has_frequency_response)
+        .count() as f64
+        / samples.len().max(1) as f64;
     let relative_permittivity_spread_ratio = spread_ratio(&relative_permittivity_values);
     let relative_permeability_spread_ratio = spread_ratio(&relative_permeability_values);
 
@@ -992,6 +1037,9 @@ fn electromagnetic_coefficient_profile(model: &AnalysisModel) -> Electromagnetic
             relative_permittivity_mean,
             relative_permeability_mean,
             conductivity_spread_ratio,
+            conductivity_frequency_scale_mean,
+            conductivity_frequency_scale_spread_ratio,
+            conductivity_frequency_response_coverage_ratio,
             relative_permittivity_spread_ratio,
             relative_permeability_spread_ratio,
             assignment_heterogeneity_index,
@@ -1000,6 +1048,73 @@ fn electromagnetic_coefficient_profile(model: &AnalysisModel) -> Electromagnetic
             region_coefficient_contrast_index,
         },
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ConductivityFrequencySample {
+    scale: f64,
+    has_frequency_response: bool,
+}
+
+fn conductivity_frequency_sample(
+    electrical: &runmat_analysis_core::MaterialElectricalModel,
+    reference_frequency_hz: f64,
+) -> ConductivityFrequencySample {
+    let scale = conductivity_scale_at_frequency(
+        &electrical.conductivity_frequency_response,
+        reference_frequency_hz,
+    )
+    .unwrap_or(1.0)
+    .clamp(1.0e-4, 1.0e4);
+    ConductivityFrequencySample {
+        scale,
+        has_frequency_response: !electrical.conductivity_frequency_response.is_empty(),
+    }
+}
+
+fn conductivity_scale_at_frequency(
+    response: &[runmat_analysis_core::ConductivityFrequencyPoint],
+    reference_frequency_hz: f64,
+) -> Option<f64> {
+    if !reference_frequency_hz.is_finite() || reference_frequency_hz <= 0.0 {
+        return None;
+    }
+    let mut points = response
+        .iter()
+        .filter_map(|point| {
+            if point.frequency_hz.is_finite()
+                && point.frequency_hz > 0.0
+                && point.conductivity_scale.is_finite()
+                && point.conductivity_scale > 0.0
+            {
+                Some((point.frequency_hz, point.conductivity_scale))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if points.is_empty() {
+        return None;
+    }
+    points.sort_by(|a, b| a.0.total_cmp(&b.0));
+    if reference_frequency_hz <= points[0].0 {
+        return Some(points[0].1);
+    }
+    if reference_frequency_hz >= points[points.len() - 1].0 {
+        return Some(points[points.len() - 1].1);
+    }
+    for window in points.windows(2) {
+        let (f0, s0) = window[0];
+        let (f1, s1) = window[1];
+        if reference_frequency_hz >= f0 && reference_frequency_hz <= f1 {
+            if (f1 - f0).abs() <= f64::EPSILON {
+                return Some(s1);
+            }
+            let t = (reference_frequency_hz.ln() - f0.ln()) / (f1.ln() - f0.ln()).max(f64::EPSILON);
+            return Some((s0 + (s1 - s0) * t.clamp(0.0, 1.0)).max(1.0e-9));
+        }
+    }
+    Some(points[points.len() - 1].1)
 }
 
 fn confidence_weight(confidence: EvidenceConfidence) -> f64 {
@@ -1305,4 +1420,57 @@ fn apply_block_jacobi_preconditioner(
 
 fn block_dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use runmat_analysis_core::{ConductivityFrequencyPoint, MaterialElectricalModel};
+
+    use super::{conductivity_frequency_sample, conductivity_scale_at_frequency};
+
+    #[test]
+    fn conductivity_scale_interpolates_on_log_frequency_axis() {
+        let response = vec![
+            ConductivityFrequencyPoint {
+                frequency_hz: 10.0,
+                conductivity_scale: 2.0,
+                dispersive_loss_scale: Some(0.1),
+            },
+            ConductivityFrequencyPoint {
+                frequency_hz: 1_000.0,
+                conductivity_scale: 0.5,
+                dispersive_loss_scale: Some(0.2),
+            },
+        ];
+        let scale = conductivity_scale_at_frequency(&response, 100.0).expect("scale should exist");
+        assert!((scale - 1.25).abs() < 1.0e-9, "expected 1.25, got {scale}");
+    }
+
+    #[test]
+    fn conductivity_scale_clamps_to_edge_points() {
+        let response = vec![
+            ConductivityFrequencyPoint {
+                frequency_hz: 20.0,
+                conductivity_scale: 1.2,
+                dispersive_loss_scale: None,
+            },
+            ConductivityFrequencyPoint {
+                frequency_hz: 200.0,
+                conductivity_scale: 0.8,
+                dispersive_loss_scale: None,
+            },
+        ];
+        let low = conductivity_scale_at_frequency(&response, 5.0).expect("low edge");
+        let high = conductivity_scale_at_frequency(&response, 500.0).expect("high edge");
+        assert!((low - 1.2).abs() < 1.0e-12, "expected low edge");
+        assert!((high - 0.8).abs() < 1.0e-12, "expected high edge");
+    }
+
+    #[test]
+    fn conductivity_frequency_sample_defaults_when_response_is_empty() {
+        let electrical = MaterialElectricalModel::default();
+        let sample = conductivity_frequency_sample(&electrical, 60.0);
+        assert!((sample.scale - 1.0).abs() < 1.0e-12);
+        assert!(!sample.has_frequency_response);
+    }
 }

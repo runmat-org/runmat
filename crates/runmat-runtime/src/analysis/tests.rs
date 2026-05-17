@@ -9,9 +9,9 @@ use runmat_accelerate_api::{
 };
 use runmat_analysis_core::{
     AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
-    BoundaryCondition, BoundaryConditionKind, ElectromagneticDomain, EvidenceConfidence, LoadCase,
-    LoadKind, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
-    MaterialThermalModel, ReferenceFrame,
+    BoundaryCondition, BoundaryConditionKind, ConductivityFrequencyPoint, ElectromagneticDomain,
+    EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment, MaterialElectricalModel,
+    MaterialMechanicalModel, MaterialModel, MaterialThermalModel, ReferenceFrame,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{
@@ -150,6 +150,7 @@ fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: ElectroTherma
             resistive_heating_coefficient: coupling.resistive_heating_coefficient,
             relative_permittivity: 1.0,
             relative_permeability: 1.0,
+            conductivity_frequency_response: Vec::new(),
         });
     }
     model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
@@ -1720,6 +1721,23 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         resistive_heating_coefficient: 0.0039,
         relative_permittivity: 3.2,
         relative_permeability: 1.8,
+        conductivity_frequency_response: vec![
+            ConductivityFrequencyPoint {
+                frequency_hz: 40.0,
+                conductivity_scale: 1.06,
+                dispersive_loss_scale: Some(0.02),
+            },
+            ConductivityFrequencyPoint {
+                frequency_hz: 60.0,
+                conductivity_scale: 1.0,
+                dispersive_loss_scale: Some(0.03),
+            },
+            ConductivityFrequencyPoint {
+                frequency_hz: 240.0,
+                conductivity_scale: 0.91,
+                dispersive_loss_scale: Some(0.04),
+            },
+        ],
     });
     model.electromagnetic = Some(ElectromagneticDomain {
         enabled: true,
@@ -1767,6 +1785,12 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         .expect("EM static diagnostic must be present");
     assert!(em_diag.message.contains("relative_permittivity_mean="));
     assert!(em_diag.message.contains("relative_permeability_mean="));
+    assert!(em_diag
+        .message
+        .contains("conductivity_frequency_scale_mean="));
+    assert!(em_diag
+        .message
+        .contains("conductivity_frequency_response_coverage_ratio="));
 }
 
 #[test]
@@ -1779,6 +1803,23 @@ fn analysis_run_electromagnetic_sweep_emits_resonance_metrics() {
         resistive_heating_coefficient: 0.0039,
         relative_permittivity: 3.2,
         relative_permeability: 1.8,
+        conductivity_frequency_response: vec![
+            ConductivityFrequencyPoint {
+                frequency_hz: 40.0,
+                conductivity_scale: 1.06,
+                dispersive_loss_scale: Some(0.02),
+            },
+            ConductivityFrequencyPoint {
+                frequency_hz: 60.0,
+                conductivity_scale: 1.0,
+                dispersive_loss_scale: Some(0.03),
+            },
+            ConductivityFrequencyPoint {
+                frequency_hz: 240.0,
+                conductivity_scale: 0.91,
+                dispersive_loss_scale: Some(0.04),
+            },
+        ],
     });
     model.electromagnetic = Some(ElectromagneticDomain {
         enabled: true,

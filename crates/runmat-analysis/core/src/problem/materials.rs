@@ -37,6 +37,14 @@ fn default_relative_permeability() -> f64 {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConductivityFrequencyPoint {
+    pub frequency_hz: f64,
+    pub conductivity_scale: f64,
+    #[serde(default)]
+    pub dispersive_loss_scale: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MaterialMechanicalModel {
     pub youngs_modulus_pa: f64,
     pub poisson_ratio: f64,
@@ -80,6 +88,8 @@ pub struct MaterialElectricalModel {
     pub relative_permittivity: f64,
     #[serde(default = "default_relative_permeability")]
     pub relative_permeability: f64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conductivity_frequency_response: Vec<ConductivityFrequencyPoint>,
 }
 
 impl Default for MaterialElectricalModel {
@@ -90,6 +100,7 @@ impl Default for MaterialElectricalModel {
             resistive_heating_coefficient: default_resistive_heating_coefficient(),
             relative_permittivity: default_relative_permittivity(),
             relative_permeability: default_relative_permeability(),
+            conductivity_frequency_response: Vec::new(),
         }
     }
 }

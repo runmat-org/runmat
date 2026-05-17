@@ -24,8 +24,8 @@ pub use problem::interfaces::{AnalysisInterface, AnalysisInterfaceKind, ContactI
 pub use problem::loads::{LoadCase, LoadKind};
 pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
 pub use problem::materials::{
-    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
-    MaterialThermalModel,
+    ConductivityFrequencyPoint, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialPlasticModel, MaterialThermalModel,
 };
 pub use problem::model::{AnalysisModel, AnalysisModelId, ReferenceFrame};
 pub use problem::steps::{AnalysisStep, AnalysisStepKind};
@@ -140,5 +140,11 @@ mod tests {
         validate_model(&model).expect("model should be valid");
         validate_model_against_geometry(&model, UnitSystem::Meter, &ReferenceFrame::Global)
             .expect("model should match geometry context");
+    }
+
+    #[test]
+    fn electrical_model_defaults_frequency_response() {
+        let electrical = MaterialElectricalModel::default();
+        assert!(electrical.conductivity_frequency_response.is_empty());
     }
 }
