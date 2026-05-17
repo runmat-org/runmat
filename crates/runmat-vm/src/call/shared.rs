@@ -756,19 +756,13 @@ mod tests {
 
     #[test]
     fn normalize_method_outputs_collapses_singleton_output_list_for_single_request() {
-        let value = normalize_method_outputs(
-            Value::OutputList(vec![Value::Num(7.0)]),
-            1,
-        );
+        let value = normalize_method_outputs(Value::OutputList(vec![Value::Num(7.0)]), 1);
         assert_eq!(value, Value::Num(7.0));
     }
 
     #[test]
     fn normalize_method_outputs_preserves_output_list_for_multi_request() {
-        let value = normalize_method_outputs(
-            Value::OutputList(vec![Value::Num(7.0)]),
-            2,
-        );
+        let value = normalize_method_outputs(Value::OutputList(vec![Value::Num(7.0)]), 2);
         assert_eq!(value, Value::OutputList(vec![Value::Num(7.0)]));
     }
 }
