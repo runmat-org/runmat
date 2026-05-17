@@ -432,18 +432,6 @@ async fn execute_resolved_callable(
                 forward_named_fallback(name, args, requested_outputs, fallback_policy).await
             }
             CallableFallbackPolicy::ObjectDispatch => {
-                let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
-                    other.clone(),
-                    fallback_policy,
-                    args.clone(),
-                    requested_outputs,
-                    runmat_runtime::user_functions::SemanticCallableKind::Other,
-                );
-                if let Some(result) =
-                    runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
-                {
-                    return result;
-                }
                 let name = other
                     .display_name()
                     .unwrap_or_else(|| "<unnamed callable>".into());
@@ -505,17 +493,8 @@ async fn try_execute_resolved_callable(
                     .map(Some)
             }
             CallableFallbackPolicy::ObjectDispatch => {
-                let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
-                    other,
-                    fallback_policy,
-                    args,
-                    requested_outputs,
-                    runmat_runtime::user_functions::SemanticCallableKind::Other,
-                );
-                match runmat_runtime::user_functions::try_call_semantic_descriptor(request).await {
-                    Some(result) => result.map(Some),
-                    None => Ok(None),
-                }
+                let _ = (other, args, requested_outputs);
+                Ok(None)
             }
             CallableFallbackPolicy::None | CallableFallbackPolicy::ExternalBoundary => Ok(None),
         },

@@ -1732,7 +1732,7 @@ mod tests {
     }
 
     #[test]
-    fn object_dispatch_policy_uses_semantic_resolver() {
+    fn object_dispatch_policy_does_not_use_semantic_resolver() {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(45)
@@ -1756,10 +1756,8 @@ mod tests {
             crate::user_functions::SemanticCallableKind::Other,
         );
 
-        let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
-            .expect("object-dispatch policy should attempt semantic resolver")
-            .expect("semantic invoker should succeed");
-        assert_eq!(result, Value::Num(11.0));
+        let result = block_on(crate::user_functions::try_call_semantic_descriptor(request));
+        assert!(result.is_none());
     }
 
     #[test]
