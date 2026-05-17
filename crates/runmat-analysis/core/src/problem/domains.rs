@@ -73,3 +73,28 @@ pub struct ElectromagneticDomain {
     pub reference_frequency_hz: f64,
     pub applied_current_a: f64,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CfdSolveFamily {
+    SteadyState,
+    Transient,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CfdTimeProfilePoint {
+    pub normalized_time: f64,
+    pub inlet_scale: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CfdDomain {
+    pub enabled: bool,
+    pub solve_family: CfdSolveFamily,
+    pub reference_density_kg_per_m3: f64,
+    pub dynamic_viscosity_pa_s: f64,
+    pub inlet_velocity_m_per_s: f64,
+    pub turbulence_intensity: f64,
+    #[serde(default)]
+    pub time_profile: Vec<CfdTimeProfilePoint>,
+}

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     bc::BoundaryCondition,
-    domains::{ElectroThermalDomain, ElectromagneticDomain, ThermoMechanicalDomain},
+    domains::{CfdDomain, ElectroThermalDomain, ElectromagneticDomain, ThermoMechanicalDomain},
     interfaces::AnalysisInterface,
     loads::LoadCase,
     material_assignment::MaterialAssignment,
@@ -37,6 +37,8 @@ pub struct AnalysisModel {
     pub electro_thermal: Option<ElectroThermalDomain>,
     #[serde(default)]
     pub electromagnetic: Option<ElectromagneticDomain>,
+    #[serde(default)]
+    pub cfd: Option<CfdDomain>,
     #[serde(default)]
     pub interfaces: Vec<AnalysisInterface>,
     pub boundary_conditions: Vec<BoundaryCondition>,

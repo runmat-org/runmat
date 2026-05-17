@@ -16,7 +16,7 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 | Plasticity depth | Broader constitutive realism | [~] |
 | Contact depth | Broader contact formulation realism | [~] |
 | Maxwell EM | From scaffolding to governance-backed solver path | [~] |
-| CFD core | Steady/transient fluid foundation | [ ] |
+| CFD core | Steady/transient fluid foundation | [~] |
 | CHT | Fluid-thermal coupled family | [ ] |
 | FSI | Structural-fluid coupled family | [ ] |
 | Acoustics | Acoustic solver family | [ ] |
@@ -45,4 +45,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - Plastic/contact nonlinear proxy and reference fixtures now use tighter constitutive severity and load realization/amplification governance bands.
 - Electro-thermal benign/pathological fixtures and nonlinear mixed-load coupling now use tighter Joule/conductivity/severity/time-scale governance bands.
 - Nonlinear assembly/stress/softening fixtures now use tighter convergence governance bands for backtracks, norms, and spike/stall behavior.
+- CFD schema/profile kickoff landed: additive core domain contracts plus `analysis.create_model` steady/transient CFD templates are in place as the first Phase C step.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.

@@ -16,8 +16,9 @@ pub mod validate;
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::bc::{BoundaryCondition, BoundaryConditionKind};
 pub use problem::domains::{
-    ElectroRegionConductivityScale, ElectroThermalDomain, ElectroTimeProfilePoint,
-    ElectromagneticDomain, ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalDomain,
+    CfdDomain, CfdSolveFamily, CfdTimeProfilePoint, ElectroRegionConductivityScale,
+    ElectroThermalDomain, ElectroTimeProfilePoint, ElectromagneticDomain,
+    ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalDomain,
     ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
 };
 pub use problem::interfaces::{AnalysisInterface, AnalysisInterfaceKind, ContactInterfaceModel};
@@ -59,6 +60,7 @@ mod tests {
             thermo_mechanical: None,
             electro_thermal: None,
             electromagnetic: None,
+            cfd: None,
             interfaces: Vec::new(),
             boundary_conditions: vec![BoundaryCondition {
                 bc_id: "bc_fixed_root".to_string(),

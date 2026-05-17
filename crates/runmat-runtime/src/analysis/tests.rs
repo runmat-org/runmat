@@ -9,9 +9,10 @@ use runmat_accelerate_api::{
 };
 use runmat_analysis_core::{
     AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
-    BoundaryCondition, BoundaryConditionKind, ConductivityFrequencyPoint, ElectromagneticDomain,
-    EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment, MaterialElectricalModel,
-    MaterialMechanicalModel, MaterialModel, MaterialThermalModel, ReferenceFrame,
+    BoundaryCondition, BoundaryConditionKind, CfdSolveFamily, ConductivityFrequencyPoint,
+    ElectromagneticDomain, EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment,
+    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
+    ReferenceFrame,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{
@@ -54,6 +55,7 @@ fn sample_model() -> AnalysisModel {
         thermo_mechanical: None,
         electro_thermal: None,
         electromagnetic: None,
+        cfd: None,
         interfaces: Vec::new(),
         boundary_conditions: vec![BoundaryCondition {
             bc_id: "bc_root".to_string(),
@@ -519,6 +521,58 @@ fn analysis_create_model_supports_electromagnetic_profile_template() {
         envelope.data.steps[0].kind,
         AnalysisStepKind::Electromagnetic
     );
+}
+
+#[test]
+fn analysis_create_model_supports_cfd_steady_profile_template() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "cfd_steady_model".to_string(),
+            profile: AnalysisCreateModelProfile::CfdSteadyState,
+            prep_context: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("cfd steady profile should be supported");
+
+    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Cfd);
+    let cfd = envelope
+        .data
+        .cfd
+        .as_ref()
+        .expect("cfd domain should be populated");
+    assert_eq!(cfd.solve_family, CfdSolveFamily::SteadyState);
+    assert!(cfd.time_profile.is_empty());
+}
+
+#[test]
+fn analysis_create_model_supports_cfd_transient_profile_template() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "cfd_transient_model".to_string(),
+            profile: AnalysisCreateModelProfile::CfdTransient,
+            prep_context: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("cfd transient profile should be supported");
+
+    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Cfd);
+    let cfd = envelope
+        .data
+        .cfd
+        .as_ref()
+        .expect("cfd domain should be populated");
+    assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
+    assert_eq!(cfd.time_profile.len(), 2);
+    assert_eq!(cfd.time_profile[0].normalized_time, 0.0);
+    assert_eq!(cfd.time_profile[1].normalized_time, 1.0);
 }
 
 #[test]

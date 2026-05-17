@@ -62,6 +62,8 @@ pub enum AnalysisCreateModelProfile {
     TransientStructural,
     NonlinearStructural,
     ElectromagneticStatic,
+    CfdSteadyState,
+    CfdTransient,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

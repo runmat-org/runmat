@@ -72,7 +72,7 @@ Legend: `[x]` complete baseline, `[~]` in active deepening, `[ ]` not started.
 | Plasticity depth | Constitutive realism beyond baseline stress proxies | [~] |
 | Contact depth | Robust contact formulations and nonlinear stability | [~] |
 | Maxwell EM | Static/harmonic to transient/frequency-dependent, reference-benchmarked | [~] |
-| CFD core | Steady/transient fluid solver family | [ ] |
+| CFD core | Steady/transient fluid solver family | [~] |
 | CHT | Fluid-thermal coupled family | [ ] |
 | FSI | Coupled structural-fluid family | [ ] |
 | Acoustics | Acoustic solver family | [ ] |

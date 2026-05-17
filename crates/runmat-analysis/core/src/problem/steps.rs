@@ -9,6 +9,7 @@ pub enum AnalysisStepKind {
     Thermal,
     Nonlinear,
     Electromagnetic,
+    Cfd,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -213,6 +213,7 @@ mod tests {
             thermo_mechanical: None,
             electro_thermal: None,
             electromagnetic: None,
+            cfd: None,
             interfaces: Vec::new(),
             boundary_conditions: vec![BoundaryCondition {
                 bc_id: "bc".to_string(),

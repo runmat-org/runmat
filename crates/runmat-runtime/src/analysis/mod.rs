@@ -417,6 +417,77 @@ pub fn analysis_create_model_op(
                 kind: AnalysisStepKind::Electromagnetic,
             },
         ),
+        AnalysisCreateModelProfile::CfdSteadyState => (
+            BoundaryCondition {
+                bc_id: "bc_default_fixed".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::Fixed,
+            },
+            LoadCase {
+                load_id: "load_default_cfd_seed".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::BodyForce {
+                    gx: 0.0,
+                    gy: 0.0,
+                    gz: 0.0,
+                },
+            },
+            AnalysisStep {
+                step_id: "step_default_cfd".to_string(),
+                kind: AnalysisStepKind::Cfd,
+            },
+        ),
+        AnalysisCreateModelProfile::CfdTransient => (
+            BoundaryCondition {
+                bc_id: "bc_default_fixed".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::Fixed,
+            },
+            LoadCase {
+                load_id: "load_default_cfd_transient_seed".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::BodyForce {
+                    gx: 0.0,
+                    gy: 0.0,
+                    gz: 0.0,
+                },
+            },
+            AnalysisStep {
+                step_id: "step_default_cfd_transient".to_string(),
+                kind: AnalysisStepKind::Cfd,
+            },
+        ),
+    };
+
+    let cfd = match intent.profile {
+        AnalysisCreateModelProfile::CfdSteadyState => Some(runmat_analysis_core::CfdDomain {
+            enabled: true,
+            solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
+            reference_density_kg_per_m3: 1.225,
+            dynamic_viscosity_pa_s: 1.81e-5,
+            inlet_velocity_m_per_s: 5.0,
+            turbulence_intensity: 0.05,
+            time_profile: Vec::new(),
+        }),
+        AnalysisCreateModelProfile::CfdTransient => Some(runmat_analysis_core::CfdDomain {
+            enabled: true,
+            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
+            reference_density_kg_per_m3: 1.225,
+            dynamic_viscosity_pa_s: 1.81e-5,
+            inlet_velocity_m_per_s: 5.0,
+            turbulence_intensity: 0.08,
+            time_profile: vec![
+                runmat_analysis_core::CfdTimeProfilePoint {
+                    normalized_time: 0.0,
+                    inlet_scale: 0.5,
+                },
+                runmat_analysis_core::CfdTimeProfilePoint {
+                    normalized_time: 1.0,
+                    inlet_scale: 1.0,
+                },
+            ],
+        }),
+        _ => None,
     };
 
     let model = AnalysisModel {
@@ -430,6 +501,7 @@ pub fn analysis_create_model_op(
         thermo_mechanical: None,
         electro_thermal: None,
         electromagnetic: None,
+        cfd,
         interfaces: Vec::new(),
         boundary_conditions: vec![default_bc],
         loads: vec![default_load],
