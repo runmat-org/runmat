@@ -296,6 +296,7 @@ Current state:
 - Semantic HIR now has a shared `CallableIdentity` and explicit `CallableFallbackPolicy` vocabulary over existing `DefPath`, builtin, semantic-function, method, dynamic-name, and external-name identities.
 - MIR calls and function-handle operands now carry `CallableIdentity`, while VM lowering still maps known identities onto the existing bytecode instructions.
 - `CallableDescriptor` and runtime `SemanticCallableRequest` now accept resolved `CallableIdentity` instead of open `{function, name}` request fields, while preserving current semantic and name-fallback behavior.
+- VM callback coverage now asserts unresolved external function handles and `cellfun` callbacks fail with `RunMat:UndefinedFunction` rather than entering legacy fallback execution.
 
 Target state:
 

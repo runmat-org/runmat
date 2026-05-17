@@ -19,6 +19,32 @@ fn execute_semantic_source_result(
 }
 
 #[test]
+fn unresolved_external_function_handle_fails_without_legacy_fallback() {
+    let err = execute_semantic_source_result("h = @definitely_missing_callback; y = feval(h, 1);")
+        .expect_err("unresolved external callback should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_external_cellfun_callback_fails_without_legacy_fallback() {
+    let err = execute_semantic_source_result(
+        "xs = {1, 2}; ys = cellfun(@definitely_missing_callback, xs);",
+    )
+    .expect_err("unresolved external cellfun callback should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn nargin_nargout_in_user_functions() {
     // Single-output: nargin/nargout should reflect call site
     let program = r#"
