@@ -4,10 +4,7 @@ use crate::call::descriptor::{
 };
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
-use runmat_builtins::{
-    builtin_functions, get_static_property_value, lookup_method, lookup_property, Access,
-    CellArray, Closure, Value,
-};
+use runmat_builtins::{builtin_functions, lookup_method, Access, CellArray, Closure, Value};
 use runmat_hir::CallableFallbackPolicy;
 use runmat_runtime::RuntimeError;
 
@@ -246,26 +243,6 @@ pub async fn call_static_method_with_outputs(
     }
 }
 
-pub fn load_static_property(class_name: &str, prop: &str) -> Result<Value, RuntimeError> {
-    if let Some((p, owner)) = lookup_property(class_name, prop) {
-        if !p.is_static {
-            return Err(format!("Property '{}' is not static", prop).into());
-        }
-        if p.get_access == Access::Private {
-            return Err(format!("Property '{}' is private", prop).into());
-        }
-        if let Some(v) = get_static_property_value(&owner, prop) {
-            Ok(v)
-        } else if let Some(v) = &p.default_value {
-            Ok(v.clone())
-        } else {
-            Ok(Value::Num(0.0))
-        }
-    } else {
-        Err(format!("Unknown property '{}' on class {}", prop, class_name).into())
-    }
-}
-
 pub async fn call_method_or_member_index_with_outputs(
     base: Value,
     name: String,
@@ -371,22 +348,13 @@ pub async fn call_method_or_member_index_with_outputs(
             }
 
             let qualified = format!("{cls}.{name}");
-            if let Some(v) = try_call_named_with_policy(
+            call_named_with_policy(
                 qualified,
-                args.clone(),
+                args,
                 requested_outputs,
-                CallableFallbackPolicy::None,
+                CallableFallbackPolicy::RuntimeNameResolution,
             )
-            .await?
-            {
-                return Ok(v);
-            }
-
-            if args.is_empty() {
-                return load_static_property(&cls, &name);
-            }
-
-            Err(format!("Unknown static member '{}' on class {}", name, cls).into())
+            .await
         }
         other => {
             let mut getfield_args = Vec::with_capacity(3);
