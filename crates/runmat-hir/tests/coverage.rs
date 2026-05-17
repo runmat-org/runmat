@@ -1,12 +1,26 @@
 use runmat_hir::{
-    lower, CallKind, DefPathSegment, FunctionHandleTarget, FunctionKind, HirAssembly, HirExprKind,
-    HirPlace, HirStmtKind, IndexKind, LoweringContext,
+    lower, CallKind, DefPathSegment, FunctionHandleTarget, FunctionId, FunctionKind, HirAssembly,
+    HirExprKind, HirPlace, HirStmtKind, IndexKind, LoweringContext,
 };
 use runmat_parser::parse;
+use std::collections::HashMap;
 
 fn lower_assembly(src: &str) -> HirAssembly {
     let ast = parse(src).unwrap();
     lower(&ast, &LoweringContext::empty()).unwrap().assembly
+}
+
+fn lower_assembly_with_semantic_functions(
+    src: &str,
+    semantic_functions: &HashMap<String, FunctionId>,
+) -> HirAssembly {
+    let ast = parse(src).unwrap();
+    lower(
+        &ast,
+        &LoweringContext::empty().with_semantic_functions(semantic_functions),
+    )
+    .unwrap()
+    .assembly
 }
 
 fn entry_body(assembly: &HirAssembly) -> &[runmat_hir::HirStmt] {
@@ -226,6 +240,21 @@ fn wildcard_import_call_lowers_to_package_function_identity() {
         CallKind::PackageFunction(path)
             if path.module.display_name().as_deref() == Some("Point.origin")
                 && matches!(path.item.as_slice(), [DefPathSegment::Function(_)])
+    )));
+}
+
+#[test]
+fn function_handle_prefers_semantic_function_identity_from_context() {
+    let mut semantic_functions = HashMap::new();
+    semantic_functions.insert("remote_inc".to_string(), FunctionId(4242));
+    let assembly = lower_assembly_with_semantic_functions("h = @remote_inc;", &semantic_functions);
+    assert!(entry_body(&assembly).iter().any(|stmt| matches!(
+        &stmt.kind,
+        HirStmtKind::Assign(_, expr, _)
+            if matches!(
+                expr.kind,
+                HirExprKind::FunctionHandle(FunctionHandleTarget::Function(FunctionId(4242)))
+            )
     )));
 }
 

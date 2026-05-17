@@ -1684,6 +1684,9 @@ impl SemanticCtx {
         if let Some(function) = self.function_names.get(name) {
             return Ok(crate::FunctionHandleTarget::Function(*function));
         }
+        if let Some(function) = self.external_function_names.get(name) {
+            return Ok(crate::FunctionHandleTarget::Function(*function));
+        }
         if is_builtin(name) {
             return Ok(crate::FunctionHandleTarget::Builtin(BuiltinId(
                 name.to_string(),
