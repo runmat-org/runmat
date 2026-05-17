@@ -371,6 +371,25 @@ pub enum CallableFallbackPolicy {
     ExternalBoundary,
 }
 
+impl CallableFallbackPolicy {
+    pub fn allows_runtime_name_resolution(self) -> bool {
+        matches!(
+            self,
+            CallableFallbackPolicy::RuntimeNameResolution
+                | CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution
+        )
+    }
+
+    pub fn after_object_dispatch_probe(self) -> Self {
+        match self {
+            CallableFallbackPolicy::ObjectDispatch => {
+                CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution
+            }
+            other => other,
+        }
+    }
+}
+
 pub const FEVAL_BUILTIN_NAME: &str = "feval";
 pub const NARGIN_BUILTIN_NAME: &str = "nargin";
 pub const NARGOUT_BUILTIN_NAME: &str = "nargout";

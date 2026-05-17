@@ -281,12 +281,7 @@ pub async fn call_method_or_member_index_with_outputs(
             call_explicit_builtin("getfield", &getfield_args, requested_outputs).await
         }
         Value::ClassRef(cls) => {
-            let classref_fallback = match fallback_policy {
-                CallableFallbackPolicy::ObjectDispatch => {
-                    CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution
-                }
-                other => other,
-            };
+            let classref_fallback = fallback_policy.after_object_dispatch_probe();
             if let Some((m, _owner)) = lookup_method(&cls, &name) {
                 if !m.is_static {
                     return Err(format!("Method '{}' is not static", name).into());
