@@ -18,7 +18,7 @@ use crate::{
     NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
 };
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) struct Scope {
     pub(crate) parent: Option<usize>,
@@ -63,8 +63,6 @@ pub fn lower(
     prog: &AstProgram,
     context: &LoweringContext<'_>,
 ) -> Result<LoweringResult, SemanticError> {
-    let _compatibility = lower_compatibility(prog, context)?;
-
     let (mut assembly, semantic_index) = SemanticCtx::lower_program(prog, context)?;
     assembly.compatibility_mode = context.compatibility_mode.clone();
 
@@ -660,6 +658,11 @@ impl SemanticCtx {
         members: &[runmat_parser::ClassMember],
         span: Span,
     ) -> Result<HirClass, SemanticError> {
+        if super_class.is_some_and(|sup| sup == name) {
+            return Err(SemanticError::new(format!(
+                "Class '{name}' cannot inherit from itself"
+            )));
+        }
         let class_id = ClassId(self.assembly.classes.len());
         self.assembly.modules[self.module.0].classes.push(class_id);
         let mut properties = Vec::new();
@@ -667,26 +670,40 @@ impl SemanticCtx {
         let mut events = Vec::new();
         let mut enumerations = Vec::new();
         let mut arguments = Vec::new();
+        let mut property_names = HashSet::new();
+        let mut method_names = HashSet::new();
 
         for member in members {
             match member {
                 runmat_parser::ClassMember::Properties { attributes, names } => {
-                    let attributes = property_attributes(attributes);
-                    properties.extend(names.iter().map(|name| ClassProperty {
-                        name: crate::MemberName(name.clone()),
-                        attributes: attributes.clone(),
-                        default: None,
-                        span,
-                    }));
+                    let attributes = property_attributes(name, attributes)?;
+                    for prop_name in names {
+                        if !property_names.insert(prop_name.clone()) {
+                            return Err(SemanticError::new(format!(
+                                "Duplicate property '{prop_name}' in class {name}"
+                            )));
+                        }
+                        if method_names.contains(prop_name) {
+                            return Err(SemanticError::new(format!(
+                                "Name '{prop_name}' used for both property and method in class {name}"
+                            )));
+                        }
+                        properties.push(ClassProperty {
+                            name: crate::MemberName(prop_name.clone()),
+                            attributes: attributes.clone(),
+                            default: None,
+                            span,
+                        });
+                    }
                 }
                 runmat_parser::ClassMember::Methods { attributes, body } => {
                     let is_static = attributes
                         .iter()
                         .any(|attr| attr.name.eq_ignore_ascii_case("Static"));
-                    let method_attributes = method_attributes(attributes);
+                    let method_attributes = method_attributes(name, attributes)?;
                     for stmt in body {
                         if let AstStmt::Function {
-                            name,
+                            name: method_name,
                             params,
                             outputs,
                             body,
@@ -698,7 +715,7 @@ impl SemanticCtx {
                             let function_id = self.take_function_id();
                             let function = self.lower_function(
                                 function_id,
-                                name,
+                                method_name,
                                 params,
                                 outputs,
                                 body,
@@ -712,9 +729,19 @@ impl SemanticCtx {
                                 Some(class_id),
                             )?;
                             self.assembly.functions.push(function);
+                            if !method_names.insert(method_name.clone()) {
+                                return Err(SemanticError::new(format!(
+                                    "Duplicate method '{method_name}' in class {name}",
+                                )));
+                            }
+                            if property_names.contains(method_name) {
+                                return Err(SemanticError::new(format!(
+                                    "Name '{method_name}' used for both property and method in class {name}",
+                                )));
+                            }
                             methods.push(ClassMethod {
                                 function: function_id,
-                                name: crate::MethodName(name.clone()),
+                                name: crate::MethodName(method_name.clone()),
                                 is_static,
                                 attributes: method_attributes.clone(),
                                 span: *span,
@@ -723,16 +750,43 @@ impl SemanticCtx {
                     }
                 }
                 runmat_parser::ClassMember::Events { names, .. } => {
-                    events.extend(names.iter().map(|name| ClassEvent {
-                        name: SymbolName(name.clone()),
-                        span,
-                    }));
+                    let mut seen = HashSet::new();
+                    for event_name in names {
+                        if !seen.insert(event_name) {
+                            return Err(SemanticError::new(format!(
+                                "Duplicate event '{event_name}' in class {name}"
+                            )));
+                        }
+                        if property_names.contains(event_name) || method_names.contains(event_name)
+                        {
+                            return Err(SemanticError::new(format!(
+                                "Name '{event_name}' used for event conflicts with existing member in class {name}"
+                            )));
+                        }
+                        events.push(ClassEvent {
+                            name: SymbolName(event_name.clone()),
+                            span,
+                        });
+                    }
                 }
                 runmat_parser::ClassMember::Enumeration { names, .. } => {
-                    enumerations.extend(names.iter().map(|name| ClassEnumeration {
-                        name: SymbolName(name.clone()),
-                        span,
-                    }));
+                    let mut seen = HashSet::new();
+                    for enum_name in names {
+                        if !seen.insert(enum_name) {
+                            return Err(SemanticError::new(format!(
+                                "Duplicate enumeration '{enum_name}' in class {name}"
+                            )));
+                        }
+                        if property_names.contains(enum_name) || method_names.contains(enum_name) {
+                            return Err(SemanticError::new(format!(
+                                "Name '{enum_name}' used for enumeration conflicts with existing member in class {name}"
+                            )));
+                        }
+                        enumerations.push(ClassEnumeration {
+                            name: SymbolName(enum_name.clone()),
+                            span,
+                        });
+                    }
                 }
                 runmat_parser::ClassMember::Arguments { .. } => {
                     arguments.push(ClassArgumentBlock { span });
@@ -1063,25 +1117,20 @@ impl SemanticCtx {
         let kind = match expr {
             AstExpr::Number(value, _) => HirExprKind::Number(value.clone()),
             AstExpr::String(value, _) => HirExprKind::String(StringLiteral(value.clone())),
-            AstExpr::Ident(name, _) => self
-                .binding_for_read(name, span)
-                .map(HirExprKind::Binding)
-                .unwrap_or_else(|| {
-                    if runmat_builtins::constants()
-                        .iter()
-                        .any(|c| c.name == name.as_str())
-                    {
-                        HirExprKind::Constant(SymbolName(name.clone()))
-                    } else {
-                        HirExprKind::Call(self.call_for_name(
-                            name,
-                            Vec::new(),
-                            CallSyntax::Plain,
-                            requested_outputs,
-                            span,
-                        ))
-                    }
-                }),
+            AstExpr::Ident(name, _) => {
+                if let Some(binding) = self.binding_for_read(name, span) {
+                    HirExprKind::Binding(binding)
+                } else if runmat_builtins::constants()
+                    .iter()
+                    .any(|c| c.name == name.as_str())
+                {
+                    HirExprKind::Constant(SymbolName(name.clone()))
+                } else {
+                    return Err(
+                        SemanticError::new(format!("undefined variable '{name}'")).with_span(span)
+                    );
+                }
+            }
             AstExpr::FuncCall(name, args, _) => {
                 let args: Vec<HirExpr> = self.lower_call_arguments_for_name(name, args)?;
                 if name == AWAIT_EXTENSION_NAME && args.len() == 1 {
@@ -1715,54 +1764,154 @@ fn creation_policy_for_place(place: &HirPlace, deletion: bool) -> AssignmentCrea
     }
 }
 
-fn property_attributes(attrs: &[runmat_parser::Attr]) -> crate::PropertyAttributes {
+fn validate_access_value(
+    class_name: &str,
+    section: &str,
+    value: &str,
+) -> Result<(), SemanticError> {
+    match value {
+        "public" | "private" => Ok(()),
+        other => Err(SemanticError::new(format!(
+            "invalid access value '{other}' in class '{class_name}' {section} (allowed: public, private)"
+        ))),
+    }
+}
+
+fn property_attributes(
+    class_name: &str,
+    attrs: &[runmat_parser::Attr],
+) -> Result<crate::PropertyAttributes, SemanticError> {
     let mut result = crate::PropertyAttributes::default();
+    let mut has_static = false;
+    let mut has_constant = false;
+    let mut has_dependent = false;
     for attr in attrs {
         if attr.name.eq_ignore_ascii_case("Static") {
             result.is_static = true;
+            has_static = true;
         } else if attr.name.eq_ignore_ascii_case("Constant") {
             result.is_constant = true;
+            has_constant = true;
         } else if attr.name.eq_ignore_ascii_case("Dependent") {
             result.is_dependent = true;
+            has_dependent = true;
         } else if attr.name.eq_ignore_ascii_case("Transient") {
             result.is_transient = true;
         } else if attr.name.eq_ignore_ascii_case("Hidden") {
             result.is_hidden = true;
         } else if attr.name.eq_ignore_ascii_case("Access") {
-            if let Some(access) = attr.value.as_deref().and_then(member_access) {
-                result.access = access.clone();
-                result.get_access = access.clone();
-                result.set_access = access;
-            }
+            let raw = attr.value.as_deref().ok_or_else(|| {
+                SemanticError::new(format!(
+                    "Access requires value in class '{class_name}' properties block",
+                ))
+            })?;
+            let access = member_access(raw).ok_or_else(|| {
+                let normalized = raw.trim().trim_matches('\'').to_ascii_lowercase();
+                SemanticError::new(format!(
+                    "invalid access value '{normalized}' in class '{class_name}' properties (allowed: public, private)"
+                ))
+            })?;
+            validate_access_value(
+                class_name,
+                "properties",
+                raw.trim().trim_matches('\'').to_ascii_lowercase().as_str(),
+            )?;
+            result.access = access.clone();
+            result.get_access = access.clone();
+            result.set_access = access;
         } else if attr.name.eq_ignore_ascii_case("GetAccess") {
-            if let Some(access) = attr.value.as_deref().and_then(member_access) {
-                result.get_access = access;
-            }
+            let raw = attr.value.as_deref().ok_or_else(|| {
+                SemanticError::new(format!(
+                    "GetAccess requires value in class '{class_name}' properties block",
+                ))
+            })?;
+            let access = member_access(raw).ok_or_else(|| {
+                let normalized = raw.trim().trim_matches('\'').to_ascii_lowercase();
+                SemanticError::new(format!(
+                    "invalid access value '{normalized}' in class '{class_name}' properties (allowed: public, private)"
+                ))
+            })?;
+            validate_access_value(
+                class_name,
+                "properties",
+                raw.trim().trim_matches('\'').to_ascii_lowercase().as_str(),
+            )?;
+            result.get_access = access;
         } else if attr.name.eq_ignore_ascii_case("SetAccess") {
-            if let Some(access) = attr.value.as_deref().and_then(member_access) {
-                result.set_access = access;
-            }
+            let raw = attr.value.as_deref().ok_or_else(|| {
+                SemanticError::new(format!(
+                    "SetAccess requires value in class '{class_name}' properties block",
+                ))
+            })?;
+            let access = member_access(raw).ok_or_else(|| {
+                let normalized = raw.trim().trim_matches('\'').to_ascii_lowercase();
+                SemanticError::new(format!(
+                    "invalid access value '{normalized}' in class '{class_name}' properties (allowed: public, private)"
+                ))
+            })?;
+            validate_access_value(
+                class_name,
+                "properties",
+                raw.trim().trim_matches('\'').to_ascii_lowercase().as_str(),
+            )?;
+            result.set_access = access;
         }
     }
-    result
+    if has_static && has_dependent {
+        return Err(SemanticError::new(format!(
+            "class '{class_name}' properties: attributes 'Static' and 'Dependent' cannot be combined"
+        )));
+    }
+    if has_constant && has_dependent {
+        return Err(SemanticError::new(format!(
+            "class '{class_name}' properties: attributes 'Constant' and 'Dependent' cannot be combined"
+        )));
+    }
+    Ok(result)
 }
 
-fn method_attributes(attrs: &[runmat_parser::Attr]) -> crate::MethodAttributes {
+fn method_attributes(
+    class_name: &str,
+    attrs: &[runmat_parser::Attr],
+) -> Result<crate::MethodAttributes, SemanticError> {
     let mut result = crate::MethodAttributes::default();
+    let mut has_abstract = false;
+    let mut has_sealed = false;
     for attr in attrs {
         if attr.name.eq_ignore_ascii_case("Access") {
-            if let Some(access) = attr.value.as_deref().and_then(member_access) {
-                result.access = access;
-            }
+            let raw = attr.value.as_deref().ok_or_else(|| {
+                SemanticError::new(format!(
+                    "Access requires value in class '{class_name}' methods block",
+                ))
+            })?;
+            let access = member_access(raw).ok_or_else(|| {
+                let normalized = raw.trim().trim_matches('\'').to_ascii_lowercase();
+                SemanticError::new(format!(
+                    "invalid access value '{normalized}' in class '{class_name}' methods (allowed: public, private)"
+                ))
+            })?;
+            validate_access_value(
+                class_name,
+                "methods",
+                raw.trim().trim_matches('\'').to_ascii_lowercase().as_str(),
+            )?;
+            result.access = access;
         } else if attr.name.eq_ignore_ascii_case("Hidden") {
             result.is_hidden = true;
         } else if attr.name.eq_ignore_ascii_case("Abstract") {
             result.is_abstract = true;
+            has_abstract = true;
         } else if attr.name.eq_ignore_ascii_case("Sealed") {
             result.is_sealed = true;
+            has_sealed = true;
         }
     }
-    result
+    if has_abstract && has_sealed {
+        return Err(SemanticError::new(format!(
+            "class '{class_name}' methods: attributes 'Abstract' and 'Sealed' cannot be combined"
+        )));
+    }
+    Ok(result)
 }
 
 fn member_access(value: &str) -> Option<crate::MemberAccess> {
