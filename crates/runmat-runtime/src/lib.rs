@@ -1048,13 +1048,12 @@ async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(name = "feval", builtin_path = "crate")]
 async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     async fn call_by_name(name: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
-        let request = crate::user_functions::SemanticCallableRequest {
-            function: None,
-            name: Some(name.to_string()),
-            args: args.to_vec(),
-            requested_outputs: 1,
-            kind: crate::user_functions::SemanticCallableKind::Feval,
-        };
+        let request = crate::user_functions::SemanticCallableRequest::named(
+            name.to_string(),
+            args.to_vec(),
+            1,
+            crate::user_functions::SemanticCallableKind::Feval,
+        );
         if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await {
             return result;
         }
@@ -1091,13 +1090,13 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         }
         Value::FunctionHandle(name) => call_by_name(&name, &rest).await,
         Value::SemanticFunctionHandle { name, function } => {
-            let request = crate::user_functions::SemanticCallableRequest {
-                function: Some(function),
-                name: Some(name.clone()),
-                args: rest.clone(),
-                requested_outputs: 1,
-                kind: crate::user_functions::SemanticCallableKind::Feval,
-            };
+            let request = crate::user_functions::SemanticCallableRequest::semantic(
+                function,
+                name.clone(),
+                rest.clone(),
+                1,
+                crate::user_functions::SemanticCallableKind::Feval,
+            );
             if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await
             {
                 return result;
@@ -1108,13 +1107,13 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             let mut args = c.captures.clone();
             args.extend(rest);
             if let Some(function) = c.semantic_function {
-                let request = crate::user_functions::SemanticCallableRequest {
-                    function: Some(function),
-                    name: Some(c.function_name.clone()),
-                    args: args.clone(),
-                    requested_outputs: 1,
-                    kind: crate::user_functions::SemanticCallableKind::Feval,
-                };
+                let request = crate::user_functions::SemanticCallableRequest::semantic(
+                    function,
+                    c.function_name.clone(),
+                    args.clone(),
+                    1,
+                    crate::user_functions::SemanticCallableKind::Feval,
+                );
                 if let Some(result) =
                     crate::user_functions::try_call_semantic_descriptor(request).await
                 {

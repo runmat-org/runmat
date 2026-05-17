@@ -292,6 +292,7 @@ Current state:
 - Member load/store object fallback checks now use descriptor-layer helpers for `subsref`/`subsasgn` membership and dispatch instead of importing object protocol operation names into resolver code.
 - Object operator and handle-method dispatch now go through typed VM call-layer helpers instead of exposing raw `call_method` argument-vector assembly to dispatch modules.
 - `CallableDescriptor` construction now routes through internal semantic, `feval` forwarding, and name-only fallback constructors, narrowing direct access to callable target fields.
+- Runtime semantic callback bridge construction now goes through `SemanticCallableRequest` constructors instead of open field assembly at `feval`/`cellfun`/`arrayfun` call sites.
 
 Target state:
 

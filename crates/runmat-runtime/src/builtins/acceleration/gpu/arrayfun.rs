@@ -632,13 +632,12 @@ impl Callable {
     async fn call(&self, args: &[Value]) -> crate::BuiltinResult<Value> {
         match self {
             Callable::Builtin { name } => {
-                let request = user_functions::SemanticCallableRequest {
-                    function: None,
-                    name: Some(name.clone()),
-                    args: args.to_vec(),
-                    requested_outputs: 1,
-                    kind: user_functions::SemanticCallableKind::Arrayfun,
-                };
+                let request = user_functions::SemanticCallableRequest::named(
+                    name.clone(),
+                    args.to_vec(),
+                    1,
+                    user_functions::SemanticCallableKind::Arrayfun,
+                );
                 if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
                     return result;
                 }
@@ -648,13 +647,13 @@ impl Callable {
                 let mut merged = c.captures.clone();
                 merged.extend_from_slice(args);
                 if let Some(function) = c.semantic_function {
-                    let request = user_functions::SemanticCallableRequest {
-                        function: Some(function),
-                        name: Some(c.function_name.clone()),
-                        args: merged.clone(),
-                        requested_outputs: 1,
-                        kind: user_functions::SemanticCallableKind::Arrayfun,
-                    };
+                    let request = user_functions::SemanticCallableRequest::semantic(
+                        function,
+                        c.function_name.clone(),
+                        merged.clone(),
+                        1,
+                        user_functions::SemanticCallableKind::Arrayfun,
+                    );
                     if let Some(result) =
                         user_functions::try_call_semantic_descriptor(request).await
                     {

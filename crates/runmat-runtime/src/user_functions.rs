@@ -21,11 +21,44 @@ pub enum SemanticCallableKind {
 
 #[derive(Debug, Clone)]
 pub struct SemanticCallableRequest {
-    pub function: Option<usize>,
-    pub name: Option<String>,
-    pub args: Vec<Value>,
-    pub requested_outputs: usize,
-    pub kind: SemanticCallableKind,
+    function: Option<usize>,
+    name: Option<String>,
+    args: Vec<Value>,
+    requested_outputs: usize,
+    kind: SemanticCallableKind,
+}
+
+impl SemanticCallableRequest {
+    pub fn named(
+        name: String,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        kind: SemanticCallableKind,
+    ) -> Self {
+        Self {
+            function: None,
+            name: Some(name),
+            args,
+            requested_outputs,
+            kind,
+        }
+    }
+
+    pub fn semantic(
+        function: usize,
+        name: String,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        kind: SemanticCallableKind,
+    ) -> Self {
+        Self {
+            function: Some(function),
+            name: Some(name),
+            args,
+            requested_outputs,
+            kind,
+        }
+    }
 }
 
 runmat_thread_local! {
@@ -100,6 +133,7 @@ pub async fn try_call_semantic_function_by_name(
 pub async fn try_call_semantic_descriptor(
     request: SemanticCallableRequest,
 ) -> Option<Result<Value, RuntimeError>> {
+    let _kind = request.kind;
     if let Some(function) = request.function {
         return try_call_semantic_function(function, &request.args, request.requested_outputs)
             .await;
