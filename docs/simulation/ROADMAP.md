@@ -71,3 +71,5 @@ Progress update (2026-05-17):
    additive `conductivity_frequency_response` schema, FEA `sigma(omega)` interpolation with dispersive loss coupling terms, and EM fixture governance thresholds.
 2. [x] EM stronger external-reference comparator metrics baseline landed:
    external-reference benchmark generation now supports threshold-assertion-backed metrics, with EM `sigma(omega)` comparator entries wired into the M6 baseline.
+3. [x] Thermal/thermo benchmark tightening landed:
+   tightened thermo gradient/ramp/shock and standalone thermal threshold assertions to reduce permissive drift windows; validated with `cargo test -p runmat-runtime --test analysis` and `cargo test -p runmat-runtime --lib`.

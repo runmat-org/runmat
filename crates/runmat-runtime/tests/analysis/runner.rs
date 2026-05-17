@@ -2896,7 +2896,7 @@ pub(super) fn run_fixture(
                                 "constitutive_material_spread_ratio",
                             ),
                             Some(1.04),
-                            Some(1.6),
+                            Some(1.55),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -2955,7 +2955,7 @@ pub(super) fn run_fixture(
                                 "effective_modulus_scale",
                             ),
                             Some(0.85),
-                            Some(1.2),
+                            Some(1.1),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -2969,7 +2969,7 @@ pub(super) fn run_fixture(
                                 "temporal_variation",
                             ),
                             Some(0.2),
-                            Some(0.45),
+                            Some(0.4),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -2997,7 +2997,7 @@ pub(super) fn run_fixture(
                                 "spatial_coverage_ratio",
                             ),
                             Some(0.35),
-                            Some(1.0),
+                            Some(0.7),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3056,7 +3056,7 @@ pub(super) fn run_fixture(
                                 "effective_modulus_scale",
                             ),
                             Some(0.8),
-                            Some(1.25),
+                            Some(1.1),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3070,7 +3070,7 @@ pub(super) fn run_fixture(
                                 "temporal_variation",
                             ),
                             Some(0.35),
-                            Some(1.0),
+                            Some(0.7),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3084,7 +3084,7 @@ pub(super) fn run_fixture(
                                 "spatial_gradient_index",
                             ),
                             Some(0.25),
-                            Some(1.0),
+                            Some(0.8),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3098,7 +3098,7 @@ pub(super) fn run_fixture(
                                 "spatial_coverage_ratio",
                             ),
                             Some(0.30),
-                            Some(1.0),
+                            Some(0.7),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3112,7 +3112,7 @@ pub(super) fn run_fixture(
                                 "field_extrapolation_ratio",
                             ),
                             Some(0.0),
-                            Some(0.2),
+                            Some(0.08),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3126,7 +3126,7 @@ pub(super) fn run_fixture(
                                 "field_clamp_ratio",
                             ),
                             Some(0.0),
-                            Some(0.2),
+                            Some(0.08),
                         );
                     } else if spec.id == "thermal_standalone_ramp_gpu_provider" {
                         push_threshold_assertion(
@@ -3141,7 +3141,7 @@ pub(super) fn run_fixture(
                                 "max_residual_norm",
                             ),
                             Some(0.0),
-                            Some(8.0),
+                            Some(6.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3155,7 +3155,7 @@ pub(super) fn run_fixture(
                                 "min_temperature_k",
                             ),
                             Some(290.0),
-                            Some(380.0),
+                            Some(360.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3169,7 +3169,7 @@ pub(super) fn run_fixture(
                                 "max_temperature_k",
                             ),
                             Some(300.0),
-                            Some(420.0),
+                            Some(370.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3183,7 +3183,7 @@ pub(super) fn run_fixture(
                                 "conductivity_spread_ratio",
                             ),
                             Some(1.0),
-                            Some(2.0),
+                            Some(1.5),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3197,7 +3197,7 @@ pub(super) fn run_fixture(
                                 "heat_capacity_spread_ratio",
                             ),
                             Some(1.0),
-                            Some(2.0),
+                            Some(1.5),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3210,8 +3210,8 @@ pub(super) fn run_fixture(
                                 "FEA_THERMAL_OUTCOME",
                                 "spatial_gradient_index",
                             ),
-                            Some(0.05),
-                            Some(2.0),
+                            Some(0.4),
+                            Some(1.4),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3224,7 +3224,7 @@ pub(super) fn run_fixture(
                                 "FEA_THERMAL_OUTCOME",
                                 "monotonic_response_fraction",
                             ),
-                            Some(0.8),
+                            Some(0.9),
                             Some(1.0),
                         );
                         push_threshold_assertion(
@@ -3238,8 +3238,8 @@ pub(super) fn run_fixture(
                                 "FEA_THERMAL_OUTCOME",
                                 "thermal_response_realization_ratio",
                             ),
-                            Some(0.5),
-                            Some(1.6),
+                            Some(0.6),
+                            Some(1.2),
                         );
                     } else if spec.id == "electro_thermal_joule_benign_gpu_provider" {
                         push_threshold_assertion(

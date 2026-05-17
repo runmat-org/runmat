@@ -41,4 +41,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - EM now includes additive material frequency-response support (`sigma(omega)` baseline) with fixture-level governance thresholds.
 - EM diagnostics/governance now include dispersive-loss scale and dispersive conductivity coupling ratios for frequency-dependent runs.
 - External-reference comparator generation now supports threshold-assertion-backed EM metrics in the M6 baseline artifact.
+- Thermal/thermo governance bands were tightened across gradient/ramp/shock and standalone thermal fixtures to reduce permissive drift windows.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.
