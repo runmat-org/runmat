@@ -269,6 +269,23 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         runmat_analysis_core::AnalysisStepKind::Modal
     );
 
+    let acoustic = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_acoustic_harmonic_model".to_string(),
+            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            prep_context: None,
+        },
+        OperationContext::new(Some("trace-contract-create-4-acoustic".to_string()), None),
+    )
+    .expect("acoustic harmonic profile should be supported");
+    assert_eq!(acoustic.operation, "analysis.create_model");
+    assert_eq!(acoustic.op_version, "analysis.create_model/v1");
+    assert_eq!(
+        acoustic.data.steps[0].kind,
+        runmat_analysis_core::AnalysisStepKind::Modal
+    );
+
     let transient = analysis_create_model_op(
         &geometry.data,
         AnalysisCreateModelIntentSpec {

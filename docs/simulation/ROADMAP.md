@@ -109,3 +109,5 @@ Progress update (2026-05-17):
     `validate_external_reference_benchmark.py` now requires coupled CFD/CHT/FSI metric sets to be present in generated comparator artifacts so incomplete payloads fail governance validation in enforce mode.
 21. [x] External-reference baseline guard test promoted into CI governance suite:
     release-readiness governance unit tests now include `scripts.tests.test_external_reference_baseline` so coupled-family comparator baseline coverage regressions fail CI before artifact generation.
+22. [x] Acoustics contract kickoff landed:
+    added additive `analysis.create_model` profile `acoustic_harmonic` that provisions a harmonic-template model scaffold (modal-step placeholder) and corresponding runtime contract/profile tests as the first acoustics family entry point.

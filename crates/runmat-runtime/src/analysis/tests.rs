@@ -607,6 +607,29 @@ fn analysis_create_model_supports_modal_profile_template() {
 }
 
 #[test]
+fn analysis_create_model_supports_acoustic_harmonic_profile_template() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "acoustic_harmonic_model".to_string(),
+            profile: AnalysisCreateModelProfile::AcousticHarmonic,
+            prep_context: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("acoustic harmonic profile should be supported");
+
+    assert_eq!(envelope.data.model_id.0, "acoustic_harmonic_model");
+    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Modal);
+    assert_eq!(
+        envelope.data.loads[0].load_id,
+        "load_default_acoustic_harmonic_seed"
+    );
+}
+
+#[test]
 fn analysis_create_model_supports_electromagnetic_profile_template() {
     let geometry = sample_geometry_asset();
     let envelope = analysis_create_model_op(

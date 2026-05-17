@@ -75,7 +75,7 @@ Legend: `[x]` complete baseline, `[~]` in active deepening, `[ ]` not started.
 | CFD core | Steady/transient fluid solver family | [~] |
 | CHT | Fluid-thermal coupled family | [~] |
 | FSI | Coupled structural-fluid family | [~] |
-| Acoustics | Acoustic solver family | [ ] |
+| Acoustics | Acoustic solver family | [~] |
 | Meshing/adaptivity | Production mesh generation/refinement pipeline | [ ] |
 | CAD interop depth | Robust CAD-native ingestion + metadata fidelity | [~] |
 | Performance/scale | Scale SLOs and regression-gated performance | [~] |

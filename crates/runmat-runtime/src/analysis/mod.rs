@@ -372,6 +372,26 @@ pub fn analysis_create_model_op(
                 kind: AnalysisStepKind::Modal,
             }],
         ),
+        AnalysisCreateModelProfile::AcousticHarmonic => (
+            BoundaryCondition {
+                bc_id: "bc_default_fixed".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::Fixed,
+            },
+            LoadCase {
+                load_id: "load_default_acoustic_harmonic_seed".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::BodyForce {
+                    gx: 0.0,
+                    gy: 0.0,
+                    gz: 0.0,
+                },
+            },
+            vec![AnalysisStep {
+                step_id: "step_default_acoustic_harmonic".to_string(),
+                kind: AnalysisStepKind::Modal,
+            }],
+        ),
         AnalysisCreateModelProfile::TransientStructural => (
             BoundaryCondition {
                 bc_id: "bc_default_fixed".to_string(),

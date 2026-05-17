@@ -60,6 +60,7 @@ pub enum AnalysisCreateModelProfile {
     ThermoMechanicalCoupled,
     ThermalStandalone,
     ModalStructural,
+    AcousticHarmonic,
     TransientStructural,
     NonlinearStructural,
     ElectromagneticStatic,

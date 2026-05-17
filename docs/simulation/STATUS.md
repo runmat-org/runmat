@@ -19,7 +19,7 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 | CFD core | Steady/transient fluid foundation | [~] |
 | CHT | Fluid-thermal coupled family | [~] |
 | FSI | Structural-fluid coupled family | [~] |
-| Acoustics | Acoustic solver family | [ ] |
+| Acoustics | Acoustic solver family | [~] |
 | Meshing/adaptivity | Production meshing/refinement pipeline | [ ] |
 | External-reference gating (M6) | Protected-branch enforced external comparators | [~] |
 | Performance/scale regression gates | SLO-backed perf readiness across key workloads | [~] |
@@ -57,4 +57,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - External-reference comparator coverage now includes coupled-family threshold metrics in the M6 baseline (`cfd_steady_gpu_provider`, `cht_coupled_gpu_provider`, `fsi_coupled_gpu_provider`) so CFD/CHT/FSI regressions are included in governance-side reference comparisons.
 - External-reference artifact validation now enforces required coupled-family metric presence for CFD/CHT/FSI fixture records, so incomplete comparator payloads fail governance validation even when schema fields are otherwise well-formed.
 - Governance CI now executes `scripts.tests.test_external_reference_baseline` in the release-readiness unittest bundle, so coupled-family baseline coverage regressions are caught before external-reference artifact generation.
+- Acoustics contract kickoff landed: additive `analysis.create_model` profile `acoustic_harmonic` now seeds a deterministic harmonic-template model scaffold (modal-step placeholder) under the existing versioned contract surface with runtime contract coverage tests.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.
