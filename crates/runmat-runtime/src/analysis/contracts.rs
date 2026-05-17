@@ -1033,6 +1033,8 @@ pub struct AnalysisStudySpec {
     pub create_model_intent: AnalysisCreateModelIntentSpec,
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
+    #[serde(default)]
+    pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

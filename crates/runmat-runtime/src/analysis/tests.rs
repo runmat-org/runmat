@@ -364,6 +364,22 @@ fn sample_linear_static_study_spec() -> AnalysisStudySpec {
         },
         run_kind: AnalysisRunKind::LinearStatic,
         backend: ComputeBackend::Cpu,
+        electromagnetic_run_options: None,
+    }
+}
+
+fn sample_electromagnetic_study_spec() -> AnalysisStudySpec {
+    AnalysisStudySpec {
+        study_id: "study_electromagnetic_001".to_string(),
+        geometry: sample_geometry_asset(),
+        create_model_intent: AnalysisCreateModelIntentSpec {
+            model_id: "study_model_electromagnetic_001".to_string(),
+            profile: AnalysisCreateModelProfile::ElectromagneticStatic,
+            prep_context: None,
+        },
+        run_kind: AnalysisRunKind::Electromagnetic,
+        backend: ComputeBackend::Cpu,
+        electromagnetic_run_options: None,
     }
 }
 
@@ -631,6 +647,7 @@ fn analysis_create_model_supports_acoustic_harmonic_profile_template() {
 
 #[test]
 fn analysis_create_model_supports_electromagnetic_profile_template() {
+    let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let envelope = analysis_create_model_op(
         &geometry,
@@ -647,6 +664,14 @@ fn analysis_create_model_supports_electromagnetic_profile_template() {
         envelope.data.steps[0].kind,
         AnalysisStepKind::Electromagnetic
     );
+    let domain = envelope
+        .data
+        .electromagnetic
+        .as_ref()
+        .expect("electromagnetic domain should be populated");
+    assert!(domain.enabled);
+    assert_eq!(domain.reference_frequency_hz, 60.0);
+    assert_eq!(domain.applied_current_a, 100.0);
 }
 
 #[test]
@@ -817,6 +842,62 @@ fn analysis_validate_study_reports_invalid_study_id() {
 }
 
 #[test]
+fn analysis_validate_study_rejects_unused_electromagnetic_options() {
+    let _guard = analysis_test_guard();
+    let mut spec = sample_linear_static_study_spec();
+    spec.electromagnetic_run_options = Some(AnalysisElectromagneticRunOptions::default());
+
+    let envelope = analysis_validate_study_op(&spec, OperationContext::new(None, None))
+        .expect("study validation should return typed output");
+
+    assert!(!envelope.data.valid);
+    assert!(envelope
+        .data
+        .issue_codes
+        .iter()
+        .any(|code| code == "ANALYSIS_STUDY_ELECTROMAGNETIC_OPTIONS_UNUSED"));
+}
+
+#[test]
+fn analysis_validate_study_rejects_invalid_electromagnetic_options() {
+    let _guard = analysis_test_guard();
+    let mut spec = sample_electromagnetic_study_spec();
+    spec.electromagnetic_run_options = Some(AnalysisElectromagneticRunOptions {
+        sweep_enabled: true,
+        sweep_frequency_hz: vec![60.0, -10.0],
+        residual_target: 0.0,
+        harmonic_tolerance: f64::NAN,
+        harmonic_max_iterations: 0,
+        ..AnalysisElectromagneticRunOptions::default()
+    });
+
+    let envelope = analysis_validate_study_op(&spec, OperationContext::new(None, None))
+        .expect("study validation should return typed output");
+
+    assert!(!envelope.data.valid);
+    assert!(envelope
+        .data
+        .issue_codes
+        .iter()
+        .any(|code| code == "ANALYSIS_STUDY_ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID"));
+    assert!(envelope
+        .data
+        .issue_codes
+        .iter()
+        .any(|code| code == "ANALYSIS_STUDY_ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID"));
+    assert!(envelope
+        .data
+        .issue_codes
+        .iter()
+        .any(|code| code == "ANALYSIS_STUDY_ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID"));
+    assert!(envelope
+        .data
+        .issue_codes
+        .iter()
+        .any(|code| code == "ANALYSIS_STUDY_ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID"));
+}
+
+#[test]
 fn analysis_plan_study_returns_canonical_linear_static_sequence() {
     let _guard = analysis_test_guard();
     let root = temp_artifact_root("plan-study-evidence");
@@ -897,6 +978,48 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(persisted.publishable, envelope.data.publishable);
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_run_study_honors_electromagnetic_run_options() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let mut spec = sample_electromagnetic_study_spec();
+    spec.electromagnetic_run_options = Some(AnalysisElectromagneticRunOptions {
+        sweep_enabled: true,
+        sweep_frequency_hz: vec![30.0, 60.0, 120.0],
+        residual_target: 5.0e-7,
+        harmonic_tolerance: 1.2345e-4,
+        harmonic_max_iterations: 64,
+        ..AnalysisElectromagneticRunOptions::default()
+    });
+
+    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("electromagnetic study run should succeed");
+
+    assert_eq!(envelope.operation, "analysis.run_study");
+    assert_eq!(envelope.op_version, "analysis.run_study/v1");
+    assert_eq!(envelope.data.run_kind, AnalysisRunKind::Electromagnetic);
+    assert_eq!(envelope.data.backend, ComputeBackend::Cpu);
+
+    let persisted = storage::load_run_result(&envelope.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    let em_payload = persisted
+        .electromagnetic_results
+        .as_ref()
+        .expect("electromagnetic payload should be present");
+    assert_eq!(em_payload.sweep_frequency_hz.len(), 3);
+    assert_eq!(em_payload.sweep_peak_flux_density.len(), 3);
+    assert_eq!(em_payload.sweep_solve_quality.len(), 3);
+    let harmonic_diag = persisted
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_EM_HARMONIC_COUPLING")
+        .expect("harmonic coupling diagnostic should be present");
+    assert!(harmonic_diag.message.contains("tolerance=0.00012345"));
+    assert!(harmonic_diag.message.contains("iterations="));
 }
 
 #[test]
@@ -2735,12 +2858,18 @@ fn analysis_run_electromagnetic_rejects_invalid_harmonic_controls() {
             harmonic_max_iterations: 0,
             ..AnalysisElectromagneticRunOptions::default()
         },
-        OperationContext::new(Some("trace-em-run-invalid-harmonic-controls".to_string()), None),
+        OperationContext::new(
+            Some("trace-em-run-invalid-harmonic-controls".to_string()),
+            None,
+        ),
     )
     .expect_err("electromagnetic run should reject zero harmonic_max_iterations");
     assert_eq!(err.operation, "analysis.run_electromagnetic");
     assert_eq!(err.op_version, "analysis.run_electromagnetic/v1");
-    assert_eq!(err.error_code, "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS");
+    assert_eq!(
+        err.error_code,
+        "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS"
+    );
 }
 
 #[test]

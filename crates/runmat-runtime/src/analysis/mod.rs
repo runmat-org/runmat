@@ -614,6 +614,16 @@ pub fn analysis_create_model_op(
         }),
         _ => None,
     };
+    let electromagnetic = match intent.profile {
+        AnalysisCreateModelProfile::ElectromagneticStatic => {
+            Some(runmat_analysis_core::ElectromagneticDomain {
+                enabled: true,
+                reference_frequency_hz: 60.0,
+                applied_current_a: 100.0,
+            })
+        }
+        _ => None,
+    };
     let thermo_mechanical = match intent.profile {
         AnalysisCreateModelProfile::ChtCoupled => {
             Some(runmat_analysis_core::ThermoMechanicalDomain {
@@ -648,7 +658,7 @@ pub fn analysis_create_model_op(
         material_assignments: inferred_assignments,
         thermo_mechanical,
         electro_thermal: None,
-        electromagnetic: None,
+        electromagnetic,
         cfd,
         interfaces: Vec::new(),
         boundary_conditions: vec![default_bc],
@@ -700,6 +710,7 @@ pub fn analysis_validate_study_op(
             "study_fingerprint": study_fingerprint.clone(),
             "valid": issue_codes.is_empty(),
             "issue_codes": issue_codes.clone(),
+            "electromagnetic_run_options": spec.electromagnetic_run_options.clone(),
         }),
     )
     .map_err(|err| {
@@ -765,6 +776,7 @@ pub fn analysis_plan_study_op(
             "model_id": spec.create_model_intent.model_id.clone(),
             "run_kind": spec.run_kind,
             "backend": spec.backend,
+            "electromagnetic_run_options": spec.electromagnetic_run_options.clone(),
             "study_fingerprint": study_fingerprint.clone(),
             "operation_sequence": operation_sequence.clone(),
         }),
@@ -862,9 +874,12 @@ pub fn analysis_run_study_op(
         AnalysisRunKind::Nonlinear => {
             analysis_run_nonlinear_op(&created.data, spec.backend, context.clone())
         }
-        AnalysisRunKind::Electromagnetic => {
-            analysis_run_electromagnetic_op(&created.data, spec.backend, context.clone())
-        }
+        AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
+            &created.data,
+            spec.backend,
+            spec.electromagnetic_run_options.clone().unwrap_or_default(),
+            context.clone(),
+        ),
     }?;
 
     let evidence_artifact_path = persist_study_evidence(
@@ -876,6 +891,7 @@ pub fn analysis_run_study_op(
             "model_id": created.data.model_id.0.clone(),
             "run_kind": spec.run_kind,
             "backend": spec.backend,
+            "electromagnetic_run_options": spec.electromagnetic_run_options.clone(),
             "study_fingerprint": study_fingerprint.clone(),
             "operation_sequence": operation_sequence.clone(),
             "run_id": run_envelope.data.run_id.clone(),
@@ -7441,6 +7457,37 @@ fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
     }
     if !profile_supports_run_kind(spec.create_model_intent.profile, spec.run_kind) {
         issue_codes.push("ANALYSIS_STUDY_RUN_KIND_PROFILE_MISMATCH".to_string());
+    }
+    if spec.electromagnetic_run_options.is_some()
+        && spec.run_kind != AnalysisRunKind::Electromagnetic
+    {
+        issue_codes.push("ANALYSIS_STUDY_ELECTROMAGNETIC_OPTIONS_UNUSED".to_string());
+    }
+    if spec.run_kind == AnalysisRunKind::Electromagnetic {
+        if let Some(options) = spec.electromagnetic_run_options.as_ref() {
+            if !options.residual_target.is_finite() || options.residual_target <= 0.0 {
+                issue_codes
+                    .push("ANALYSIS_STUDY_ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID".to_string());
+            }
+            if !options.harmonic_tolerance.is_finite() || options.harmonic_tolerance <= 0.0 {
+                issue_codes
+                    .push("ANALYSIS_STUDY_ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID".to_string());
+            }
+            if options.harmonic_max_iterations == 0 {
+                issue_codes.push(
+                    "ANALYSIS_STUDY_ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID".to_string(),
+                );
+            }
+            if options.sweep_enabled
+                && !options
+                    .sweep_frequency_hz
+                    .iter()
+                    .all(|frequency_hz| frequency_hz.is_finite() && *frequency_hz > 0.0)
+            {
+                issue_codes
+                    .push("ANALYSIS_STUDY_ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID".to_string());
+            }
+        }
     }
 
     issue_codes

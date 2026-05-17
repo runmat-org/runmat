@@ -340,6 +340,14 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         electromagnetic.data.steps[0].kind,
         runmat_analysis_core::AnalysisStepKind::Electromagnetic
     );
+    let electromagnetic_domain = electromagnetic
+        .data
+        .electromagnetic
+        .as_ref()
+        .expect("electromagnetic profile should seed electromagnetic domain");
+    assert!(electromagnetic_domain.enabled);
+    assert_eq!(electromagnetic_domain.reference_frequency_hz, 60.0);
+    assert_eq!(electromagnetic_domain.applied_current_a, 100.0);
 }
 
 #[test]
@@ -376,6 +384,7 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
         },
         run_kind: AnalysisRunKind::LinearStatic,
         backend: ComputeBackend::Cpu,
+        electromagnetic_run_options: None,
     };
 
     let validate = analysis_validate_study_op(

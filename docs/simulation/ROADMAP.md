@@ -139,3 +139,5 @@ Progress update (2026-05-17):
     `analysis.run_electromagnetic/v1` now accepts validated harmonic control options (`residual_target`, `harmonic_tolerance`, `harmonic_max_iterations`) that flow into FEA solve behavior and EM diagnostics, replacing fixed harmonic constants with explicit runtime contract controls.
 36. [x] EM benchmark-schema fixture coverage expanded for non-core EM scenarios:
     `validate_analysis_report_nonlinear.py` now requires sparse-assignments, fallback-heavy, overlap-interference, and boundary-kernel EM provider fixture assertion sets plus finite GPU performance telemetry fields, broadening Maxwell schema-governance coverage beyond the original core EM fixtures.
+37. [x] Study workflow EM option propagation and validation landed:
+    additive `AnalysisStudySpec.electromagnetic_run_options` is now validated by `analysis.validate_study/v1`, rejected when used on non-EM run kinds, and routed by `analysis.run_study/v1` into `analysis.run_electromagnetic/v1`; electromagnetic create-model profile defaults now seed an EM domain so study-driven EM runs are executable under canonical study workflows.
