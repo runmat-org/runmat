@@ -1041,7 +1041,15 @@ pub struct AnalysisStudySpec {
 pub struct AnalysisStudyValidateResult {
     pub valid: bool,
     pub issue_codes: Vec<String>,
+    #[serde(default)]
+    pub issues: Vec<AnalysisStudyIssue>,
     pub evidence_artifact_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisStudyIssue {
+    pub code: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

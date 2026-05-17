@@ -29,6 +29,7 @@ Last updated: 2026-05-17
    Baseline increment landed: study workflow typed outputs now surface requested/resolved EM run options on `analysis.plan_study`/`analysis.run_study`, improving API-level reproducibility for programmatic study orchestration.
    Baseline increment landed: `analysis.run_study` typed output now includes run-operation identity and `quality_reasons`, so EM study automation can extract immediate execution verdict context without a separate results retrieval hop.
    Baseline increment landed: `analysis.plan_study` typed output now includes planned run-operation identity, allowing EM study orchestration clients to select the electromagnetic run-contract path without introspecting operation-sequence arrays.
+   Baseline increment landed: `analysis.validate_study` typed output now includes structured issue details (`code`, `message`) so EM study-option validation failures are machine-readable without external issue-code message mapping.
 
 ## Next Recommended EM Slice
 

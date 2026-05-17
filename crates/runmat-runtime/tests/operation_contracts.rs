@@ -395,6 +395,7 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
     assert_eq!(validate.operation, "analysis.validate_study");
     assert_eq!(validate.op_version, "analysis.validate_study/v1");
     assert!(validate.data.valid);
+    assert_eq!(validate.data.issues.len(), 0);
     assert!(PathBuf::from(&validate.data.evidence_artifact_path).exists());
 
     let plan = analysis_plan_study_op(

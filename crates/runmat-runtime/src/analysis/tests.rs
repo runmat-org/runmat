@@ -833,6 +833,10 @@ fn analysis_validate_study_reports_invalid_study_id() {
         .issue_codes
         .iter()
         .any(|code| code == "ANALYSIS_STUDY_ID_EMPTY"));
+    assert!(envelope.data.issues.iter().any(|issue| {
+        issue.code == "ANALYSIS_STUDY_ID_EMPTY"
+            && issue.message.contains("study_id must be non-empty")
+    }));
     assert!(envelope
         .data
         .evidence_artifact_path
@@ -856,6 +860,12 @@ fn analysis_validate_study_rejects_unused_electromagnetic_options() {
         .issue_codes
         .iter()
         .any(|code| code == "ANALYSIS_STUDY_ELECTROMAGNETIC_OPTIONS_UNUSED"));
+    assert!(envelope.data.issues.iter().any(|issue| {
+        issue.code == "ANALYSIS_STUDY_ELECTROMAGNETIC_OPTIONS_UNUSED"
+            && issue
+                .message
+                .contains("only valid when run_kind is electromagnetic")
+    }));
 }
 
 #[test]
@@ -895,6 +905,12 @@ fn analysis_validate_study_rejects_invalid_electromagnetic_options() {
         .issue_codes
         .iter()
         .any(|code| code == "ANALYSIS_STUDY_ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID"));
+    assert!(envelope.data.issues.iter().any(|issue| {
+        issue.code == "ANALYSIS_STUDY_ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID"
+            && issue
+                .message
+                .contains("must contain finite positive values")
+    }));
 }
 
 #[test]

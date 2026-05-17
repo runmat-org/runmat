@@ -147,3 +147,5 @@ Progress update (2026-05-17):
     additive `analysis.run_study/v1` typed output now includes concrete run operation identity (`run_operation`, `run_op_version`) plus propagated `quality_reasons`, so programmatic callers can consume execution verdict context without an immediate follow-up `analysis.results` call.
 40. [x] Study planning typed ergonomics expanded:
     additive `analysis.plan_study/v1` typed output now includes planned run operation identity (`run_operation`, `run_op_version`) so automation clients can select downstream run-contract handlers without parsing `operation_sequence`.
+41. [x] Study validation typed issue details added:
+    additive `analysis.validate_study/v1` payload now includes structured `issues` entries (`code`, `message`) alongside existing `issue_codes`, preserving machine-stable code interfaces while improving automation/debug ergonomics without out-of-band code-to-message mapping tables.

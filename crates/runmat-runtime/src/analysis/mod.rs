@@ -56,8 +56,8 @@ pub use contracts::{
     AnalysisElectromagneticRunOptions, AnalysisFsiRunOptions, AnalysisModalRunOptions,
     AnalysisNonlinearRunOptions, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
     AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind,
-    AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult, AnalysisStudyPlanData,
-    AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudyValidateResult,
+    AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult, AnalysisStudyIssue,
+    AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudyValidateResult,
     AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
     AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
     ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
@@ -700,6 +700,13 @@ pub fn analysis_validate_study_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisStudyValidateResult>, OperationErrorEnvelope> {
     let issue_codes = validate_study_issue_codes(spec);
+    let issues: Vec<AnalysisStudyIssue> = issue_codes
+        .iter()
+        .map(|code| AnalysisStudyIssue {
+            code: code.clone(),
+            message: study_issue_message(code).to_string(),
+        })
+        .collect();
     let study_fingerprint = study_fingerprint(spec);
     let evidence_artifact_path = persist_study_evidence(
         &study_fingerprint,
@@ -710,6 +717,7 @@ pub fn analysis_validate_study_op(
             "study_fingerprint": study_fingerprint.clone(),
             "valid": issue_codes.is_empty(),
             "issue_codes": issue_codes.clone(),
+            "issues": issues.clone(),
             "electromagnetic_run_options": spec.electromagnetic_run_options.clone(),
         }),
     )
@@ -735,6 +743,7 @@ pub fn analysis_validate_study_op(
         AnalysisStudyValidateResult {
             valid: issue_codes.is_empty(),
             issue_codes,
+            issues,
             evidence_artifact_path,
         },
     ))
@@ -7531,6 +7540,36 @@ fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
     }
 
     issue_codes
+}
+
+fn study_issue_message(code: &str) -> &'static str {
+    match code {
+        "ANALYSIS_STUDY_ID_EMPTY" => "study_id must be non-empty",
+        "ANALYSIS_STUDY_MODEL_ID_EMPTY" => "create_model_intent.model_id must be non-empty",
+        "ANALYSIS_STUDY_GEOMETRY_MESHES_EMPTY" => "geometry.meshes must contain at least one mesh",
+        "ANALYSIS_STUDY_GEOMETRY_UNITS_UNSPECIFIED" => {
+            "geometry.units must be specified (not unspecified)"
+        }
+        "ANALYSIS_STUDY_RUN_KIND_PROFILE_MISMATCH" => {
+            "create_model_intent.profile does not support the requested run_kind"
+        }
+        "ANALYSIS_STUDY_ELECTROMAGNETIC_OPTIONS_UNUSED" => {
+            "electromagnetic_run_options are only valid when run_kind is electromagnetic"
+        }
+        "ANALYSIS_STUDY_ELECTROMAGNETIC_RESIDUAL_TARGET_INVALID" => {
+            "electromagnetic_run_options.residual_target must be finite and positive"
+        }
+        "ANALYSIS_STUDY_ELECTROMAGNETIC_HARMONIC_TOLERANCE_INVALID" => {
+            "electromagnetic_run_options.harmonic_tolerance must be finite and positive"
+        }
+        "ANALYSIS_STUDY_ELECTROMAGNETIC_HARMONIC_MAX_ITERATIONS_INVALID" => {
+            "electromagnetic_run_options.harmonic_max_iterations must be greater than zero"
+        }
+        "ANALYSIS_STUDY_ELECTROMAGNETIC_SWEEP_FREQUENCY_INVALID" => {
+            "electromagnetic_run_options.sweep_frequency_hz must contain finite positive values when sweep_enabled is true"
+        }
+        _ => "unrecognized study validation issue",
+    }
 }
 
 fn profile_supports_run_kind(
