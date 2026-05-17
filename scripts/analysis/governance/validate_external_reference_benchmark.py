@@ -11,6 +11,7 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "em_homogeneous_sigma_omega_scale_mean",
         "em_homogeneous_dispersive_loss_scale_mean",
         "em_homogeneous_dispersive_phase_attenuation_mean",
+        "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
         "em_homogeneous_flux_divergence_proxy",
     },
     "electromagnetic_reference_heterogeneous_gpu_provider": {
@@ -19,6 +20,7 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "em_heterogeneous_sigma_omega_scale_spread_ratio",
         "em_heterogeneous_dispersive_loss_scale_mean",
         "em_heterogeneous_dispersive_phase_attenuation_mean",
+        "em_heterogeneous_dispersive_phase_conductivity_attenuation_ratio",
         "em_heterogeneous_region_contrast_index",
     },
     "electromagnetic_reference_boundary_penalty_stress_gpu_provider": {

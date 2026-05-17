@@ -41,6 +41,7 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - EM now includes additive material frequency-response support (`sigma(omega)` baseline) with fixture-level governance thresholds.
 - EM diagnostics/governance now include dispersive-loss scale and dispersive conductivity coupling ratios for frequency-dependent runs.
 - EM fidelity/governance now includes dispersive-loss-derived phase attenuation signals for conductivity coupling (`dispersive_phase_attenuation_mean`, `dispersive_phase_conductivity_attenuation_ratio`) with enforced benchmark/external-reference metric coverage on key EM provider fixtures.
+- EM external-reference/nonlinear schema governance now explicitly requires both phase attenuation mean and phase conductivity attenuation ratio metrics for homogeneous/heterogeneous EM provider fixtures, closing partial phase-fidelity evidence gaps in enforce-mode validation.
 - External-reference comparator generation now supports threshold-assertion-backed EM metrics in the M6 baseline artifact.
 - Thermal/thermo governance bands were tightened across gradient/ramp/shock and standalone thermal fixtures to reduce permissive drift windows.
 - Plastic/contact nonlinear proxy and reference fixtures now use tighter constitutive severity and load realization/amplification governance bands.

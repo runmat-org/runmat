@@ -37,6 +37,7 @@ Last updated: 2026-05-17
    Baseline increment landed: additive `analysis.plan_study_sweep` now provides typed sweep-level preflight planning entries and aggregate planned/failure counts under `fail_fast` policy control, improving EM-inclusive sweep orchestration ergonomics before run dispatch.
    Baseline increment landed: electromagnetic FEA now applies dispersive-loss-derived phase attenuation to conductive coupling terms and emits additive phase attenuation diagnostics (`dispersive_phase_attenuation_mean`, `dispersive_phase_conductivity_attenuation_ratio`) with conformance/external-reference governance enforcement for homogeneous and heterogeneous EM provider fixtures.
    Baseline increment landed: release-readiness Maxwell posture governance now consumes homogeneous/heterogeneous EM phase attenuation threshold assertions, adding profile-tuned branch readiness reasons for phase-fidelity regressions beyond existing energy/residual/source posture gates.
+   Baseline increment landed: external-reference and nonlinear schema validators now require both EM phase attenuation mean and phase conductivity attenuation ratio metrics for homogeneous/heterogeneous provider fixtures, preventing partial phase-fidelity comparator payloads from passing enforce-mode governance.
 
 ## Next Recommended EM Slice
 
