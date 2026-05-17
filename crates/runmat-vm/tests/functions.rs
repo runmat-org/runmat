@@ -1222,6 +1222,32 @@ fn method_single_output_uses_typed_instruction() {
 }
 
 #[test]
+fn unresolved_function_single_output_uses_typed_instruction() {
+    let source = "a = definitely_missing_callback(7);";
+    let bytecode = compile_semantic_source(source).expect("compile unresolved call");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionMulti(name, argc, out_count)
+            if name == "definitely_missing_callback" && *argc == 1 && *out_count == 1
+    )));
+    assert!(!bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, runmat_vm::Instr::CallFunction(_, _))));
+}
+
+#[test]
+fn unresolved_function_expand_single_output_uses_typed_instruction() {
+    let source = "C = deal(7,3); a = definitely_missing_callback(C{:});";
+    let bytecode = compile_semantic_source(source).expect("compile unresolved expanded call");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionExpandMultiOutput(name, specs, out_count)
+            if name == "definitely_missing_callback" && *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+}
+
+#[test]
 fn builtin_vector_index_expansion() {
     let program = "C = deal(9, 2); r = max(C{[1 2]});";
     let vars = execute_semantic_source(program);

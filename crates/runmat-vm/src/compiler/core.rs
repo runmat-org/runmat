@@ -1119,15 +1119,11 @@ impl Compiler {
                         output_count,
                     ));
                 } else {
-                    if output_count == 1 {
-                        self.emit(Instr::CallFunction(name, call.args.len()));
-                    } else {
-                        self.emit(Instr::CallFunctionMulti(
-                            name,
-                            call.args.len(),
-                            output_count,
-                        ));
-                    }
+                    self.emit(Instr::CallFunctionMulti(
+                        name,
+                        call.args.len(),
+                        output_count,
+                    ));
                 }
             }
         }
@@ -1652,15 +1648,11 @@ impl Compiler {
                             output_count,
                         ));
                     } else {
-                        if output_count == 1 {
-                            self.emit(Instr::CallFunction(name, call.args.len()));
-                        } else {
-                            self.emit(Instr::CallFunctionMulti(
-                                name,
-                                call.args.len(),
-                                output_count,
-                            ));
-                        }
+                        self.emit(Instr::CallFunctionMulti(
+                            name,
+                            call.args.len(),
+                            output_count,
+                        ));
                     }
                 } else {
                     let fallback_count = 1;
@@ -1671,7 +1663,11 @@ impl Compiler {
                             fallback_count,
                         ));
                     } else {
-                        self.emit(Instr::CallFunction(name, call.args.len()));
+                        self.emit(Instr::CallFunctionMulti(
+                            name,
+                            call.args.len(),
+                            fallback_count,
+                        ));
                     }
                 }
             }
