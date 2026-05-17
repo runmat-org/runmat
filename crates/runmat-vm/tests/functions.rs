@@ -1122,6 +1122,42 @@ fn builtin_expand_multi_output_uses_typed_instruction() {
 }
 
 #[test]
+fn builtin_expand_single_output_uses_typed_instruction() {
+    let source = "C = deal(7,3); a = max(C{:});";
+    let bytecode = compile_semantic_source(source).expect("compile builtin expand single output");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
+            if name == "max" && *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+}
+
+#[test]
+fn semantic_expand_single_output_uses_typed_instruction() {
+    let source = "function y = sum2(a,b); y = a + b; end; C = deal(7,8); r = sum2(C{:});";
+    let bytecode =
+        compile_semantic_source(source).expect("compile semantic expand single output source");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, specs, out_count)
+            if *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+}
+
+#[cfg(any(feature = "test-classes", test))]
+#[test]
+fn method_expand_single_output_uses_typed_instruction() {
+    let source = "obj = new_object('Point'); C = deal(7,3); a = obj.deal(C{:});";
+    let bytecode =
+        compile_semantic_source(source).expect("compile method expand single-output source");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput(name, specs, out_count)
+            if name == "deal" && *out_count == 1 && specs.len() == 2 && specs[1].is_expand && specs[1].expand_all
+    )));
+}
+
+#[test]
 fn builtin_vector_index_expansion() {
     let program = "C = deal(9, 2); r = max(C{[1 2]});";
     let vars = execute_semantic_source(program);

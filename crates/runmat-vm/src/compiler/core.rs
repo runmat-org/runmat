@@ -1048,15 +1048,11 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    if output_count == 1 {
-                        self.emit(Instr::CallSemanticFunctionExpandMulti(*function, specs));
-                    } else {
-                        self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
-                            *function,
-                            specs,
-                            output_count,
-                        ));
-                    }
+                    self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
+                        *function,
+                        specs,
+                        output_count,
+                    ));
                     return Ok(());
                 }
                 if output_count == 1 {
@@ -1078,11 +1074,7 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    if output_count == 1 {
-                        self.emit(Instr::CallFevalExpandMulti(specs));
-                    } else {
-                        self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
-                    }
+                    self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
                 } else {
                     if output_count == 1 {
                         self.emit(Instr::CallFeval(call.args.len()));
@@ -1097,15 +1089,11 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    if output_count == 1 {
-                        self.emit(Instr::CallBuiltinExpandMulti(name, specs));
-                    } else {
-                        self.emit(Instr::CallBuiltinExpandMultiOutput(
-                            name,
-                            specs,
-                            output_count,
-                        ));
-                    }
+                    self.emit(Instr::CallBuiltinExpandMultiOutput(
+                        name,
+                        specs,
+                        output_count,
+                    ));
                 } else {
                     self.emit(Instr::CallBuiltin(name, call.args.len()));
                 }
@@ -1129,15 +1117,11 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    if output_count == 1 {
-                        self.emit(Instr::CallFunctionExpandMulti(name, specs));
-                    } else {
-                        self.emit(Instr::CallFunctionExpandMultiOutput(
-                            name,
-                            specs,
-                            output_count,
-                        ));
-                    }
+                    self.emit(Instr::CallFunctionExpandMultiOutput(
+                        name,
+                        specs,
+                        output_count,
+                    ));
                 } else {
                     if output_count == 1 {
                         self.emit(Instr::CallFunction(name, call.args.len()));
@@ -1581,15 +1565,11 @@ impl Compiler {
                 }
                 if has_expansion {
                     if let Some(output_count) = requested_outputs {
-                        if output_count == 1 {
-                            self.emit(Instr::CallSemanticFunctionExpandMulti(*function, specs));
-                        } else {
-                            self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
-                                *function,
-                                specs,
-                                output_count,
-                            ));
-                        }
+                        self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
+                            *function,
+                            specs,
+                            output_count,
+                        ));
                     } else {
                         self.emit(Instr::CallSemanticFunctionExpandMulti(*function, specs));
                     }
@@ -1614,11 +1594,7 @@ impl Compiler {
                 }
                 if let Some(output_count) = requested_outputs {
                     if has_expansion {
-                        if output_count == 1 {
-                            self.emit(Instr::CallFevalExpandMulti(specs));
-                        } else {
-                            self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
-                        }
+                        self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
                     } else if output_count == 1 {
                         self.emit(Instr::CallFeval(call.args.len()));
                     } else {
@@ -1637,15 +1613,11 @@ impl Compiler {
                 }
                 if has_expansion {
                     if let Some(output_count) = requested_outputs {
-                        if output_count == 1 {
-                            self.emit(Instr::CallBuiltinExpandMulti(name, specs));
-                        } else {
-                            self.emit(Instr::CallBuiltinExpandMultiOutput(
-                                name,
-                                specs,
-                                output_count,
-                            ));
-                        }
+                        self.emit(Instr::CallBuiltinExpandMultiOutput(
+                            name,
+                            specs,
+                            output_count,
+                        ));
                     } else {
                         self.emit(Instr::CallBuiltinExpandMulti(name, specs));
                     }
@@ -1673,15 +1645,11 @@ impl Compiler {
                 }
                 if let Some(output_count) = requested_outputs {
                     if has_expansion {
-                        if output_count == 1 {
-                            self.emit(Instr::CallFunctionExpandMulti(name, specs));
-                        } else {
-                            self.emit(Instr::CallFunctionExpandMultiOutput(
-                                name,
-                                specs,
-                                output_count,
-                            ));
-                        }
+                        self.emit(Instr::CallFunctionExpandMultiOutput(
+                            name,
+                            specs,
+                            output_count,
+                        ));
                     } else {
                         if output_count == 1 {
                             self.emit(Instr::CallFunction(name, call.args.len()));
@@ -1792,15 +1760,11 @@ impl Compiler {
         if has_expansion {
             let (specs, _) = self.mir_call_arg_specs(&call.args);
             if let Some(output_count) = self.call_requested_output_count(call) {
-                if output_count == 1 {
-                    self.emit(Instr::CallMethodOrMemberIndexExpandMulti(name, specs));
-                } else {
-                    self.emit(Instr::CallMethodOrMemberIndexExpandMultiOutput(
-                        name,
-                        specs,
-                        output_count,
-                    ));
-                }
+                self.emit(Instr::CallMethodOrMemberIndexExpandMultiOutput(
+                    name,
+                    specs,
+                    output_count,
+                ));
             } else {
                 self.emit(Instr::CallMethodOrMemberIndexExpandMulti(name, specs));
             }
