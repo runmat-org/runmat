@@ -75,3 +75,5 @@ Progress update (2026-05-17):
    tightened thermo gradient/ramp/shock and standalone thermal threshold assertions to reduce permissive drift windows; validated with `cargo test -p runmat-runtime --test analysis` and `cargo test -p runmat-runtime --lib`.
 4. [x] Plastic/contact constitutive realism increment with benchmark lock-in landed:
    tightened nonlinear plastic/contact proxy and reference threshold assertions (severity and load realization/amplification bands) to lock benchmark behavior; validated with `cargo test -p runmat-runtime --test analysis` and `cargo test -p runmat-runtime --lib -- --test-threads=1`.
+5. [x] Electro-thermal benchmark tightening landed:
+   tightened benign/pathological electro-thermal and nonlinear mixed-load electro-thermal threshold assertions (Joule coupling, conductivity spread, severity, temporal variation, and time-scale bands); validated with `cargo test -p runmat-runtime --test analysis` and `cargo test -p runmat-runtime --lib -- --test-threads=1`.

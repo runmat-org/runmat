@@ -3253,8 +3253,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_COUPLING",
                                 "joule_heating_scale",
                             ),
-                            Some(9.5),
-                            Some(10.5),
+                            Some(9.8),
+                            Some(10.2),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3267,8 +3267,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_COUPLING",
                                 "conductivity_spread_ratio",
                             ),
-                            Some(1.0),
-                            Some(1.2),
+                            Some(1.03),
+                            Some(1.12),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3281,8 +3281,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_TRANSIENT",
                                 "severity_peak",
                             ),
-                            Some(0.95),
-                            Some(1.05),
+                            Some(0.98),
+                            Some(1.02),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3295,8 +3295,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_TRANSIENT",
                                 "temporal_variation",
                             ),
-                            Some(0.0),
-                            Some(0.4),
+                            Some(0.08),
+                            Some(0.25),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3309,8 +3309,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_TRANSIENT",
                                 "time_scale_mean",
                             ),
-                            Some(0.8),
-                            Some(1.05),
+                            Some(0.82),
+                            Some(0.95),
                         );
                     } else if spec.id == "electro_thermal_joule_pathological_gpu_provider" {
                         push_threshold_assertion(
@@ -3324,8 +3324,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_COUPLING",
                                 "joule_heating_scale",
                             ),
-                            Some(9.5),
-                            Some(10.5),
+                            Some(9.8),
+                            Some(10.2),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3338,8 +3338,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_COUPLING",
                                 "conductivity_spread_ratio",
                             ),
-                            Some(1.5),
-                            Some(4.0),
+                            Some(2.8),
+                            Some(3.6),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3352,8 +3352,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_TRANSIENT",
                                 "severity_peak",
                             ),
-                            Some(0.5),
-                            Some(3.0),
+                            Some(0.9),
+                            Some(1.2),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3366,8 +3366,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_TRANSIENT",
                                 "temporal_variation",
                             ),
-                            Some(0.2),
-                            Some(1.5),
+                            Some(0.35),
+                            Some(0.8),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3380,8 +3380,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_TRANSIENT",
                                 "time_scale_mean",
                             ),
-                            Some(0.7),
-                            Some(1.3),
+                            Some(0.85),
+                            Some(1.1),
                         );
                     }
                     if spec.id == "nonlinear_assembly_gpu_provider" {
@@ -3608,8 +3608,8 @@ pub(super) fn run_fixture(
                             "nonlinear_path_mix_max_backtracks_per_increment",
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_max_backtracks_per_increment,
-                            Some(1.0),
-                            Some(12.0),
+                            Some(8.0),
+                            Some(11.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3619,7 +3619,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_backtrack_burst_count,
                             Some(1.0),
-                            Some(10.0),
+                            Some(3.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3629,7 +3629,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_iteration_spike_count,
                             Some(0.0),
-                            Some(10.0),
+                            Some(2.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3642,8 +3642,8 @@ pub(super) fn run_fixture(
                                 "FEA_TM_COUPLING",
                                 "effective_modulus_scale",
                             ),
-                            Some(0.85),
-                            Some(1.2),
+                            Some(0.93),
+                            Some(1.02),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3657,7 +3657,7 @@ pub(super) fn run_fixture(
                                 "constitutive_material_spread_ratio",
                             ),
                             Some(1.0),
-                            Some(1.4),
+                            Some(1.08),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3671,7 +3671,7 @@ pub(super) fn run_fixture(
                                 "severity_peak",
                             ),
                             Some(0.0),
-                            Some(0.2),
+                            Some(0.08),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3684,8 +3684,8 @@ pub(super) fn run_fixture(
                                 "FEA_TM_NONLINEAR",
                                 "time_scale_mean",
                             ),
-                            Some(0.7),
-                            Some(1.25),
+                            Some(0.9),
+                            Some(1.1),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3699,7 +3699,7 @@ pub(super) fn run_fixture(
                                 "field_clamp_ratio",
                             ),
                             Some(0.0),
-                            Some(0.15),
+                            Some(0.05),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3712,8 +3712,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_COUPLING",
                                 "joule_heating_scale",
                             ),
-                            Some(9.5),
-                            Some(10.5),
+                            Some(9.8),
+                            Some(10.2),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3726,8 +3726,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_COUPLING",
                                 "conductivity_spread_ratio",
                             ),
-                            Some(1.0),
-                            Some(1.8),
+                            Some(1.3),
+                            Some(1.55),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3740,8 +3740,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_NONLINEAR",
                                 "severity_peak",
                             ),
-                            Some(0.95),
-                            Some(1.05),
+                            Some(0.98),
+                            Some(1.02),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3754,8 +3754,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_NONLINEAR",
                                 "temporal_variation",
                             ),
-                            Some(0.0),
-                            Some(0.8),
+                            Some(0.2),
+                            Some(0.45),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3768,8 +3768,8 @@ pub(super) fn run_fixture(
                                 "FEA_ET_NONLINEAR",
                                 "time_scale_mean",
                             ),
-                            Some(0.8),
-                            Some(1.2),
+                            Some(0.9),
+                            Some(1.05),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3783,7 +3783,7 @@ pub(super) fn run_fixture(
                                 "severity_mean",
                             ),
                             Some(0.9),
-                            Some(1.05),
+                            Some(0.98),
                         );
                     }
                     if spec.id == "nonlinear_plasticity_proxy_gpu_provider" {
