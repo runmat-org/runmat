@@ -1,7 +1,7 @@
 use crate::{MirLocalId, MirPlace, MirRvalue};
 use runmat_hir::{
-    AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, PlaceMutationKind, Span,
-    WorkspaceEffect,
+    AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, PlaceMutationKind,
+    RequestedOutputCount, Span, WorkspaceEffect,
 };
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +41,7 @@ pub struct MirPlaceMutation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MirOutputTargetList {
     pub targets: Vec<MirOutputTarget>,
+    pub requested_outputs: RequestedOutputCount,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

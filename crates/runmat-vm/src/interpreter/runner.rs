@@ -271,7 +271,7 @@ pub async fn invoke_semantic_function_value(
         &bytecode,
         vars,
         &func.display_name,
-        requested_outputs.max(1),
+        requested_outputs,
         runtime_arg_count,
     )
     .await?;
@@ -320,18 +320,6 @@ fn collect_semantic_outputs(
     }
     while values.len() < requested_outputs {
         values.push(Value::Num(0.0));
-    }
-    if values.is_empty() && requested_outputs <= 1 {
-        if let Some(slot) = func.varargout_slot {
-            if let Some(Value::Cell(cell)) = result_vars.get(slot) {
-                if let Some(value) = crate::call::shared::expand_all_cell(cell)?
-                    .into_iter()
-                    .next()
-                {
-                    values.push(value);
-                }
-            }
-        }
     }
     Ok(values)
 }
@@ -797,4 +785,48 @@ pub async fn interpret_function_with_counts(
     }?;
     runtime_globals::persist_declared_for_bytecode(bytecode, name, &vars);
     Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_semantic_outputs;
+    use crate::bytecode::program::SemanticFunctionBytecode;
+    use crate::bytecode::Instr;
+    use runmat_builtins::{CellArray, Value};
+    use runmat_hir::FunctionId;
+
+    fn test_function(varargout_slot: Option<usize>) -> SemanticFunctionBytecode {
+        SemanticFunctionBytecode {
+            function: FunctionId(0),
+            display_name: "f".into(),
+            source_id: None,
+            instructions: vec![Instr::Return],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 1,
+            input_slots: Vec::new(),
+            varargin_slot: None,
+            output_slots: Vec::new(),
+            varargout_slot,
+            capture_slots: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn collect_outputs_zero_requested_does_not_consume_varargout() {
+        let func = test_function(Some(0));
+        let varargout = CellArray::new(vec![Value::Num(7.0)], 1, 1).expect("cell");
+        let result_vars = vec![Value::Cell(varargout)];
+        let outputs = collect_semantic_outputs(&func, &result_vars, 0).expect("collect");
+        assert!(outputs.is_empty());
+    }
+
+    #[test]
+    fn collect_outputs_one_requested_reads_varargout() {
+        let func = test_function(Some(0));
+        let varargout = CellArray::new(vec![Value::Num(7.0)], 1, 1).expect("cell");
+        let result_vars = vec![Value::Cell(varargout)];
+        let outputs = collect_semantic_outputs(&func, &result_vars, 1).expect("collect");
+        assert_eq!(outputs, vec![Value::Num(7.0)]);
+    }
 }

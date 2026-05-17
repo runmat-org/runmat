@@ -843,19 +843,14 @@ impl Compiler {
         targets: &runmat_mir::MirOutputTargetList,
         value: &MirRvalue,
     ) -> Result<(), CompileError> {
+        let output_count = self.output_count_for_targets(targets)?;
         match value {
-            MirRvalue::Call(call) => {
-                self.compile_mir_call_for_multi_assign(call, targets.targets.len())?
-            }
+            MirRvalue::Call(call) => self.compile_mir_call_for_multi_assign(call, output_count)?,
             MirRvalue::Index { base, indexing }
                 if indexing.kind == IndexKind::Brace
                     && matches!(indexing.result_context, IndexResultContext::ReadCommaList) =>
             {
-                self.compile_mir_cell_expand_for_multi_assign(
-                    base,
-                    indexing,
-                    targets.targets.len(),
-                )?
+                self.compile_mir_cell_expand_for_multi_assign(base, indexing, output_count)?
             }
             _ => self.compile_mir_rvalue(value)?,
         }
@@ -1021,18 +1016,26 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
-                        *function,
-                        specs,
-                        output_count,
-                    ));
+                    if output_count == 1 {
+                        self.emit(Instr::CallSemanticFunctionExpandMulti(*function, specs));
+                    } else {
+                        self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
+                            *function,
+                            specs,
+                            output_count,
+                        ));
+                    }
                     return Ok(());
                 }
-                self.emit(Instr::CallSemanticFunctionMulti(
-                    *function,
-                    call.args.len(),
-                    output_count,
-                ));
+                if output_count == 1 {
+                    self.emit(Instr::CallSemanticFunction(*function, call.args.len()));
+                } else {
+                    self.emit(Instr::CallSemanticFunctionMulti(
+                        *function,
+                        call.args.len(),
+                        output_count,
+                    ));
+                }
             }
             MirCallee::Dynamic(_) => {
                 self.compile_mir_operand(match &call.callee {
@@ -1043,9 +1046,17 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
+                    if output_count == 1 {
+                        self.emit(Instr::CallFevalExpandMulti(specs));
+                    } else {
+                        self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
+                    }
                 } else {
-                    self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                    if output_count == 1 {
+                        self.emit(Instr::CallFeval(call.args.len()));
+                    } else {
+                        self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                    }
                 }
             }
             MirCallee::Static(_) => {
@@ -1063,9 +1074,17 @@ impl Compiler {
                             self.compile_mir_call_arg(arg)?;
                         }
                         if has_expansion {
-                            self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
+                            if output_count == 1 {
+                                self.emit(Instr::CallFevalExpandMulti(specs));
+                            } else {
+                                self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
+                            }
                         } else {
-                            self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                            if output_count == 1 {
+                                self.emit(Instr::CallFeval(call.args.len()));
+                            } else {
+                                self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                            }
                         }
                         return Ok(());
                     }
@@ -1493,14 +1512,7 @@ impl Compiler {
     }
 
     fn compile_mir_call(&mut self, call: &MirCall) -> Result<(), CompileError> {
-        match call.requested_outputs {
-            RequestedOutputCount::Zero
-            | RequestedOutputCount::One
-            | RequestedOutputCount::UnknownDynamic
-            | RequestedOutputCount::Exactly(1)
-            | RequestedOutputCount::AtLeast(1) => {}
-            RequestedOutputCount::Exactly(_) | RequestedOutputCount::AtLeast(_) => {}
-        }
+        let requested_outputs = self.call_requested_output_count(call);
 
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
@@ -1511,30 +1523,30 @@ impl Compiler {
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
-                let requested_outputs = match call.requested_outputs {
-                    RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count)
-                        if count > 1 =>
-                    {
-                        Some(count)
-                    }
-                    _ => None,
-                };
                 if has_expansion {
                     if let Some(output_count) = requested_outputs {
-                        self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
-                            *function,
-                            specs,
-                            output_count,
-                        ));
+                        if output_count == 1 {
+                            self.emit(Instr::CallSemanticFunctionExpandMulti(*function, specs));
+                        } else {
+                            self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
+                                *function,
+                                specs,
+                                output_count,
+                            ));
+                        }
                     } else {
                         self.emit(Instr::CallSemanticFunctionExpandMulti(*function, specs));
                     }
                 } else if let Some(output_count) = requested_outputs {
-                    self.emit(Instr::CallSemanticFunctionMulti(
-                        *function,
-                        call.args.len(),
-                        output_count,
-                    ));
+                    if output_count == 1 {
+                        self.emit(Instr::CallSemanticFunction(*function, call.args.len()));
+                    } else {
+                        self.emit(Instr::CallSemanticFunctionMulti(
+                            *function,
+                            call.args.len(),
+                            output_count,
+                        ));
+                    }
                 } else {
                     self.emit(Instr::CallSemanticFunction(*function, call.args.len()));
                 }
@@ -1544,7 +1556,19 @@ impl Compiler {
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
-                if has_expansion {
+                if let Some(output_count) = requested_outputs {
+                    if has_expansion {
+                        if output_count == 1 {
+                            self.emit(Instr::CallFevalExpandMulti(specs));
+                        } else {
+                            self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
+                        }
+                    } else if output_count == 1 {
+                        self.emit(Instr::CallFeval(call.args.len()));
+                    } else {
+                        self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                    }
+                } else if has_expansion {
                     self.emit(Instr::CallFevalExpandMulti(specs));
                 } else {
                     self.emit(Instr::CallFeval(call.args.len()));
@@ -1564,7 +1588,22 @@ impl Compiler {
                         for arg in &call.args {
                             self.compile_mir_call_arg(arg)?;
                         }
-                        if has_expansion {
+                        if let Some(output_count) = requested_outputs {
+                            if has_expansion {
+                                if output_count == 1 {
+                                    self.emit(Instr::CallFevalExpandMulti(specs));
+                                } else {
+                                    self.emit(Instr::CallFevalExpandMultiOutput(
+                                        specs,
+                                        output_count,
+                                    ));
+                                }
+                            } else if output_count == 1 {
+                                self.emit(Instr::CallFeval(call.args.len()));
+                            } else {
+                                self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                            }
+                        } else if has_expansion {
                             self.emit(Instr::CallFevalExpandMulti(specs));
                         } else {
                             self.emit(Instr::CallFeval(call.args.len()));
@@ -1584,6 +1623,36 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    fn call_requested_output_count(&self, call: &MirCall) -> Option<usize> {
+        match call.requested_outputs {
+            RequestedOutputCount::Zero => Some(0),
+            RequestedOutputCount::One => Some(1),
+            RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count) => {
+                Some(count)
+            }
+            RequestedOutputCount::UnknownDynamic => None,
+        }
+    }
+
+    fn output_count_for_targets(
+        &self,
+        targets: &runmat_mir::MirOutputTargetList,
+    ) -> Result<usize, CompileError> {
+        let expected = targets.targets.len();
+        let count = match targets.requested_outputs {
+            RequestedOutputCount::Zero => 0,
+            RequestedOutputCount::One => 1,
+            RequestedOutputCount::Exactly(count) | RequestedOutputCount::AtLeast(count) => count,
+            RequestedOutputCount::UnknownDynamic => expected,
+        };
+        if count != expected {
+            return Err(self.compile_error(format!(
+                "MIR multi-assign output target count mismatch: requested {count}, targets {expected}"
+            )));
+        }
+        Ok(count)
     }
 
     fn mir_unresolved_single_call_name(&self, call: &MirCall) -> Option<String> {

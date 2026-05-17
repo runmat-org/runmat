@@ -358,6 +358,26 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_lowers_statement_semantic_call_to_zero_outputs() {
+        let ast =
+            runmat_parser::parse("function y = f(x); y = nargout(); end; f(10);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::CallSemanticFunctionMulti(_, _, 0))));
+        assert!(!bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::CallSemanticFunction(_, _))));
+    }
+
+    #[test]
     fn primary_compile_interprets_simple_indexed_assignment() {
         let ast = runmat_parser::parse("x = [1 2; 3 4]; x(1, 2) = 9;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
