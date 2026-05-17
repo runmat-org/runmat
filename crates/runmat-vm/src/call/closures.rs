@@ -279,7 +279,7 @@ pub async fn call_method_or_member_index_with_outputs(
             method_args.extend(args.iter().cloned());
             let qualified = format!("{}.{}", obj.class_name, name);
             if let Some(v) = try_call_named_with_policy(
-                qualified,
+                qualified.clone(),
                 method_args.clone(),
                 requested_outputs,
                 CallableFallbackPolicy::ObjectDispatch,
@@ -297,6 +297,32 @@ pub async fn call_method_or_member_index_with_outputs(
             .await?
             {
                 return Ok(v);
+            }
+
+            match call_named_with_policy(
+                qualified,
+                method_args.clone(),
+                requested_outputs,
+                CallableFallbackPolicy::RuntimeNameResolution,
+            )
+            .await
+            {
+                Ok(v) => return Ok(v),
+                Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => {}
+                Err(err) => return Err(err),
+            }
+
+            match call_named_with_policy(
+                name.clone(),
+                method_args,
+                requested_outputs,
+                CallableFallbackPolicy::RuntimeNameResolution,
+            )
+            .await
+            {
+                Ok(v) => return Ok(v),
+                Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => {}
+                Err(err) => return Err(err),
             }
 
             let mut getfield_args = Vec::with_capacity(3);
