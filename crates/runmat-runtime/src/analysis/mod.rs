@@ -59,16 +59,16 @@ pub use contracts::{
     AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult, AnalysisStudyIssue,
     AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudySweepData,
     AnalysisStudySweepFailureEntry, AnalysisStudySweepRunEntry, AnalysisStudySweepSpec,
-    AnalysisStudyValidateResult, AnalysisThermalRunOptions, AnalysisTransientRunOptions,
-    AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult,
-    ContactInterfaceOptions, ElectroRegionConductivityScale, ElectroThermalCouplingOptions,
-    ElectroTimeProfilePoint, ElectromagneticResultsData, ModalFrequencyBasis, ModalFrequencyUnits,
-    ModalResultsData, NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions,
-    PrecisionMode, PreconditionerMode, PrepCalibrationProfile, QualityGate, QualityPolicy,
-    QualityReason, QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData,
-    ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalCouplingOptions,
-    ThermoRegionTemperatureDelta, ThermoTimeProfilePoint, TransientIntegrationMethod,
-    TransientResultsData,
+    AnalysisStudySweepValidateData, AnalysisStudySweepValidateEntry, AnalysisStudyValidateResult,
+    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
+    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
+    ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
+    ElectromagneticResultsData, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
+    NonlinearMethod, NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode,
+    PreconditionerMode, PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason,
+    QualityReasonCode, RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode,
+    ThermoFieldSource, ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta,
+    ThermoTimeProfilePoint, TransientIntegrationMethod, TransientResultsData,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -79,6 +79,8 @@ const ANALYSIS_PLAN_STUDY_OPERATION: &str = "analysis.plan_study";
 const ANALYSIS_PLAN_STUDY_OP_VERSION: &str = "analysis.plan_study/v1";
 const ANALYSIS_RUN_STUDY_OPERATION: &str = "analysis.run_study";
 const ANALYSIS_RUN_STUDY_OP_VERSION: &str = "analysis.run_study/v1";
+const ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION: &str = "analysis.validate_study_sweep";
+const ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION: &str = "analysis.validate_study_sweep/v1";
 const ANALYSIS_RUN_STUDY_SWEEP_OPERATION: &str = "analysis.run_study_sweep";
 const ANALYSIS_RUN_STUDY_SWEEP_OP_VERSION: &str = "analysis.run_study_sweep/v1";
 const ANALYSIS_VALIDATE_OPERATION: &str = "analysis.validate";
@@ -981,6 +983,114 @@ pub fn analysis_run_study_op(
     ))
 }
 
+pub fn analysis_validate_study_sweep_op(
+    spec: &AnalysisStudySweepSpec,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisStudySweepValidateData>, OperationErrorEnvelope> {
+    let mut issue_codes = Vec::new();
+    if spec.sweep_id.trim().is_empty() {
+        issue_codes.push("ANALYSIS_STUDY_SWEEP_ID_EMPTY".to_string());
+    }
+    if spec.studies.is_empty() {
+        issue_codes.push("ANALYSIS_STUDY_SWEEP_STUDIES_EMPTY".to_string());
+    }
+
+    let study_entries: Vec<AnalysisStudySweepValidateEntry> = spec
+        .studies
+        .iter()
+        .map(|study| {
+            let study_issue_codes = validate_study_issue_codes(study);
+            let issues = study_issue_codes
+                .iter()
+                .map(|code| AnalysisStudyIssue {
+                    code: code.clone(),
+                    message: study_issue_message(code).to_string(),
+                })
+                .collect::<Vec<_>>();
+            AnalysisStudySweepValidateEntry {
+                study_id: study.study_id.clone(),
+                valid: study_issue_codes.is_empty(),
+                issue_codes: study_issue_codes,
+                issues,
+            }
+        })
+        .collect();
+
+    let valid = issue_codes.is_empty() && study_entries.iter().all(|entry| entry.valid);
+    let sanitized_sweep_id = sanitize_study_sweep_id(&spec.sweep_id);
+    let evidence_path = study_evidence_root()
+        .join("sweeps")
+        .join(sanitized_sweep_id)
+        .join("validate.json");
+    if let Some(parent) = evidence_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| {
+            operation_error(
+                ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION,
+                ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                    error_type: OperationErrorType::Internal,
+                    retryable: true,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to create study sweep validation evidence directory: {err}"),
+                BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
+            )
+        })?;
+    }
+    let payload = serde_json::json!({
+        "schema_version": "analysis_study_sweep_validate_artifact/v1",
+        "sweep_id": spec.sweep_id.clone(),
+        "valid": valid,
+        "issue_codes": issue_codes.clone(),
+        "study_entries": study_entries,
+    });
+    let payload_bytes = serde_json::to_vec_pretty(&payload).map_err(|err| {
+        operation_error(
+            ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION,
+            ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to encode study sweep validation evidence payload: {err}"),
+            BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
+        )
+    })?;
+    atomic_write_bytes(&evidence_path, &payload_bytes).map_err(|err| {
+        operation_error(
+            ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION,
+            ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            err,
+            BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
+        )
+    })?;
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION,
+        ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION,
+        &context,
+        AnalysisStudySweepValidateData {
+            sweep_id: spec.sweep_id.clone(),
+            valid,
+            issue_codes,
+            study_entries,
+            evidence_artifact_path: evidence_path.display().to_string(),
+        },
+    ))
+}
+
 pub fn analysis_run_study_sweep_op(
     spec: &AnalysisStudySweepSpec,
     context: OperationContext,
@@ -1057,17 +1167,7 @@ pub fn analysis_run_study_sweep_op(
         });
     }
 
-    let sanitized_sweep_id = spec
-        .sweep_id
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
+    let sanitized_sweep_id = sanitize_study_sweep_id(&spec.sweep_id);
     let evidence_root = study_evidence_root()
         .join("sweeps")
         .join(sanitized_sweep_id)
@@ -7663,6 +7763,19 @@ fn run_operation_for_kind(kind: AnalysisRunKind) -> &'static str {
         AnalysisRunKind::Nonlinear => ANALYSIS_RUN_NONLINEAR_OPERATION,
         AnalysisRunKind::Electromagnetic => ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
     }
+}
+
+fn sanitize_study_sweep_id(sweep_id: &str) -> String {
+    sweep_id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {

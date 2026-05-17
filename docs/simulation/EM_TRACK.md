@@ -33,6 +33,7 @@ Last updated: 2026-05-17
    Baseline increment landed: `analysis.run_study` typed output now includes solver gates and full run provenance (`solver_convergence`, `result_quality`, `provenance`), improving EM automation-side extraction of readiness posture and execution lineage.
    Baseline increment landed: `analysis.run_study_sweep` now supports deterministic sequential multi-study orchestration, including EM studies, with typed aggregate run-entry outputs and sweep evidence artifacts for programmatic study pipelines.
    Baseline increment landed: `analysis.run_study_sweep` now supports continue-on-failure mode (`fail_fast=false`) with typed per-study failure entries, so EM-inclusive sweeps can preserve successful runs while still surfacing invalid-study diagnostics.
+   Baseline increment landed: additive `analysis.validate_study_sweep` now provides typed sweep-level and per-study preflight validation (`issue_codes` plus structured issues) with persisted validation evidence artifacts, improving EM-inclusive sweep gating ergonomics before run dispatch.
 
 ## Next Recommended EM Slice
 

@@ -3019,11 +3019,7 @@ pub(super) fn run_fixture(
                         "prepared_build_ms",
                     )
                     .or_else(|| {
-                        diagnostic_metric(
-                            &gpu_envelope.data,
-                            "FEA_EM_COST",
-                            "prepared_build_ms",
-                        )
+                        diagnostic_metric(&gpu_envelope.data, "FEA_EM_COST", "prepared_build_ms")
                     })
                     .or_else(|| {
                         diagnostic_metric(
@@ -3065,11 +3061,7 @@ pub(super) fn run_fixture(
                         "fallback_apply_count",
                     )
                     .or_else(|| {
-                        diagnostic_metric(
-                            &gpu_envelope.data,
-                            "FEA_EM_COST",
-                            "fallback_apply_count",
-                        )
+                        diagnostic_metric(&gpu_envelope.data, "FEA_EM_COST", "fallback_apply_count")
                     })
                     .or_else(|| {
                         diagnostic_metric(

@@ -1098,6 +1098,24 @@ pub struct AnalysisStudySweepSpec {
     pub fail_fast: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisStudySweepValidateEntry {
+    pub study_id: String,
+    pub valid: bool,
+    pub issue_codes: Vec<String>,
+    #[serde(default)]
+    pub issues: Vec<AnalysisStudyIssue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisStudySweepValidateData {
+    pub sweep_id: String,
+    pub valid: bool,
+    pub issue_codes: Vec<String>,
+    pub study_entries: Vec<AnalysisStudySweepValidateEntry>,
+    pub evidence_artifact_path: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisStudySweepRunEntry {
     pub study_id: String,

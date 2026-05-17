@@ -1234,6 +1234,87 @@ fn analysis_run_study_sweep_can_continue_on_study_failure() {
 }
 
 #[test]
+fn analysis_validate_study_sweep_reports_valid_entries_and_persists_artifact() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("validate-study-sweep-evidence");
+    let _ = fs::remove_dir_all(&root);
+    let env_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT").ok(),
+    };
+    std::env::set_var(
+        "RUNMAT_ANALYSIS_STUDY_ARTIFACT_ROOT",
+        root.display().to_string(),
+    );
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "study_sweep_validate_001".to_string(),
+        studies: vec![
+            sample_linear_static_study_spec(),
+            sample_electromagnetic_study_spec(),
+        ],
+        fail_fast: true,
+    };
+
+    let envelope = analysis_validate_study_sweep_op(&spec, OperationContext::new(None, None))
+        .expect("study sweep validation should succeed");
+
+    assert_eq!(envelope.operation, "analysis.validate_study_sweep");
+    assert_eq!(envelope.op_version, "analysis.validate_study_sweep/v1");
+    assert_eq!(envelope.data.sweep_id, "study_sweep_validate_001");
+    assert!(envelope.data.valid);
+    assert!(envelope.data.issue_codes.is_empty());
+    assert_eq!(envelope.data.study_entries.len(), 2);
+    assert!(envelope.data.study_entries.iter().all(|entry| entry.valid));
+    assert!(envelope
+        .data
+        .study_entries
+        .iter()
+        .all(|entry| entry.issue_codes.is_empty() && entry.issues.is_empty()));
+    assert!(envelope
+        .data
+        .evidence_artifact_path
+        .ends_with("validate.json"));
+    assert!(PathBuf::from(&envelope.data.evidence_artifact_path).exists());
+
+    drop(env_guard);
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_validate_study_sweep_reports_sweep_and_study_issue_details() {
+    let _guard = analysis_test_guard();
+    let mut invalid = sample_linear_static_study_spec();
+    invalid.study_id = "   ".to_string();
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "   ".to_string(),
+        studies: vec![invalid],
+        fail_fast: true,
+    };
+
+    let envelope = analysis_validate_study_sweep_op(&spec, OperationContext::new(None, None))
+        .expect("study sweep validation should return a typed payload");
+
+    assert_eq!(envelope.operation, "analysis.validate_study_sweep");
+    assert_eq!(envelope.op_version, "analysis.validate_study_sweep/v1");
+    assert!(!envelope.data.valid);
+    assert_eq!(
+        envelope.data.issue_codes,
+        vec!["ANALYSIS_STUDY_SWEEP_ID_EMPTY".to_string()]
+    );
+    assert_eq!(envelope.data.study_entries.len(), 1);
+    assert!(!envelope.data.study_entries[0].valid);
+    assert!(envelope.data.study_entries[0]
+        .issue_codes
+        .iter()
+        .any(|code| code == "ANALYSIS_STUDY_ID_EMPTY"));
+    assert!(envelope.data.study_entries[0]
+        .issues
+        .iter()
+        .any(|issue| issue.code == "ANALYSIS_STUDY_ID_EMPTY" && !issue.message.is_empty()));
+}
+
+#[test]
 fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence() {
     let _guard = analysis_test_guard();
     let geometry = sample_step_like_geometry_asset();
