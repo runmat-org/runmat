@@ -1,0 +1,28 @@
+# Maxwell EM Track
+
+Last updated: 2026-05-17
+
+## Current Position
+
+- Phase 0-4: complete.
+- Phase 5-15: complete.
+- Phase 16: complete (frequency sweep + resonance governance).
+
+## Achieved Baseline
+
+1. Model-owned EM schema and runtime operation surface.
+2. FEA-backed EM solve path with harmonic/block-coupled maturity increments.
+3. Rich EM diagnostics and typed quality reasons.
+4. `analysis.results` and `analysis.trends` EM governance surfaces.
+5. EM reference fixture family with conformance and baseline drift tracking.
+
+## Remaining to EM Completion
+
+1. Frequency-dependent constitutive modeling in EM solve coefficients.
+2. Higher-fidelity Maxwell-form implementation depth beyond current proxy approximations.
+3. Stronger external-reference EM comparators integrated into protected-branch policy.
+4. Continued robustness/performance hardening under larger EM workloads.
+
+## Next Recommended EM Slice
+
+- Add region/material frequency-dependent EM coefficients (starting with `sigma(omega)`), wire to solve assembly, and gate with new reference fixture thresholds.
