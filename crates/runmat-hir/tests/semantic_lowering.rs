@@ -268,6 +268,207 @@ fn multi_output_assignment_records_requested_outputs_and_discard() {
 }
 
 #[test]
+fn lowering_emits_only_fixed_requested_output_counts() {
+    fn is_fixed(outputs: &RequestedOutputCount) -> bool {
+        matches!(
+            outputs,
+            RequestedOutputCount::Zero
+                | RequestedOutputCount::One
+                | RequestedOutputCount::Exactly(_)
+        )
+    }
+
+    fn walk_expr(expr: &runmat_hir::HirExpr) {
+        match &expr.kind {
+            HirExprKind::Call(call) => {
+                assert!(
+                    is_fixed(&call.requested_outputs),
+                    "unexpected non-fixed requested outputs in lowered call: {:?}",
+                    call.requested_outputs
+                );
+                for arg in &call.args {
+                    walk_expr(arg);
+                }
+                if let HirCallableRef::DynamicExpr(callee) = &call.callee {
+                    walk_expr(callee);
+                }
+            }
+            HirExprKind::CommandCall(_) => {}
+            HirExprKind::Unary(_, inner)
+            | HirExprKind::Spawn(inner)
+            | HirExprKind::Await(inner) => walk_expr(inner),
+            HirExprKind::Binary(left, _, right) | HirExprKind::MemberDynamic(left, right) => {
+                walk_expr(left);
+                walk_expr(right);
+            }
+            HirExprKind::Range(start, step, end) => {
+                walk_expr(start);
+                if let Some(step) = step {
+                    walk_expr(step);
+                }
+                walk_expr(end);
+            }
+            HirExprKind::Tensor(rows) | HirExprKind::Cell(rows) => {
+                for row in rows {
+                    for value in row {
+                        walk_expr(value);
+                    }
+                }
+            }
+            HirExprKind::Index(base, indexing) => {
+                walk_expr(base);
+                for component in &indexing.components {
+                    if let IndexComponent::Expr(value) | IndexComponent::Logical(value) = component
+                    {
+                        walk_expr(value);
+                    }
+                }
+            }
+            HirExprKind::Member(base, _) => walk_expr(base),
+            HirExprKind::FunctionHandle(_)
+            | HirExprKind::AnonymousFunction(_)
+            | HirExprKind::MetaClass(_)
+            | HirExprKind::Number(_)
+            | HirExprKind::String(_)
+            | HirExprKind::Constant(_)
+            | HirExprKind::Binding(_)
+            | HirExprKind::Colon
+            | HirExprKind::End => {}
+        }
+    }
+
+    fn walk_place(place: &HirPlace) {
+        match place {
+            HirPlace::Binding(_) => {}
+            HirPlace::Member(base, _) => walk_expr(base),
+            HirPlace::MemberDynamic(base, member) => {
+                walk_expr(base);
+                walk_expr(member);
+            }
+            HirPlace::Index(base, indexing) | HirPlace::IndexCell(base, indexing) => {
+                walk_expr(base);
+                for component in &indexing.components {
+                    if let IndexComponent::Expr(value) | IndexComponent::Logical(value) = component
+                    {
+                        walk_expr(value);
+                    }
+                }
+            }
+        }
+    }
+
+    fn walk_stmt(stmt: &runmat_hir::HirStmt) {
+        match &stmt.kind {
+            HirStmtKind::ExprStmt(expr, _) => walk_expr(expr),
+            HirStmtKind::Assign(place, value, _) => {
+                walk_place(place);
+                walk_expr(value);
+            }
+            HirStmtKind::MultiAssign(targets, value, _) => {
+                for target in &targets.targets {
+                    if let OutputTarget::Place(place) = target {
+                        walk_place(place);
+                    }
+                }
+                walk_expr(value);
+            }
+            HirStmtKind::If {
+                cond,
+                then_body,
+                elseif_blocks,
+                else_body,
+            } => {
+                walk_expr(cond);
+                for stmt in &then_body.statements {
+                    walk_stmt(stmt);
+                }
+                for (cond, block) in elseif_blocks {
+                    walk_expr(cond);
+                    for stmt in &block.statements {
+                        walk_stmt(stmt);
+                    }
+                }
+                if let Some(block) = else_body {
+                    for stmt in &block.statements {
+                        walk_stmt(stmt);
+                    }
+                }
+            }
+            HirStmtKind::While { cond, body } => {
+                walk_expr(cond);
+                for stmt in &body.statements {
+                    walk_stmt(stmt);
+                }
+            }
+            HirStmtKind::For { range, body, .. } => {
+                walk_expr(range);
+                for stmt in &body.statements {
+                    walk_stmt(stmt);
+                }
+            }
+            HirStmtKind::Switch {
+                expr,
+                cases,
+                otherwise,
+            } => {
+                walk_expr(expr);
+                for (case_expr, block) in cases {
+                    walk_expr(case_expr);
+                    for stmt in &block.statements {
+                        walk_stmt(stmt);
+                    }
+                }
+                if let Some(block) = otherwise {
+                    for stmt in &block.statements {
+                        walk_stmt(stmt);
+                    }
+                }
+            }
+            HirStmtKind::TryCatch {
+                try_body,
+                catch_body,
+                ..
+            } => {
+                for stmt in &try_body.statements {
+                    walk_stmt(stmt);
+                }
+                for stmt in &catch_body.statements {
+                    walk_stmt(stmt);
+                }
+            }
+            HirStmtKind::Global(_)
+            | HirStmtKind::Persistent(_)
+            | HirStmtKind::Break
+            | HirStmtKind::Continue
+            | HirStmtKind::Return
+            | HirStmtKind::Import(_) => {}
+        }
+    }
+
+    let assembly = lower_semantic(
+        r#"
+x = 1;
+[~, idx] = max(x);
+y = feval(@sin, x);
+obj = 1;
+z = obj.method(x);
+function [a,b] = f(v)
+  a = v;
+  b = v + 1;
+end
+function y = g(h)
+  y = h(1);
+end
+"#,
+    );
+    for function in &assembly.functions {
+        for stmt in &function.body.statements {
+            walk_stmt(stmt);
+        }
+    }
+}
+
+#[test]
 fn global_and_persistent_declarations_set_binding_storage() {
     let assembly = lower_semantic("global g; persistent p; g = 1; p = 2;");
 
