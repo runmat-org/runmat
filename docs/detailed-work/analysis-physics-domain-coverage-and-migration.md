@@ -182,13 +182,17 @@ Not required for this milestone:
 
 ### Maxwell EM Phase-5 Status (2026-05-16)
 
-- Added explicit EM material coefficients in analysis-core electrical material schema:
-  - `MaterialElectricalModel.relative_permittivity` (default `1.0`),
-  - `MaterialElectricalModel.relative_permeability` (default `1.0`).
-- Upgraded EM assembly proxy terms to be material-driven instead of fixed constants:
-  - reluctivity now uses averaged material `relative_permeability`,
-  - frequency mass-like term now includes conductivity and permittivity contribution (`omega*sigma + omega^2*epsilon`).
-- Expanded `FEA_EM_STATIC` diagnostic posture with EM material means and spread ratios so governance/triage can distinguish homogeneous vs heterogeneous EM material setups.
+- Added region/material-driven EM coefficient assembly sourced from `material_assignments`:
+  - per-region `sigma`, `epsilon_r`, and `mu_r` now drive node/edge coefficient fields,
+  - deterministic fallback behavior is explicit when assigned/expected materials are missing or non-electrical.
+- Expanded EM readiness posture into first-class summary/trend signals:
+  - `analysis.results` now surfaces EM readiness metrics (`assignment_coverage_ratio`, `fallback_coefficient_ratio`, `region_coefficient_contrast_index`, `solver_conditioning_proxy`) in addition to spread/heterogeneity metrics,
+  - `analysis.trends` now tracks breach rates for EM coverage, fallback, contrast, and conditioning signals.
+- Added first EM governance fixture family for readiness splits:
+  - homogeneous baseline (publishable),
+  - heterogeneous high-contrast reference (degraded),
+  - sparse-assignment reference (degraded),
+  - fallback-heavy reference (degraded).
 
 ## Closeout Checklist for This Track
 

@@ -107,9 +107,9 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 
 ## Maxwell EM Bring-Up Status (Phase 5)
 
-1. EM material coefficients are now explicit in analysis-core (`relative_permeability`, `relative_permittivity`) with additive defaults for backward compatibility.
-2. EM weak-form proxy coefficients now consume material-driven means (`mu_r`, `epsilon_r`, `sigma`) instead of fixed permeability assumptions.
-3. EM diagnostics now include material means/spread ratios to support future heterogeneity governance and reference calibration.
+1. EM weak-form proxy assembly is now region/material-driven from `material_assignments`, with deterministic fallback accounting for missing assigned/expected material references.
+2. EM readiness posture is now first-class in `analysis.results`/`analysis.trends` via coverage, fallback, contrast, and conditioning signals (plus spread/heterogeneity).
+3. EM benchmark/conformance harness now includes a four-fixture governance family (homogeneous, heterogeneous, sparse-assignment, fallback-heavy) with publishability split enforced by thresholds.
 
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 

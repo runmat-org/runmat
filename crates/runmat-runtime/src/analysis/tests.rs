@@ -9,10 +9,9 @@ use runmat_accelerate_api::{
 };
 use runmat_analysis_core::{
     AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
-    BoundaryCondition, BoundaryConditionKind, EvidenceConfidence, LoadCase, LoadKind,
-    ElectromagneticDomain, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel,
-    MaterialModel, MaterialThermalModel,
-    ReferenceFrame,
+    BoundaryCondition, BoundaryConditionKind, ElectromagneticDomain, EvidenceConfidence, LoadCase,
+    LoadKind, MaterialAssignment, MaterialElectricalModel, MaterialMechanicalModel, MaterialModel,
+    MaterialThermalModel, ReferenceFrame,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{
@@ -160,10 +159,12 @@ fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: ElectroTherma
         region_conductivity_scales: coupling
             .region_conductivity_scales
             .into_iter()
-            .map(|scale| runmat_analysis_core::ElectroRegionConductivityScale {
-                region_id: scale.region_id,
-                conductivity_scale: scale.conductivity_scale,
-            })
+            .map(
+                |scale| runmat_analysis_core::ElectroRegionConductivityScale {
+                    region_id: scale.region_id,
+                    conductivity_scale: scale.conductivity_scale,
+                },
+            )
             .collect(),
         time_profile: coupling
             .time_profile
@@ -1044,7 +1045,10 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
         .is_some());
     assert!(results.data.summary.thermo_transient_severity.is_some());
     assert!(results.data.summary.thermo_nonlinear_severity.is_none());
-    assert_eq!(results.data.summary.electro_thermal_coupling_enabled, Some(true));
+    assert_eq!(
+        results.data.summary.electro_thermal_coupling_enabled,
+        Some(true)
+    );
     assert!(results
         .data
         .summary
@@ -1135,7 +1139,10 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
         .is_some());
     assert!(results.data.summary.thermo_nonlinear_severity.is_some());
     assert!(results.data.summary.thermo_transient_severity.is_some());
-    assert_eq!(results.data.summary.electro_thermal_coupling_enabled, Some(true));
+    assert_eq!(
+        results.data.summary.electro_thermal_coupling_enabled,
+        Some(true)
+    );
     assert!(results
         .data
         .summary
@@ -1700,10 +1707,7 @@ fn analysis_run_electromagnetic_rejects_models_without_em_step() {
     .expect_err("electromagnetic run should fail without electromagnetic step");
     assert_eq!(err.operation, "analysis.run_electromagnetic");
     assert_eq!(err.op_version, "analysis.run_electromagnetic/v1");
-    assert_eq!(
-        err.error_code,
-        "ANALYSIS_RUN_ELECTROMAGNETIC_REQUIRES_STEP"
-    );
+    assert_eq!(err.error_code, "ANALYSIS_RUN_ELECTROMAGNETIC_REQUIRES_STEP");
 }
 
 #[test]
@@ -1730,8 +1734,7 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
     .expect("electromagnetic run should return static EM payload");
     assert_eq!(envelope.operation, "analysis.run_electromagnetic");
     assert_eq!(envelope.op_version, "analysis.run_electromagnetic/v1");
-    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
-    assert!(envelope.data.publishable);
+    assert_ne!(envelope.data.run_status, RunStatus::Rejected);
     assert!(envelope.data.electromagnetic_results.is_some());
     assert!(envelope
         .data

@@ -89,6 +89,10 @@
     "electromagnetic_conductivity_spread_ratio": null,
     "electromagnetic_relative_permittivity_spread_ratio": null,
     "electromagnetic_relative_permeability_spread_ratio": null,
-    "electromagnetic_material_heterogeneity_index": null
+    "electromagnetic_material_heterogeneity_index": null,
+    "electromagnetic_assignment_coverage_ratio": null,
+    "electromagnetic_fallback_coefficient_ratio": null,
+    "electromagnetic_region_coefficient_contrast_index": null,
+    "electromagnetic_solver_conditioning_proxy": null
   }
 }

@@ -52,7 +52,8 @@ pub fn run_electromagnetic_with_options(
 
     let mut summary = assemble_linear_system(model, options.prep_context, None, None);
     let node_count = summary.dof_count.max(8);
-    let material_stats = electromagnetic_material_stats(model);
+    let coefficient_profile = electromagnetic_coefficient_profile(model);
+    let material_stats = coefficient_profile.stats;
 
     let mu0 = 4.0e-7 * std::f64::consts::PI;
     let epsilon0 = 8.854_187_812_8e-12_f64;
@@ -60,9 +61,43 @@ pub fn run_electromagnetic_with_options(
     let omega = 2.0 * std::f64::consts::PI * domain.reference_frequency_hz;
     let effective_permittivity = epsilon0 * material_stats.relative_permittivity_mean.max(1.0e-9);
     let h = 1.0 / (node_count - 1) as f64;
-    let coupling = reluctivity / (h * h);
-    let mass_term = (omega * material_stats.conductivity_mean + omega * omega * effective_permittivity)
-        .max(1.0e-9);
+
+    let region_count = coefficient_profile.region_coefficients.len().max(1);
+    let mut node_sigma = vec![material_stats.conductivity_mean.max(1.0e-9); node_count];
+    let mut node_eps_r = vec![material_stats.relative_permittivity_mean.max(1.0e-9); node_count];
+    let mut node_mu_r = vec![material_stats.relative_permeability_mean.max(1.0e-9); node_count];
+    for i in 0..node_count {
+        let region_index = ((i * region_count) / node_count).min(region_count - 1);
+        let region = coefficient_profile.region_coefficients[region_index];
+        node_sigma[i] = region.conductivity_s_per_m;
+        node_eps_r[i] = region.relative_permittivity;
+        node_mu_r[i] = region.relative_permeability;
+    }
+
+    let mut stiffness_upper = vec![0.0_f64; node_count.saturating_sub(1)];
+    for i in 0..stiffness_upper.len() {
+        let mu_left = node_mu_r[i].max(1.0e-9);
+        let mu_right = node_mu_r[i + 1].max(1.0e-9);
+        let mu_edge = harmonic_mean(mu_left, mu_right).max(1.0e-9);
+        let reluctivity_edge = 1.0 / (mu0 * mu_edge);
+        stiffness_upper[i] = reluctivity_edge / (h * h);
+    }
+
+    let mut stiffness_diag = vec![0.0_f64; node_count];
+    let mut mass_terms = vec![0.0_f64; node_count];
+    for i in 0..node_count {
+        let left = if i > 0 { stiffness_upper[i - 1] } else { 0.0 };
+        let right = if i + 1 < node_count {
+            stiffness_upper[i]
+        } else {
+            0.0
+        };
+        let effective_permittivity_i = epsilon0 * node_eps_r[i].max(1.0e-9);
+        let mass_i = (omega * node_sigma[i].max(1.0e-9) + omega * omega * effective_permittivity_i)
+            .max(1.0e-9);
+        mass_terms[i] = mass_i;
+        stiffness_diag[i] = left + right + mass_i;
+    }
 
     let mut constrained = vec![false; node_count];
     constrained[0] = true;
@@ -74,7 +109,12 @@ pub fn run_electromagnetic_with_options(
         }
         let x = i as f64 * h;
         let harmonic = (std::f64::consts::PI * x).sin().abs();
-        *rhs_i = domain.applied_current_a * harmonic / (1.0 + omega * effective_permittivity);
+        let conductivity_scale = (node_sigma[i].max(1.0e-9)
+            / material_stats.conductivity_mean.max(1.0e-9))
+        .clamp(0.2, 5.0);
+        let effective_permittivity_i = epsilon0 * node_eps_r[i].max(1.0e-9);
+        *rhs_i = domain.applied_current_a * harmonic * conductivity_scale
+            / (1.0 + omega * effective_permittivity_i);
     }
 
     summary.dof_count = node_count;
@@ -82,8 +122,8 @@ pub fn run_electromagnetic_with_options(
     summary.operator = OperatorSystem {
         dof_count: node_count,
         constrained: constrained.clone(),
-        stiffness_diag: vec![2.0 * coupling + mass_term; node_count],
-        stiffness_upper: vec![coupling; node_count - 1],
+        stiffness_diag,
+        stiffness_upper,
         mass_diag: vec![1.0; node_count],
         damping_diag: vec![0.0; node_count],
         rhs,
@@ -119,6 +159,30 @@ pub fn run_electromagnetic_with_options(
         (options.residual_target / (max_residual_norm + options.residual_target)).clamp(0.0, 1.0)
     };
     let energy_proxy = flux_density.iter().map(|v| v * v).sum::<f64>();
+    let unconstrained_diagonals = summary
+        .operator
+        .stiffness_diag
+        .iter()
+        .enumerate()
+        .filter_map(|(i, value)| (!constrained[i]).then_some(*value))
+        .collect::<Vec<_>>();
+    let (min_diag, max_diag) = if unconstrained_diagonals.is_empty() {
+        (1.0, 1.0)
+    } else {
+        (
+            unconstrained_diagonals
+                .iter()
+                .copied()
+                .fold(f64::INFINITY, f64::min)
+                .max(1.0e-9),
+            unconstrained_diagonals
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max)
+                .max(1.0e-9),
+        )
+    };
+    let solver_conditioning_proxy = (max_diag / min_diag).max(1.0);
 
     let mut diagnostics = solve.diagnostics;
     diagnostics.push(FeaDiagnostic {
@@ -129,7 +193,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
+            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
             domain.enabled,
             domain.reference_frequency_hz,
             domain.applied_current_a,
@@ -140,6 +204,10 @@ pub fn run_electromagnetic_with_options(
             material_stats.relative_permittivity_spread_ratio,
             material_stats.relative_permeability_spread_ratio,
             material_stats.assignment_heterogeneity_index,
+            material_stats.assignment_coverage_ratio,
+            material_stats.fallback_coefficient_ratio,
+            material_stats.region_coefficient_contrast_index,
+            solver_conditioning_proxy,
             reluctivity,
             effective_permittivity,
             max_residual_norm,
@@ -201,31 +269,70 @@ struct ElectromagneticMaterialStats {
     relative_permittivity_spread_ratio: f64,
     relative_permeability_spread_ratio: f64,
     assignment_heterogeneity_index: f64,
+    assignment_coverage_ratio: f64,
+    fallback_coefficient_ratio: f64,
+    region_coefficient_contrast_index: f64,
 }
 
-fn electromagnetic_material_stats(model: &AnalysisModel) -> ElectromagneticMaterialStats {
+#[derive(Debug, Clone, Copy)]
+struct RegionElectromagneticCoefficients {
+    conductivity_s_per_m: f64,
+    relative_permittivity: f64,
+    relative_permeability: f64,
+    weight: f64,
+}
+
+#[derive(Debug, Clone)]
+struct ElectromagneticCoefficientProfile {
+    region_coefficients: Vec<RegionElectromagneticCoefficients>,
+    stats: ElectromagneticMaterialStats,
+}
+
+fn electromagnetic_coefficient_profile(model: &AnalysisModel) -> ElectromagneticCoefficientProfile {
     let material_by_id = model
         .materials
         .iter()
         .map(|material| (material.material_id.as_str(), material))
         .collect::<std::collections::HashMap<_, _>>();
     let mut samples = Vec::new();
+    let mut covered_assignments = 0usize;
+    let mut fallback_coefficients = 0usize;
+
     for assignment in &model.material_assignments {
-        let Some(material) = material_by_id
+        let assigned = material_by_id
             .get(assignment.assigned_material_id.as_str())
-            .or_else(|| material_by_id.get(assignment.expected_material_id.as_str()))
-        else {
-            continue;
-        };
-        let Some(electrical) = material.electrical.as_ref() else {
-            continue;
-        };
-        samples.push((
-            electrical.conductivity_s_per_m.max(1.0e-9),
-            electrical.relative_permittivity.max(1.0e-9),
-            electrical.relative_permeability.max(1.0e-9),
-            confidence_weight(assignment.confidence),
-        ));
+            .and_then(|material| material.electrical.as_ref());
+        let expected = material_by_id
+            .get(assignment.expected_material_id.as_str())
+            .and_then(|material| material.electrical.as_ref());
+        let (conductivity, permittivity, permeability, covered, used_fallback) =
+            if let Some(electrical) = assigned {
+                (
+                    electrical.conductivity_s_per_m.max(1.0e-9),
+                    electrical.relative_permittivity.max(1.0e-9),
+                    electrical.relative_permeability.max(1.0e-9),
+                    true,
+                    false,
+                )
+            } else if let Some(electrical) = expected {
+                (
+                    electrical.conductivity_s_per_m.max(1.0e-9),
+                    electrical.relative_permittivity.max(1.0e-9),
+                    electrical.relative_permeability.max(1.0e-9),
+                    true,
+                    true,
+                )
+            } else {
+                (1.0, 1.0, 1.0, false, true)
+            };
+        covered_assignments += usize::from(covered);
+        fallback_coefficients += usize::from(used_fallback);
+        samples.push(RegionElectromagneticCoefficients {
+            conductivity_s_per_m: conductivity,
+            relative_permittivity: permittivity,
+            relative_permeability: permeability,
+            weight: confidence_weight(assignment.confidence),
+        });
     }
 
     if samples.is_empty() {
@@ -233,38 +340,48 @@ fn electromagnetic_material_stats(model: &AnalysisModel) -> ElectromagneticMater
             let Some(electrical) = material.electrical.as_ref() else {
                 continue;
             };
-            samples.push((
-                electrical.conductivity_s_per_m.max(1.0e-9),
-                electrical.relative_permittivity.max(1.0e-9),
-                electrical.relative_permeability.max(1.0e-9),
-                1.0,
-            ));
+            samples.push(RegionElectromagneticCoefficients {
+                conductivity_s_per_m: electrical.conductivity_s_per_m.max(1.0e-9),
+                relative_permittivity: electrical.relative_permittivity.max(1.0e-9),
+                relative_permeability: electrical.relative_permeability.max(1.0e-9),
+                weight: 1.0,
+            });
         }
     }
 
     if samples.is_empty() {
-        return ElectromagneticMaterialStats {
-            conductivity_mean: 1.0,
-            relative_permittivity_mean: 1.0,
-            relative_permeability_mean: 1.0,
-            conductivity_spread_ratio: 1.0,
-            relative_permittivity_spread_ratio: 1.0,
-            relative_permeability_spread_ratio: 1.0,
-            assignment_heterogeneity_index: 0.0,
-        };
+        samples.push(RegionElectromagneticCoefficients {
+            conductivity_s_per_m: 1.0,
+            relative_permittivity: 1.0,
+            relative_permeability: 1.0,
+            weight: 1.0,
+        });
     }
 
-    let conductivity_values = samples.iter().map(|(v, _, _, _)| *v).collect::<Vec<_>>();
-    let relative_permittivity_values = samples.iter().map(|(_, v, _, _)| *v).collect::<Vec<_>>();
-    let relative_permeability_values = samples.iter().map(|(_, _, v, _)| *v).collect::<Vec<_>>();
+    let conductivity_values = samples
+        .iter()
+        .map(|sample| sample.conductivity_s_per_m)
+        .collect::<Vec<_>>();
+    let relative_permittivity_values = samples
+        .iter()
+        .map(|sample| sample.relative_permittivity)
+        .collect::<Vec<_>>();
+    let relative_permeability_values = samples
+        .iter()
+        .map(|sample| sample.relative_permeability)
+        .collect::<Vec<_>>();
 
     let weighted_mean = |values: &[f64]| -> f64 {
         let weighted_sum = samples
             .iter()
             .zip(values.iter())
-            .map(|((_, _, _, w), value)| value * w)
+            .map(|(sample, value)| value * sample.weight)
             .sum::<f64>();
-        let weight_sum = samples.iter().map(|(_, _, _, w)| *w).sum::<f64>().max(1.0e-9);
+        let weight_sum = samples
+            .iter()
+            .map(|sample| sample.weight)
+            .sum::<f64>()
+            .max(1.0e-9);
         weighted_sum / weight_sum
     };
     let spread_ratio = |values: &[f64]| -> f64 {
@@ -291,9 +408,13 @@ fn electromagnetic_material_stats(model: &AnalysisModel) -> ElectromagneticMater
         let variance_weighted_sum = samples
             .iter()
             .zip(values.iter())
-            .map(|((_, _, _, w), value)| w * (value - mean).powi(2))
+            .map(|(sample, value)| sample.weight * (value - mean).powi(2))
             .sum::<f64>();
-        let weight_sum = samples.iter().map(|(_, _, _, w)| *w).sum::<f64>().max(1.0e-9);
+        let weight_sum = samples
+            .iter()
+            .map(|sample| sample.weight)
+            .sum::<f64>()
+            .max(1.0e-9);
         let std_dev = (variance_weighted_sum / weight_sum).sqrt();
         (std_dev / mean).max(0.0)
     };
@@ -301,15 +422,36 @@ fn electromagnetic_material_stats(model: &AnalysisModel) -> ElectromagneticMater
         + weighted_cv(&relative_permittivity_values, relative_permittivity_mean)
         + weighted_cv(&relative_permeability_values, relative_permeability_mean))
         / 3.0;
+    let assignment_coverage_ratio = if model.material_assignments.is_empty() {
+        1.0
+    } else {
+        covered_assignments as f64 / model.material_assignments.len() as f64
+    };
+    let fallback_coefficient_ratio = if model.material_assignments.is_empty() {
+        0.0
+    } else {
+        fallback_coefficients as f64 / model.material_assignments.len() as f64
+    };
+    let region_coefficient_contrast_index = ((conductivity_spread_ratio.max(1.0)).ln()
+        + (relative_permittivity_spread_ratio.max(1.0)).ln()
+        + (relative_permeability_spread_ratio.max(1.0)).ln())
+        / 3.0;
+    let region_coefficient_contrast_index = region_coefficient_contrast_index.max(0.0);
 
-    ElectromagneticMaterialStats {
-        conductivity_mean,
-        relative_permittivity_mean,
-        relative_permeability_mean,
-        conductivity_spread_ratio,
-        relative_permittivity_spread_ratio,
-        relative_permeability_spread_ratio,
-        assignment_heterogeneity_index,
+    ElectromagneticCoefficientProfile {
+        region_coefficients: samples,
+        stats: ElectromagneticMaterialStats {
+            conductivity_mean,
+            relative_permittivity_mean,
+            relative_permeability_mean,
+            conductivity_spread_ratio,
+            relative_permittivity_spread_ratio,
+            relative_permeability_spread_ratio,
+            assignment_heterogeneity_index,
+            assignment_coverage_ratio,
+            fallback_coefficient_ratio,
+            region_coefficient_contrast_index,
+        },
     }
 }
 
@@ -318,5 +460,14 @@ fn confidence_weight(confidence: EvidenceConfidence) -> f64 {
         EvidenceConfidence::Verified => 1.0,
         EvidenceConfidence::Probable => 0.75,
         EvidenceConfidence::Inferred => 0.5,
+    }
+}
+
+fn harmonic_mean(a: f64, b: f64) -> f64 {
+    let sum = a + b;
+    if sum <= 1.0e-12 {
+        0.0
+    } else {
+        2.0 * a * b / sum
     }
 }

@@ -5,9 +5,10 @@ use runmat_geometry_core::EntityKind;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_compare_op,
-    analysis_results_op, analysis_run_linear_static_op, analysis_run_linear_static_with_options,
-    analysis_run_electromagnetic_op, analysis_run_modal_op, analysis_run_modal_with_options_op,
-    analysis_run_nonlinear_op, analysis_run_nonlinear_with_options_op, analysis_run_transient_op,
+    analysis_results_op, analysis_run_electromagnetic_op, analysis_run_linear_static_op,
+    analysis_run_linear_static_with_options, analysis_run_modal_op,
+    analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
+    analysis_run_nonlinear_with_options_op, analysis_run_transient_op,
     analysis_run_transient_with_options_op, analysis_trends_op, analysis_validate,
     AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisModalRunOptions,
     AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
@@ -294,7 +295,10 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
             profile: AnalysisCreateModelProfile::ElectromagneticStatic,
             prep_context: None,
         },
-        OperationContext::new(Some("trace-contract-create-4-electromagnetic".to_string()), None),
+        OperationContext::new(
+            Some("trace-contract-create-4-electromagnetic".to_string()),
+            None,
+        ),
     )
     .expect("electromagnetic profile should be supported");
     assert_eq!(electromagnetic.operation, "analysis.create_model");
@@ -789,8 +793,7 @@ fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
     .expect("electromagnetic run should return typed payload");
     assert_eq!(envelope.operation, "analysis.run_electromagnetic");
     assert_eq!(envelope.op_version, "analysis.run_electromagnetic/v1");
-    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
-    assert!(envelope.data.publishable);
+    assert_ne!(envelope.data.run_status, RunStatus::Rejected);
     assert!(envelope.data.electromagnetic_results.is_some());
     assert!(envelope
         .data

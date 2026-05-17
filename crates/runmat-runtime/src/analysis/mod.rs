@@ -33,19 +33,18 @@ pub mod storage;
 pub use contracts::{
     AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
     AnalysisElectromagneticRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
-    AnalysisResultsCompareData,
-    AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
-    AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
-    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
-    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
-    ElectromagneticResultsData,
-    ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
+    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisResultsData,
+    AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind, AnalysisRunOptions,
+    AnalysisRunPrepContext, AnalysisRunResult, AnalysisThermalRunOptions,
+    AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
+    AnalysisValidateResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
+    ElectroThermalCouplingOptions, ElectroTimeProfilePoint, ElectromagneticResultsData,
     ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
     NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
     PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
-    RunProvenance, RunStatus, ThermoFieldInterpolationMode, ThermoFieldSource,
+    RunProvenance, RunStatus, ThermalResultsData, ThermoFieldInterpolationMode, ThermoFieldSource,
     ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
-    ThermalResultsData, TransientIntegrationMethod, TransientResultsData,
+    TransientIntegrationMethod, TransientResultsData,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -75,6 +74,10 @@ const THERMO_SPREAD_THRESHOLD_BALANCED: f64 = 1.25;
 const THERMO_HETEROGENEITY_THRESHOLD_BALANCED: f64 = 0.2;
 const EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED: f64 = 2.0;
 const EM_HETEROGENEITY_THRESHOLD_BALANCED: f64 = 0.2;
+const EM_ASSIGNMENT_COVERAGE_MIN_BALANCED: f64 = 0.85;
+const EM_FALLBACK_COEFFICIENT_MAX_BALANCED: f64 = 0.25;
+const EM_REGION_CONTRAST_MAX_BALANCED: f64 = 0.85;
+const EM_CONDITIONING_MAX_BALANCED: f64 = 2.0e4;
 
 pub fn analysis_create_model_op(
     geometry: &GeometryAsset,
@@ -854,7 +857,12 @@ pub fn analysis_run_thermal_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    analysis_run_thermal_with_options_op(model, backend, AnalysisThermalRunOptions::default(), context)
+    analysis_run_thermal_with_options_op(
+        model,
+        backend,
+        AnalysisThermalRunOptions::default(),
+        context,
+    )
 }
 
 pub fn analysis_run_thermal_with_options_op(
@@ -2614,22 +2622,70 @@ pub fn analysis_run_electromagnetic_with_options_op(
         QualityGate::Fail
     };
     let mut quality_reasons = Vec::new();
-    let em_conductivity_spread_ratio =
-        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "conductivity_spread_ratio");
+    let em_conductivity_spread_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "conductivity_spread_ratio",
+    );
     let em_assignment_heterogeneity_index = diagnostic_metric(
         &run.diagnostics,
         "FEA_EM_STATIC",
         "electromagnetic_material_heterogeneity_index",
     );
-    let (em_spread_threshold, em_heterogeneity_threshold) =
-        electromagnetic_thresholds_for_policy(options.quality_policy);
+    let em_assignment_coverage_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "assignment_coverage_ratio",
+    );
+    let em_fallback_coefficient_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "fallback_coefficient_ratio",
+    );
+    let em_region_contrast_index = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "region_coefficient_contrast_index",
+    );
+    let em_solver_conditioning_proxy = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "solver_conditioning_proxy",
+    );
+    let (
+        em_spread_threshold,
+        em_heterogeneity_threshold,
+        em_coverage_min_threshold,
+        em_fallback_max_threshold,
+        em_contrast_max_threshold,
+        em_conditioning_max_threshold,
+    ) = electromagnetic_thresholds_for_policy(options.quality_policy);
     let em_spread_breach = em_conductivity_spread_ratio
         .map(|value| value > em_spread_threshold)
         .unwrap_or(false);
     let em_heterogeneity_breach = em_assignment_heterogeneity_index
         .map(|value| value > em_heterogeneity_threshold)
         .unwrap_or(false);
-    if (em_spread_breach || em_heterogeneity_breach) && result_quality == QualityGate::Pass {
+    let em_coverage_breach = em_assignment_coverage_ratio
+        .map(|value| value < em_coverage_min_threshold)
+        .unwrap_or(false);
+    let em_fallback_breach = em_fallback_coefficient_ratio
+        .map(|value| value > em_fallback_max_threshold)
+        .unwrap_or(false);
+    let em_contrast_breach = em_region_contrast_index
+        .map(|value| value > em_contrast_max_threshold)
+        .unwrap_or(false);
+    let em_conditioning_breach = em_solver_conditioning_proxy
+        .map(|value| value > em_conditioning_max_threshold)
+        .unwrap_or(false);
+    if (em_spread_breach
+        || em_heterogeneity_breach
+        || em_coverage_breach
+        || em_fallback_breach
+        || em_contrast_breach
+        || em_conditioning_breach)
+        && result_quality == QualityGate::Pass
+    {
         result_quality = QualityGate::Warn;
     }
     if solver_convergence == QualityGate::Warn {
@@ -2661,6 +2717,46 @@ pub fn analysis_run_electromagnetic_with_options_op(
                 "electromagnetic material heterogeneity index {} exceeds threshold {}",
                 em_assignment_heterogeneity_index.unwrap_or(0.0),
                 em_heterogeneity_threshold
+            ),
+        });
+    }
+    if em_coverage_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticAssignmentCoverageLow,
+            detail: format!(
+                "electromagnetic assignment coverage ratio {} is below threshold {}",
+                em_assignment_coverage_ratio.unwrap_or(0.0),
+                em_coverage_min_threshold
+            ),
+        });
+    }
+    if em_fallback_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticFallbackCoefficientHigh,
+            detail: format!(
+                "electromagnetic fallback coefficient ratio {} exceeds threshold {}",
+                em_fallback_coefficient_ratio.unwrap_or(0.0),
+                em_fallback_max_threshold
+            ),
+        });
+    }
+    if em_contrast_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticRegionContrastHigh,
+            detail: format!(
+                "electromagnetic region coefficient contrast index {} exceeds threshold {}",
+                em_region_contrast_index.unwrap_or(0.0),
+                em_contrast_max_threshold
+            ),
+        });
+    }
+    if em_conditioning_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticConditioningHigh,
+            detail: format!(
+                "electromagnetic solver conditioning proxy {} exceeds threshold {}",
+                em_solver_conditioning_proxy.unwrap_or(0.0),
+                em_conditioning_max_threshold
             ),
         });
     }
@@ -3104,12 +3200,21 @@ pub fn analysis_results_op(
         "FEA_CONTACT_NONLINEAR",
         "load_amplification_ratio",
     );
-    let thermal_max_residual_norm =
-        diagnostic_metric(&run_result.run.diagnostics, "FEA_THERMAL_STABILITY", "max_residual_norm");
-    let thermal_min_temperature_k =
-        diagnostic_metric(&run_result.run.diagnostics, "FEA_THERMAL_STABILITY", "min_temperature_k");
-    let thermal_max_temperature_k =
-        diagnostic_metric(&run_result.run.diagnostics, "FEA_THERMAL_STABILITY", "max_temperature_k");
+    let thermal_max_residual_norm = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_STABILITY",
+        "max_residual_norm",
+    );
+    let thermal_min_temperature_k = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_STABILITY",
+        "min_temperature_k",
+    );
+    let thermal_max_temperature_k = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_STABILITY",
+        "max_temperature_k",
+    );
     let thermal_conductivity_spread_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_THERMAL_CONSTITUTIVE",
@@ -3135,8 +3240,10 @@ pub fn analysis_results_op(
         "FEA_THERMAL_OUTCOME",
         "thermal_response_realization_ratio",
     );
-    let electromagnetic_enabled = diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_STATIC", "enabled")
-        .or_else(|| diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_PLACEHOLDER", "enabled"));
+    let electromagnetic_enabled =
+        diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_STATIC", "enabled").or_else(
+            || diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_PLACEHOLDER", "enabled"),
+        );
     let electromagnetic_reference_frequency_hz = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
@@ -3192,6 +3299,26 @@ pub fn analysis_results_op(
         &run_result.run.diagnostics,
         "FEA_EM_STATIC",
         "electromagnetic_material_heterogeneity_index",
+    );
+    let electromagnetic_assignment_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "assignment_coverage_ratio",
+    );
+    let electromagnetic_fallback_coefficient_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "fallback_coefficient_ratio",
+    );
+    let electromagnetic_region_coefficient_contrast_index = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "region_coefficient_contrast_index",
+    );
+    let electromagnetic_solver_conditioning_proxy = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "solver_conditioning_proxy",
     );
 
     let summary = AnalysisResultsSummary {
@@ -3269,6 +3396,10 @@ pub fn analysis_results_op(
         electromagnetic_relative_permittivity_spread_ratio,
         electromagnetic_relative_permeability_spread_ratio,
         electromagnetic_material_heterogeneity_index,
+        electromagnetic_assignment_coverage_ratio,
+        electromagnetic_fallback_coefficient_ratio,
+        electromagnetic_region_coefficient_contrast_index,
+        electromagnetic_solver_conditioning_proxy,
     };
 
     let modal_results = if query.include_modal_results {
@@ -3931,7 +4062,10 @@ pub fn analysis_trends_op(
             if values.is_empty() {
                 None
             } else {
-                Some(values.iter().filter(|value| **value > 2.5).count() as f64 / values.len() as f64)
+                Some(
+                    values.iter().filter(|value| **value > 2.5).count() as f64
+                        / values.len() as f64,
+                )
             }
         } else {
             None
@@ -3969,32 +4103,132 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let electromagnetic_heterogeneity_breach_rate =
-            if kind == AnalysisRunKind::Electromagnetic {
-                let values = entries
-                    .iter()
-                    .filter_map(|run| {
-                        diagnostic_metric(
-                            &run.run.diagnostics,
-                            "FEA_EM_STATIC",
-                            "electromagnetic_material_heterogeneity_index",
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                if values.is_empty() {
-                    None
-                } else {
-                    Some(
-                        values
-                            .iter()
-                            .filter(|value| **value > EM_HETEROGENEITY_THRESHOLD_BALANCED)
-                            .count() as f64
-                            / values.len() as f64,
+        let electromagnetic_heterogeneity_breach_rate = if kind == AnalysisRunKind::Electromagnetic
+        {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_STATIC",
+                        "electromagnetic_material_heterogeneity_index",
                     )
-                }
-            } else {
+                })
+                .collect::<Vec<_>>();
+            if values.is_empty() {
                 None
-            };
+            } else {
+                Some(
+                    values
+                        .iter()
+                        .filter(|value| **value > EM_HETEROGENEITY_THRESHOLD_BALANCED)
+                        .count() as f64
+                        / values.len() as f64,
+                )
+            }
+        } else {
+            None
+        };
+        let electromagnetic_coverage_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_STATIC",
+                        "assignment_coverage_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                None
+            } else {
+                Some(
+                    values
+                        .iter()
+                        .filter(|value| **value < EM_ASSIGNMENT_COVERAGE_MIN_BALANCED)
+                        .count() as f64
+                        / values.len() as f64,
+                )
+            }
+        } else {
+            None
+        };
+        let electromagnetic_fallback_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_STATIC",
+                        "fallback_coefficient_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                None
+            } else {
+                Some(
+                    values
+                        .iter()
+                        .filter(|value| **value > EM_FALLBACK_COEFFICIENT_MAX_BALANCED)
+                        .count() as f64
+                        / values.len() as f64,
+                )
+            }
+        } else {
+            None
+        };
+        let electromagnetic_contrast_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_STATIC",
+                        "region_coefficient_contrast_index",
+                    )
+                })
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                None
+            } else {
+                Some(
+                    values
+                        .iter()
+                        .filter(|value| **value > EM_REGION_CONTRAST_MAX_BALANCED)
+                        .count() as f64
+                        / values.len() as f64,
+                )
+            }
+        } else {
+            None
+        };
+        let electromagnetic_conditioning_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_STATIC",
+                        "solver_conditioning_proxy",
+                    )
+                })
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                None
+            } else {
+                Some(
+                    values
+                        .iter()
+                        .filter(|value| **value > EM_CONDITIONING_MAX_BALANCED)
+                        .count() as f64
+                        / values.len() as f64,
+                )
+            }
+        } else {
+            None
+        };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -4025,6 +4259,10 @@ pub fn analysis_trends_op(
             electromagnetic_placeholder_warn_rate,
             electromagnetic_spread_breach_rate,
             electromagnetic_heterogeneity_breach_rate,
+            electromagnetic_coverage_breach_rate,
+            electromagnetic_fallback_breach_rate,
+            electromagnetic_contrast_breach_rate,
+            electromagnetic_conditioning_breach_rate,
         });
     }
 
@@ -4042,10 +4280,10 @@ pub fn analysis_trends_op(
 fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
     if run.electromagnetic_results.is_some()
         || run
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_EM_PLACEHOLDER")
+            .run
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_EM_PLACEHOLDER")
     {
         AnalysisRunKind::Electromagnetic
     } else if run.nonlinear_results.is_some() {
@@ -4128,19 +4366,22 @@ fn model_thermo_coupling_options(model: &AnalysisModel) -> Option<ThermoMechanic
         applied_temperature_delta_k: domain.applied_temperature_delta_k,
         thermal_expansion_coefficient: expansion,
         field_artifact_id: domain.field_artifact_id.clone(),
-        field_source: domain.field_source.as_ref().map(|source| ThermoFieldSource {
-            source_id: source.source_id.clone(),
-            revision: source.revision,
-            interpolation_mode: source.interpolation_mode.map(|mode| match mode {
-                runmat_analysis_core::ThermoFieldInterpolationMode::Linear => {
-                    ThermoFieldInterpolationMode::Linear
-                }
-                runmat_analysis_core::ThermoFieldInterpolationMode::Step => {
-                    ThermoFieldInterpolationMode::Step
-                }
+        field_source: domain
+            .field_source
+            .as_ref()
+            .map(|source| ThermoFieldSource {
+                source_id: source.source_id.clone(),
+                revision: source.revision,
+                interpolation_mode: source.interpolation_mode.map(|mode| match mode {
+                    runmat_analysis_core::ThermoFieldInterpolationMode::Linear => {
+                        ThermoFieldInterpolationMode::Linear
+                    }
+                    runmat_analysis_core::ThermoFieldInterpolationMode::Step => {
+                        ThermoFieldInterpolationMode::Step
+                    }
+                }),
+                expected_region_ids: source.expected_region_ids.clone(),
             }),
-            expected_region_ids: source.expected_region_ids.clone(),
-        }),
         region_temperature_deltas: domain
             .region_temperature_deltas
             .iter()
@@ -4333,12 +4574,14 @@ fn to_fea_electro_thermal_context(
 fn to_fea_plasticity_constitutive_context(
     options: Option<PlasticityConstitutiveOptions>,
 ) -> Option<runmat_analysis_fea::FeaPlasticityConstitutiveContext> {
-    options.map(|plasticity| runmat_analysis_fea::FeaPlasticityConstitutiveContext {
-        enabled: plasticity.enabled,
-        yield_strain: plasticity.yield_strain,
-        hardening_modulus_ratio: plasticity.hardening_modulus_ratio,
-        saturation_exponent: plasticity.saturation_exponent,
-    })
+    options.map(
+        |plasticity| runmat_analysis_fea::FeaPlasticityConstitutiveContext {
+            enabled: plasticity.enabled,
+            yield_strain: plasticity.yield_strain,
+            hardening_modulus_ratio: plasticity.hardening_modulus_ratio,
+            saturation_exponent: plasticity.saturation_exponent,
+        },
+    )
 }
 
 fn to_fea_contact_interface_context(
@@ -4654,8 +4897,7 @@ fn validate_contact_interface_options(
     }
     if !options.friction_coefficient.is_finite() || options.friction_coefficient < 0.0 {
         return Err((
-            "contact interface model requires finite non-negative friction_coefficient"
-                .to_string(),
+            "contact interface model requires finite non-negative friction_coefficient".to_string(),
             BTreeMap::from([(
                 "friction_coefficient".to_string(),
                 options.friction_coefficient.to_string(),
@@ -5524,14 +5766,18 @@ fn thermo_field_quality_thresholds_for_policy(policy: QualityPolicy) -> (f64, f6
     }
 }
 
-fn electromagnetic_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
+fn electromagnetic_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64, f64, f64, f64, f64) {
     match policy {
-        QualityPolicy::Strict => (1.5, 0.12),
+        QualityPolicy::Strict => (1.5, 0.12, 0.95, 0.05, 0.45, 8.0e3),
         QualityPolicy::Balanced => (
             EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
             EM_HETEROGENEITY_THRESHOLD_BALANCED,
+            EM_ASSIGNMENT_COVERAGE_MIN_BALANCED,
+            EM_FALLBACK_COEFFICIENT_MAX_BALANCED,
+            EM_REGION_CONTRAST_MAX_BALANCED,
+            EM_CONDITIONING_MAX_BALANCED,
         ),
-        QualityPolicy::Exploratory => (3.0, 0.35),
+        QualityPolicy::Exploratory => (3.0, 0.35, 0.5, 0.65, 1.8, 1.5e5),
     }
 }
 

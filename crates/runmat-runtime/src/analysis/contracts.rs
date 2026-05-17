@@ -210,6 +210,10 @@ pub enum QualityReasonCode {
     ElectromagneticPlaceholder,
     ElectromagneticConductivitySpreadHigh,
     ElectromagneticMaterialHeterogeneityHigh,
+    ElectromagneticAssignmentCoverageLow,
+    ElectromagneticFallbackCoefficientHigh,
+    ElectromagneticRegionContrastHigh,
+    ElectromagneticConditioningHigh,
     PlasticityNonlinearStress,
     ContactNonlinearStress,
     NonlinearResidualExceeded,
@@ -770,6 +774,10 @@ pub struct AnalysisResultsSummary {
     pub electromagnetic_relative_permittivity_spread_ratio: Option<f64>,
     pub electromagnetic_relative_permeability_spread_ratio: Option<f64>,
     pub electromagnetic_material_heterogeneity_index: Option<f64>,
+    pub electromagnetic_assignment_coverage_ratio: Option<f64>,
+    pub electromagnetic_fallback_coefficient_ratio: Option<f64>,
+    pub electromagnetic_region_coefficient_contrast_index: Option<f64>,
+    pub electromagnetic_solver_conditioning_proxy: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -862,6 +870,10 @@ pub struct AnalysisTrendKindSummary {
     pub electromagnetic_placeholder_warn_rate: Option<f64>,
     pub electromagnetic_spread_breach_rate: Option<f64>,
     pub electromagnetic_heterogeneity_breach_rate: Option<f64>,
+    pub electromagnetic_coverage_breach_rate: Option<f64>,
+    pub electromagnetic_fallback_breach_rate: Option<f64>,
+    pub electromagnetic_contrast_breach_rate: Option<f64>,
+    pub electromagnetic_conditioning_breach_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
