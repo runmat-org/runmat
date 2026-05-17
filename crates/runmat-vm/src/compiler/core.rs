@@ -1065,37 +1065,8 @@ impl Compiler {
                     }
                 }
             }
-            MirCallee::Static(_) => {
-                let name = match self.mir_builtin_call_name(call) {
-                    Ok(name) => name,
-                    Err(err)
-                        if !call.args.is_empty()
-                            && err.message.starts_with("unknown builtin function ") =>
-                    {
-                        let Some(candidate) = self.mir_unresolved_single_call_name(call) else {
-                            return Err(err);
-                        };
-                        self.emit(Instr::CreateFunctionHandle(candidate));
-                        for arg in &call.args {
-                            self.compile_mir_call_arg(arg)?;
-                        }
-                        if has_expansion {
-                            if output_count == 1 {
-                                self.emit(Instr::CallFevalExpandMulti(specs));
-                            } else {
-                                self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
-                            }
-                        } else {
-                            if output_count == 1 {
-                                self.emit(Instr::CallFeval(call.args.len()));
-                            } else {
-                                self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
-                            }
-                        }
-                        return Ok(());
-                    }
-                    Err(err) => return Err(err),
-                };
+            MirCallee::Static(CallableIdentity::Builtin(id)) => {
+                let name = self.mir_builtin_call_name(id)?;
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -1103,6 +1074,28 @@ impl Compiler {
                     self.emit(Instr::CallBuiltinExpandMulti(name, specs));
                 } else {
                     self.emit(Instr::CallBuiltin(name, call.args.len()));
+                }
+            }
+            MirCallee::Static(identity) => {
+                let Some(name) = self.mir_runtime_name_callee(identity)? else {
+                    return Err(self.compile_error(
+                        "MIR bytecode lowering for this call callee is not implemented yet",
+                    ));
+                };
+                self.emit(Instr::CreateFunctionHandle(name));
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                if has_expansion {
+                    if output_count == 1 {
+                        self.emit(Instr::CallFevalExpandMulti(specs));
+                    } else {
+                        self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
+                    }
+                } else if output_count == 1 {
+                    self.emit(Instr::CallFeval(call.args.len()));
+                } else {
+                    self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
                 }
             }
         }
@@ -1580,44 +1573,8 @@ impl Compiler {
                     self.emit(Instr::CallFeval(call.args.len()));
                 }
             }
-            MirCallee::Static(_) => {
-                let name = match self.mir_builtin_call_name(call) {
-                    Ok(name) => name,
-                    Err(err)
-                        if !call.args.is_empty()
-                            && err.message.starts_with("unknown builtin function ") =>
-                    {
-                        let Some(candidate) = self.mir_unresolved_single_call_name(call) else {
-                            return Err(err);
-                        };
-                        self.emit(Instr::CreateFunctionHandle(candidate));
-                        for arg in &call.args {
-                            self.compile_mir_call_arg(arg)?;
-                        }
-                        if let Some(output_count) = requested_outputs {
-                            if has_expansion {
-                                if output_count == 1 {
-                                    self.emit(Instr::CallFevalExpandMulti(specs));
-                                } else {
-                                    self.emit(Instr::CallFevalExpandMultiOutput(
-                                        specs,
-                                        output_count,
-                                    ));
-                                }
-                            } else if output_count == 1 {
-                                self.emit(Instr::CallFeval(call.args.len()));
-                            } else {
-                                self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
-                            }
-                        } else if has_expansion {
-                            self.emit(Instr::CallFevalExpandMulti(specs));
-                        } else {
-                            self.emit(Instr::CallFeval(call.args.len()));
-                        }
-                        return Ok(());
-                    }
-                    Err(err) => return Err(err),
-                };
+            MirCallee::Static(CallableIdentity::Builtin(id)) => {
+                let name = self.mir_builtin_call_name(id)?;
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -1625,6 +1582,34 @@ impl Compiler {
                     self.emit(Instr::CallBuiltinExpandMulti(name, specs));
                 } else {
                     self.emit(Instr::CallBuiltin(name, call.args.len()));
+                }
+            }
+            MirCallee::Static(identity) => {
+                let Some(name) = self.mir_runtime_name_callee(identity)? else {
+                    return Err(self.compile_error(
+                        "MIR bytecode lowering for this call callee is not implemented yet",
+                    ));
+                };
+                self.emit(Instr::CreateFunctionHandle(name));
+                for arg in &call.args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                if let Some(output_count) = requested_outputs {
+                    if has_expansion {
+                        if output_count == 1 {
+                            self.emit(Instr::CallFevalExpandMulti(specs));
+                        } else {
+                            self.emit(Instr::CallFevalExpandMultiOutput(specs, output_count));
+                        }
+                    } else if output_count == 1 {
+                        self.emit(Instr::CallFeval(call.args.len()));
+                    } else {
+                        self.emit(Instr::CallFevalMulti(call.args.len(), output_count));
+                    }
+                } else if has_expansion {
+                    self.emit(Instr::CallFevalExpandMulti(specs));
+                } else {
+                    self.emit(Instr::CallFeval(call.args.len()));
                 }
             }
         }
@@ -1661,13 +1646,57 @@ impl Compiler {
         Ok(count)
     }
 
-    fn mir_unresolved_single_call_name(&self, call: &MirCall) -> Option<String> {
-        match &call.callee {
-            MirCallee::Static(CallableIdentity::ExternalName(name)) if name.0.len() == 1 => {
-                Some(name.0[0].0.clone())
+    fn mir_runtime_name_callee(
+        &self,
+        callee: &CallableIdentity,
+    ) -> Result<Option<String>, CompileError> {
+        match callee {
+            CallableIdentity::ExternalName(name) => {
+                let Some(display) = name.display_name() else {
+                    return Ok(None);
+                };
+                if name.0.len() != 1 {
+                    return Ok(Some(display));
+                }
+                let candidate = &name.0[0].0;
+                let specific: Vec<&Vec<String>> = self
+                    .imports
+                    .iter()
+                    .filter(|(path, wildcard)| {
+                        !*wildcard && path.last().map(String::as_str) == Some(candidate.as_str())
+                    })
+                    .map(|(path, _)| path)
+                    .collect();
+                if specific.len() > 1 {
+                    return Err(CompileError::new(format!(
+                        "ambiguous runtime call target '{candidate}' via imports"
+                    )));
+                }
+                if let Some(path) = specific.first() {
+                    return Ok(Some(path.join(".")));
+                }
+                let wildcard_matches: Vec<&Vec<String>> = self
+                    .imports
+                    .iter()
+                    .filter(|(path, wildcard)| *wildcard && !path.is_empty())
+                    .map(|(path, _)| path)
+                    .collect();
+                if wildcard_matches.len() > 1 {
+                    return Err(CompileError::new(format!(
+                        "ambiguous runtime call target '{candidate}' via wildcard imports"
+                    )));
+                }
+                if let Some(path) = wildcard_matches.first() {
+                    return Ok(Some(format!("{}.{}", path.join("."), candidate)));
+                }
+                Ok(Some(display))
             }
-            MirCallee::Static(CallableIdentity::DynamicName(name)) => Some(name.0.clone()),
-            _ => None,
+            CallableIdentity::DynamicName(name) => Ok(Some(name.0.clone())),
+            CallableIdentity::Imported(path) => {
+                Ok(path.module.display_name().or_else(|| path.display_name()))
+            }
+            CallableIdentity::Method(id) => Ok(Some(id.0.clone())),
+            _ => Ok(None),
         }
     }
 
@@ -1746,69 +1775,18 @@ impl Compiler {
         }
     }
 
-    fn mir_builtin_call_name(&self, call: &MirCall) -> Result<String, CompileError> {
-        let candidate = match &call.callee {
-            MirCallee::Static(CallableIdentity::Builtin(id)) => id.0.clone(),
-            MirCallee::Static(CallableIdentity::ExternalName(name)) if name.0.len() == 1 => {
-                name.0[0].0.clone()
-            }
-            MirCallee::Static(CallableIdentity::DynamicName(name)) => name.0.clone(),
-            _ => {
-                return Err(CompileError::new(
-                    "MIR bytecode lowering for this call callee is not implemented yet",
-                ))
-            }
-        };
+    fn mir_builtin_call_name(
+        &self,
+        builtin: &runmat_hir::BuiltinId,
+    ) -> Result<String, CompileError> {
+        let candidate = builtin.0.clone();
         if is_vm_intrinsic_counter_builtin(&candidate) {
             return Ok(candidate);
         }
         if let Some(builtin) = runmat_builtins::builtin_function_by_name(&candidate) {
             return Ok(builtin.name.to_string());
         }
-        let specific_matches = self
-            .imports
-            .iter()
-            .filter(|(path, wildcard)| {
-                !*wildcard && path.last().map(|part| part.as_str()) == Some(candidate.as_str())
-            })
-            .filter(|(path, _)| {
-                runmat_builtins::builtin_function_by_name(&path.join(".")).is_some()
-            })
-            .count();
-        if specific_matches > 1 {
-            return Err(CompileError::new(format!(
-                "ambiguous builtin '{candidate}' via imports"
-            )));
-        }
-        if specific_matches == 1 {
-            return Ok(candidate);
-        }
-
-        let wildcard_matches = self
-            .imports
-            .iter()
-            .filter(|(_, wildcard)| *wildcard)
-            .filter(|(path, _)| {
-                !path.is_empty()
-                    && runmat_builtins::builtin_function_by_name(&format!(
-                        "{}.{}",
-                        path.join("."),
-                        candidate
-                    ))
-                    .is_some()
-            })
-            .count();
-        if wildcard_matches > 1 {
-            return Err(CompileError::new(format!(
-                "ambiguous builtin '{candidate}' via wildcard imports"
-            )));
-        }
-        if wildcard_matches == 1 {
-            return Ok(candidate);
-        }
-        Err(CompileError::new(format!(
-            "unknown builtin function {candidate}"
-        )))
+        Err(CompileError::new(format!("unknown builtin id {candidate}")))
     }
 
     fn compile_mir_aggregate(

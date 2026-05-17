@@ -95,13 +95,13 @@ pub(crate) fn lower_expr_with_replacements(
                         requested_outputs: call.requested_outputs.clone(),
                     }
                 } else {
-                    call_rvalue(call, args)
+                    call_rvalue(call, args)?
                 }
             } else {
-                call_rvalue(call, args)
+                call_rvalue(call, args)?
             }
         }
-        HirExprKind::CommandCall(call) => lower_command_call(call),
+        HirExprKind::CommandCall(call) => lower_command_call(call)?,
         HirExprKind::Index(base, indexing) => MirRvalue::Index {
             base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
             indexing: lower_indexing_with_replacements(ctx, indexing, temps, await_replacements)?,
@@ -277,13 +277,15 @@ fn lower_index_component(
     })
 }
 
-fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
-    let callee =
-        MirCallee::Static(call.command.identity().unwrap_or_else(|| {
-            CallableIdentity::ExternalName(runmat_hir::QualifiedName(Vec::new()))
-        }));
+fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, SemanticError> {
+    let Some(identity) = call.command.identity() else {
+        return Err(SemanticError::new(
+            "command call requires a statically classified callee identity",
+        ));
+    };
+    let callee = MirCallee::Static(identity);
     let semantics = call_semantics(&callee);
-    MirRvalue::Call(MirCall {
+    Ok(MirRvalue::Call(MirCall {
         callee,
         args: call
             .args
@@ -298,16 +300,21 @@ fn lower_command_call(call: &HirCommandCall) -> MirRvalue {
         environment_effect: semantics.environment_effect,
         purity: semantics.purity,
         semantic_kind: semantics.semantic_kind,
-    })
+    }))
 }
 
-fn call_rvalue(call: &runmat_hir::HirCall, args: Vec<MirCallArg>) -> MirRvalue {
-    let callee =
-        MirCallee::Static(call.callee.identity().unwrap_or_else(|| {
-            CallableIdentity::ExternalName(runmat_hir::QualifiedName(Vec::new()))
-        }));
+fn call_rvalue(
+    call: &runmat_hir::HirCall,
+    args: Vec<MirCallArg>,
+) -> Result<MirRvalue, SemanticError> {
+    let Some(identity) = call.callee.identity() else {
+        return Err(SemanticError::new(
+            "call requires either a static callable identity or a dynamic callee expression",
+        ));
+    };
+    let callee = MirCallee::Static(identity);
     let semantics = call_semantics(&callee);
-    MirRvalue::Call(MirCall {
+    Ok(MirRvalue::Call(MirCall {
         callee,
         args,
         syntax: call.syntax.clone(),
@@ -318,7 +325,7 @@ fn call_rvalue(call: &runmat_hir::HirCall, args: Vec<MirCallArg>) -> MirRvalue {
         environment_effect: semantics.environment_effect,
         purity: semantics.purity,
         semantic_kind: semantics.semantic_kind,
-    })
+    }))
 }
 
 fn dynamic_call_rvalue(
