@@ -133,6 +133,10 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "em_sparse_source_realization_ratio",
+            ),
+            (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
                 "em_sparse_source_region_coverage_ratio",
             ),
             (
@@ -144,12 +148,20 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
                 "em_sparse_boundary_anchor_ratio",
             ),
             (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "em_sparse_energy_imbalance_ratio",
+            ),
+            (
                 "electromagnetic_reference_fallback_heavy_gpu_provider",
                 "em_fallback_heavy_fallback_coefficient_ratio",
             ),
             (
                 "electromagnetic_reference_fallback_heavy_gpu_provider",
                 "em_fallback_heavy_assignment_coverage_ratio",
+            ),
+            (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "em_fallback_heavy_source_realization_ratio",
             ),
             (
                 "electromagnetic_reference_fallback_heavy_gpu_provider",
@@ -162,6 +174,10 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_fallback_heavy_gpu_provider",
                 "em_fallback_heavy_boundary_anchor_ratio",
+            ),
+            (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "em_fallback_heavy_energy_imbalance_ratio",
             ),
             (
                 "electromagnetic_reference_overlap_interference_gpu_provider",

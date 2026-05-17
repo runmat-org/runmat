@@ -152,16 +152,20 @@ REQUIRED_FIXTURES = {
     "electromagnetic_reference_sparse_assignments_gpu_provider": {
         "em_sparse_assignment_coverage_ratio",
         "em_sparse_fallback_coefficient_ratio",
+        "em_sparse_source_realization_ratio",
         "em_sparse_source_region_coverage_ratio",
         "em_sparse_source_material_alignment_ratio",
         "em_sparse_boundary_anchor_ratio",
+        "em_sparse_energy_imbalance_ratio",
     },
     "electromagnetic_reference_fallback_heavy_gpu_provider": {
         "em_fallback_heavy_assignment_coverage_ratio",
         "em_fallback_heavy_fallback_coefficient_ratio",
+        "em_fallback_heavy_source_realization_ratio",
         "em_fallback_heavy_source_region_coverage_ratio",
         "em_fallback_heavy_source_material_alignment_ratio",
         "em_fallback_heavy_boundary_anchor_ratio",
+        "em_fallback_heavy_energy_imbalance_ratio",
     },
     "electromagnetic_reference_overlap_interference_gpu_provider": {
         "em_overlap_source_interference_index",

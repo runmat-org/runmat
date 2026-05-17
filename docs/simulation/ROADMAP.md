@@ -193,3 +193,5 @@ Progress update (2026-05-17):
     `release_readiness_nonlinear.py` now evaluates rolling worsening ratios for sparse/fallback/overlap/boundary-kernel assertion metrics, emitting dedicated readiness reasons when non-core EM fixture posture regresses relative to baseline.
 63. [x] EM release-readiness summary visibility expanded:
     `markdown_summary` output from `release_readiness_nonlinear.py` now includes an explicit EM posture section (core + boundary/phased + non-core static/trend signals), improving operator-facing readiness triage without requiring JSON field inspection.
+64. [x] EM sparse/fallback source-realization and energy-imbalance comparator governance expanded:
+    M6 baseline plus external-reference/nonlinear schema validators now require sparse/fallback source-realization and energy-imbalance assertion comparators (`em_sparse_source_realization_ratio`, `em_sparse_energy_imbalance_ratio`, `em_fallback_heavy_source_realization_ratio`, `em_fallback_heavy_energy_imbalance_ratio`) so partial non-core EM comparator payloads fail enforce-mode governance.

@@ -234,6 +234,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "em_sparse_source_realization_ratio",
+            "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+            "observed": 0.25,
+            "reference": 0.25,
+            "pass": True,
+        },
+        {
             "name": "em_sparse_source_region_coverage_ratio",
             "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
             "observed": 1.0,
@@ -255,6 +262,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "em_sparse_energy_imbalance_ratio",
+            "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+            "observed": 0.427,
+            "reference": 0.427,
+            "pass": True,
+        },
+        {
             "name": "em_fallback_heavy_fallback_coefficient_ratio",
             "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
             "observed": 1.0,
@@ -266,6 +280,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
+            "pass": True,
+        },
+        {
+            "name": "em_fallback_heavy_source_realization_ratio",
+            "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+            "observed": 0.2,
+            "reference": 0.2,
             "pass": True,
         },
         {
@@ -287,6 +308,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
             "observed": 0.2,
             "reference": 0.2,
+            "pass": True,
+        },
+        {
+            "name": "em_fallback_heavy_energy_imbalance_ratio",
+            "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+            "observed": 0.62,
+            "reference": 0.62,
             "pass": True,
         },
         {

@@ -359,6 +359,16 @@
       "tolerance_rel": 0.35
     },
     {
+      "name": "em_sparse_source_realization_ratio",
+      "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_sparse_source_realization_ratio",
+      "reference": 0.25,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.35
+    },
+    {
       "name": "em_sparse_source_region_coverage_ratio",
       "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -389,6 +399,16 @@
       "tolerance_rel": 0.35
     },
     {
+      "name": "em_sparse_energy_imbalance_ratio",
+      "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_sparse_energy_imbalance_ratio",
+      "reference": 0.427,
+      "tolerance_abs": 0.18,
+      "tolerance_rel": 0.35
+    },
+    {
       "name": "em_fallback_heavy_fallback_coefficient_ratio",
       "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -407,6 +427,16 @@
       "reference": 1.0,
       "tolerance_abs": 0.05,
       "tolerance_rel": 0.05
+    },
+    {
+      "name": "em_fallback_heavy_source_realization_ratio",
+      "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_fallback_heavy_source_realization_ratio",
+      "reference": 0.2,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.4
     },
     {
       "name": "em_fallback_heavy_source_region_coverage_ratio",
@@ -436,6 +466,16 @@
       "assertion_name": "em_fallback_heavy_boundary_anchor_ratio",
       "reference": 0.2,
       "tolerance_abs": 0.1,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "em_fallback_heavy_energy_imbalance_ratio",
+      "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_fallback_heavy_energy_imbalance_ratio",
+      "reference": 0.62,
+      "tolerance_abs": 0.2,
       "tolerance_rel": 0.35
     },
     {
