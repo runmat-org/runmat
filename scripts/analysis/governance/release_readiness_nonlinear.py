@@ -5776,6 +5776,84 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('electro_time_scale_trend_ratio') if result.get('electro_time_scale_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
+    lines.append("### EM Posture")
+    lines.append(
+        "- Max EM energy imbalance ratio: "
+        f"`{result.get('em_max_energy_imbalance_ratio') if result.get('em_max_energy_imbalance_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM energy imbalance threshold: "
+        f"`{result.get('em_max_energy_imbalance_ratio_threshold') if result.get('em_max_energy_imbalance_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max EM flux divergence proxy: "
+        f"`{result.get('em_max_flux_divergence_proxy') if result.get('em_max_flux_divergence_proxy') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM flux divergence threshold: "
+        f"`{result.get('em_max_flux_divergence_proxy_threshold') if result.get('em_max_flux_divergence_proxy_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max EM boundary-penalty residual norms (real/imag): "
+        f"`{result.get('em_max_boundary_penalty_real_residual_norm') if result.get('em_max_boundary_penalty_real_residual_norm') is not None else '-'}`/`{result.get('em_max_boundary_penalty_imag_residual_norm') if result.get('em_max_boundary_penalty_imag_residual_norm') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM boundary-penalty residual thresholds (real/imag): "
+        f"`{result.get('em_max_boundary_penalty_real_residual_norm_threshold') if result.get('em_max_boundary_penalty_real_residual_norm_threshold') is not None else '-'}`/`{result.get('em_max_boundary_penalty_imag_residual_norm_threshold') if result.get('em_max_boundary_penalty_imag_residual_norm_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max EM phased-source overlap/interference: "
+        f"`{result.get('em_max_phased_source_overlap_ratio') if result.get('em_max_phased_source_overlap_ratio') is not None else '-'}`/`{result.get('em_max_phased_source_interference_index') if result.get('em_max_phased_source_interference_index') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM phased-source overlap/interference thresholds: "
+        f"`{result.get('em_max_phased_source_overlap_ratio_threshold') if result.get('em_max_phased_source_overlap_ratio_threshold') is not None else '-'}`/`{result.get('em_max_phased_source_interference_index_threshold') if result.get('em_max_phased_source_interference_index_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM sparse assignment/fallback: "
+        f"`{result.get('em_min_sparse_assignment_coverage_ratio') if result.get('em_min_sparse_assignment_coverage_ratio') is not None else '-'}`/`{result.get('em_max_sparse_fallback_coefficient_ratio') if result.get('em_max_sparse_fallback_coefficient_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM sparse assignment/fallback thresholds: "
+        f"`{result.get('em_min_sparse_assignment_coverage_ratio_threshold') if result.get('em_min_sparse_assignment_coverage_ratio_threshold') is not None else '-'}`/`{result.get('em_max_sparse_fallback_coefficient_ratio_threshold') if result.get('em_max_sparse_fallback_coefficient_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM fallback-heavy assignment/fallback: "
+        f"`{result.get('em_min_fallback_heavy_assignment_coverage_ratio') if result.get('em_min_fallback_heavy_assignment_coverage_ratio') is not None else '-'}`/`{result.get('em_min_fallback_heavy_fallback_coefficient_ratio') if result.get('em_min_fallback_heavy_fallback_coefficient_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM fallback-heavy assignment/fallback thresholds: "
+        f"`{result.get('em_min_fallback_heavy_assignment_coverage_ratio_threshold') if result.get('em_min_fallback_heavy_assignment_coverage_ratio_threshold') is not None else '-'}`/`{result.get('em_min_fallback_heavy_fallback_coefficient_ratio_threshold') if result.get('em_min_fallback_heavy_fallback_coefficient_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM overlap interference index: "
+        f"`{result.get('em_max_overlap_source_interference_index') if result.get('em_max_overlap_source_interference_index') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM overlap interference threshold: "
+        f"`{result.get('em_max_overlap_source_interference_index_threshold') if result.get('em_max_overlap_source_interference_index_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM boundary-kernel localization/ground/leakage: "
+        f"`{result.get('em_min_boundary_kernel_localization_ratio') if result.get('em_min_boundary_kernel_localization_ratio') is not None else '-'}`/`{result.get('em_min_boundary_kernel_ground_anchor_effectiveness_ratio') if result.get('em_min_boundary_kernel_ground_anchor_effectiveness_ratio') is not None else '-'}`/`{result.get('em_max_boundary_kernel_insulation_leakage_proxy') if result.get('em_max_boundary_kernel_insulation_leakage_proxy') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM boundary-kernel localization/ground/leakage thresholds: "
+        f"`{result.get('em_min_boundary_kernel_localization_ratio_threshold') if result.get('em_min_boundary_kernel_localization_ratio_threshold') is not None else '-'}`/`{result.get('em_min_boundary_kernel_ground_anchor_effectiveness_ratio_threshold') if result.get('em_min_boundary_kernel_ground_anchor_effectiveness_ratio_threshold') is not None else '-'}`/`{result.get('em_max_boundary_kernel_insulation_leakage_proxy_threshold') if result.get('em_max_boundary_kernel_insulation_leakage_proxy_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM breach rate/threshold: "
+        f"`{result.get('em_breach_rate') if result.get('em_breach_rate') is not None else '-'}`/`{result.get('em_max_breach_rate_threshold') if result.get('em_max_breach_rate_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM boundary/phased trend ratios (penalty real, penalty imag, overlap, interference): "
+        f"`{result.get('em_boundary_penalty_real_residual_norm_trend_ratio') if result.get('em_boundary_penalty_real_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_penalty_imag_residual_norm_trend_ratio') if result.get('em_boundary_penalty_imag_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_overlap_trend_ratio') if result.get('em_phased_source_overlap_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_interference_trend_ratio') if result.get('em_phased_source_interference_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM non-core trend ratios (sparse assignment, sparse fallback, overlap interference, boundary-kernel leakage): "
+        f"`{result.get('em_sparse_assignment_coverage_drop_trend_ratio') if result.get('em_sparse_assignment_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_fallback_coefficient_trend_ratio') if result.get('em_sparse_fallback_coefficient_trend_ratio') is not None else '-'}`/`{result.get('em_overlap_source_interference_trend_ratio') if result.get('em_overlap_source_interference_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_kernel_insulation_leakage_trend_ratio') if result.get('em_boundary_kernel_insulation_leakage_trend_ratio') is not None else '-'}`"
+    )
+    lines.append("")
     lines.append("### Plasticity Posture")
     lines.append(
         "- Max plastic nonlinear severity: "

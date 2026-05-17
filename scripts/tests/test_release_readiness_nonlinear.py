@@ -2591,6 +2591,18 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Electro-thermal time-scale thresholds (min/max)", summary)
         self.assertIn("Electro-thermal time-scale breach rate", summary)
         self.assertIn("Electro-thermal time-scale trend ratio", summary)
+        self.assertIn("### EM Posture", summary)
+        self.assertIn("Max EM energy imbalance ratio", summary)
+        self.assertIn("Max EM boundary-penalty residual norms (real/imag)", summary)
+        self.assertIn("Max EM phased-source overlap/interference", summary)
+        self.assertIn("EM sparse assignment/fallback", summary)
+        self.assertIn("EM overlap interference index", summary)
+        self.assertIn("EM boundary-kernel localization/ground/leakage", summary)
+        self.assertIn("EM breach rate/threshold", summary)
+        self.assertIn(
+            "EM non-core trend ratios (sparse assignment, sparse fallback, overlap interference, boundary-kernel leakage)",
+            summary,
+        )
         self.assertIn("### Promotion Evidence Quality", summary)
         self.assertIn("Promotion calibration applied/required", summary)
         self.assertIn("Promotion calibration age/max days", summary)

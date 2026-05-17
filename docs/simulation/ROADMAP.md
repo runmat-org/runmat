@@ -191,3 +191,5 @@ Progress update (2026-05-17):
     `release_readiness_nonlinear.py` now evaluates sparse/fallback/overlap/boundary-kernel assertion thresholds (assignment/fallback/source coverage/material alignment/boundary anchor/interference/localization/leakage signals), promoting non-core EM fixture regressions into explicit readiness reasons and EM breach-rate accounting.
 62. [x] EM release-readiness non-core fixture trend gating expanded:
     `release_readiness_nonlinear.py` now evaluates rolling worsening ratios for sparse/fallback/overlap/boundary-kernel assertion metrics, emitting dedicated readiness reasons when non-core EM fixture posture regresses relative to baseline.
+63. [x] EM release-readiness summary visibility expanded:
+    `markdown_summary` output from `release_readiness_nonlinear.py` now includes an explicit EM posture section (core + boundary/phased + non-core static/trend signals), improving operator-facing readiness triage without requiring JSON field inspection.
