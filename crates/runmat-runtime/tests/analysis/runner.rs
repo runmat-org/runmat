@@ -534,6 +534,8 @@ enum ElectromagneticFixtureKind {
     FallbackHeavy,
     OverlapInterference,
     BoundaryKernel,
+    BoundaryPenaltyStress,
+    MultiRegionPhasedSource,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -585,6 +587,20 @@ fn electromagnetic_profile_for_fixture(spec_id: &str) -> Option<ElectromagneticF
                 reference_frequency_hz: 520.0,
                 applied_current_a: 180.0,
                 kind: ElectromagneticFixtureKind::BoundaryKernel,
+            })
+        }
+        "electromagnetic_reference_boundary_penalty_stress_gpu_provider" => {
+            Some(ElectromagneticFixtureProfile {
+                reference_frequency_hz: 650.0,
+                applied_current_a: 210.0,
+                kind: ElectromagneticFixtureKind::BoundaryPenaltyStress,
+            })
+        }
+        "electromagnetic_reference_multi_region_phased_source_gpu_provider" => {
+            Some(ElectromagneticFixtureProfile {
+                reference_frequency_hz: 460.0,
+                applied_current_a: 260.0,
+                kind: ElectromagneticFixtureKind::MultiRegionPhasedSource,
             })
         }
         _ => None,
@@ -829,6 +845,50 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                                 runmat_analysis_core::EvidenceConfidence::Verified
                             } else {
                                 runmat_analysis_core::EvidenceConfidence::Probable
+                            },
+                        }
+                    })
+                    .collect();
+            }
+            ElectromagneticFixtureKind::BoundaryPenaltyStress => {
+                let ids = model
+                    .materials
+                    .iter()
+                    .map(|material| material.material_id.clone())
+                    .collect::<Vec<_>>();
+                model.material_assignments = (0..48)
+                    .map(|idx| {
+                        let material_id = ids[idx % ids.len()].clone();
+                        runmat_analysis_core::MaterialAssignment {
+                            region_id: format!("em_penalty_region_{idx}"),
+                            expected_material_id: material_id.clone(),
+                            assigned_material_id: material_id,
+                            confidence: if idx % 4 == 0 {
+                                runmat_analysis_core::EvidenceConfidence::Probable
+                            } else {
+                                runmat_analysis_core::EvidenceConfidence::Verified
+                            },
+                        }
+                    })
+                    .collect();
+            }
+            ElectromagneticFixtureKind::MultiRegionPhasedSource => {
+                let ids = model
+                    .materials
+                    .iter()
+                    .map(|material| material.material_id.clone())
+                    .collect::<Vec<_>>();
+                model.material_assignments = (0..16)
+                    .map(|idx| {
+                        let material_id = ids[idx % ids.len()].clone();
+                        runmat_analysis_core::MaterialAssignment {
+                            region_id: format!("em_phase_region_{idx}"),
+                            expected_material_id: material_id.clone(),
+                            assigned_material_id: material_id,
+                            confidence: if idx % 3 == 0 {
+                                runmat_analysis_core::EvidenceConfidence::Inferred
+                            } else {
+                                runmat_analysis_core::EvidenceConfidence::Verified
                             },
                         }
                     })
@@ -1168,6 +1228,112 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                             jx: 0.9,
                             jy: -0.5,
                             jz: 0.2,
+                        },
+                    },
+                ];
+            }
+            ElectromagneticFixtureKind::BoundaryPenaltyStress => {
+                model.boundary_conditions = (0..18)
+                    .flat_map(|idx| {
+                        let mut conditions = vec![runmat_analysis_core::BoundaryCondition {
+                            bc_id: format!("em_bc_penalty_ground_{idx}"),
+                            region_id: format!("em_penalty_region_{}", idx + 8),
+                            kind:
+                                runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
+                        }];
+                        if idx % 2 == 0 {
+                            conditions.push(runmat_analysis_core::BoundaryCondition {
+                                bc_id: format!("em_bc_penalty_insulation_{idx}"),
+                                region_id: format!("em_penalty_region_{}", idx + 20),
+                                kind:
+                                    runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
+                            });
+                        }
+                        conditions
+                    })
+                    .collect();
+                model.loads = vec![
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_penalty_coil_0".to_string(),
+                        region_id: "em_penalty_region_10".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
+                            current_a: profile.applied_current_a,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_penalty_coil_1".to_string(),
+                        region_id: "em_penalty_region_13".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
+                            current_a: profile.applied_current_a * -0.65,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_penalty_density".to_string(),
+                        region_id: "em_penalty_region_29".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
+                            jx: 1.2,
+                            jy: -0.7,
+                            jz: 0.15,
+                        },
+                    },
+                ];
+            }
+            ElectromagneticFixtureKind::MultiRegionPhasedSource => {
+                model.boundary_conditions = vec![
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_phase_ground_0".to_string(),
+                        region_id: "em_phase_region_0".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_phase_ground_1".to_string(),
+                        region_id: "em_phase_region_8".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::VectorPotentialGround,
+                    },
+                    runmat_analysis_core::BoundaryCondition {
+                        bc_id: "em_bc_phase_insulation_0".to_string(),
+                        region_id: "em_phase_region_5".to_string(),
+                        kind: runmat_analysis_core::BoundaryConditionKind::MagneticInsulation,
+                    },
+                ];
+                model.loads = vec![
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_phase_coil_0".to_string(),
+                        region_id: "em_phase_region_1".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
+                            current_a: profile.applied_current_a,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_phase_coil_1".to_string(),
+                        region_id: "em_phase_region_3".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
+                            current_a: -profile.applied_current_a * 0.8,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_phase_coil_2".to_string(),
+                        region_id: "em_phase_region_7".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CoilCurrent {
+                            current_a: profile.applied_current_a * 0.55,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_phase_density_0".to_string(),
+                        region_id: "em_phase_region_10".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
+                            jx: 0.9,
+                            jy: -0.45,
+                            jz: 0.2,
+                        },
+                    },
+                    runmat_analysis_core::LoadCase {
+                        load_id: "em_load_phase_density_1".to_string(),
+                        region_id: "em_phase_region_12".to_string(),
+                        kind: runmat_analysis_core::LoadKind::CurrentDensity {
+                            jx: -0.85,
+                            jy: 0.35,
+                            jz: -0.1,
                         },
                     },
                 ];
@@ -1837,6 +2003,10 @@ pub(super) fn run_fixture(
     let mut electromagnetic_flux_divergence_proxy = None;
     let mut electromagnetic_energy_imbalance_ratio = None;
     let mut electromagnetic_boundary_energy_ratio = None;
+    let mut electromagnetic_boundary_penalty_conditioning_contribution = None;
+    let mut electromagnetic_source_region_energy_consistency_ratio = None;
+    let mut electromagnetic_real_residual_norm = None;
+    let mut electromagnetic_imag_residual_norm = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -1943,6 +2113,10 @@ pub(super) fn run_fixture(
                     electromagnetic_flux_divergence_proxy,
                     electromagnetic_energy_imbalance_ratio,
                     electromagnetic_boundary_energy_ratio,
+                    electromagnetic_boundary_penalty_conditioning_contribution,
+                    electromagnetic_source_region_energy_consistency_ratio,
+                    electromagnetic_real_residual_norm,
+                    electromagnetic_imag_residual_norm,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -4391,6 +4565,124 @@ pub(super) fn run_fixture(
                             Some(2.0),
                         );
                     }
+                    if spec.id == "electromagnetic_reference_boundary_penalty_stress_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_boundary_penalty_conditioning_contribution",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "boundary_penalty_conditioning_contribution",
+                            ),
+                            Some(0.35),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_boundary_penalty_anchor_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "boundary_anchor_ratio",
+                            ),
+                            Some(0.75),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_boundary_penalty_real_residual_norm",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "real_residual_norm",
+                            ),
+                            Some(0.0),
+                            Some(0.95),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_boundary_penalty_imag_residual_norm",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "imag_residual_norm",
+                            ),
+                            Some(0.0),
+                            Some(0.95),
+                        );
+                    }
+                    if spec.id
+                        == "electromagnetic_reference_multi_region_phased_source_gpu_provider"
+                    {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_phased_source_region_coverage_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_region_coverage_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_phased_source_energy_consistency_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_region_energy_consistency_ratio",
+                            ),
+                            Some(0.2),
+                            Some(0.95),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_phased_source_overlap_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_overlap_ratio",
+                            ),
+                            Some(0.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_phased_source_interference_index",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_interference_index",
+                            ),
+                            Some(0.0),
+                            Some(1.0),
+                        );
+                    }
 
                     let gpu_primary_field_id =
                         gpu_envelope.data.run.displacement_field.field_id.clone();
@@ -4506,6 +4798,10 @@ pub(super) fn run_fixture(
                                 electromagnetic_flux_divergence_proxy,
                                 electromagnetic_energy_imbalance_ratio,
                                 electromagnetic_boundary_energy_ratio,
+                                electromagnetic_boundary_penalty_conditioning_contribution,
+                                electromagnetic_source_region_energy_consistency_ratio,
+                                electromagnetic_real_residual_norm,
+                                electromagnetic_imag_residual_norm,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -4692,6 +4988,18 @@ pub(super) fn run_fixture(
                         .data
                         .summary
                         .electromagnetic_boundary_energy_ratio;
+                    electromagnetic_boundary_penalty_conditioning_contribution = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_boundary_penalty_conditioning_contribution;
+                    electromagnetic_source_region_energy_consistency_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_source_region_energy_consistency_ratio;
+                    electromagnetic_real_residual_norm =
+                        gpu_results.data.summary.electromagnetic_real_residual_norm;
+                    electromagnetic_imag_residual_norm =
+                        gpu_results.data.summary.electromagnetic_imag_residual_norm;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -4902,6 +5210,10 @@ pub(super) fn run_fixture(
                                     electromagnetic_flux_divergence_proxy,
                                     electromagnetic_energy_imbalance_ratio,
                                     electromagnetic_boundary_energy_ratio,
+                                    electromagnetic_boundary_penalty_conditioning_contribution,
+                                    electromagnetic_source_region_energy_consistency_ratio,
+                                    electromagnetic_real_residual_norm,
+                                    electromagnetic_imag_residual_norm,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -5057,6 +5369,10 @@ pub(super) fn run_fixture(
         electromagnetic_flux_divergence_proxy,
         electromagnetic_energy_imbalance_ratio,
         electromagnetic_boundary_energy_ratio,
+        electromagnetic_boundary_penalty_conditioning_contribution,
+        electromagnetic_source_region_energy_consistency_ratio,
+        electromagnetic_real_residual_norm,
+        electromagnetic_imag_residual_norm,
         publishable,
         parity,
         threshold_assertions,

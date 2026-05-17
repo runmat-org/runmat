@@ -106,6 +106,10 @@
     "electromagnetic_insulation_leakage_proxy": null,
     "electromagnetic_flux_divergence_proxy": null,
     "electromagnetic_energy_imbalance_ratio": null,
-    "electromagnetic_boundary_energy_ratio": null
+    "electromagnetic_boundary_energy_ratio": null,
+    "electromagnetic_boundary_penalty_conditioning_contribution": null,
+    "electromagnetic_source_region_energy_consistency_ratio": null,
+    "electromagnetic_real_residual_norm": null,
+    "electromagnetic_imag_residual_norm": null
   }
 }

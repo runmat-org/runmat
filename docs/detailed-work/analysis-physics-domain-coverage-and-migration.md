@@ -285,6 +285,17 @@ Not required for this milestone:
 - Maintained governance compatibility:
   - EM contract tests and conformance harness pass on re-run,
   - residual quality signaling remains calibrated for control-fixture publishability and stress-fixture degradation behavior.
+- Added region-consistent EM boundary/source governance signals:
+  - `boundary_penalty_conditioning_contribution`,
+  - `source_region_energy_consistency_ratio`,
+  - split harmonic residual posture (`real_residual_norm`, `imag_residual_norm`).
+- Promoted these signals to first-class runtime governance:
+  - `analysis.results` summary fields,
+  - `analysis.trends` breach-rate metrics,
+  - policy-threshold quality reasons.
+- Extended EM reference-fixture governance family with:
+  - `electromagnetic_reference_boundary_penalty_stress_gpu_provider`,
+  - `electromagnetic_reference_multi_region_phased_source_gpu_provider`.
 
 ## Closeout Checklist for This Track
 

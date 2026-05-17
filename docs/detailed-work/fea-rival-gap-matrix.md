@@ -159,6 +159,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. Added block-Jacobi preconditioning and block-operator residual evaluation for stronger harmonic solve posture.
 3. Preserved runtime governance/result interfaces while advancing internal solver fidelity toward production Maxwell-form behavior.
 
+## Maxwell EM Bring-Up Status (Phase 14)
+
+1. Added region-consistent boundary/source governance metrics to EM diagnostics: `boundary_penalty_conditioning_contribution`, `source_region_energy_consistency_ratio`, and split harmonic residuals (`real_residual_norm`, `imag_residual_norm`).
+2. Surfaced these signals as first-class runtime contract outputs in `analysis.results` summary and `analysis.trends` breach-rate tracking with policy thresholds and typed quality reasons.
+3. Added two EM governance reference fixtures (`boundary_penalty_stress`, `multi_region_phased_source`) and extended conformance/baseline drift gating to cover the new metrics.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

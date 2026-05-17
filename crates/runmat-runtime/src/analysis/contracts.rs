@@ -226,6 +226,10 @@ pub enum QualityReasonCode {
     ElectromagneticFluxDivergenceHigh,
     ElectromagneticEnergyImbalanceHigh,
     ElectromagneticBoundaryEnergyLow,
+    ElectromagneticBoundaryPenaltyConditioningHigh,
+    ElectromagneticSourceRegionEnergyConsistencyLow,
+    ElectromagneticRealResidualHigh,
+    ElectromagneticImagResidualHigh,
     PlasticityNonlinearStress,
     ContactNonlinearStress,
     NonlinearResidualExceeded,
@@ -803,6 +807,10 @@ pub struct AnalysisResultsSummary {
     pub electromagnetic_flux_divergence_proxy: Option<f64>,
     pub electromagnetic_energy_imbalance_ratio: Option<f64>,
     pub electromagnetic_boundary_energy_ratio: Option<f64>,
+    pub electromagnetic_boundary_penalty_conditioning_contribution: Option<f64>,
+    pub electromagnetic_source_region_energy_consistency_ratio: Option<f64>,
+    pub electromagnetic_real_residual_norm: Option<f64>,
+    pub electromagnetic_imag_residual_norm: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -911,6 +919,10 @@ pub struct AnalysisTrendKindSummary {
     pub electromagnetic_divergence_breach_rate: Option<f64>,
     pub electromagnetic_energy_imbalance_breach_rate: Option<f64>,
     pub electromagnetic_boundary_energy_breach_rate: Option<f64>,
+    pub electromagnetic_boundary_penalty_contribution_breach_rate: Option<f64>,
+    pub electromagnetic_source_region_energy_consistency_breach_rate: Option<f64>,
+    pub electromagnetic_real_residual_breach_rate: Option<f64>,
+    pub electromagnetic_imag_residual_breach_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

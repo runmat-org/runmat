@@ -20,6 +20,10 @@ pub(crate) const EM_INSULATION_LEAKAGE_MAX_BALANCED: f64 = 0.55;
 pub(crate) const EM_FLUX_DIVERGENCE_MAX_BALANCED: f64 = 0.30;
 pub(crate) const EM_ENERGY_IMBALANCE_MAX_BALANCED: f64 = 0.40;
 pub(crate) const EM_BOUNDARY_ENERGY_MIN_BALANCED: f64 = 0.12;
+pub(crate) const EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED: f64 = 0.55;
+pub(crate) const EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED: f64 = 0.65;
+pub(crate) const EM_REAL_RESIDUAL_MAX_BALANCED: f64 = 0.30;
+pub(crate) const EM_IMAG_RESIDUAL_MAX_BALANCED: f64 = 0.65;
 
 pub(crate) fn thermo_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
     match policy {
@@ -69,11 +73,15 @@ pub(crate) fn electromagnetic_thresholds_for_policy(
     f64,
     f64,
     f64,
+    f64,
+    f64,
+    f64,
+    f64,
 ) {
     match policy {
         QualityPolicy::Strict => (
             1.5, 0.12, 0.95, 0.05, 0.45, 8.0e3, 0.85, 0.95, 0.9, 0.55, 0.35, 0.7, 0.9, 0.85, 0.4,
-            0.18, 0.25, 0.25,
+            0.18, 0.25, 0.25, 0.35, 0.80, 0.18, 0.50,
         ),
         QualityPolicy::Balanced => (
             EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
@@ -94,10 +102,14 @@ pub(crate) fn electromagnetic_thresholds_for_policy(
             EM_FLUX_DIVERGENCE_MAX_BALANCED,
             EM_ENERGY_IMBALANCE_MAX_BALANCED,
             EM_BOUNDARY_ENERGY_MIN_BALANCED,
+            EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED,
+            EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED,
+            EM_REAL_RESIDUAL_MAX_BALANCED,
+            EM_IMAG_RESIDUAL_MAX_BALANCED,
         ),
         QualityPolicy::Exploratory => (
             3.0, 0.35, 0.5, 0.65, 1.8, 1.5e5, 0.2, 0.35, 0.25, 0.95, 0.85, 0.15, 0.4, 0.35, 0.9,
-            0.8, 1.2, 0.03,
+            0.8, 1.2, 0.03, 0.9, 0.25, 0.85, 1.2,
         ),
     }
 }

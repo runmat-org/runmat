@@ -450,7 +450,11 @@ pub fn run_electromagnetic_with_options(
     let real_applied = apply_k(&summary.operator, &vector_potential_real);
     let imag_applied = apply_k(&summary.operator, &vector_potential_imag);
     let mut coupled_residual_sq_sum = 0.0_f64;
+    let mut real_residual_sq_sum = 0.0_f64;
+    let mut imag_residual_sq_sum = 0.0_f64;
     let mut equation_scale_sq_sum = 0.0_f64;
+    let mut real_equation_scale_sq_sum = 0.0_f64;
+    let mut imag_equation_scale_sq_sum = 0.0_f64;
     let mut rhs_sq_sum = 0.0_f64;
     for i in 0..node_count {
         if constrained[i] {
@@ -460,7 +464,15 @@ pub fn run_electromagnetic_with_options(
         let conductivity_real = conductivity_coupling_terms[i] * vector_potential_real[i];
         let residual_real = real_applied[i] - conductivity_imag - base_rhs[i];
         let residual_imag = imag_applied[i] + conductivity_real - rhs_imag[i];
+        real_residual_sq_sum += residual_real * residual_real;
+        imag_residual_sq_sum += residual_imag * residual_imag;
         coupled_residual_sq_sum += residual_real * residual_real + residual_imag * residual_imag;
+        real_equation_scale_sq_sum += real_applied[i] * real_applied[i]
+            + conductivity_imag * conductivity_imag
+            + base_rhs[i] * base_rhs[i];
+        imag_equation_scale_sq_sum += imag_applied[i] * imag_applied[i]
+            + conductivity_real * conductivity_real
+            + rhs_imag[i] * rhs_imag[i];
         equation_scale_sq_sum += real_applied[i] * real_applied[i]
             + conductivity_imag * conductivity_imag
             + base_rhs[i] * base_rhs[i]
@@ -471,6 +483,10 @@ pub fn run_electromagnetic_with_options(
     }
     let max_residual_norm =
         coupled_residual_sq_sum.sqrt() / equation_scale_sq_sum.sqrt().max(1.0e-9);
+    let real_residual_norm =
+        real_residual_sq_sum.sqrt() / real_equation_scale_sq_sum.sqrt().max(1.0e-9);
+    let imag_residual_norm =
+        imag_residual_sq_sum.sqrt() / imag_equation_scale_sq_sum.sqrt().max(1.0e-9);
     let rhs_imag_norm = rhs_imag
         .iter()
         .map(|value| value * value)
@@ -594,6 +610,25 @@ pub fn run_electromagnetic_with_options(
         )
     };
     let solver_conditioning_proxy = (max_diag / min_diag).max(1.0);
+    let boundary_penalty_conditioning_contribution =
+        ((vector_potential_ground_count as f64 / node_count as f64).clamp(0.0, 1.0)
+            * (solver_conditioning_proxy / (solver_conditioning_proxy + 1.0)))
+            .clamp(0.0, 1.0);
+    let mut region_source_energy = vec![0.0_f64; region_count];
+    let mut region_field_energy = vec![0.0_f64; region_count];
+    for i in 0..node_count {
+        let region_index = ((i * region_count) / node_count).min(region_count - 1);
+        region_source_energy[region_index] += source_distribution[i].abs();
+        region_field_energy[region_index] += vector_potential[i].abs();
+    }
+    let source_total = region_source_energy.iter().sum::<f64>().max(1.0e-9);
+    let field_total = region_field_energy.iter().sum::<f64>().max(1.0e-9);
+    let l1_mismatch = region_source_energy
+        .iter()
+        .zip(region_field_energy.iter())
+        .map(|(source, field)| (source / source_total - field / field_total).abs())
+        .sum::<f64>();
+    let source_region_energy_consistency_ratio = (1.0 - 0.5 * l1_mismatch).clamp(0.0, 1.0);
 
     diagnostics.push(FeaDiagnostic {
         code: "FEA_EM_STATIC".to_string(),
@@ -603,7 +638,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_proxy={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
+            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_proxy={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} boundary_penalty_conditioning_contribution={} source_region_energy_consistency_ratio={} real_residual_norm={} imag_residual_norm={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
             domain.enabled,
             domain.reference_frequency_hz,
             domain.applied_current_a,
@@ -631,6 +666,10 @@ pub fn run_electromagnetic_with_options(
             flux_divergence_proxy,
             energy_imbalance_ratio,
             boundary_energy_ratio,
+            boundary_penalty_conditioning_contribution,
+            source_region_energy_consistency_ratio,
+            real_residual_norm,
+            imag_residual_norm,
             reluctivity,
             effective_permittivity,
             max_residual_norm,

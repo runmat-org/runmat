@@ -30,14 +30,16 @@ use policy::{
     thermo_field_quality_thresholds_for_policy, thermo_gradient_thresholds_for_policy,
     thermo_thresholds_for_policy, EM_ASSIGNMENT_COVERAGE_MIN_BALANCED,
     EM_BOUNDARY_ANCHOR_MIN_BALANCED, EM_BOUNDARY_ENERGY_MIN_BALANCED,
-    EM_BOUNDARY_LOCALIZATION_MIN_BALANCED, EM_CONDITIONING_MAX_BALANCED,
-    EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED, EM_ENERGY_IMBALANCE_MAX_BALANCED,
-    EM_FALLBACK_COEFFICIENT_MAX_BALANCED, EM_FLUX_DIVERGENCE_MAX_BALANCED,
-    EM_GROUND_EFFECTIVENESS_MIN_BALANCED, EM_HETEROGENEITY_THRESHOLD_BALANCED,
-    EM_INSULATION_LEAKAGE_MAX_BALANCED, EM_REGION_CONTRAST_MAX_BALANCED,
-    EM_SOURCE_INTERFERENCE_MAX_BALANCED, EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED,
-    EM_SOURCE_OVERLAP_MAX_BALANCED, EM_SOURCE_REALIZATION_MIN_BALANCED,
-    EM_SOURCE_REGION_COVERAGE_MIN_BALANCED, THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
+    EM_BOUNDARY_LOCALIZATION_MIN_BALANCED, EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED,
+    EM_CONDITIONING_MAX_BALANCED, EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
+    EM_ENERGY_IMBALANCE_MAX_BALANCED, EM_FALLBACK_COEFFICIENT_MAX_BALANCED,
+    EM_FLUX_DIVERGENCE_MAX_BALANCED, EM_GROUND_EFFECTIVENESS_MIN_BALANCED,
+    EM_HETEROGENEITY_THRESHOLD_BALANCED, EM_IMAG_RESIDUAL_MAX_BALANCED,
+    EM_INSULATION_LEAKAGE_MAX_BALANCED, EM_REAL_RESIDUAL_MAX_BALANCED,
+    EM_REGION_CONTRAST_MAX_BALANCED, EM_SOURCE_INTERFERENCE_MAX_BALANCED,
+    EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED, EM_SOURCE_OVERLAP_MAX_BALANCED,
+    EM_SOURCE_REALIZATION_MIN_BALANCED, EM_SOURCE_REGION_COVERAGE_MIN_BALANCED,
+    EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED, THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
     THERMO_SPREAD_THRESHOLD_BALANCED,
 };
 
@@ -2705,6 +2707,20 @@ pub fn analysis_run_electromagnetic_with_options_op(
         diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "energy_imbalance_ratio");
     let em_boundary_energy_ratio =
         diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "boundary_energy_ratio");
+    let em_boundary_penalty_conditioning_contribution = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "boundary_penalty_conditioning_contribution",
+    );
+    let em_source_region_energy_consistency_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_EM_STATIC",
+        "source_region_energy_consistency_ratio",
+    );
+    let em_real_residual_norm =
+        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "real_residual_norm");
+    let em_imag_residual_norm =
+        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "imag_residual_norm");
     let (
         em_spread_threshold,
         em_heterogeneity_threshold,
@@ -2724,6 +2740,10 @@ pub fn analysis_run_electromagnetic_with_options_op(
         em_divergence_max_threshold,
         em_energy_imbalance_max_threshold,
         em_boundary_energy_min_threshold,
+        em_boundary_penalty_contribution_max_threshold,
+        em_source_region_energy_consistency_min_threshold,
+        em_real_residual_max_threshold,
+        em_imag_residual_max_threshold,
     ) = electromagnetic_thresholds_for_policy(options.quality_policy);
     let em_spread_breach = em_conductivity_spread_ratio
         .map(|value| value > em_spread_threshold)
@@ -2779,6 +2799,18 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let em_boundary_energy_breach = em_boundary_energy_ratio
         .map(|value| value < em_boundary_energy_min_threshold)
         .unwrap_or(false);
+    let em_boundary_penalty_contribution_breach = em_boundary_penalty_conditioning_contribution
+        .map(|value| value > em_boundary_penalty_contribution_max_threshold)
+        .unwrap_or(false);
+    let em_source_region_energy_consistency_breach = em_source_region_energy_consistency_ratio
+        .map(|value| value < em_source_region_energy_consistency_min_threshold)
+        .unwrap_or(false);
+    let em_real_residual_breach = em_real_residual_norm
+        .map(|value| value > em_real_residual_max_threshold)
+        .unwrap_or(false);
+    let em_imag_residual_breach = em_imag_residual_norm
+        .map(|value| value > em_imag_residual_max_threshold)
+        .unwrap_or(false);
     if (em_spread_breach
         || em_heterogeneity_breach
         || em_coverage_breach
@@ -2796,7 +2828,11 @@ pub fn analysis_run_electromagnetic_with_options_op(
         || em_insulation_leakage_breach
         || em_divergence_breach
         || em_energy_imbalance_breach
-        || em_boundary_energy_breach)
+        || em_boundary_energy_breach
+        || em_boundary_penalty_contribution_breach
+        || em_source_region_energy_consistency_breach
+        || em_real_residual_breach
+        || em_imag_residual_breach)
         && result_quality == QualityGate::Pass
     {
         result_quality = QualityGate::Warn;
@@ -2990,6 +3026,46 @@ pub fn analysis_run_electromagnetic_with_options_op(
                 "electromagnetic boundary energy ratio {} is below threshold {}",
                 em_boundary_energy_ratio.unwrap_or(0.0),
                 em_boundary_energy_min_threshold
+            ),
+        });
+    }
+    if em_boundary_penalty_contribution_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticBoundaryPenaltyConditioningHigh,
+            detail: format!(
+                "electromagnetic boundary penalty conditioning contribution {} exceeds threshold {}",
+                em_boundary_penalty_conditioning_contribution.unwrap_or(0.0),
+                em_boundary_penalty_contribution_max_threshold
+            ),
+        });
+    }
+    if em_source_region_energy_consistency_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticSourceRegionEnergyConsistencyLow,
+            detail: format!(
+                "electromagnetic source-region energy consistency ratio {} is below threshold {}",
+                em_source_region_energy_consistency_ratio.unwrap_or(0.0),
+                em_source_region_energy_consistency_min_threshold
+            ),
+        });
+    }
+    if em_real_residual_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticRealResidualHigh,
+            detail: format!(
+                "electromagnetic real residual norm {} exceeds threshold {}",
+                em_real_residual_norm.unwrap_or(0.0),
+                em_real_residual_max_threshold
+            ),
+        });
+    }
+    if em_imag_residual_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticImagResidualHigh,
+            detail: format!(
+                "electromagnetic imaginary residual norm {} exceeds threshold {}",
+                em_imag_residual_norm.unwrap_or(0.0),
+                em_imag_residual_max_threshold
             ),
         });
     }
@@ -3618,6 +3694,26 @@ pub fn analysis_results_op(
         "FEA_EM_STATIC",
         "boundary_energy_ratio",
     );
+    let electromagnetic_boundary_penalty_conditioning_contribution = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "boundary_penalty_conditioning_contribution",
+    );
+    let electromagnetic_source_region_energy_consistency_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "source_region_energy_consistency_ratio",
+    );
+    let electromagnetic_real_residual_norm = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "real_residual_norm",
+    );
+    let electromagnetic_imag_residual_norm = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "imag_residual_norm",
+    );
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -3711,6 +3807,10 @@ pub fn analysis_results_op(
         electromagnetic_flux_divergence_proxy,
         electromagnetic_energy_imbalance_ratio,
         electromagnetic_boundary_energy_ratio,
+        electromagnetic_boundary_penalty_conditioning_contribution,
+        electromagnetic_source_region_energy_consistency_ratio,
+        electromagnetic_real_residual_norm,
+        electromagnetic_imag_residual_norm,
     };
 
     let modal_results = if query.include_modal_results {
@@ -4644,6 +4744,62 @@ pub fn analysis_trends_op(
             } else {
                 None
             };
+        let electromagnetic_boundary_penalty_contribution_breach_rate =
+            if kind == AnalysisRunKind::Electromagnetic {
+                let values = entries
+                    .iter()
+                    .filter_map(|run| {
+                        diagnostic_metric(
+                            &run.run.diagnostics,
+                            "FEA_EM_STATIC",
+                            "boundary_penalty_conditioning_contribution",
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                breach_rate_greater_than(&values, EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED)
+            } else {
+                None
+            };
+        let electromagnetic_source_region_energy_consistency_breach_rate =
+            if kind == AnalysisRunKind::Electromagnetic {
+                let values = entries
+                    .iter()
+                    .filter_map(|run| {
+                        diagnostic_metric(
+                            &run.run.diagnostics,
+                            "FEA_EM_STATIC",
+                            "source_region_energy_consistency_ratio",
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                breach_rate_less_than(&values, EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED)
+            } else {
+                None
+            };
+        let electromagnetic_real_residual_breach_rate = if kind == AnalysisRunKind::Electromagnetic
+        {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(&run.run.diagnostics, "FEA_EM_STATIC", "real_residual_norm")
+                })
+                .collect::<Vec<_>>();
+            breach_rate_greater_than(&values, EM_REAL_RESIDUAL_MAX_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_imag_residual_breach_rate = if kind == AnalysisRunKind::Electromagnetic
+        {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(&run.run.diagnostics, "FEA_EM_STATIC", "imag_residual_norm")
+                })
+                .collect::<Vec<_>>();
+            breach_rate_greater_than(&values, EM_IMAG_RESIDUAL_MAX_BALANCED)
+        } else {
+            None
+        };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -4690,6 +4846,10 @@ pub fn analysis_trends_op(
             electromagnetic_divergence_breach_rate,
             electromagnetic_energy_imbalance_breach_rate,
             electromagnetic_boundary_energy_breach_rate,
+            electromagnetic_boundary_penalty_contribution_breach_rate,
+            electromagnetic_source_region_energy_consistency_breach_rate,
+            electromagnetic_real_residual_breach_rate,
+            electromagnetic_imag_residual_breach_rate,
         });
     }
 

@@ -7,6 +7,8 @@ const EM_READINESS_TARGET_FIXTURES: &[&str] = &[
     "electromagnetic_reference_fallback_heavy_gpu_provider",
     "electromagnetic_reference_overlap_interference_gpu_provider",
     "electromagnetic_reference_boundary_kernel_gpu_provider",
+    "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+    "electromagnetic_reference_multi_region_phased_source_gpu_provider",
 ];
 const EM_MAX_READINESS_RELATIVE_DRIFT: f64 = 0.25;
 const EM_MAX_READINESS_ABSOLUTE_DRIFT: f64 = 0.05;
@@ -428,6 +430,46 @@ pub(super) fn check_rolling_baseline_drift(
                 EM_MAX_READINESS_ABSOLUTE_DRIFT,
                 failures,
             );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_boundary_penalty_conditioning_contribution",
+                history,
+                current_record.electromagnetic_boundary_penalty_conditioning_contribution,
+                |record| record.electromagnetic_boundary_penalty_conditioning_contribution,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_source_region_energy_consistency_ratio",
+                history,
+                current_record.electromagnetic_source_region_energy_consistency_ratio,
+                |record| record.electromagnetic_source_region_energy_consistency_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_real_residual_norm",
+                history,
+                current_record.electromagnetic_real_residual_norm,
+                |record| record.electromagnetic_real_residual_norm,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_imag_residual_norm",
+                history,
+                current_record.electromagnetic_imag_residual_norm,
+                |record| record.electromagnetic_imag_residual_norm,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
         }
     }
 }
@@ -613,6 +655,42 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_boundary_energy_ratio",
                 baseline_record.electromagnetic_boundary_energy_ratio,
                 current_record.electromagnetic_boundary_energy_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_boundary_penalty_conditioning_contribution",
+                baseline_record.electromagnetic_boundary_penalty_conditioning_contribution,
+                current_record.electromagnetic_boundary_penalty_conditioning_contribution,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_source_region_energy_consistency_ratio",
+                baseline_record.electromagnetic_source_region_energy_consistency_ratio,
+                current_record.electromagnetic_source_region_energy_consistency_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_real_residual_norm",
+                baseline_record.electromagnetic_real_residual_norm,
+                current_record.electromagnetic_real_residual_norm,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_imag_residual_norm",
+                baseline_record.electromagnetic_imag_residual_norm,
+                current_record.electromagnetic_imag_residual_norm,
                 EM_MAX_READINESS_RELATIVE_DRIFT,
                 EM_MAX_READINESS_ABSOLUTE_DRIFT,
                 failures,
