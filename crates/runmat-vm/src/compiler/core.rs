@@ -986,10 +986,10 @@ impl Compiler {
                     }));
                     index_count += 1;
                 }
-                _ => {
-                    return Err(self.compile_error(
-                        "MIR cell selector lowering only supports colon, expression/logical operands, and end/end-k",
-                    ))
+                MirIndexComponent::End { offset, .. } => {
+                    return Err(self.compile_error(format!(
+                        "MIR cell selector lowering does not support end+{offset} selectors in this path"
+                    )))
                 }
             }
         }
@@ -1973,6 +1973,11 @@ impl Compiler {
                         *offset as f64
                     }));
                 }
+                MirIndexComponent::End { offset, .. } => {
+                    return Err(self.compile_error(format!(
+                    "MIR cell index lowering does not support end+{offset} selectors in this path"
+                )))
+                }
                 _ => {
                     return Err(self.compile_error(
                         "MIR cell index lowering expects expression/logical selectors or end/end-k",
@@ -1997,6 +2002,11 @@ impl Compiler {
                     } else {
                         *offset as f64
                     }));
+                }
+                MirIndexComponent::End { offset, .. } => {
+                    return Err(self.compile_error(format!(
+                    "MIR cell index lowering does not support end+{offset} selectors in this path"
+                )))
                 }
                 _ => {
                     return Err(self.compile_error(
