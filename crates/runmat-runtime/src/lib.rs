@@ -220,6 +220,14 @@ async fn call_method_builtin(
     method: String,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    fn qualified_method_name(class_name: &str, method: &str) -> String {
+        if class_name.is_empty() {
+            method.to_string()
+        } else {
+            format!("{class_name}.{method}")
+        }
+    }
+
     async fn dispatch_with_current_outputs(
         name: &str,
         args: &[Value],
@@ -235,7 +243,7 @@ async fn call_method_builtin(
     match base {
         Value::Object(obj) => {
             // Simple dynamic dispatch via builtin registry: method name may be qualified as Class.method
-            let qualified = format!("{}.{}", obj.class_name, method);
+            let qualified = qualified_method_name(&obj.class_name, &method);
             // Prepend receiver as first arg so methods can accept it
             let mut args = Vec::with_capacity(1 + rest.len());
             args.push(Value::Object(obj.clone()));
@@ -254,7 +262,7 @@ async fn call_method_builtin(
                 Value::Struct(_) => h.class_name.clone(),
                 _ => h.class_name.clone(),
             };
-            let qualified = format!("{class_name}.{method}");
+            let qualified = qualified_method_name(&class_name, &method);
             let mut args = Vec::with_capacity(1 + rest.len());
             args.push(Value::HandleObject(h.clone()));
             args.extend(rest);
@@ -277,6 +285,14 @@ async fn subsasgn_dispatch(
     payload: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<Value> {
+    fn qualified_method_name(class_name: &str, method: &str) -> String {
+        if class_name.is_empty() {
+            method.to_string()
+        } else {
+            format!("{class_name}.{method}")
+        }
+    }
+
     async fn dispatch_with_current_outputs(
         name: &str,
         args: &[Value],
@@ -291,7 +307,7 @@ async fn subsasgn_dispatch(
 
     match &obj {
         Value::Object(o) => {
-            let qualified = format!("{}.{}", o.class_name, OBJECT_SUBSASGN_METHOD);
+            let qualified = qualified_method_name(&o.class_name, OBJECT_SUBSASGN_METHOD);
             Ok(
                 dispatch_with_current_outputs(
                     &qualified,
@@ -306,7 +322,7 @@ async fn subsasgn_dispatch(
                 Value::Object(o) => o.class_name.clone(),
                 _ => h.class_name.clone(),
             };
-            let qualified = format!("{class_name}.{OBJECT_SUBSASGN_METHOD}");
+            let qualified = qualified_method_name(&class_name, OBJECT_SUBSASGN_METHOD);
             Ok(
                 dispatch_with_current_outputs(
                     &qualified,
@@ -321,6 +337,14 @@ async fn subsasgn_dispatch(
 
 #[runmat_macros::runtime_builtin(name = "subsref", builtin_path = "crate")]
 async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
+    fn qualified_method_name(class_name: &str, method: &str) -> String {
+        if class_name.is_empty() {
+            method.to_string()
+        } else {
+            format!("{class_name}.{method}")
+        }
+    }
+
     async fn dispatch_with_current_outputs(
         name: &str,
         args: &[Value],
@@ -335,7 +359,7 @@ async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::Bu
 
     match &obj {
         Value::Object(o) => {
-            let qualified = format!("{}.{}", o.class_name, OBJECT_SUBSREF_METHOD);
+            let qualified = qualified_method_name(&o.class_name, OBJECT_SUBSREF_METHOD);
             Ok(
                 dispatch_with_current_outputs(&qualified, &[obj, Value::String(kind), payload])
                     .await?,
@@ -347,7 +371,7 @@ async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::Bu
                 Value::Object(o) => o.class_name.clone(),
                 _ => h.class_name.clone(),
             };
-            let qualified = format!("{class_name}.{OBJECT_SUBSREF_METHOD}");
+            let qualified = qualified_method_name(&class_name, OBJECT_SUBSREF_METHOD);
             Ok(
                 dispatch_with_current_outputs(&qualified, &[obj, Value::String(kind), payload])
                     .await?,
