@@ -49,6 +49,7 @@ Last updated: 2026-05-17
    Baseline increment landed: release-readiness Maxwell posture governance now also consumes boundary-penalty residual norm assertions (`em_boundary_penalty_real_residual_norm`, `em_boundary_penalty_imag_residual_norm`) and phased-source overlap/interference assertions (`em_phased_source_overlap_ratio`, `em_phased_source_interference_index`) with profile-tuned maxima, so boundary/phased fidelity regressions are branch-gated alongside other EM posture signals.
    Baseline increment landed: release-readiness Maxwell posture governance now also evaluates rolling worsening ratios for boundary-penalty residual norm and phased-source overlap/interference assertions, so boundary/phased baseline-relative fidelity drift is branch-gated alongside static threshold posture.
    Baseline increment landed: release-readiness Maxwell posture governance now also consumes non-core sparse/fallback/overlap/boundary-kernel assertion thresholds (assignment/fallback/source coverage/material alignment/boundary anchor/interference/localization/leakage signals), so non-core fixture posture regressions are branch-gated alongside core Maxwell posture signals.
+   Baseline increment landed: release-readiness Maxwell posture governance now also evaluates rolling worsening ratios for non-core sparse/fallback/overlap/boundary-kernel assertion signals, so non-core fixture baseline-relative fidelity drift is branch-gated alongside static posture thresholds.
 
 ## Next Recommended EM Slice
 

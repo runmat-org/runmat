@@ -146,6 +146,21 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_LOCALIZATION_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO": "1e-16",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.95",
@@ -274,6 +289,21 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_LOCALIZATION_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO": "1e-15",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.85",
@@ -402,6 +432,21 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_LOCALIZATION_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO": "1e-14",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.7",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.7",
@@ -1482,6 +1527,141 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_max_sparse_assignment_coverage_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_sparse_fallback_coefficient_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_FALLBACK_COEFFICIENT_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_sparse_source_region_coverage_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_sparse_source_material_alignment_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_sparse_boundary_anchor_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_BOUNDARY_ANCHOR_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_SPARSE_BOUNDARY_ANCHOR_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_fallback_heavy_assignment_coverage_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_fallback_heavy_fallback_coefficient_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_fallback_heavy_source_region_coverage_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_fallback_heavy_boundary_anchor_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_overlap_source_region_coverage_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_overlap_source_material_alignment_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_overlap_source_interference_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_INTERFERENCE_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_boundary_kernel_localization_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_LOCALIZATION_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_LOCALIZATION_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_boundary_kernel_insulation_leakage_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_KERNEL_INSULATION_LEAKAGE_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
     em_min_dispersive_phase_attenuation_mean_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN",
@@ -2055,6 +2235,21 @@ def evaluate_release_readiness(
     em_boundary_penalty_imag_residual_norm_trend_ratio = None
     em_phased_source_overlap_trend_ratio = None
     em_phased_source_interference_trend_ratio = None
+    em_sparse_assignment_coverage_drop_trend_ratio = None
+    em_sparse_fallback_coefficient_trend_ratio = None
+    em_sparse_source_region_coverage_drop_trend_ratio = None
+    em_sparse_source_material_alignment_drop_trend_ratio = None
+    em_sparse_boundary_anchor_drop_trend_ratio = None
+    em_fallback_heavy_assignment_coverage_drop_trend_ratio = None
+    em_fallback_heavy_fallback_coefficient_drop_trend_ratio = None
+    em_fallback_heavy_source_region_coverage_drop_trend_ratio = None
+    em_fallback_heavy_boundary_anchor_drop_trend_ratio = None
+    em_overlap_source_region_coverage_drop_trend_ratio = None
+    em_overlap_source_material_alignment_drop_trend_ratio = None
+    em_overlap_source_interference_trend_ratio = None
+    em_boundary_kernel_localization_drop_trend_ratio = None
+    em_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio = None
+    em_boundary_kernel_insulation_leakage_trend_ratio = None
     plastic_max_nonlinear_severity = None
     plastic_load_realization_ratio_min = None
     plastic_load_realization_ratio_max = None
@@ -4293,6 +4488,309 @@ def evaluate_release_readiness(
                 )
             )
 
+        em_sparse_assignment_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_sparse_assignment_coverage_ratio"
+        )
+        if (
+            em_sparse_assignment_coverage_drop_trend_ratio is not None
+            and em_sparse_assignment_coverage_drop_trend_ratio
+            > em_max_sparse_assignment_coverage_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_SPARSE_ASSIGNMENT_COVERAGE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM sparse assignment coverage drop trend ratio "
+                        f"{em_sparse_assignment_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_sparse_assignment_coverage_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_sparse_fallback_coefficient_trend_ratio = fixture_assertion_trend_ratio(
+            "em_sparse_fallback_coefficient_ratio",
+            ratio_mode="increase",
+        )
+        if (
+            em_sparse_fallback_coefficient_trend_ratio is not None
+            and em_sparse_fallback_coefficient_trend_ratio
+            > em_max_sparse_fallback_coefficient_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_SPARSE_FALLBACK_COEFFICIENT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM sparse fallback coefficient trend ratio "
+                        f"{em_sparse_fallback_coefficient_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_sparse_fallback_coefficient_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_sparse_source_region_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_sparse_source_region_coverage_ratio"
+        )
+        if (
+            em_sparse_source_region_coverage_drop_trend_ratio is not None
+            and em_sparse_source_region_coverage_drop_trend_ratio
+            > em_max_sparse_source_region_coverage_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_SPARSE_SOURCE_REGION_COVERAGE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM sparse source-region coverage drop trend ratio "
+                        f"{em_sparse_source_region_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_sparse_source_region_coverage_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_sparse_source_material_alignment_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_sparse_source_material_alignment_ratio"
+        )
+        if (
+            em_sparse_source_material_alignment_drop_trend_ratio is not None
+            and em_sparse_source_material_alignment_drop_trend_ratio
+            > em_max_sparse_source_material_alignment_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_SPARSE_SOURCE_MATERIAL_ALIGNMENT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM sparse source-material alignment drop trend ratio "
+                        f"{em_sparse_source_material_alignment_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_sparse_source_material_alignment_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_sparse_boundary_anchor_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_sparse_boundary_anchor_ratio"
+        )
+        if (
+            em_sparse_boundary_anchor_drop_trend_ratio is not None
+            and em_sparse_boundary_anchor_drop_trend_ratio
+            > em_max_sparse_boundary_anchor_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_SPARSE_BOUNDARY_ANCHOR_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM sparse boundary-anchor drop trend ratio "
+                        f"{em_sparse_boundary_anchor_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_sparse_boundary_anchor_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_fallback_heavy_assignment_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_fallback_heavy_assignment_coverage_ratio"
+        )
+        if (
+            em_fallback_heavy_assignment_coverage_drop_trend_ratio is not None
+            and em_fallback_heavy_assignment_coverage_drop_trend_ratio
+            > em_max_fallback_heavy_assignment_coverage_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_FALLBACK_HEAVY_ASSIGNMENT_COVERAGE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM fallback-heavy assignment coverage drop trend ratio "
+                        f"{em_fallback_heavy_assignment_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_fallback_heavy_assignment_coverage_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_fallback_heavy_fallback_coefficient_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_fallback_heavy_fallback_coefficient_ratio"
+        )
+        if (
+            em_fallback_heavy_fallback_coefficient_drop_trend_ratio is not None
+            and em_fallback_heavy_fallback_coefficient_drop_trend_ratio
+            > em_max_fallback_heavy_fallback_coefficient_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_FALLBACK_HEAVY_FALLBACK_COEFFICIENT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM fallback-heavy fallback coefficient drop trend ratio "
+                        f"{em_fallback_heavy_fallback_coefficient_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_fallback_heavy_fallback_coefficient_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_fallback_heavy_source_region_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_fallback_heavy_source_region_coverage_ratio"
+        )
+        if (
+            em_fallback_heavy_source_region_coverage_drop_trend_ratio is not None
+            and em_fallback_heavy_source_region_coverage_drop_trend_ratio
+            > em_max_fallback_heavy_source_region_coverage_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_FALLBACK_HEAVY_SOURCE_REGION_COVERAGE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM fallback-heavy source-region coverage drop trend ratio "
+                        f"{em_fallback_heavy_source_region_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_fallback_heavy_source_region_coverage_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_fallback_heavy_boundary_anchor_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_fallback_heavy_boundary_anchor_ratio"
+        )
+        if (
+            em_fallback_heavy_boundary_anchor_drop_trend_ratio is not None
+            and em_fallback_heavy_boundary_anchor_drop_trend_ratio
+            > em_max_fallback_heavy_boundary_anchor_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_FALLBACK_HEAVY_BOUNDARY_ANCHOR_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM fallback-heavy boundary-anchor drop trend ratio "
+                        f"{em_fallback_heavy_boundary_anchor_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_fallback_heavy_boundary_anchor_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_overlap_source_region_coverage_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_overlap_source_region_coverage_ratio"
+        )
+        if (
+            em_overlap_source_region_coverage_drop_trend_ratio is not None
+            and em_overlap_source_region_coverage_drop_trend_ratio
+            > em_max_overlap_source_region_coverage_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_OVERLAP_SOURCE_REGION_COVERAGE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM overlap source-region coverage drop trend ratio "
+                        f"{em_overlap_source_region_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_overlap_source_region_coverage_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_overlap_source_material_alignment_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_overlap_source_material_alignment_ratio"
+        )
+        if (
+            em_overlap_source_material_alignment_drop_trend_ratio is not None
+            and em_overlap_source_material_alignment_drop_trend_ratio
+            > em_max_overlap_source_material_alignment_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM overlap source-material alignment drop trend ratio "
+                        f"{em_overlap_source_material_alignment_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_overlap_source_material_alignment_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_overlap_source_interference_trend_ratio = fixture_assertion_trend_ratio(
+            "em_overlap_source_interference_index",
+            ratio_mode="increase",
+        )
+        if (
+            em_overlap_source_interference_trend_ratio is not None
+            and em_overlap_source_interference_trend_ratio
+            > em_max_overlap_source_interference_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_OVERLAP_SOURCE_INTERFERENCE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM overlap source-interference trend ratio "
+                        f"{em_overlap_source_interference_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_overlap_source_interference_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_boundary_kernel_localization_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_boundary_kernel_boundary_localization_ratio"
+        )
+        if (
+            em_boundary_kernel_localization_drop_trend_ratio is not None
+            and em_boundary_kernel_localization_drop_trend_ratio
+            > em_max_boundary_kernel_localization_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_BOUNDARY_KERNEL_LOCALIZATION_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM boundary-kernel localization drop trend ratio "
+                        f"{em_boundary_kernel_localization_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_boundary_kernel_localization_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_boundary_kernel_ground_anchor_effectiveness_ratio"
+        )
+        if (
+            em_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio is not None
+            and em_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio
+            > em_max_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_BOUNDARY_KERNEL_GROUND_ANCHOR_EFFECTIVENESS_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM boundary-kernel ground-anchor effectiveness drop trend ratio "
+                        f"{em_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_boundary_kernel_insulation_leakage_trend_ratio = fixture_assertion_trend_ratio(
+            "em_boundary_kernel_insulation_leakage_proxy",
+            ratio_mode="increase",
+        )
+        if (
+            em_boundary_kernel_insulation_leakage_trend_ratio is not None
+            and em_boundary_kernel_insulation_leakage_trend_ratio
+            > em_max_boundary_kernel_insulation_leakage_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_BOUNDARY_KERNEL_INSULATION_LEAKAGE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM boundary-kernel insulation leakage trend ratio "
+                        f"{em_boundary_kernel_insulation_leakage_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_boundary_kernel_insulation_leakage_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         plastic_trend_ratio = fixture_trend_ratio("plastic_nonlinear_severity")
         if (
             plastic_trend_ratio is not None
@@ -4888,6 +5386,36 @@ def evaluate_release_readiness(
         "em_max_phased_source_overlap_trend_ratio_threshold": em_max_phased_source_overlap_trend_ratio_threshold,
         "em_phased_source_interference_trend_ratio": em_phased_source_interference_trend_ratio,
         "em_max_phased_source_interference_trend_ratio_threshold": em_max_phased_source_interference_trend_ratio_threshold,
+        "em_sparse_assignment_coverage_drop_trend_ratio": em_sparse_assignment_coverage_drop_trend_ratio,
+        "em_max_sparse_assignment_coverage_drop_trend_ratio_threshold": em_max_sparse_assignment_coverage_drop_trend_ratio_threshold,
+        "em_sparse_fallback_coefficient_trend_ratio": em_sparse_fallback_coefficient_trend_ratio,
+        "em_max_sparse_fallback_coefficient_trend_ratio_threshold": em_max_sparse_fallback_coefficient_trend_ratio_threshold,
+        "em_sparse_source_region_coverage_drop_trend_ratio": em_sparse_source_region_coverage_drop_trend_ratio,
+        "em_max_sparse_source_region_coverage_drop_trend_ratio_threshold": em_max_sparse_source_region_coverage_drop_trend_ratio_threshold,
+        "em_sparse_source_material_alignment_drop_trend_ratio": em_sparse_source_material_alignment_drop_trend_ratio,
+        "em_max_sparse_source_material_alignment_drop_trend_ratio_threshold": em_max_sparse_source_material_alignment_drop_trend_ratio_threshold,
+        "em_sparse_boundary_anchor_drop_trend_ratio": em_sparse_boundary_anchor_drop_trend_ratio,
+        "em_max_sparse_boundary_anchor_drop_trend_ratio_threshold": em_max_sparse_boundary_anchor_drop_trend_ratio_threshold,
+        "em_fallback_heavy_assignment_coverage_drop_trend_ratio": em_fallback_heavy_assignment_coverage_drop_trend_ratio,
+        "em_max_fallback_heavy_assignment_coverage_drop_trend_ratio_threshold": em_max_fallback_heavy_assignment_coverage_drop_trend_ratio_threshold,
+        "em_fallback_heavy_fallback_coefficient_drop_trend_ratio": em_fallback_heavy_fallback_coefficient_drop_trend_ratio,
+        "em_max_fallback_heavy_fallback_coefficient_drop_trend_ratio_threshold": em_max_fallback_heavy_fallback_coefficient_drop_trend_ratio_threshold,
+        "em_fallback_heavy_source_region_coverage_drop_trend_ratio": em_fallback_heavy_source_region_coverage_drop_trend_ratio,
+        "em_max_fallback_heavy_source_region_coverage_drop_trend_ratio_threshold": em_max_fallback_heavy_source_region_coverage_drop_trend_ratio_threshold,
+        "em_fallback_heavy_boundary_anchor_drop_trend_ratio": em_fallback_heavy_boundary_anchor_drop_trend_ratio,
+        "em_max_fallback_heavy_boundary_anchor_drop_trend_ratio_threshold": em_max_fallback_heavy_boundary_anchor_drop_trend_ratio_threshold,
+        "em_overlap_source_region_coverage_drop_trend_ratio": em_overlap_source_region_coverage_drop_trend_ratio,
+        "em_max_overlap_source_region_coverage_drop_trend_ratio_threshold": em_max_overlap_source_region_coverage_drop_trend_ratio_threshold,
+        "em_overlap_source_material_alignment_drop_trend_ratio": em_overlap_source_material_alignment_drop_trend_ratio,
+        "em_max_overlap_source_material_alignment_drop_trend_ratio_threshold": em_max_overlap_source_material_alignment_drop_trend_ratio_threshold,
+        "em_overlap_source_interference_trend_ratio": em_overlap_source_interference_trend_ratio,
+        "em_max_overlap_source_interference_trend_ratio_threshold": em_max_overlap_source_interference_trend_ratio_threshold,
+        "em_boundary_kernel_localization_drop_trend_ratio": em_boundary_kernel_localization_drop_trend_ratio,
+        "em_max_boundary_kernel_localization_drop_trend_ratio_threshold": em_max_boundary_kernel_localization_drop_trend_ratio_threshold,
+        "em_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio": em_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio,
+        "em_max_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio_threshold": em_max_boundary_kernel_ground_anchor_effectiveness_drop_trend_ratio_threshold,
+        "em_boundary_kernel_insulation_leakage_trend_ratio": em_boundary_kernel_insulation_leakage_trend_ratio,
+        "em_max_boundary_kernel_insulation_leakage_trend_ratio_threshold": em_max_boundary_kernel_insulation_leakage_trend_ratio_threshold,
         "plastic_max_nonlinear_severity": plastic_max_nonlinear_severity,
         "plastic_max_nonlinear_severity_threshold": plastic_max_nonlinear_severity_threshold,
         "plastic_load_realization_ratio_min": plastic_load_realization_ratio_min,
