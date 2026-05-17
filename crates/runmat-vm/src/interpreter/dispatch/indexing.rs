@@ -12,9 +12,7 @@ use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
 use crate::indexing::read_linear as idx_read_linear;
 use crate::indexing::read_slice as idx_read_slice;
-use crate::indexing::selectors::{
-    build_slice_selectors, index_scalar_from_value, indices_from_value_linear,
-};
+use crate::indexing::selectors::{build_slice_selectors, index_scalar_from_value, SliceSelector};
 use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
 use runmat_builtins::Value;
@@ -762,28 +760,29 @@ where
                 ),
                 other => {
                     if *dims == 1 {
-                        let is_colon = (*colon_mask & 1u32) != 0;
-                        let is_end = (*end_mask & 1u32) != 0;
-                        if is_colon {
+                        if (*colon_mask & 1u32) != 0 {
                             return Err(crate::interpreter::errors::mex(
                                 "SliceNonTensor",
                                 "Slicing only supported on tensors",
                             ));
                         }
-                        let linear_indices: Vec<f64> = if is_end {
-                            vec![1.0]
-                        } else {
-                            let value = numeric.first().ok_or_else(|| {
-                                crate::interpreter::errors::mex(
-                                    "MissingNumericIndex",
-                                    "missing numeric index for linear slice",
-                                )
-                            })?;
-                            indices_from_value_linear(value, 1)
-                                .await?
-                                .into_iter()
-                                .map(|idx| idx as f64)
-                                .collect()
+                        let selectors =
+                            build_slice_selectors(1, *colon_mask, *end_mask, &numeric, &[1usize])
+                                .await?;
+                        let linear_indices: Vec<f64> = match selectors.first() {
+                            Some(SliceSelector::Scalar(index)) => vec![*index as f64],
+                            Some(SliceSelector::Indices(indices)) => {
+                                indices.iter().map(|&index| index as f64).collect()
+                            }
+                            Some(SliceSelector::LinearIndices { values, .. }) => {
+                                values.iter().map(|&index| index as f64).collect()
+                            }
+                            Some(SliceSelector::Colon) | None => {
+                                return Err(crate::interpreter::errors::mex(
+                                    "SliceNonTensor",
+                                    "Slicing only supported on tensors",
+                                ));
+                            }
                         };
                         let v = runmat_runtime::perform_indexing(&other, &linear_indices)
                             .await
