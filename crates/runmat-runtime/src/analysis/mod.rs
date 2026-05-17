@@ -805,6 +805,7 @@ pub fn analysis_plan_study_op(
             model_id: spec.create_model_intent.model_id.clone(),
             run_kind: spec.run_kind,
             backend: spec.backend,
+            electromagnetic_run_options: spec.electromagnetic_run_options.clone(),
             operation_sequence,
             study_fingerprint,
             evidence_artifact_path,
@@ -851,6 +852,12 @@ pub fn analysis_run_study_op(
         &ReferenceFrame::Global,
         context.clone(),
     )?;
+    let resolved_electromagnetic_run_options = if spec.run_kind == AnalysisRunKind::Electromagnetic
+    {
+        Some(spec.electromagnetic_run_options.clone().unwrap_or_default())
+    } else {
+        None
+    };
 
     let run_envelope = match spec.run_kind {
         AnalysisRunKind::LinearStatic => {
@@ -877,7 +884,9 @@ pub fn analysis_run_study_op(
         AnalysisRunKind::Electromagnetic => analysis_run_electromagnetic_with_options_op(
             &created.data,
             spec.backend,
-            spec.electromagnetic_run_options.clone().unwrap_or_default(),
+            resolved_electromagnetic_run_options
+                .clone()
+                .unwrap_or_default(),
             context.clone(),
         ),
     }?;
@@ -892,6 +901,7 @@ pub fn analysis_run_study_op(
             "run_kind": spec.run_kind,
             "backend": spec.backend,
             "electromagnetic_run_options": spec.electromagnetic_run_options.clone(),
+            "resolved_electromagnetic_run_options": resolved_electromagnetic_run_options.clone(),
             "study_fingerprint": study_fingerprint.clone(),
             "operation_sequence": operation_sequence.clone(),
             "run_id": run_envelope.data.run_id.clone(),
@@ -927,6 +937,7 @@ pub fn analysis_run_study_op(
             model_id: created.data.model_id.0.clone(),
             run_kind: spec.run_kind,
             backend: spec.backend,
+            electromagnetic_run_options: resolved_electromagnetic_run_options,
             study_fingerprint,
             operation_sequence,
             run_id: run_envelope.data.run_id,

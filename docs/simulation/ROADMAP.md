@@ -141,3 +141,5 @@ Progress update (2026-05-17):
     `validate_analysis_report_nonlinear.py` now requires sparse-assignments, fallback-heavy, overlap-interference, and boundary-kernel EM provider fixture assertion sets plus finite GPU performance telemetry fields, broadening Maxwell schema-governance coverage beyond the original core EM fixtures.
 37. [x] Study workflow EM option propagation and validation landed:
     additive `AnalysisStudySpec.electromagnetic_run_options` is now validated by `analysis.validate_study/v1`, rejected when used on non-EM run kinds, and routed by `analysis.run_study/v1` into `analysis.run_electromagnetic/v1`; electromagnetic create-model profile defaults now seed an EM domain so study-driven EM runs are executable under canonical study workflows.
+38. [x] Study workflow typed outputs now surface EM execution options:
+    additive `analysis.plan_study/v1` and `analysis.run_study/v1` typed payloads now include `electromagnetic_run_options`, with run-study reporting resolved EM defaults when options are omitted, improving programmatic reproducibility without requiring artifact JSON inspection.

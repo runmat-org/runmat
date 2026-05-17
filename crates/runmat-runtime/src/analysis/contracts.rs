@@ -1050,6 +1050,8 @@ pub struct AnalysisStudyPlanData {
     pub model_id: String,
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
+    #[serde(default)]
+    pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
     pub operation_sequence: Vec<String>,
     pub study_fingerprint: String,
     pub evidence_artifact_path: String,
@@ -1061,6 +1063,8 @@ pub struct AnalysisStudyRunData {
     pub model_id: String,
     pub run_kind: AnalysisRunKind,
     pub backend: ComputeBackend,
+    #[serde(default)]
+    pub electromagnetic_run_options: Option<AnalysisElectromagneticRunOptions>,
     pub study_fingerprint: String,
     pub operation_sequence: Vec<String>,
     pub run_id: String,

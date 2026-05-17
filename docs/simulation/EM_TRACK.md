@@ -26,6 +26,7 @@ Last updated: 2026-05-17
 4. Continued robustness/performance hardening under larger EM workloads.
    Baseline increment landed: additive EM harmonic solver controls (`residual_target`, `harmonic_tolerance`, `harmonic_max_iterations`) now route from runtime options into FEA solve behavior with validated contracts and diagnostic visibility.
    Baseline increment landed: study workflow orchestration (`analysis.validate_study` / `analysis.run_study`) now validates and propagates additive EM run controls through `AnalysisStudySpec.electromagnetic_run_options`, and the EM create-model profile seeds default EM domain parameters so EM study runs execute without out-of-band model edits.
+   Baseline increment landed: study workflow typed outputs now surface requested/resolved EM run options on `analysis.plan_study`/`analysis.run_study`, improving API-level reproducibility for programmatic study orchestration.
 
 ## Next Recommended EM Slice
 
