@@ -182,6 +182,20 @@ fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
             )
     )));
 
+    let wildcard_imported_handle = lower_assembly("import Point.*; @origin;");
+    assert!(entry_body(&wildcard_imported_handle)
+        .iter()
+        .any(|stmt| matches!(
+            &stmt.kind,
+            HirStmtKind::ExprStmt(expr, _)
+                if matches!(
+                    &expr.kind,
+                    HirExprKind::FunctionHandle(FunctionHandleTarget::DefPath(path))
+                        if path.module.display_name().as_deref() == Some("Point.origin")
+                            && matches!(path.item.as_slice(), [DefPathSegment::Function(_)])
+                )
+        )));
+
     let anon = lower_assembly("@(x) x+1");
     assert!(anon
         .functions
