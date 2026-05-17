@@ -1225,6 +1225,28 @@ fn temp_artifact_root(test_name: &str) -> PathBuf {
     ))
 }
 
+struct EnvVarRestoreGuard {
+    key: &'static str,
+    previous: Option<String>,
+}
+
+impl Drop for EnvVarRestoreGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.as_ref() {
+            std::env::set_var(self.key, previous);
+        } else {
+            std::env::remove_var(self.key);
+        }
+    }
+}
+
+fn scoped_thermo_field_artifact_root(root: &PathBuf) -> EnvVarRestoreGuard {
+    const KEY: &str = "RUNMAT_THERMO_FIELD_ARTIFACT_ROOT";
+    let previous = std::env::var(KEY).ok();
+    std::env::set_var(KEY, root.display().to_string());
+    EnvVarRestoreGuard { key: KEY, previous }
+}
+
 #[test]
 fn analysis_results_by_run_id_legacy_nonlinear_artifacts_remain_loadable() {
     let _guard = analysis_test_guard();
@@ -2684,7 +2706,8 @@ fn analysis_run_transient_can_resolve_thermo_field_artifact() {
         kind: AnalysisStepKind::Transient,
     }];
 
-    let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
+    let root = temp_artifact_root("transient-thermo-resolve").join("thermo-fields");
+    let _root_guard = scoped_thermo_field_artifact_root(&root);
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("create thermo field artifact root");
     let mut field_artifact = serde_json::json!({
@@ -2764,7 +2787,8 @@ fn analysis_run_transient_rejects_missing_thermo_field_artifact() {
         kind: AnalysisStepKind::Transient,
     }];
 
-    let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
+    let root = temp_artifact_root("transient-thermo-missing").join("thermo-fields");
+    let _root_guard = scoped_thermo_field_artifact_root(&root);
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("create empty thermo field artifact root");
     set_model_thermo_coupling(
@@ -2802,7 +2826,8 @@ fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
         kind: AnalysisStepKind::Transient,
     }];
 
-    let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
+    let root = temp_artifact_root("transient-thermo-inline-parity").join("thermo-fields");
+    let _root_guard = scoped_thermo_field_artifact_root(&root);
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("create thermo field artifact root");
     let mut inline_equivalent_artifact = serde_json::json!({
