@@ -4933,6 +4933,7 @@ pub fn analysis_trends_op(
         AnalysisRunKind::Modal,
         AnalysisRunKind::Thermal,
         AnalysisRunKind::Transient,
+        AnalysisRunKind::Cfd,
         AnalysisRunKind::Nonlinear,
         AnalysisRunKind::Electromagnetic,
     ] {
@@ -5557,6 +5558,13 @@ fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
             .any(|diag| diag.code == "FEA_EM_PLACEHOLDER")
     {
         AnalysisRunKind::Electromagnetic
+    } else if run
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_CFD_FLOW")
+    {
+        AnalysisRunKind::Cfd
     } else if run.nonlinear_results.is_some() {
         AnalysisRunKind::Nonlinear
     } else if run.thermal_results.is_some() {

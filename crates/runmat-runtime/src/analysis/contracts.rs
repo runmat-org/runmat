@@ -921,6 +921,7 @@ pub enum AnalysisRunKind {
     Modal,
     Thermal,
     Transient,
+    Cfd,
     Nonlinear,
     Electromagnetic,
 }

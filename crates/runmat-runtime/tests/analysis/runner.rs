@@ -608,6 +608,25 @@ fn electromagnetic_profile_for_fixture(spec_id: &str) -> Option<ElectromagneticF
 }
 
 fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
+    if spec_id.starts_with("cfd_steady_") {
+        model.steps = vec![runmat_analysis_core::AnalysisStep {
+            step_id: format!("step_cfd_{}", spec_id),
+            kind: runmat_analysis_core::AnalysisStepKind::Cfd,
+        }];
+        model.thermo_mechanical = None;
+        model.electro_thermal = None;
+        model.interfaces.clear();
+        model.cfd = Some(runmat_analysis_core::CfdDomain {
+            enabled: true,
+            solve_family: runmat_analysis_core::CfdSolveFamily::SteadyState,
+            reference_density_kg_per_m3: 1.225,
+            dynamic_viscosity_pa_s: 1.81e-5,
+            inlet_velocity_m_per_s: 5.0,
+            turbulence_intensity: 0.06,
+            time_profile: Vec::new(),
+        });
+    }
+
     if let Some(profile) = electromagnetic_profile_for_fixture(spec_id) {
         model.steps = vec![runmat_analysis_core::AnalysisStep {
             step_id: format!("step_em_{}", spec_id),
@@ -1829,6 +1848,26 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
+        AnalysisRunKind::Cfd => analysis_run_cfd_with_options_op(
+            model,
+            ComputeBackend::Cpu,
+            AnalysisCfdRunOptions {
+                deterministic_mode: true,
+                precision_mode: PrecisionMode::Fp64,
+                quality_policy: QualityPolicy::Balanced,
+                time_step_s: 1.0e-3,
+                step_count: spec
+                    .transient_step_count
+                    .unwrap_or(AnalysisCfdRunOptions::default().step_count),
+                max_linear_iters: 128,
+                tolerance: 1.0e-8,
+                residual_warn_threshold: 1.0e-4,
+                prep_context: None,
+                prep_artifact_id: None,
+                prep_calibration_profile: None,
+            },
+            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+        ),
         AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Cpu,
@@ -1907,6 +1946,26 @@ fn run_fixture_gpu(
                     .transient_step_count
                     .unwrap_or(AnalysisThermalRunOptions::default().step_count),
                 ..AnalysisThermalRunOptions::default()
+            },
+            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+        ),
+        AnalysisRunKind::Cfd => analysis_run_cfd_with_options_op(
+            model,
+            ComputeBackend::Gpu,
+            AnalysisCfdRunOptions {
+                deterministic_mode: true,
+                precision_mode: PrecisionMode::Fp64,
+                quality_policy: QualityPolicy::Balanced,
+                time_step_s: 1.0e-3,
+                step_count: spec
+                    .transient_step_count
+                    .unwrap_or(AnalysisCfdRunOptions::default().step_count),
+                max_linear_iters: 128,
+                tolerance: 1.0e-8,
+                residual_warn_threshold: 1.0e-4,
+                prep_context: None,
+                prep_artifact_id: None,
+                prep_calibration_profile: None,
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -2371,6 +2430,68 @@ pub(super) fn run_fixture(
                 observed,
                 None,
                 Some(max_growth),
+            );
+        }
+        if spec.id.starts_with("cfd_steady_") {
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_reference_density_kg_per_m3",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "density"),
+                Some(1.20),
+                Some(1.25),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_dynamic_viscosity_pa_s",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "viscosity"),
+                Some(1.0e-5),
+                Some(3.0e-5),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_inlet_velocity_m_per_s",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "inlet_velocity"),
+                Some(4.0),
+                Some(6.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_turbulence_intensity",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "turbulence_intensity"),
+                Some(0.04),
+                Some(0.08),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_reynolds_proxy",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "reynolds_proxy"),
+                Some(2.0e5),
+                Some(5.0e5),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "cfd_profile_point_count",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
+                Some(0.0),
+                Some(0.0),
             );
         }
 

@@ -83,3 +83,5 @@ Progress update (2026-05-17):
    additive core CFD domain schema (`AnalysisStepKind::Cfd`, model-owned CFD domain fields) plus `analysis.create_model` steady/transient CFD profile templates with runtime coverage tests; validated with `cargo test -p runmat-analysis-core`, `cargo test -p runmat-runtime --lib -- --test-threads=1`, and `cargo test -p runmat-runtime --test analysis`.
 8. [x] CFD first run-path baseline landed:
    added additive runtime operation contract `analysis.run_cfd/v1` with `AnalysisCfdRunOptions`, model/domain + option validation, prep-context integration, typed run envelope output, and CFD flow diagnostics (`FEA_CFD_FLOW`) backed by runtime coverage tests.
+9. [x] CFD conformance/trend baseline landed:
+   added benchmark harness CFD fixtures (cpu/gpu-provider/gpu-fallback) with `FEA_CFD_FLOW` threshold assertions and promoted runtime trends to classify CFD runs as a first-class run kind (`AnalysisRunKind::Cfd`).

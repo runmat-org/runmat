@@ -47,4 +47,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - Nonlinear assembly/stress/softening fixtures now use tighter convergence governance bands for backtracks, norms, and spike/stall behavior.
 - CFD schema/profile kickoff landed: additive core domain contracts plus `analysis.create_model` steady/transient CFD templates are in place as the first Phase C step.
 - CFD first run-path baseline landed: `analysis.run_cfd/v1` now executes through the runtime/FEA stack with typed outputs and first fluid diagnostics (`FEA_CFD_FLOW`) under existing governance posture.
+- CFD benchmark/trend baseline landed: conformance harness now includes CFD fixtures with flow-metric threshold assertions, and runtime trends classify CFD runs as a dedicated run family.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.

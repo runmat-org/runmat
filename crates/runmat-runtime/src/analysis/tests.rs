@@ -1043,6 +1043,46 @@ fn analysis_trends_summarizes_recent_nonlinear_runs() {
 }
 
 #[test]
+fn analysis_trends_classifies_cfd_runs_separately() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "cfd_1".to_string(),
+        kind: AnalysisStepKind::Cfd,
+    }];
+    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+    for _ in 0..3 {
+        let _ = analysis_run_cfd_op(
+            &model,
+            ComputeBackend::Cpu,
+            OperationContext::new(None, None),
+        )
+        .expect("cfd run should persist for trends");
+    }
+
+    let trends = analysis_trends_op(
+        AnalysisTrendsQuery { window_size: 2 },
+        OperationContext::new(None, None),
+    )
+    .expect("trends should succeed");
+
+    let cfd = trends
+        .data
+        .summaries
+        .iter()
+        .find(|summary| summary.run_kind == AnalysisRunKind::Cfd)
+        .expect("cfd trend summary should exist");
+    assert_eq!(cfd.sample_count, 2);
+    assert!(cfd.median_solve_ms.is_some());
+    assert!(cfd.p95_solve_ms.is_some());
+    assert!(cfd.failed_increment_rate.is_none());
+
+    storage::reset_artifact_store_for_tests();
+}
+
+#[test]
 fn analysis_results_summary_surfaces_thermo_transient_metrics() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
