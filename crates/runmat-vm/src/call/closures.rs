@@ -283,7 +283,7 @@ pub async fn call_method_or_member_index_with_outputs(
         Value::ClassRef(cls) => {
             let classref_fallback = match fallback_policy {
                 CallableFallbackPolicy::ObjectDispatch => {
-                    CallableFallbackPolicy::RuntimeNameResolution
+                    CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution
                 }
                 other => other,
             };

@@ -380,7 +380,8 @@ async fn forward_named_fallback(
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
     match fallback_policy {
-        CallableFallbackPolicy::RuntimeNameResolution => {
+        CallableFallbackPolicy::RuntimeNameResolution
+        | CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution => {
             forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
         }
         CallableFallbackPolicy::None
@@ -411,7 +412,8 @@ async fn execute_resolved_callable(
             Err(semantic_unavailable_error(function.0, &metadata))
         }
         other => match fallback_policy {
-            CallableFallbackPolicy::RuntimeNameResolution => {
+            CallableFallbackPolicy::RuntimeNameResolution
+            | CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution => {
                 let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
                     other.clone(),
                     fallback_policy,
@@ -481,7 +483,8 @@ async fn try_execute_resolved_callable(
             Ok(None)
         }
         other => match fallback_policy {
-            CallableFallbackPolicy::RuntimeNameResolution => {
+            CallableFallbackPolicy::RuntimeNameResolution
+            | CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution => {
                 let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
                     other.clone(),
                     fallback_policy,

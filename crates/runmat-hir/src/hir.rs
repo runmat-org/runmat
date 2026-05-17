@@ -367,6 +367,7 @@ pub enum CallableFallbackPolicy {
     None,
     RuntimeNameResolution,
     ObjectDispatch,
+    ObjectDispatchThenRuntimeNameResolution,
     ExternalBoundary,
 }
 
