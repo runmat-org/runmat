@@ -1,7 +1,7 @@
 use crate::call::shared::{
     call_object_member_subsasgn, call_object_member_subsref,
     call_object_property_getter_with_outputs, call_object_property_setter_with_outputs,
-    class_defines_member_subsasgn, class_defines_member_subsref, external_qualified_identity,
+    class_defines_member_subsasgn, class_defines_member_subsref, external_qualified_display_name,
 };
 use crate::interpreter::errors::mex;
 use runmat_builtins::{self, Access, Closure, StructValue, Value};
@@ -136,9 +136,7 @@ pub fn load_static_member(cls: &str, field: &str) -> Result<Value, RuntimeError>
             captures: vec![],
         }))
     } else {
-        let qualified = external_qualified_identity(cls, field)
-            .display_name()
-            .unwrap_or_else(|| format!("{cls}.{field}"));
+        let qualified = external_qualified_display_name(cls, field);
         if runmat_builtins::builtin_functions()
             .iter()
             .any(|b| b.name == qualified)

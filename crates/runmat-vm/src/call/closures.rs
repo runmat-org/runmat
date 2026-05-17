@@ -2,7 +2,7 @@ use crate::call::descriptor::{
     execute_callable_descriptor, try_execute_callable_descriptor, CallableCallKind,
     CallableDescriptor,
 };
-use crate::call::shared::external_qualified_identity;
+use crate::call::shared::{external_qualified_display_name, external_qualified_identity};
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
 use runmat_builtins::{builtin_functions, lookup_method, Access, CellArray, Closure, Value};
@@ -108,9 +108,7 @@ pub fn create_semantic_closure(
 pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
-            let function_name = external_qualified_identity(&obj.class_name, &name)
-                .display_name()
-                .unwrap_or_else(|| format!("{}.{}", obj.class_name, name));
+            let function_name = external_qualified_display_name(&obj.class_name, &name);
             Ok(Value::Closure(Closure {
                 semantic_function:
                     runmat_runtime::user_functions::resolve_semantic_function_by_name(
@@ -201,9 +199,7 @@ pub async fn call_method_or_member_index_with_outputs(
             method_args.push(Value::Object(obj.clone()));
             method_args.extend(args.iter().cloned());
             let qualified_identity = external_qualified_identity(&obj.class_name, &name);
-            let qualified_display_name = qualified_identity
-                .display_name()
-                .unwrap_or_else(|| format!("{}.{}", obj.class_name, name));
+            let qualified_display_name = external_qualified_display_name(&obj.class_name, &name);
             if let Some(v) = try_call_identity_with_policy(
                 qualified_identity.clone(),
                 Some(qualified_display_name.clone()),
@@ -306,9 +302,7 @@ pub async fn call_method_or_member_index_with_outputs(
             }
 
             let qualified_identity = external_qualified_identity(&cls, &name);
-            let qualified_display_name = qualified_identity
-                .display_name()
-                .unwrap_or_else(|| format!("{cls}.{name}"));
+            let qualified_display_name = external_qualified_display_name(&cls, &name);
             call_identity_with_policy(
                 qualified_identity,
                 Some(qualified_display_name),

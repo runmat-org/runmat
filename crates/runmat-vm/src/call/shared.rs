@@ -26,6 +26,12 @@ pub(crate) fn external_qualified_identity(base: &str, member: &str) -> CallableI
     CallableIdentity::ExternalName(QualifiedName(segments))
 }
 
+pub(crate) fn external_qualified_display_name(base: &str, member: &str) -> String {
+    external_qualified_identity(base, member)
+        .display_name()
+        .unwrap_or_else(|| format!("{base}.{member}"))
+}
+
 pub(crate) fn object_property_getter_name(field: &str) -> String {
     format!("get.{field}")
 }
