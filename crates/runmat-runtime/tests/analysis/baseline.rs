@@ -308,6 +308,36 @@ pub(super) fn check_rolling_baseline_drift(
             );
             check_rolling_metric_drift(
                 fixture_id,
+                "electromagnetic_source_region_coverage_ratio",
+                history,
+                current_record.electromagnetic_source_region_coverage_ratio,
+                |record| record.electromagnetic_source_region_coverage_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_source_material_alignment_ratio",
+                history,
+                current_record.electromagnetic_source_material_alignment_ratio,
+                |record| record.electromagnetic_source_material_alignment_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
+                "electromagnetic_source_localization_ratio",
+                history,
+                current_record.electromagnetic_source_localization_ratio,
+                |record| record.electromagnetic_source_localization_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_rolling_metric_drift(
+                fixture_id,
                 "electromagnetic_boundary_anchor_ratio",
                 history,
                 current_record.electromagnetic_boundary_anchor_ratio,
@@ -423,6 +453,33 @@ pub(super) fn check_baseline_drift(
                 "electromagnetic_source_realization_ratio",
                 baseline_record.electromagnetic_source_realization_ratio,
                 current_record.electromagnetic_source_realization_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_source_region_coverage_ratio",
+                baseline_record.electromagnetic_source_region_coverage_ratio,
+                current_record.electromagnetic_source_region_coverage_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_source_material_alignment_ratio",
+                baseline_record.electromagnetic_source_material_alignment_ratio,
+                current_record.electromagnetic_source_material_alignment_ratio,
+                EM_MAX_READINESS_RELATIVE_DRIFT,
+                EM_MAX_READINESS_ABSOLUTE_DRIFT,
+                failures,
+            );
+            check_metric_drift(
+                &current_record.fixture_id,
+                "electromagnetic_source_localization_ratio",
+                baseline_record.electromagnetic_source_localization_ratio,
+                current_record.electromagnetic_source_localization_ratio,
                 EM_MAX_READINESS_RELATIVE_DRIFT,
                 EM_MAX_READINESS_ABSOLUTE_DRIFT,
                 failures,

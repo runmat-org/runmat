@@ -681,6 +681,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         });
                 } else {
                     for assignment in &mut model.material_assignments {
+                        assignment.region_id = "em_region_homogeneous".to_string();
                         assignment.expected_material_id = material_id.clone();
                         assignment.assigned_material_id = material_id.clone();
                         assignment.confidence = runmat_analysis_core::EvidenceConfidence::Verified;
@@ -706,6 +707,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
                         .collect();
                 } else {
                     for (idx, assignment) in model.material_assignments.iter_mut().enumerate() {
+                        assignment.region_id = format!("em_region_{idx}");
                         let material_id = &model.materials[idx % model.materials.len()].material_id;
                         assignment.expected_material_id = material_id.clone();
                         assignment.assigned_material_id = material_id.clone();
@@ -1656,6 +1658,9 @@ pub(super) fn run_fixture(
     let mut electromagnetic_region_coefficient_contrast_index = None;
     let mut electromagnetic_solver_conditioning_proxy = None;
     let mut electromagnetic_source_realization_ratio = None;
+    let mut electromagnetic_source_region_coverage_ratio = None;
+    let mut electromagnetic_source_material_alignment_ratio = None;
+    let mut electromagnetic_source_localization_ratio = None;
     let mut electromagnetic_boundary_anchor_ratio = None;
     let mut electromagnetic_flux_divergence_proxy = None;
     let mut electromagnetic_energy_imbalance_ratio = None;
@@ -1754,6 +1759,9 @@ pub(super) fn run_fixture(
                     electromagnetic_region_coefficient_contrast_index,
                     electromagnetic_solver_conditioning_proxy,
                     electromagnetic_source_realization_ratio,
+                    electromagnetic_source_region_coverage_ratio,
+                    electromagnetic_source_material_alignment_ratio,
+                    electromagnetic_source_localization_ratio,
                     electromagnetic_boundary_anchor_ratio,
                     electromagnetic_flux_divergence_proxy,
                     electromagnetic_energy_imbalance_ratio,
@@ -3681,6 +3689,34 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "em_homogeneous_source_region_coverage_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_region_coverage_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_source_material_alignment_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_material_alignment_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "em_homogeneous_boundary_anchor_ratio",
                             "FEA_EM_STATIC",
                             diagnostic_metric(
@@ -3809,6 +3845,34 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "em_heterogeneous_source_region_coverage_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_region_coverage_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_source_material_alignment_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_material_alignment_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "em_heterogeneous_boundary_anchor_ratio",
                             "FEA_EM_STATIC",
                             diagnostic_metric(
@@ -3830,7 +3894,7 @@ pub(super) fn run_fixture(
                                 "FEA_EM_STATIC",
                                 "flux_divergence_proxy",
                             ),
-                            Some(0.15),
+                            Some(0.12),
                             Some(2.5),
                         );
                         push_threshold_assertion(
@@ -3890,6 +3954,34 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.2),
                             Some(0.35),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_sparse_source_region_coverage_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_region_coverage_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_sparse_source_material_alignment_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_material_alignment_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3962,6 +4054,34 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.15),
                             Some(0.3),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_fallback_heavy_source_region_coverage_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_region_coverage_ratio",
+                            ),
+                            Some(0.95),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_fallback_heavy_source_material_alignment_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "source_material_alignment_ratio",
+                            ),
+                            Some(0.0),
+                            Some(0.2),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -4095,6 +4215,9 @@ pub(super) fn run_fixture(
                                 electromagnetic_region_coefficient_contrast_index,
                                 electromagnetic_solver_conditioning_proxy,
                                 electromagnetic_source_realization_ratio,
+                                electromagnetic_source_region_coverage_ratio,
+                                electromagnetic_source_material_alignment_ratio,
+                                electromagnetic_source_localization_ratio,
                                 electromagnetic_boundary_anchor_ratio,
                                 electromagnetic_flux_divergence_proxy,
                                 electromagnetic_energy_imbalance_ratio,
@@ -4237,6 +4360,18 @@ pub(super) fn run_fixture(
                         .data
                         .summary
                         .electromagnetic_source_realization_ratio;
+                    electromagnetic_source_region_coverage_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_source_region_coverage_ratio;
+                    electromagnetic_source_material_alignment_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_source_material_alignment_ratio;
+                    electromagnetic_source_localization_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_source_localization_ratio;
                     electromagnetic_boundary_anchor_ratio = gpu_results
                         .data
                         .summary
@@ -4451,6 +4586,9 @@ pub(super) fn run_fixture(
                                     electromagnetic_region_coefficient_contrast_index,
                                     electromagnetic_solver_conditioning_proxy,
                                     electromagnetic_source_realization_ratio,
+                                    electromagnetic_source_region_coverage_ratio,
+                                    electromagnetic_source_material_alignment_ratio,
+                                    electromagnetic_source_localization_ratio,
                                     electromagnetic_boundary_anchor_ratio,
                                     electromagnetic_flux_divergence_proxy,
                                     electromagnetic_energy_imbalance_ratio,
@@ -4598,6 +4736,9 @@ pub(super) fn run_fixture(
         electromagnetic_region_coefficient_contrast_index,
         electromagnetic_solver_conditioning_proxy,
         electromagnetic_source_realization_ratio,
+        electromagnetic_source_region_coverage_ratio,
+        electromagnetic_source_material_alignment_ratio,
+        electromagnetic_source_localization_ratio,
         electromagnetic_boundary_anchor_ratio,
         electromagnetic_flux_divergence_proxy,
         electromagnetic_energy_imbalance_ratio,

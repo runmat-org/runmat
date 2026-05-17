@@ -228,6 +228,20 @@ Not required for this milestone:
   - boundary energy ratio now reflects boundary-coupling share of assembled operator energy (stable under strongly constrained boundary potentials).
 - Wired these metrics through runtime quality policy gates, `analysis.results` summary, `analysis.trends` breach rates, and baseline/conformance harness assertions for EM reference fixtures.
 
+### Maxwell EM Phase-9 Status (2026-05-16)
+
+- Added region-resolved EM source deposition in analysis-fea:
+  - EM loads (`current_density`, `coil_current`) now map by `load.region_id` onto assignment-backed coefficient regions instead of global-only source shaping,
+  - unmapped sources fall back to attenuated global deposition with explicit diagnostic accounting.
+- Surfaced source-locality readiness posture as first-class EM metrics:
+  - `source_region_coverage_ratio`,
+  - `source_material_alignment_ratio`,
+  - `source_localization_ratio`.
+- Wired the new source-locality posture through runtime policy/results/trends:
+  - quality gates now enforce coverage/alignment thresholds,
+  - `analysis.results` summary and `analysis.trends` breach rates include the new fields,
+  - conformance/baseline checks were extended for the EM fixture family.
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.

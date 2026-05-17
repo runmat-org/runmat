@@ -129,6 +129,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. Reworked EM imbalance/boundary metric formulas to be assembly/material-aware and stable across constrained-boundary fixtures.
 3. Extended quality gates and EM reference-fixture conformance thresholds to enforce these metrics without regressing publishability split expectations.
 
+## Maxwell EM Bring-Up Status (Phase 9)
+
+1. Added region-localized EM source deposition by mapping load regions onto assignment-backed coefficient regions in the EM assembly path.
+2. Introduced first source-locality readiness signals (`source_region_coverage_ratio`, `source_material_alignment_ratio`, `source_localization_ratio`) in EM diagnostics/results.
+3. Extended runtime governance and conformance/baseline drift gates with source coverage/alignment threshold enforcement and trend breach tracking.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

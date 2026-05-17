@@ -74,25 +74,101 @@ pub fn run_electromagnetic_with_options(
     let electromagnetic_boundary_count = magnetic_insulation_count + vector_potential_ground_count;
     let boundary_anchor_ratio = electromagnetic_boundary_count as f64 / total_bc_count as f64;
 
+    let region_count = coefficient_profile.region_coefficients.len().max(1);
+    let region_index_by_id = coefficient_profile
+        .region_coefficients
+        .iter()
+        .enumerate()
+        .map(|(index, region)| (region.region_id.as_str(), index))
+        .collect::<std::collections::HashMap<_, _>>();
+
     let total_load_count = model.loads.len().max(1);
     let mut electromagnetic_source_count = 0usize;
     let mut electromagnetic_source_strength = 0.0_f64;
+    let mut mapped_source_count = 0usize;
+    let mut aligned_source_count = 0usize;
+    let mut localized_source_shape = vec![0.0_f64; node_count];
+    let mut fallback_source_shape = vec![0.0_f64; node_count];
+    let h = 1.0 / (node_count - 1) as f64;
     for load in &model.loads {
-        match load.kind {
+        let source_scale = match load.kind {
             LoadKind::CurrentDensity { jx, jy, jz } => {
-                electromagnetic_source_count += 1;
-                electromagnetic_source_strength +=
-                    (jx * jx + jy * jy + jz * jz).sqrt().clamp(0.0, 2.5);
+                Some((jx * jx + jy * jy + jz * jz).sqrt().clamp(0.0, 2.5))
             }
             LoadKind::CoilCurrent { current_a } => {
-                electromagnetic_source_count += 1;
-                electromagnetic_source_strength +=
-                    (current_a.abs() / domain.applied_current_a.max(1.0e-9)).clamp(0.0, 2.5);
+                Some((current_a.abs() / domain.applied_current_a.max(1.0e-9)).clamp(0.0, 2.5))
             }
-            _ => {}
+            _ => None,
+        };
+        let Some(source_scale) = source_scale else {
+            continue;
+        };
+        electromagnetic_source_count += 1;
+        electromagnetic_source_strength += source_scale;
+
+        if let Some(region_index) = region_index_by_id.get(load.region_id.as_str()).copied() {
+            mapped_source_count += 1;
+            if let Some(region) = coefficient_profile.region_coefficients.get(region_index) {
+                if region.covered && !region.used_fallback {
+                    aligned_source_count += 1;
+                }
+            }
+            let (start, end) = region_span_for_index(region_index, region_count, node_count);
+            for i in start..end {
+                let local_x = if end - start <= 1 {
+                    0.5
+                } else {
+                    (i - start) as f64 / (end - start - 1) as f64
+                };
+                localized_source_shape[i] += source_scale
+                    * domain.applied_current_a
+                    * (std::f64::consts::PI * local_x).sin().abs();
+            }
+        } else {
+            for (i, value) in fallback_source_shape.iter_mut().enumerate() {
+                let x = i as f64 * h;
+                *value += source_scale
+                    * domain.applied_current_a
+                    * 0.35
+                    * (std::f64::consts::PI * x).sin().abs();
+            }
         }
     }
     let source_realization_ratio = electromagnetic_source_count as f64 / total_load_count as f64;
+    let source_region_coverage_ratio = if electromagnetic_source_count == 0 {
+        0.0
+    } else {
+        mapped_source_count as f64 / electromagnetic_source_count as f64
+    };
+    let source_material_alignment_ratio = if mapped_source_count == 0 {
+        0.0
+    } else {
+        aligned_source_count as f64 / mapped_source_count as f64
+    };
+    let source_distribution = if electromagnetic_source_count == 0 {
+        let mut synthetic = vec![0.0_f64; node_count];
+        for (i, value) in synthetic.iter_mut().enumerate() {
+            let x = i as f64 * h;
+            *value = domain.applied_current_a * 0.25 * (std::f64::consts::PI * x).sin().abs();
+        }
+        synthetic
+    } else {
+        localized_source_shape
+            .iter()
+            .zip(fallback_source_shape.iter())
+            .map(|(localized, fallback)| localized + fallback)
+            .collect::<Vec<_>>()
+    };
+    let source_distribution_sum = source_distribution
+        .iter()
+        .map(|value| value.abs())
+        .sum::<f64>()
+        .max(1.0e-9);
+    let source_localization_ratio = localized_source_shape
+        .iter()
+        .map(|value| value.abs())
+        .sum::<f64>()
+        / source_distribution_sum;
     let source_drive_scale = if electromagnetic_source_count == 0 {
         0.25
     } else {
@@ -104,15 +180,13 @@ pub fn run_electromagnetic_with_options(
     let reluctivity = 1.0 / (mu0 * material_stats.relative_permeability_mean.max(1.0e-9));
     let omega = 2.0 * std::f64::consts::PI * domain.reference_frequency_hz;
     let effective_permittivity = epsilon0 * material_stats.relative_permittivity_mean.max(1.0e-9);
-    let h = 1.0 / (node_count - 1) as f64;
 
-    let region_count = coefficient_profile.region_coefficients.len().max(1);
     let mut node_sigma = vec![material_stats.conductivity_mean.max(1.0e-9); node_count];
     let mut node_eps_r = vec![material_stats.relative_permittivity_mean.max(1.0e-9); node_count];
     let mut node_mu_r = vec![material_stats.relative_permeability_mean.max(1.0e-9); node_count];
     for i in 0..node_count {
         let region_index = ((i * region_count) / node_count).min(region_count - 1);
-        let region = coefficient_profile.region_coefficients[region_index];
+        let region = &coefficient_profile.region_coefficients[region_index];
         node_sigma[i] = region.conductivity_s_per_m;
         node_eps_r[i] = region.relative_permittivity;
         node_mu_r[i] = region.relative_permeability;
@@ -185,13 +259,11 @@ pub fn run_electromagnetic_with_options(
         if constrained[i] {
             continue;
         }
-        let x = i as f64 * h;
-        let harmonic = (std::f64::consts::PI * x).sin().abs();
         let conductivity_scale = (node_sigma[i].max(1.0e-9)
             / material_stats.conductivity_mean.max(1.0e-9))
         .clamp(0.2, 5.0);
         let effective_permittivity_i = epsilon0 * node_eps_r[i].max(1.0e-9);
-        *rhs_i = domain.applied_current_a * source_drive_scale * harmonic * conductivity_scale
+        *rhs_i = source_distribution[i] * source_drive_scale * conductivity_scale
             / (1.0 + omega * effective_permittivity_i);
     }
 
@@ -255,13 +327,22 @@ pub fn run_electromagnetic_with_options(
         ((divergence_sum / divergence_count as f64) * h) / max_flux_density
     };
     let residual_imbalance = (1.0 - solve_quality).clamp(0.0, 1.0);
-    let heterogeneity_imbalance = material_stats.assignment_heterogeneity_index.clamp(0.0, 1.0);
+    let heterogeneity_imbalance = material_stats
+        .assignment_heterogeneity_index
+        .clamp(0.0, 1.0);
     let fallback_imbalance = material_stats.fallback_coefficient_ratio.clamp(0.0, 1.0);
     let source_imbalance = (1.0 - source_realization_ratio).clamp(0.0, 1.0);
-    let energy_imbalance_ratio = (0.15 * residual_imbalance
-        + 0.35 * heterogeneity_imbalance
-        + 0.35 * fallback_imbalance
-        + 0.15 * source_imbalance)
+    let source_region_coverage_imbalance = (1.0 - source_region_coverage_ratio).clamp(0.0, 1.0);
+    let source_material_alignment_imbalance =
+        (1.0 - source_material_alignment_ratio).clamp(0.0, 1.0);
+    let source_localization_imbalance = (1.0 - source_localization_ratio).clamp(0.0, 1.0);
+    let energy_imbalance_ratio = (0.12 * residual_imbalance
+        + 0.24 * heterogeneity_imbalance
+        + 0.24 * fallback_imbalance
+        + 0.12 * source_imbalance
+        + 0.14 * source_region_coverage_imbalance
+        + 0.10 * source_material_alignment_imbalance
+        + 0.04 * source_localization_imbalance)
         .clamp(0.0, 1.0);
     let boundary_band = (node_count / 4).max(1);
     let mut boundary_coupling_energy = 0.0_f64;
@@ -308,7 +389,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} boundary_anchor_ratio={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
+            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} boundary_anchor_ratio={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
             domain.enabled,
             domain.reference_frequency_hz,
             domain.applied_current_a,
@@ -324,6 +405,9 @@ pub fn run_electromagnetic_with_options(
             material_stats.region_coefficient_contrast_index,
             solver_conditioning_proxy,
             source_realization_ratio,
+            source_region_coverage_ratio,
+            source_material_alignment_ratio,
+            source_localization_ratio,
             boundary_anchor_ratio,
             flux_divergence_proxy,
             energy_imbalance_ratio,
@@ -394,12 +478,15 @@ struct ElectromagneticMaterialStats {
     region_coefficient_contrast_index: f64,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct RegionElectromagneticCoefficients {
+    region_id: String,
     conductivity_s_per_m: f64,
     relative_permittivity: f64,
     relative_permeability: f64,
     weight: f64,
+    covered: bool,
+    used_fallback: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -448,10 +535,13 @@ fn electromagnetic_coefficient_profile(model: &AnalysisModel) -> Electromagnetic
         covered_assignments += usize::from(covered);
         fallback_coefficients += usize::from(used_fallback);
         samples.push(RegionElectromagneticCoefficients {
+            region_id: assignment.region_id.clone(),
             conductivity_s_per_m: conductivity,
             relative_permittivity: permittivity,
             relative_permeability: permeability,
             weight: confidence_weight(assignment.confidence),
+            covered,
+            used_fallback,
         });
     }
 
@@ -461,20 +551,26 @@ fn electromagnetic_coefficient_profile(model: &AnalysisModel) -> Electromagnetic
                 continue;
             };
             samples.push(RegionElectromagneticCoefficients {
+                region_id: format!("material_region_{}", material.material_id),
                 conductivity_s_per_m: electrical.conductivity_s_per_m.max(1.0e-9),
                 relative_permittivity: electrical.relative_permittivity.max(1.0e-9),
                 relative_permeability: electrical.relative_permeability.max(1.0e-9),
                 weight: 1.0,
+                covered: true,
+                used_fallback: false,
             });
         }
     }
 
     if samples.is_empty() {
         samples.push(RegionElectromagneticCoefficients {
+            region_id: "default_region_0".to_string(),
             conductivity_s_per_m: 1.0,
             relative_permittivity: 1.0,
             relative_permeability: 1.0,
             weight: 1.0,
+            covered: false,
+            used_fallback: true,
         });
     }
 
@@ -590,4 +686,20 @@ fn harmonic_mean(a: f64, b: f64) -> f64 {
     } else {
         2.0 * a * b / sum
     }
+}
+
+fn region_span_for_index(
+    region_index: usize,
+    region_count: usize,
+    node_count: usize,
+) -> (usize, usize) {
+    if region_count == 0 || node_count == 0 {
+        return (0, 0);
+    }
+    let start = (region_index * node_count) / region_count;
+    let mut end = ((region_index + 1) * node_count) / region_count;
+    if end <= start {
+        end = (start + 1).min(node_count);
+    }
+    (start.min(node_count), end.min(node_count))
 }
