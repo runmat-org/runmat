@@ -1553,7 +1553,7 @@ mod tests {
     }
 
     #[test]
-    fn builtin_by_name_policy_does_not_use_semantic_resolver() {
+    fn none_policy_does_not_use_semantic_resolver() {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(45)
@@ -1572,7 +1572,7 @@ mod tests {
             vec![Value::Num(4.0)],
             1,
             crate::user_functions::SemanticCallableKind::Other,
-            runmat_hir::CallableFallbackPolicy::BuiltinByName,
+            runmat_hir::CallableFallbackPolicy::None,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request));

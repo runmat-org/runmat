@@ -363,7 +363,6 @@ impl CallableIdentity {
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub enum CallableFallbackPolicy {
     None,
-    BuiltinByName,
     RuntimeNameResolution,
     ObjectDispatch,
     ExternalBoundary,

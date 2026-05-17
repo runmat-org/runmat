@@ -328,14 +328,6 @@ async fn forward_named_fallback(
         CallableFallbackPolicy::RuntimeNameResolution => {
             forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
         }
-        CallableFallbackPolicy::BuiltinByName => {
-            if requested_outputs == 1 {
-                runmat_runtime::call_builtin_async(&name, &args).await
-            } else {
-                runmat_runtime::call_builtin_async_with_outputs(&name, &args, requested_outputs)
-                    .await
-            }
-        }
         CallableFallbackPolicy::None
         | CallableFallbackPolicy::ObjectDispatch
         | CallableFallbackPolicy::ExternalBoundary => unreachable!(),
@@ -362,8 +354,7 @@ async fn execute_resolved_callable(
             }
             if matches!(
                 fallback_policy,
-                CallableFallbackPolicy::BuiltinByName
-                    | CallableFallbackPolicy::RuntimeNameResolution
+                CallableFallbackPolicy::RuntimeNameResolution
             ) {
                 if let Some(name) = metadata.display_name.clone() {
                     return forward_named_fallback(name, args, requested_outputs, fallback_policy)
@@ -373,8 +364,7 @@ async fn execute_resolved_callable(
             Err(semantic_unavailable_error(function.0, &metadata))
         }
         other => match fallback_policy {
-            CallableFallbackPolicy::BuiltinByName
-            | CallableFallbackPolicy::RuntimeNameResolution => {
+            CallableFallbackPolicy::RuntimeNameResolution => {
                 let Some(name) = other.display_name() else {
                     return Err(undefined_name_error("<unnamed callable>", &metadata));
                 };
@@ -412,8 +402,7 @@ async fn try_execute_resolved_callable(
             }
             if matches!(
                 fallback_policy,
-                CallableFallbackPolicy::BuiltinByName
-                    | CallableFallbackPolicy::RuntimeNameResolution
+                CallableFallbackPolicy::RuntimeNameResolution
             ) {
                 if let Some(name) = metadata.display_name {
                     return forward_named_fallback(name, args, requested_outputs, fallback_policy)
@@ -426,8 +415,7 @@ async fn try_execute_resolved_callable(
         other => {
             if !matches!(
                 fallback_policy,
-                CallableFallbackPolicy::BuiltinByName
-                    | CallableFallbackPolicy::RuntimeNameResolution
+                CallableFallbackPolicy::RuntimeNameResolution
             ) {
                 return Ok(None);
             }
