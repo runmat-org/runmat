@@ -1034,7 +1034,12 @@ impl Compiler {
             }
         }
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
-        if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
+        if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke)
+            && !matches!(
+                call.callee,
+                MirCallee::Static(CallableIdentity::SemanticFunction(_))
+            )
+        {
             return self.compile_mir_method_call(call, has_expansion);
         }
         match &call.callee {
@@ -1535,7 +1540,12 @@ impl Compiler {
         let requested_outputs = self.call_requested_output_count(call);
 
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
-        if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
+        if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke)
+            && !matches!(
+                call.callee,
+                MirCallee::Static(CallableIdentity::SemanticFunction(_))
+            )
+        {
             return self.compile_mir_method_call(call, has_expansion);
         }
         match &call.callee {

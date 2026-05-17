@@ -591,6 +591,20 @@ fn semantic_function_handle_index_call_executes() {
 }
 
 #[test]
+fn method_syntax_with_semantic_function_callee_executes_directly() {
+    let source = "obj = 2; y = obj.bump(3);\nfunction out = bump(receiver, value)\n  out = receiver + value;\nend";
+    let bytecode = compile_semantic_source(source).expect("semantic method-style call compiles");
+    assert!(bytecode
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunction(_, 2))));
+    let vars = interpret(&bytecode).expect("semantic method-style call executes");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-12)));
+}
+
+#[test]
 fn cellfun_upper_function_handle_round_trip() {
     let input =
         "names = {'Ada', 'Linus', 'Katherine'}; upper = cellfun(@upper, names, 'UniformOutput', false);";
