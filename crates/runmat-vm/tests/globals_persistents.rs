@@ -9,7 +9,7 @@ fn global_across_functions() {
         function y = setg(x)
             global g;
             g = x;
-            y = 0; % ensure one output to satisfy current CallFunction semantics
+            y = 0; % ensure one output for the typed CallFunctionMulti lowering
         end
         function y = getg()
             global g;

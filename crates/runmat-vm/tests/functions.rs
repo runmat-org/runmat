@@ -1230,10 +1230,6 @@ fn unresolved_function_single_output_uses_typed_instruction() {
         runmat_vm::Instr::CallFunctionMulti(name, argc, out_count)
             if name == "definitely_missing_callback" && *argc == 1 && *out_count == 1
     )));
-    assert!(!bytecode
-        .instructions
-        .iter()
-        .any(|instr| matches!(instr, runmat_vm::Instr::CallFunction(_, _))));
 }
 
 #[test]

@@ -38,7 +38,7 @@ Since we want a production-hardened system with (to start) full MATLAB code exec
   - Stores (scatter)
     - StoreIndex, StoreIndexCell, StoreSlice, StoreSliceEx, StoreSlice1DRangeEnd (broadcast + shape laws).
   - Calls and expansion
-    - CallBuiltin, CallBuiltinExpand{Last,At,Multi}, CallFunction, CallFunctionMulti, CallFunctionExpand{At,Multi}, feval and feval-expand.
+    - CallBuiltin, CallBuiltinExpand{Last,At,Multi}, CallFunctionMulti, CallFunctionExpandMultiOutput, feval and feval-expand.
   - OOP and static accesses
     - Load/StoreMember, Load/StoreMemberDynamic, LoadMethod, CallMethod, LoadStaticProperty, CallStaticMethod, RegisterClass.
   - Control flow and exceptions

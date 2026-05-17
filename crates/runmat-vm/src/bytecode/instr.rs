@@ -190,7 +190,6 @@ pub enum Instr {
     ReturnValue,
 
     // User-function invocation variants.
-    CallFunction(String, usize),
     CallSemanticFunction(FunctionId, usize),
     CallBuiltinMulti(String, usize, usize),
 
@@ -198,7 +197,6 @@ pub enum Instr {
     CallFunctionMulti(String, usize, usize),
     CallSemanticFunctionMulti(FunctionId, usize, usize),
 
-    CallFunctionExpandMulti(String, Vec<ArgSpec>),
     CallFunctionExpandMultiOutput(String, Vec<ArgSpec>, usize),
     CallSemanticFunctionExpandMulti(FunctionId, Vec<ArgSpec>),
     CallSemanticFunctionExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
@@ -293,9 +291,7 @@ impl Instr {
             | Instr::LoadMember(_)
             | Instr::LoadMemberOrInit(_)
             | Instr::LoadMethod(_) => effect(1, 1),
-            Instr::CallBuiltin(_, argc)
-            | Instr::CallFunction(_, argc)
-            | Instr::CallSemanticFunction(_, argc) => effect(*argc, 1),
+            Instr::CallBuiltin(_, argc) | Instr::CallSemanticFunction(_, argc) => effect(*argc, 1),
             Instr::CallBuiltinMulti(_, argc, _) => effect(*argc, 1),
             Instr::CallFunctionMulti(_, argc, out_count)
             | Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
@@ -343,7 +339,6 @@ impl Instr {
             Instr::RegisterClass { .. } => effect(0, 0),
             Instr::CallFevalExpandMulti(specs)
             | Instr::CallFevalExpandMultiOutput(specs, _)
-            | Instr::CallFunctionExpandMulti(_, specs)
             | Instr::CallFunctionExpandMultiOutput(_, specs, _)
             | Instr::CallSemanticFunctionExpandMulti(_, specs)
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)

@@ -806,9 +806,6 @@ impl TurbineEngine {
                     num_indices.hash(&mut hasher);
                 }
                 Instr::Return => "Return".hash(&mut hasher),
-                Instr::CallFunction(name, argc) => {
-                    Self::hash_named_function_call(&mut hasher, "CallFunction", name, *argc, None);
-                }
                 Instr::CallFunctionMulti(name, argc, out_count) => {
                     Self::hash_named_function_call(
                         &mut hasher,

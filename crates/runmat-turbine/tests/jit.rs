@@ -980,9 +980,9 @@ fn test_jit_legacy_user_function_fallback_removed() {
 
     let bytecode = Bytecode::with_instructions(
         vec![
-            Instr::LoadConst(5.0),                           // Load argument
-            Instr::CallFunction("my_double".to_string(), 1), // Call function
-            Instr::StoreVar(0),                              // Store result
+            Instr::LoadConst(5.0),                                   // Load argument
+            Instr::CallFunctionMulti("my_double".to_string(), 1, 1), // Call function
+            Instr::StoreVar(0),                                      // Store result
         ],
         1,
     );
@@ -1086,7 +1086,7 @@ fn test_jit_named_call_resolves_semantic_registry() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(5.0),
-                Instr::CallFunction("inc".to_string(), 1),
+                Instr::CallFunctionMulti("inc".to_string(), 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1143,7 +1143,7 @@ fn test_jit_named_call_prefers_semantic_registry_over_legacy_shape() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(9.0),
-                Instr::CallFunction("inc".to_string(), 1),
+                Instr::CallFunctionMulti("inc".to_string(), 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1510,7 +1510,7 @@ fn test_jit_function_variable_preservation() {
 
     let function_bytecode = Bytecode::with_instructions(
         vec![
-            Instr::CallFunction("add_globals".to_string(), 0),
+            Instr::CallFunctionMulti("add_globals".to_string(), 0, 1),
             Instr::StoreVar(2),
         ],
         3,
@@ -1586,7 +1586,7 @@ fn test_jit_mixed_execution_patterns() {
                 Instr::StoreVar(1),
                 // Function call: z = square(y) = 64
                 Instr::LoadVar(1),
-                Instr::CallFunction("square".to_string(), 1),
+                Instr::CallFunctionMulti("square".to_string(), 1, 1),
                 Instr::StoreVar(2),
                 // JIT-able: result = z + 10 = 74
                 Instr::LoadVar(2),
@@ -1624,7 +1624,7 @@ fn test_jit_function_compilation_attempts() {
             Instr::StoreLocal(1), // Should be handled gracefully
             Instr::EnterScope(5), // Should be handled gracefully
             Instr::ExitScope(5),  // Should be handled gracefully
-            Instr::CallFunction("test".to_string(), 1), // Should trigger fallback
+            Instr::CallFunctionMulti("test".to_string(), 1, 1), // Should trigger fallback
             Instr::StoreVar(0),
         ],
         1,
@@ -1671,7 +1671,7 @@ fn test_jit_engine_statistics_with_functions() {
     }
 
     let function_bytecode =
-        Bytecode::with_instructions(vec![Instr::CallFunction("noop".to_string(), 0)], 1);
+        Bytecode::with_instructions(vec![Instr::CallFunctionMulti("noop".to_string(), 0, 1)], 1);
 
     assert!(engine
         .execute_or_compile(&function_bytecode, &mut vars)
@@ -1726,7 +1726,7 @@ fn test_jit_simple_function_compilation() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(5.0),
-                Instr::CallFunction("double".to_string(), 1),
+                Instr::CallFunctionMulti("double".to_string(), 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1829,7 +1829,7 @@ fn test_jit_nested_function_calls_compilation() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(4.0),
-                Instr::CallFunction("multiply_and_add".to_string(), 1),
+                Instr::CallFunctionMulti("multiply_and_add".to_string(), 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1902,7 +1902,7 @@ fn test_jit_function_parameter_validation() {
             vec![
                 Instr::LoadConst(5.0),
                 // Only 1 argument but function expects 2
-                Instr::CallFunction("add_two".to_string(), 1),
+                Instr::CallFunctionMulti("add_two".to_string(), 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1927,7 +1927,7 @@ fn test_jit_function_parameter_validation() {
             vec![
                 Instr::LoadConst(3.0),
                 Instr::LoadConst(7.0),
-                Instr::CallFunction("add_two".to_string(), 2),
+                Instr::CallFunctionMulti("add_two".to_string(), 2, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1987,7 +1987,7 @@ fn test_jit_function_variable_isolation() {
                 Instr::LoadConst(100.0),
                 Instr::StoreVar(1), // Store in global var 1
                 Instr::LoadConst(8.0),
-                Instr::CallFunction("isolate_test".to_string(), 1),
+                Instr::CallFunctionMulti("isolate_test".to_string(), 1, 1),
                 Instr::StoreVar(0),
             ],
             2,
@@ -2060,7 +2060,7 @@ fn test_jit_function_compilation_performance() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(6.0),
-                Instr::CallFunction("compute_intensive".to_string(), 1),
+                Instr::CallFunctionMulti("compute_intensive".to_string(), 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -2108,7 +2108,7 @@ fn test_jit_function_error_handling() {
     let bytecode_undefined = Bytecode::with_instructions(
         vec![
             Instr::LoadConst(5.0),
-            Instr::CallFunction("undefined_function".to_string(), 1),
+            Instr::CallFunctionMulti("undefined_function".to_string(), 1, 1),
             Instr::StoreVar(0),
         ],
         1,
@@ -2145,7 +2145,7 @@ fn test_jit_function_error_handling() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(42.0),
-                Instr::CallFunction("simple".to_string(), 1),
+                Instr::CallFunctionMulti("simple".to_string(), 1, 1),
                 Instr::StoreVar(0),
             ],
             1,

@@ -637,12 +637,6 @@ impl BytecodeCompiler {
                             .brif(is_false, false_block, &[], true_block, &[]);
                         block_terminated = true;
                     }
-                    Instr::CallFunction(func_name, arg_count) => {
-                        let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
-                        let result =
-                            Self::compile_named_function_call_jit(builder, ctx, func_name, &args)?;
-                        local_stack.push(result);
-                    }
                     Instr::CallSemanticFunction(function, arg_count) => {
                         let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
 
@@ -681,11 +675,13 @@ impl BytecodeCompiler {
                         pc += 1;
                     }
                     Instr::CallFunctionMulti(func_name, arg_count, out_count) => {
-                        match instructions.get(pc + 1) {
-                            Some(Instr::Unpack(count)) if count == out_count => {}
-                            _ => return Err(execution_error(
-                                "Semantic named multi-output JIT calls require a following Unpack",
-                            )),
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => return Err(execution_error(
+                                    "Semantic named multi-output JIT calls require a following Unpack",
+                                )),
+                            }
                         }
 
                         let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
@@ -695,7 +691,9 @@ impl BytecodeCompiler {
                         for result in results {
                             local_stack.push(result);
                         }
-                        pc += 1;
+                        if *out_count > 1 {
+                            pc += 1;
+                        }
                     }
                     Instr::CallSemanticFunctionExpandMulti(function, specs) => {
                         let result = if specs.iter().any(|spec| spec.is_expand) {
@@ -799,7 +797,6 @@ impl BytecodeCompiler {
                     }
                     Instr::CallBuiltinExpandMulti(_, _)
                     | Instr::CallBuiltinExpandMultiOutput(_, _, _)
-                    | Instr::CallFunctionExpandMulti(_, _)
                     | Instr::CallFunctionExpandMultiOutput(_, _, _)
                     | Instr::CallFevalExpandMulti(_)
                     | Instr::CallFevalExpandMultiOutput(_, _)
@@ -937,28 +934,6 @@ impl BytecodeCompiler {
         }
         entries.reverse();
         Ok(entries)
-    }
-
-    fn compile_named_function_call_jit(
-        builder: &mut FunctionBuilder,
-        ctx: &mut CompileContext<'_>,
-        func_name: &str,
-        args: &[Value],
-    ) -> Result<Value> {
-        if let Some(function) = ctx.semantic_registry.resolve_name(func_name) {
-            return Self::call_semantic_function_jit(
-                builder,
-                ctx.module,
-                ctx.runmat_call_semantic_function_id,
-                function.0,
-                args,
-            );
-        }
-
-        let _ = (builder, args);
-        Err(execution_error(format!(
-            "Named function '{func_name}' is not available as a semantic function in Turbine JIT"
-        )))
     }
 
     fn compile_named_function_multi_call_jit(
@@ -2314,19 +2289,7 @@ mod tests {
 
         assert_eq!(
             source
-                .matches(&["Instr::", "CallFunction(func_name"].concat())
-                .count(),
-            1
-        );
-        assert_eq!(
-            source
                 .matches(&["Instr::", "CallFunctionMulti(func_name"].concat())
-                .count(),
-            1
-        );
-        assert_eq!(
-            source
-                .matches(&["Self::", "compile_named_function_call_jit("].concat())
                 .count(),
             1
         );
@@ -2340,8 +2303,8 @@ mod tests {
             source
                 .matches(&["Self::", "call_user_function_jit("].concat())
                 .count(),
-            1,
-            "legacy host callback should only be reachable through semantic-first named call lowering"
+            0,
+            "legacy host callback should not be reachable after typed named-call lowering"
         );
     }
 

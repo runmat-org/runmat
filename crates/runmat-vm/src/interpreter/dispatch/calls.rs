@@ -196,8 +196,8 @@ pub async fn build_user_function_expand_multi_args(
     build_expanded_args_from_specs(
         stack,
         specs,
-        "CallFunctionExpandMulti requires cell or object for expand_all",
-        "CallFunctionExpandMulti requires cell or object cell access",
+        "CallFunctionExpandMultiOutput requires cell or object for expand_all",
+        "CallFunctionExpandMultiOutput requires cell or object cell access",
         |base| async move {
             match base {
                 Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
@@ -210,7 +210,7 @@ pub async fn build_user_function_expand_multi_args(
                 }
                 _ => Err(crate::interpreter::errors::mex(
                     "InvalidExpandAllTarget",
-                    "CallFunctionExpandMulti requires cell or object for expand_all",
+                    "CallFunctionExpandMultiOutput requires cell or object for expand_all",
                 )),
             }
         },
@@ -223,7 +223,7 @@ pub async fn build_user_function_expand_multi_args(
                 }
                 _ => Err(crate::interpreter::errors::mex(
                     "ExpandError",
-                    "CallFunctionExpandMulti requires cell or object cell access",
+                    "CallFunctionExpandMultiOutput requires cell or object cell access",
                 )),
             }
         },
