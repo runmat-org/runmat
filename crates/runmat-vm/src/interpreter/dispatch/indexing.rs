@@ -1113,7 +1113,7 @@ pub async fn dispatch_indexing(
             range_end_exprs,
             end_numeric_exprs,
         } => {
-            let mut rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
+            let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
@@ -1146,26 +1146,11 @@ pub async fn dispatch_indexing(
                 ))?);
             }
             numeric.reverse();
-            let mut base = stack.pop().ok_or(crate::interpreter::errors::mex(
+            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
             clear_value_residency(&base);
-            let base_assignable = matches!(
-                base,
-                Value::Object(_) | Value::Tensor(_) | Value::ComplexTensor(_) | Value::GpuTensor(_)
-            );
-            if !base_assignable
-                && matches!(
-                    rhs,
-                    Value::Object(_)
-                        | Value::Tensor(_)
-                        | Value::ComplexTensor(_)
-                        | Value::GpuTensor(_)
-                )
-            {
-                std::mem::swap(&mut base, &mut rhs);
-            }
             if !end_numeric_exprs.is_empty() {
                 numeric = match &base {
                     Value::GpuTensor(handle) => {
