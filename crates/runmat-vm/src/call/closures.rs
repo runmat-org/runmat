@@ -5,7 +5,7 @@ use crate::call::descriptor::{
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
 use runmat_builtins::{builtin_functions, lookup_method, Access, CellArray, Closure, Value};
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, SymbolName};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, SymbolName};
 use runmat_runtime::RuntimeError;
 
 fn requested_output_arity(requested_outputs: Option<usize>) -> usize {
@@ -25,6 +25,10 @@ async fn call_explicit_builtin(
 
 fn dynamic_identity(name: String) -> CallableIdentity {
     CallableIdentity::DynamicName(SymbolName(name))
+}
+
+fn method_identity(name: String) -> CallableIdentity {
+    CallableIdentity::Method(MethodId(name))
 }
 
 async fn call_identity_with_policy(
@@ -102,27 +106,39 @@ pub fn create_semantic_closure(
 
 pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeError> {
     match base {
-        Value::Object(obj) => Ok(Value::Closure(Closure {
-            function_name: format!("{}.{}", obj.class_name, name),
-            semantic_function: None,
-            captures: vec![Value::Object(obj)],
-        })),
+        Value::Object(obj) => {
+            let function_name = format!("{}.{}", obj.class_name, name);
+            Ok(Value::Closure(Closure {
+                semantic_function:
+                    runmat_runtime::user_functions::resolve_semantic_function_by_name(
+                        &function_name,
+                    ),
+                function_name,
+                captures: vec![Value::Object(obj)],
+            }))
+        }
         Value::ClassRef(cls) => {
             if let Some((m, _owner)) = lookup_method(&cls, &name) {
                 if !m.is_static {
                     return Err(format!("Method '{}' is not static", name).into());
                 }
                 return Ok(Value::Closure(Closure {
+                    semantic_function:
+                        runmat_runtime::user_functions::resolve_semantic_function_by_name(
+                            &m.function_name,
+                        ),
                     function_name: m.function_name,
-                    semantic_function: None,
                     captures: vec![],
                 }));
             }
             let qualified = format!("{cls}.{name}");
             if builtin_functions().iter().any(|b| b.name == qualified) {
                 Ok(Value::Closure(Closure {
+                    semantic_function:
+                        runmat_runtime::user_functions::resolve_semantic_function_by_name(
+                            &qualified,
+                        ),
                     function_name: qualified,
-                    semantic_function: None,
                     captures: vec![],
                 }))
             } else {
@@ -166,7 +182,7 @@ pub async fn call_method_or_member_index_with_outputs(
                 full_args.push(Value::Object(obj));
                 full_args.extend(args);
                 return call_identity_with_policy(
-                    dynamic_identity(m.function_name.clone()),
+                    method_identity(m.function_name.clone()),
                     Some(m.function_name),
                     full_args,
                     requested_outputs,
@@ -265,16 +281,22 @@ pub async fn call_method_or_member_index_with_outputs(
             call_explicit_builtin("getfield", &getfield_args, requested_outputs).await
         }
         Value::ClassRef(cls) => {
+            let classref_fallback = match fallback_policy {
+                CallableFallbackPolicy::ObjectDispatch => {
+                    CallableFallbackPolicy::RuntimeNameResolution
+                }
+                other => other,
+            };
             if let Some((m, _owner)) = lookup_method(&cls, &name) {
                 if !m.is_static {
                     return Err(format!("Method '{}' is not static", name).into());
                 }
                 return call_identity_with_policy(
-                    dynamic_identity(m.function_name.clone()),
+                    method_identity(m.function_name.clone()),
                     Some(m.function_name),
                     args,
                     requested_outputs,
-                    fallback_policy,
+                    classref_fallback,
                 )
                 .await;
             }
@@ -285,7 +307,7 @@ pub async fn call_method_or_member_index_with_outputs(
                 Some(qualified),
                 args,
                 requested_outputs,
-                fallback_policy,
+                classref_fallback,
             )
             .await
         }
