@@ -10,8 +10,7 @@ mod stack;
 use crate::bytecode::Instr;
 use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
 use crate::call::shared::{
-    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexKind, ObjectIndexOp,
-    ObjectIndexSelector,
+    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexSelector,
 };
 use crate::interpreter::debug;
 use crate::runtime::workspace::refresh_workspace_state;
@@ -644,17 +643,15 @@ pub async fn dispatch_instruction(
                         Value::Object(obj) => obj,
                         _ => unreachable!(),
                     };
-                    let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
-                        base: Value::Object(obj),
-                        op: ObjectIndexOp::Subsref,
-                        kind: ObjectIndexKind::Paren,
-                        selector: ObjectIndexSelector::IndexValues {
-                            values: indices,
-                            context: "subsref build error",
-                        },
-                        rhs: None,
-                    })
-                    .await?;
+                    let v =
+                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_paren(
+                            Value::Object(obj),
+                            ObjectIndexSelector::IndexValues {
+                                values: indices,
+                                context: "subsref build error",
+                            },
+                        ))
+                        .await?;
                     Ok(vec![v])
                 },
             )
@@ -676,17 +673,15 @@ pub async fn dispatch_instruction(
                         Value::Object(obj) => obj,
                         _ => unreachable!(),
                     };
-                    let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
-                        base: Value::Object(obj),
-                        op: ObjectIndexOp::Subsref,
-                        kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::IndexValues {
-                            values: indices,
-                            context: "subsref build error",
-                        },
-                        rhs: None,
-                    })
-                    .await?;
+                    let v =
+                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+                            Value::Object(obj),
+                            ObjectIndexSelector::IndexValues {
+                                values: indices,
+                                context: "subsref build error",
+                            },
+                        ))
+                        .await?;
                     Ok(vec![v])
                 },
             )
@@ -713,17 +708,15 @@ pub async fn dispatch_instruction(
                         Value::Object(obj) => obj,
                         _ => unreachable!(),
                     };
-                    let v = call_object_index_descriptor_method(ObjectIndexDescriptor {
-                        base: Value::Object(obj),
-                        op: ObjectIndexOp::Subsref,
-                        kind: ObjectIndexKind::Brace,
-                        selector: ObjectIndexSelector::IndexValues {
-                            values: indices,
-                            context: "subsref build error",
-                        },
-                        rhs: None,
-                    })
-                    .await?;
+                    let v =
+                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+                            Value::Object(obj),
+                            ObjectIndexSelector::IndexValues {
+                                values: indices,
+                                context: "subsref build error",
+                            },
+                        ))
+                        .await?;
                     Ok(vec![v])
                 },
             )

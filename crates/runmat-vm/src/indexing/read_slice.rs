@@ -1,6 +1,5 @@
 use crate::call::shared::{
-    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexKind, ObjectIndexOp,
-    ObjectIndexSelector,
+    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexSelector,
 };
 use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::selectors::{
@@ -12,16 +11,13 @@ use runmat_runtime::RuntimeError;
 pub async fn object_subsref_paren(base: Value, numeric: &[Value]) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(_) | Value::HandleObject(_) => {
-            call_object_index_descriptor_method(ObjectIndexDescriptor {
+            call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_paren(
                 base,
-                op: ObjectIndexOp::Subsref,
-                kind: ObjectIndexKind::Paren,
-                selector: ObjectIndexSelector::IndexValues {
+                ObjectIndexSelector::IndexValues {
                     values: numeric.to_vec(),
                     context: "subsref build error",
                 },
-                rhs: None,
-            })
+            ))
             .await
         }
         other => Err(format!("slice subsref requires object/handle, got {other:?}").into()),

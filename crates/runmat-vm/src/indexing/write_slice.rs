@@ -1,6 +1,5 @@
 use crate::call::shared::{
-    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexKind, ObjectIndexOp,
-    ObjectIndexSelector,
+    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexSelector,
 };
 use crate::indexing::plan::IndexPlan;
 use crate::interpreter::errors::mex;
@@ -20,16 +19,14 @@ pub async fn object_subsasgn_paren(
 ) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(_) | Value::HandleObject(_) => {
-            call_object_index_descriptor_method(ObjectIndexDescriptor {
+            call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
                 base,
-                op: ObjectIndexOp::Subsasgn,
-                kind: ObjectIndexKind::Paren,
-                selector: ObjectIndexSelector::IndexValues {
+                ObjectIndexSelector::IndexValues {
                     values: numeric.to_vec(),
                     context: "subsasgn build error",
                 },
-                rhs: Some(rhs),
-            })
+                rhs,
+            ))
             .await
         }
         other => Err(format!("slice subsasgn requires object/handle, got {other:?}").into()),

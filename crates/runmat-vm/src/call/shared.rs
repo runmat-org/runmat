@@ -71,6 +71,61 @@ pub struct ObjectIndexDescriptor {
 }
 
 impl ObjectIndexDescriptor {
+    pub(crate) fn subsref_paren(base: Value, selector: ObjectIndexSelector) -> Self {
+        Self {
+            base,
+            op: ObjectIndexOp::Subsref,
+            kind: ObjectIndexKind::Paren,
+            selector,
+            rhs: None,
+        }
+    }
+
+    pub(crate) fn subsref_brace(base: Value, selector: ObjectIndexSelector) -> Self {
+        Self {
+            base,
+            op: ObjectIndexOp::Subsref,
+            kind: ObjectIndexKind::Brace,
+            selector,
+            rhs: None,
+        }
+    }
+
+    pub(crate) fn subsasgn_paren(base: Value, selector: ObjectIndexSelector, rhs: Value) -> Self {
+        Self {
+            base,
+            op: ObjectIndexOp::Subsasgn,
+            kind: ObjectIndexKind::Paren,
+            selector,
+            rhs: Some(rhs),
+        }
+    }
+
+    pub(crate) fn subsasgn_brace(base: Value, selector: ObjectIndexSelector, rhs: Value) -> Self {
+        Self {
+            base,
+            op: ObjectIndexOp::Subsasgn,
+            kind: ObjectIndexKind::Brace,
+            selector,
+            rhs: Some(rhs),
+        }
+    }
+
+    pub(crate) fn member(
+        base: Value,
+        op: ObjectIndexOp,
+        field: String,
+        rhs: Option<Value>,
+    ) -> Self {
+        Self {
+            base,
+            op,
+            kind: ObjectIndexKind::Member,
+            selector: ObjectIndexSelector::Member(field),
+            rhs,
+        }
+    }
+
     fn into_runtime_method_args(self) -> Result<Vec<Value>, RuntimeError> {
         let selector = match self.selector {
             ObjectIndexSelector::Empty { context } => {
@@ -118,14 +173,7 @@ pub async fn call_object_member_method(
     field: String,
     rhs: Option<Value>,
 ) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor {
-        base,
-        op,
-        kind: ObjectIndexKind::Member,
-        selector: ObjectIndexSelector::Member(field),
-        rhs,
-    })
-    .await
+    call_object_index_descriptor_method(ObjectIndexDescriptor::member(base, op, field, rhs)).await
 }
 
 pub async fn call_object_index_descriptor_method(
