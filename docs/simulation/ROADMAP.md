@@ -129,3 +129,5 @@ Progress update (2026-05-17):
     `release_readiness_nonlinear.py` now evaluates key EM/acoustic/CFD/CHT/FSI provider fixtures for minimum GPU speedup and rolling slowdown ratios (with governance-profile defaults and enforceable fixture-presence policy), adding regression blocking posture for non-nonlinear key workloads.
 31. [x] Acoustic comparator/assertion governance depth expanded:
     acoustic conformance + external-reference governance now enforce acoustic-specific modal quality metrics (`acoustic_max_m_orthogonality_offdiag`, `acoustic_min_relative_frequency_separation`) for provider fixtures in addition to mode-count/residual controls.
+32. [x] EM external-reference fixture coverage expanded beyond core homogeneous/heterogeneous paths:
+    added/enforced comparator metrics for sparse-assignments, fallback-heavy, overlap-interference, and boundary-kernel EM provider fixtures, and expanded required metric sets for boundary-penalty/phased-source fixtures in enforce-mode validation.
