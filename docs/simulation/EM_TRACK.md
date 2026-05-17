@@ -43,6 +43,7 @@ Last updated: 2026-05-17
    Baseline increment landed: external-reference and nonlinear schema governance now also requires homogeneous/heterogeneous dispersive-coupling-ratio assertion comparators, extending EM dispersive-coupling fidelity policy coverage in enforce-mode validation.
    Baseline increment landed: external-reference and nonlinear schema governance now also requires homogeneous/heterogeneous source-region-coverage and boundary-anchor assertion comparators, extending EM source/boundary-fidelity policy coverage in enforce-mode validation.
    Baseline increment landed: release-readiness Maxwell posture governance now also consumes homogeneous/heterogeneous dispersive-coupling-ratio threshold assertions with profile-tuned maxima, so coupling-ratio excursions are branch-gated alongside other EM posture signals.
+   Baseline increment landed: release-readiness Maxwell posture governance now also consumes homogeneous/heterogeneous boundary-anchor-ratio threshold assertions with profile-tuned minima, so anchor-ratio regressions are branch-gated alongside other EM posture signals.
 
 ## Next Recommended EM Slice
 

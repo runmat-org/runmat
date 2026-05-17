@@ -136,6 +136,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.55",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.55",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.55",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.15",
@@ -240,6 +241,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.45",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.25",
@@ -344,6 +346,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO": "0.6",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.35",
@@ -1331,6 +1334,12 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_min_boundary_anchor_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO", "0.8"),
+        )
+    )
     em_max_breach_rate_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE",
@@ -1750,6 +1759,7 @@ def evaluate_release_readiness(
     em_min_source_realization_ratio = None
     em_min_source_region_coverage_ratio = None
     em_min_source_material_alignment_ratio = None
+    em_min_boundary_anchor_ratio = None
     em_min_dispersive_phase_attenuation_mean = None
     em_min_dispersive_phase_conductivity_attenuation_ratio = None
     em_max_dispersive_coupling_ratio = None
@@ -2560,6 +2570,22 @@ def evaluate_release_readiness(
             ),
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_boundary_anchor_ratio",
+                "min",
+                "EM_BOUNDARY_ANCHOR_RATIO_LOW",
+                "EM homogeneous boundary-anchor ratio",
+                em_min_boundary_anchor_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_boundary_anchor_ratio",
+                "min",
+                "EM_BOUNDARY_ANCHOR_RATIO_LOW",
+                "EM heterogeneous boundary-anchor ratio",
+                em_min_boundary_anchor_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
                 "em_homogeneous_dispersive_coupling_ratio",
                 "max",
                 "EM_DISPERSIVE_COUPLING_RATIO_HIGH",
@@ -2648,6 +2674,12 @@ def evaluate_release_readiness(
                     or observed > em_max_dispersive_coupling_ratio
                 ):
                     em_max_dispersive_coupling_ratio = observed
+            elif assertion_name.endswith("boundary_anchor_ratio"):
+                if (
+                    em_min_boundary_anchor_ratio is None
+                    or observed < em_min_boundary_anchor_ratio
+                ):
+                    em_min_boundary_anchor_ratio = observed
 
             breached = observed > threshold if mode == "max" else observed < threshold
             breaches.append(breached)
@@ -4145,6 +4177,8 @@ def evaluate_release_readiness(
         "em_min_source_region_coverage_ratio_threshold": em_min_source_region_coverage_ratio_threshold,
         "em_min_source_material_alignment_ratio": em_min_source_material_alignment_ratio,
         "em_min_source_material_alignment_ratio_threshold": em_min_source_material_alignment_ratio_threshold,
+        "em_min_boundary_anchor_ratio": em_min_boundary_anchor_ratio,
+        "em_min_boundary_anchor_ratio_threshold": em_min_boundary_anchor_ratio_threshold,
         "em_min_dispersive_phase_attenuation_mean": em_min_dispersive_phase_attenuation_mean,
         "em_min_dispersive_phase_attenuation_mean_threshold": em_min_dispersive_phase_attenuation_mean_threshold,
         "em_min_dispersive_phase_conductivity_attenuation_ratio": em_min_dispersive_phase_conductivity_attenuation_ratio,
