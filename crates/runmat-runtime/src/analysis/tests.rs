@@ -160,6 +160,39 @@ fn sample_cht_model() -> AnalysisModel {
     model
 }
 
+fn sample_fsi_model() -> AnalysisModel {
+    let mut model = sample_model();
+    model.steps = vec![
+        AnalysisStep {
+            step_id: "fsi_structure".to_string(),
+            kind: AnalysisStepKind::Transient,
+        },
+        AnalysisStep {
+            step_id: "fsi_flow".to_string(),
+            kind: AnalysisStepKind::Cfd,
+        },
+    ];
+    model.cfd = Some(runmat_analysis_core::CfdDomain {
+        enabled: true,
+        solve_family: CfdSolveFamily::Transient,
+        reference_density_kg_per_m3: 1.225,
+        dynamic_viscosity_pa_s: 1.81e-5,
+        inlet_velocity_m_per_s: 4.0,
+        turbulence_intensity: 0.06,
+        time_profile: vec![
+            runmat_analysis_core::CfdTimeProfilePoint {
+                normalized_time: 0.0,
+                inlet_scale: 0.6,
+            },
+            runmat_analysis_core::CfdTimeProfilePoint {
+                normalized_time: 1.0,
+                inlet_scale: 1.0,
+            },
+        ],
+    });
+    model
+}
+
 fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: ThermoMechanicalCouplingOptions) {
     model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
         enabled: coupling.enabled,
@@ -1327,6 +1360,51 @@ fn analysis_trends_classifies_cht_runs_separately() {
 }
 
 #[test]
+fn analysis_trends_classifies_fsi_runs_separately() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+
+    let model = sample_fsi_model();
+    for _ in 0..3 {
+        let _ = analysis_run_fsi_op(
+            &model,
+            ComputeBackend::Cpu,
+            OperationContext::new(None, None),
+        )
+        .expect("fsi run should persist for trends");
+    }
+
+    let trends = analysis_trends_op(
+        AnalysisTrendsQuery { window_size: 2 },
+        OperationContext::new(None, None),
+    )
+    .expect("trends should succeed");
+
+    let fsi = trends
+        .data
+        .summaries
+        .iter()
+        .find(|summary| summary.run_kind == AnalysisRunKind::Fsi)
+        .expect("fsi trend summary should exist");
+    assert_eq!(fsi.sample_count, 2);
+    assert!(fsi.median_solve_ms.is_some());
+    assert!(fsi.p95_solve_ms.is_some());
+    assert!(fsi.failed_increment_rate.is_none());
+
+    let transient = trends
+        .data
+        .summaries
+        .iter()
+        .find(|summary| summary.run_kind == AnalysisRunKind::Transient);
+    assert!(
+        transient.is_none(),
+        "fsi runs should not classify as transient"
+    );
+
+    storage::reset_artifact_store_for_tests();
+}
+
+#[test]
 fn analysis_results_summary_surfaces_thermo_transient_metrics() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -2196,6 +2274,48 @@ fn analysis_run_cht_rejects_invalid_cfd_domain_parameters() {
     assert_eq!(err.operation, "analysis.run_cht");
     assert_eq!(err.op_version, "analysis.run_cht/v1");
     assert_eq!(err.error_code, "ANALYSIS_RUN_CHT_INVALID_OPTIONS");
+}
+
+#[test]
+fn analysis_run_fsi_rejects_models_without_transient_step() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "cfd_1".to_string(),
+        kind: AnalysisStepKind::Cfd,
+    }];
+    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::Transient, true));
+    let err = analysis_run_fsi_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("fsi run should fail for missing transient step");
+
+    assert_eq!(err.operation, "analysis.run_fsi");
+    assert_eq!(err.op_version, "analysis.run_fsi/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_FSI_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_fsi_rejects_invalid_cfd_domain_parameters() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_fsi_model();
+    model
+        .cfd
+        .as_mut()
+        .expect("fsi model should include cfd")
+        .dynamic_viscosity_pa_s = 0.0;
+    let err = analysis_run_fsi_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("fsi run should fail for invalid cfd domain values");
+
+    assert_eq!(err.operation, "analysis.run_fsi");
+    assert_eq!(err.op_version, "analysis.run_fsi/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_FSI_INVALID_OPTIONS");
 }
 
 #[test]
@@ -3081,6 +3201,61 @@ fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
         transient.displacement_snapshots.len()
     );
     assert_eq!(thermal.time_points_s.len(), 4);
+}
+
+#[test]
+fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
+    let _guard = analysis_test_guard();
+    let model = sample_fsi_model();
+
+    let envelope = analysis_run_fsi_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisFsiRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            time_step_s: 1.0e-3,
+            step_count: 4,
+            max_linear_iters: 64,
+            tolerance: 1.0e-8,
+            residual_warn_threshold: 1.0e-4,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("fsi run should return envelope");
+
+    assert_eq!(envelope.operation, "analysis.run_fsi");
+    assert_eq!(envelope.op_version, "analysis.run_fsi/v1");
+    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
+    assert!(envelope.data.transient_results.is_some());
+    assert!(envelope.data.thermal_results.is_none());
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_CFD_FLOW" && diag.message.contains("reynolds_proxy=")));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_FSI_COUPLING"
+            && diag.message.contains("cfd_profile_point_count=2")));
+    let transient = envelope
+        .data
+        .transient_results
+        .as_ref()
+        .expect("transient payload should exist");
+    assert_eq!(transient.time_points_s.len(), 5);
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.displacement_snapshots.len()
+    );
 }
 
 #[test]

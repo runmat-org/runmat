@@ -95,3 +95,5 @@ Progress update (2026-05-17):
     added additive `analysis.create_model` profile `fsi_coupled` with baseline coupled template defaults (transient structural + CFD steps, seeded transient CFD domain, and baseline FSI load template) plus runtime contract tests.
 14. [x] Study workflow kickoff landed:
     added additive high-level runtime operations `analysis.validate_study/v1`, `analysis.plan_study/v1`, and `analysis.run_study/v1` with typed study contracts, deterministic study fingerprinting, canonical linear-static operation sequencing, and runtime coverage tests.
+15. [x] FSI first run-path and governance baseline landed:
+    added additive runtime operation contract `analysis.run_fsi/v1` with `AnalysisFsiRunOptions`, transient+CFD model/domain validation, FSI diagnostics (`FEA_FSI_COUPLING` + `FEA_CFD_FLOW`), study/trend classification wiring (`AnalysisRunKind::Fsi`), and conformance harness fixtures (`fsi_coupled_cpu`, `fsi_coupled_gpu_provider`, `fsi_coupled_gpu_fallback`) with threshold assertions.

@@ -685,6 +685,39 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             ],
         });
     }
+    if spec_id.starts_with("fsi_coupled_") {
+        model.steps = vec![
+            runmat_analysis_core::AnalysisStep {
+                step_id: format!("step_fsi_structure_{}", spec_id),
+                kind: runmat_analysis_core::AnalysisStepKind::Transient,
+            },
+            runmat_analysis_core::AnalysisStep {
+                step_id: format!("step_fsi_flow_{}", spec_id),
+                kind: runmat_analysis_core::AnalysisStepKind::Cfd,
+            },
+        ];
+        model.thermo_mechanical = None;
+        model.electro_thermal = None;
+        model.interfaces.clear();
+        model.cfd = Some(runmat_analysis_core::CfdDomain {
+            enabled: true,
+            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
+            reference_density_kg_per_m3: 1.225,
+            dynamic_viscosity_pa_s: 1.81e-5,
+            inlet_velocity_m_per_s: 4.0,
+            turbulence_intensity: 0.06,
+            time_profile: vec![
+                runmat_analysis_core::CfdTimeProfilePoint {
+                    normalized_time: 0.0,
+                    inlet_scale: 0.6,
+                },
+                runmat_analysis_core::CfdTimeProfilePoint {
+                    normalized_time: 1.0,
+                    inlet_scale: 1.0,
+                },
+            ],
+        });
+    }
 
     if let Some(profile) = electromagnetic_profile_for_fixture(spec_id) {
         model.steps = vec![runmat_analysis_core::AnalysisStep {
@@ -1949,6 +1982,26 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
+        AnalysisRunKind::Fsi => analysis_run_fsi_with_options_op(
+            model,
+            ComputeBackend::Cpu,
+            AnalysisFsiRunOptions {
+                deterministic_mode: true,
+                precision_mode: PrecisionMode::Fp64,
+                quality_policy: QualityPolicy::Balanced,
+                time_step_s: 1.0e-3,
+                step_count: spec
+                    .transient_step_count
+                    .unwrap_or(AnalysisFsiRunOptions::default().step_count),
+                max_linear_iters: 128,
+                tolerance: 1.0e-8,
+                residual_warn_threshold: 1.0e-4,
+                prep_context: None,
+                prep_artifact_id: None,
+                prep_calibration_profile: None,
+            },
+            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+        ),
         AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Cpu,
@@ -2061,6 +2114,26 @@ fn run_fixture_gpu(
                 step_count: spec
                     .transient_step_count
                     .unwrap_or(AnalysisChtRunOptions::default().step_count),
+                max_linear_iters: 128,
+                tolerance: 1.0e-8,
+                residual_warn_threshold: 1.0e-4,
+                prep_context: None,
+                prep_artifact_id: None,
+                prep_calibration_profile: None,
+            },
+            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+        ),
+        AnalysisRunKind::Fsi => analysis_run_fsi_with_options_op(
+            model,
+            ComputeBackend::Gpu,
+            AnalysisFsiRunOptions {
+                deterministic_mode: true,
+                precision_mode: PrecisionMode::Fp64,
+                quality_policy: QualityPolicy::Balanced,
+                time_step_s: 1.0e-3,
+                step_count: spec
+                    .transient_step_count
+                    .unwrap_or(AnalysisFsiRunOptions::default().step_count),
                 max_linear_iters: 128,
                 tolerance: 1.0e-8,
                 residual_warn_threshold: 1.0e-4,
@@ -2689,6 +2762,116 @@ pub(super) fn run_fixture(
                 diagnostic_metric(&cpu_envelope.data, "FEA_CHT_COUPLING", "time_step_s"),
                 Some(1.0e-3),
                 Some(1.0e-3),
+            );
+        }
+        if spec.id.starts_with("fsi_coupled_") {
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_reference_density_kg_per_m3",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "density"),
+                Some(1.20),
+                Some(1.25),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_dynamic_viscosity_pa_s",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "viscosity"),
+                Some(1.0e-5),
+                Some(3.0e-5),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_inlet_velocity_m_per_s",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "inlet_velocity"),
+                Some(3.5),
+                Some(4.5),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_turbulence_intensity",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "turbulence_intensity"),
+                Some(0.04),
+                Some(0.08),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_reynolds_proxy",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "reynolds_proxy"),
+                Some(2.0e5),
+                Some(3.0e5),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_profile_point_count",
+                "FEA_CFD_FLOW",
+                diagnostic_metric(&cpu_envelope.data, "FEA_CFD_FLOW", "profile_point_count"),
+                Some(2.0),
+                Some(2.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_step_count",
+                "FEA_FSI_COUPLING",
+                diagnostic_metric(&cpu_envelope.data, "FEA_FSI_COUPLING", "step_count"),
+                Some(12.0),
+                Some(12.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_time_step_s",
+                "FEA_FSI_COUPLING",
+                diagnostic_metric(&cpu_envelope.data, "FEA_FSI_COUPLING", "time_step_s"),
+                Some(1.0e-3),
+                Some(1.0e-3),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_structural_step_count",
+                "FEA_FSI_COUPLING",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_COUPLING",
+                    "structural_step_count",
+                ),
+                Some(1.0),
+                Some(1.0),
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "fsi_cfd_profile_point_count",
+                "FEA_FSI_COUPLING",
+                diagnostic_metric(
+                    &cpu_envelope.data,
+                    "FEA_FSI_COUPLING",
+                    "cfd_profile_point_count",
+                ),
+                Some(2.0),
+                Some(2.0),
             );
         }
 
