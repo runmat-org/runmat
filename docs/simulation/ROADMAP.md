@@ -103,3 +103,5 @@ Progress update (2026-05-17):
     filesystem analysis artifacts now classify and persist family-accurate `op_version` for CFD/CHT/FSI runs (`analysis.run_cfd/v1`, `analysis.run_cht/v1`, `analysis.run_fsi/v1`) based on diagnostic signatures, with regression coverage to prevent coupled runs from collapsing into generic transient op-version labels.
 18. [x] Coupled-family governance validator coverage expanded:
     release/nonlinear benchmark schema validation now requires CFD/CHT/FSI provider fixture threshold-assertion sets (`cfd_steady_gpu_provider`, `cht_coupled_gpu_provider`, `fsi_coupled_gpu_provider`) so coupled-family conformance regressions fail policy validation instead of silently passing.
+19. [x] Coupled-family external-reference comparator metrics expanded:
+    M6 baseline external-reference data now includes threshold-assertion metrics for CFD/CHT/FSI provider fixtures (`cfd_steady_gpu_provider`, `cht_coupled_gpu_provider`, `fsi_coupled_gpu_provider`) so coupled-family regressions are evaluated by governance reference comparisons.

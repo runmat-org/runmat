@@ -97,6 +97,66 @@
       "reference": 0.13,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.9
+    },
+    {
+      "name": "cfd_reference_density_kg_per_m3",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_reference_density_kg_per_m3",
+      "reference": 1.225,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.08
+    },
+    {
+      "name": "cfd_reynolds_proxy",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_reynolds_proxy",
+      "reference": 338397.79005524865,
+      "tolerance_abs": 70000.0,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "cht_applied_temperature_delta_k",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cht_applied_temperature_delta_k",
+      "reference": 60.0,
+      "tolerance_abs": 6.0,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "cht_reynolds_proxy",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cht_reynolds_proxy",
+      "reference": 338397.79005524865,
+      "tolerance_abs": 70000.0,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "fsi_reynolds_proxy",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "fsi_reynolds_proxy",
+      "reference": 270718.2320441989,
+      "tolerance_abs": 60000.0,
+      "tolerance_rel": 0.22
+    },
+    {
+      "name": "fsi_structural_step_count",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "fsi_structural_step_count",
+      "reference": 1.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": 0.0
     }
   ]
 }
