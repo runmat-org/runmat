@@ -256,6 +256,10 @@ fn multi_output_assignment_records_requested_outputs_and_discard() {
     let HirStmtKind::MultiAssign(targets, expr, _) = &function.body.statements[1].kind else {
         panic!("expected multi-assignment");
     };
+    assert!(matches!(
+        targets.requested_outputs,
+        RequestedOutputCount::Exactly(2)
+    ));
     assert!(matches!(targets.targets[0], OutputTarget::Discard));
     assert!(matches!(targets.targets[1], OutputTarget::Place(_)));
     let HirExprKind::Call(call) = &expr.kind else {

@@ -872,7 +872,10 @@ impl SemanticCtx {
                     })
                     .collect();
                 HirStmtKind::MultiAssign(
-                    crate::OutputTargetList { targets },
+                    crate::OutputTargetList {
+                        requested_outputs: RequestedOutputCount::Exactly(names.len()),
+                        targets,
+                    },
                     self.lower_expr_semantic_requested(
                         expr,
                         RequestedOutputCount::Exactly(names.len()),

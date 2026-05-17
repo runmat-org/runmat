@@ -3,8 +3,8 @@ use crate::{
 };
 use runmat_hir::{
     AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, ExprId, HirExpr,
-    HirExprKind, HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind, RequestedOutputCount,
-    SemanticError, Span, WorkspaceEffect,
+    HirExprKind, HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind, SemanticError, Span,
+    WorkspaceEffect,
 };
 use std::collections::HashMap;
 
@@ -44,7 +44,7 @@ pub(crate) fn lower_stmt_with_replacements(
             stmts.push(MirStmt {
                 kind: MirStmtKind::MultiAssign {
                     targets: MirOutputTargetList {
-                        requested_outputs: requested_outputs_for_targets(&lowered_targets),
+                        requested_outputs: targets.requested_outputs.clone(),
                         targets: lowered_targets,
                     },
                     value,
@@ -199,14 +199,6 @@ fn lower_output_targets(
         .iter()
         .map(|target| lower_output_target(ctx, target, stmts))
         .collect()
-}
-
-fn requested_outputs_for_targets(targets: &[MirOutputTarget]) -> RequestedOutputCount {
-    match targets.len() {
-        0 => RequestedOutputCount::Zero,
-        1 => RequestedOutputCount::One,
-        n => RequestedOutputCount::Exactly(n),
-    }
 }
 
 fn lower_output_target(

@@ -1604,6 +1604,10 @@ fn multi_assign_preserves_discard_targets_and_requested_outputs() {
     };
 
     assert_eq!(targets.targets.len(), 2);
+    assert!(matches!(
+        targets.requested_outputs,
+        runmat_hir::RequestedOutputCount::Exactly(2)
+    ));
     assert!(matches!(targets.targets[0], MirOutputTarget::Discard));
     assert!(matches!(targets.targets[1], MirOutputTarget::Place(_)));
     assert!(matches!(

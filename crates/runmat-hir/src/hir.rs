@@ -494,6 +494,7 @@ pub enum MemberAccess {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct OutputTargetList {
+    pub requested_outputs: RequestedOutputCount,
     pub targets: Vec<OutputTarget>,
 }
 
