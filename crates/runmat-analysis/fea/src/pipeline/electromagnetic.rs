@@ -288,6 +288,8 @@ pub fn run_electromagnetic_with_options(
     let mut node_mu_r = vec![material_stats.relative_permeability_mean.max(1.0e-9); node_count];
     let mut node_dispersive_loss_scale =
         vec![material_stats.dispersive_loss_scale_mean; node_count];
+    let mut node_dispersive_phase_attenuation =
+        vec![material_stats.dispersive_phase_attenuation_mean; node_count];
     for i in 0..node_count {
         let region_index = ((i * region_count) / node_count).min(region_count - 1);
         let region = &coefficient_profile.region_coefficients[region_index];
@@ -295,6 +297,7 @@ pub fn run_electromagnetic_with_options(
         node_eps_r[i] = region.relative_permittivity;
         node_mu_r[i] = region.relative_permeability;
         node_dispersive_loss_scale[i] = region.dispersive_loss_scale;
+        node_dispersive_phase_attenuation[i] = region.dispersive_phase_attenuation;
     }
 
     let mut stiffness_upper = vec![0.0_f64; node_count.saturating_sub(1)];
@@ -337,6 +340,8 @@ pub fn run_electromagnetic_with_options(
     let mut stiffness_diag = vec![0.0_f64; node_count];
     let mut conductivity_coupling_terms = vec![0.0_f64; node_count];
     let mut dispersive_conductivity_terms = vec![0.0_f64; node_count];
+    let mut phase_attenuated_conductivity_terms = vec![0.0_f64; node_count];
+    let mut unattenuated_conductivity_terms = vec![0.0_f64; node_count];
     for i in 0..node_count {
         let left = if i > 0 { stiffness_upper[i - 1] } else { 0.0 };
         let right = if i + 1 < node_count {
@@ -347,9 +352,12 @@ pub fn run_electromagnetic_with_options(
         let effective_permittivity_i = epsilon0 * node_eps_r[i].max(1.0e-9);
         let dispersive_term =
             omega * effective_permittivity_i * node_dispersive_loss_scale[i].clamp(0.0, 10.0);
+        let phase_attenuation = node_dispersive_phase_attenuation[i].clamp(0.05, 1.0);
+        let attenuated_conductive_term = omega * node_sigma[i].max(1.0e-9) * phase_attenuation;
         dispersive_conductivity_terms[i] = dispersive_term;
-        conductivity_coupling_terms[i] =
-            (omega * node_sigma[i].max(1.0e-9) + dispersive_term).max(1.0e-9);
+        phase_attenuated_conductivity_terms[i] = attenuated_conductive_term;
+        unattenuated_conductivity_terms[i] = omega * node_sigma[i].max(1.0e-9);
+        conductivity_coupling_terms[i] = (attenuated_conductive_term + dispersive_term).max(1.0e-9);
         stiffness_diag[i] = left + right + (omega * omega * effective_permittivity_i).max(1.0e-9);
     }
     let mut boundary_penalty_diag = vec![0.0_f64; node_count];
@@ -727,10 +735,16 @@ pub fn run_electromagnetic_with_options(
     let source_region_energy_consistency_ratio = (1.0 - 0.5 * l1_mismatch).clamp(0.0, 1.0);
     let mean_dispersive_conductivity =
         dispersive_conductivity_terms.iter().sum::<f64>() / node_count.max(1) as f64;
+    let mean_phase_attenuated_conductivity =
+        phase_attenuated_conductivity_terms.iter().sum::<f64>() / node_count.max(1) as f64;
+    let mean_unattenuated_conductivity =
+        unattenuated_conductivity_terms.iter().sum::<f64>() / node_count.max(1) as f64;
     let mean_total_conductivity_coupling =
         conductivity_coupling_terms.iter().sum::<f64>() / node_count.max(1) as f64;
     let dispersive_conductivity_coupling_ratio =
         mean_dispersive_conductivity / mean_total_conductivity_coupling.max(1.0e-9);
+    let dispersive_phase_conductivity_attenuation_ratio =
+        mean_phase_attenuated_conductivity / mean_unattenuated_conductivity.max(1.0e-9);
 
     diagnostics.push(FeaDiagnostic {
         code: "FEA_EM_STATIC".to_string(),
@@ -740,7 +754,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} conductivity_frequency_scale_mean={} conductivity_frequency_scale_spread_ratio={} conductivity_frequency_response_coverage_ratio={} dispersive_loss_scale_mean={} dispersive_loss_scale_spread_ratio={} dispersive_conductivity_coupling_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_proxy={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} boundary_penalty_conditioning_contribution={} source_region_energy_consistency_ratio={} real_residual_norm={} imag_residual_norm={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
+            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} conductivity_frequency_scale_mean={} conductivity_frequency_scale_spread_ratio={} conductivity_frequency_response_coverage_ratio={} dispersive_loss_scale_mean={} dispersive_loss_scale_spread_ratio={} dispersive_phase_attenuation_mean={} dispersive_phase_attenuation_spread_ratio={} dispersive_conductivity_coupling_ratio={} dispersive_phase_conductivity_attenuation_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_proxy={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} boundary_penalty_conditioning_contribution={} source_region_energy_consistency_ratio={} real_residual_norm={} imag_residual_norm={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
             domain.enabled,
             domain.reference_frequency_hz,
             domain.applied_current_a,
@@ -753,7 +767,10 @@ pub fn run_electromagnetic_with_options(
             material_stats.conductivity_frequency_response_coverage_ratio,
             material_stats.dispersive_loss_scale_mean,
             material_stats.dispersive_loss_scale_spread_ratio,
+            material_stats.dispersive_phase_attenuation_mean,
+            material_stats.dispersive_phase_attenuation_spread_ratio,
             dispersive_conductivity_coupling_ratio,
+            dispersive_phase_conductivity_attenuation_ratio,
             material_stats.relative_permittivity_spread_ratio,
             material_stats.relative_permeability_spread_ratio,
             material_stats.assignment_heterogeneity_index,
@@ -841,6 +858,8 @@ struct ElectromagneticMaterialStats {
     conductivity_frequency_response_coverage_ratio: f64,
     dispersive_loss_scale_mean: f64,
     dispersive_loss_scale_spread_ratio: f64,
+    dispersive_phase_attenuation_mean: f64,
+    dispersive_phase_attenuation_spread_ratio: f64,
     relative_permittivity_spread_ratio: f64,
     relative_permeability_spread_ratio: f64,
     assignment_heterogeneity_index: f64,
@@ -855,6 +874,7 @@ struct RegionElectromagneticCoefficients {
     conductivity_s_per_m: f64,
     conductivity_frequency_scale: f64,
     dispersive_loss_scale: f64,
+    dispersive_phase_attenuation: f64,
     relative_permittivity: f64,
     relative_permeability: f64,
     weight: f64,
@@ -893,6 +913,7 @@ fn electromagnetic_coefficient_profile(
             conductivity,
             conductivity_frequency_scale,
             dispersive_loss_scale,
+            dispersive_phase_attenuation,
             permittivity,
             permeability,
             covered,
@@ -904,6 +925,7 @@ fn electromagnetic_coefficient_profile(
                 (electrical.conductivity_s_per_m * freq_sample.scale).max(1.0e-9),
                 freq_sample.scale,
                 freq_sample.dispersive_loss_scale,
+                freq_sample.phase_attenuation,
                 electrical.relative_permittivity.max(1.0e-9),
                 electrical.relative_permeability.max(1.0e-9),
                 true,
@@ -916,6 +938,7 @@ fn electromagnetic_coefficient_profile(
                 (electrical.conductivity_s_per_m * freq_sample.scale).max(1.0e-9),
                 freq_sample.scale,
                 freq_sample.dispersive_loss_scale,
+                freq_sample.phase_attenuation,
                 electrical.relative_permittivity.max(1.0e-9),
                 electrical.relative_permeability.max(1.0e-9),
                 true,
@@ -923,7 +946,7 @@ fn electromagnetic_coefficient_profile(
                 freq_sample.has_frequency_response,
             )
         } else {
-            (1.0, 1.0, 0.0, 1.0, 1.0, false, true, false)
+            (1.0, 1.0, 0.0, 1.0, 1.0, 1.0, false, true, false)
         };
         covered_assignments += usize::from(covered);
         fallback_coefficients += usize::from(used_fallback);
@@ -932,6 +955,7 @@ fn electromagnetic_coefficient_profile(
             conductivity_s_per_m: conductivity,
             conductivity_frequency_scale,
             dispersive_loss_scale,
+            dispersive_phase_attenuation,
             relative_permittivity: permittivity,
             relative_permeability: permeability,
             weight: confidence_weight(assignment.confidence),
@@ -953,6 +977,7 @@ fn electromagnetic_coefficient_profile(
                     .max(1.0e-9),
                 conductivity_frequency_scale: freq_sample.scale,
                 dispersive_loss_scale: freq_sample.dispersive_loss_scale,
+                dispersive_phase_attenuation: freq_sample.phase_attenuation,
                 relative_permittivity: electrical.relative_permittivity.max(1.0e-9),
                 relative_permeability: electrical.relative_permeability.max(1.0e-9),
                 weight: 1.0,
@@ -969,6 +994,7 @@ fn electromagnetic_coefficient_profile(
             conductivity_s_per_m: 1.0,
             conductivity_frequency_scale: 1.0,
             dispersive_loss_scale: 0.0,
+            dispersive_phase_attenuation: 1.0,
             relative_permittivity: 1.0,
             relative_permeability: 1.0,
             weight: 1.0,
@@ -997,6 +1023,10 @@ fn electromagnetic_coefficient_profile(
     let dispersive_loss_scale_values = samples
         .iter()
         .map(|sample| sample.dispersive_loss_scale)
+        .collect::<Vec<_>>();
+    let dispersive_phase_attenuation_values = samples
+        .iter()
+        .map(|sample| sample.dispersive_phase_attenuation)
         .collect::<Vec<_>>();
 
     let weighted_mean = |values: &[f64]| -> f64 {
@@ -1036,6 +1066,9 @@ fn electromagnetic_coefficient_profile(
         / samples.len().max(1) as f64;
     let dispersive_loss_scale_mean = weighted_mean(&dispersive_loss_scale_values);
     let dispersive_loss_scale_spread_ratio = spread_ratio(&dispersive_loss_scale_values);
+    let dispersive_phase_attenuation_mean = weighted_mean(&dispersive_phase_attenuation_values);
+    let dispersive_phase_attenuation_spread_ratio =
+        spread_ratio(&dispersive_phase_attenuation_values);
     let relative_permittivity_spread_ratio = spread_ratio(&relative_permittivity_values);
     let relative_permeability_spread_ratio = spread_ratio(&relative_permeability_values);
 
@@ -1088,6 +1121,8 @@ fn electromagnetic_coefficient_profile(
             conductivity_frequency_response_coverage_ratio,
             dispersive_loss_scale_mean,
             dispersive_loss_scale_spread_ratio,
+            dispersive_phase_attenuation_mean,
+            dispersive_phase_attenuation_spread_ratio,
             relative_permittivity_spread_ratio,
             relative_permeability_spread_ratio,
             assignment_heterogeneity_index,
@@ -1102,6 +1137,7 @@ fn electromagnetic_coefficient_profile(
 struct ConductivityFrequencySample {
     scale: f64,
     dispersive_loss_scale: f64,
+    phase_attenuation: f64,
     has_frequency_response: bool,
 }
 
@@ -1121,11 +1157,18 @@ fn conductivity_frequency_sample(
     )
     .unwrap_or(0.0)
     .clamp(0.0, 10.0);
+    let phase_attenuation = dispersive_phase_attenuation_for_loss_scale(dispersive_loss_scale);
     ConductivityFrequencySample {
         scale,
         dispersive_loss_scale,
+        phase_attenuation,
         has_frequency_response: !electrical.conductivity_frequency_response.is_empty(),
     }
+}
+
+fn dispersive_phase_attenuation_for_loss_scale(dispersive_loss_scale: f64) -> f64 {
+    let bounded = dispersive_loss_scale.clamp(0.0, 10.0);
+    (1.0 / (1.0 + bounded * bounded)).clamp(0.05, 1.0)
 }
 
 fn conductivity_scale_at_frequency(
@@ -1507,7 +1550,7 @@ mod tests {
 
     use super::{
         conductivity_frequency_sample, conductivity_scale_at_frequency,
-        dispersive_loss_scale_at_frequency,
+        dispersive_loss_scale_at_frequency, dispersive_phase_attenuation_for_loss_scale,
     };
 
     #[test]
@@ -1554,6 +1597,7 @@ mod tests {
         let sample = conductivity_frequency_sample(&electrical, 60.0);
         assert!((sample.scale - 1.0).abs() < 1.0e-12);
         assert!((sample.dispersive_loss_scale - 0.0).abs() < 1.0e-12);
+        assert!((sample.phase_attenuation - 1.0).abs() < 1.0e-12);
         assert!(!sample.has_frequency_response);
     }
 
@@ -1577,5 +1621,17 @@ mod tests {
             (value - 0.14).abs() < 1.0e-9,
             "unexpected interpolated value: {value}"
         );
+    }
+
+    #[test]
+    fn dispersive_phase_attenuation_decreases_with_loss_scale() {
+        let low = dispersive_phase_attenuation_for_loss_scale(0.05);
+        let high = dispersive_phase_attenuation_for_loss_scale(0.8);
+        assert!(
+            low > high,
+            "expected attenuation to decrease for higher loss scale"
+        );
+        assert!((0.0..=1.0).contains(&low));
+        assert!((0.0..=1.0).contains(&high));
     }
 }

@@ -35,6 +35,7 @@ Last updated: 2026-05-17
    Baseline increment landed: `analysis.run_study_sweep` now supports continue-on-failure mode (`fail_fast=false`) with typed per-study failure entries, so EM-inclusive sweeps can preserve successful runs while still surfacing invalid-study diagnostics.
    Baseline increment landed: additive `analysis.validate_study_sweep` now provides typed sweep-level and per-study preflight validation (`issue_codes` plus structured issues) with persisted validation evidence artifacts, improving EM-inclusive sweep gating ergonomics before run dispatch.
    Baseline increment landed: additive `analysis.plan_study_sweep` now provides typed sweep-level preflight planning entries and aggregate planned/failure counts under `fail_fast` policy control, improving EM-inclusive sweep orchestration ergonomics before run dispatch.
+   Baseline increment landed: electromagnetic FEA now applies dispersive-loss-derived phase attenuation to conductive coupling terms and emits additive phase attenuation diagnostics (`dispersive_phase_attenuation_mean`, `dispersive_phase_conductivity_attenuation_ratio`) with conformance/external-reference governance enforcement for homogeneous and heterogeneous EM provider fixtures.
 
 ## Next Recommended EM Slice
 

@@ -3152,6 +3152,12 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         .message
         .contains("conductivity_frequency_response_coverage_ratio="));
     assert!(em_diag.message.contains("dispersive_loss_scale_mean="));
+    assert!(em_diag
+        .message
+        .contains("dispersive_phase_attenuation_mean="));
+    assert!(em_diag
+        .message
+        .contains("dispersive_phase_conductivity_attenuation_ratio="));
 }
 
 #[test]

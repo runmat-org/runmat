@@ -25,6 +25,10 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_dispersive_phase_attenuation_mean",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
                 "em_homogeneous_boundary_energy_ratio",
             ),
             (
@@ -38,6 +42,10 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "em_heterogeneous_region_contrast_index",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_dispersive_phase_attenuation_mean",
             ),
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
