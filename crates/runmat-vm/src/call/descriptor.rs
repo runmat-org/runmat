@@ -1,7 +1,7 @@
 use crate::bytecode::SemanticFunctionRegistry;
-use crate::call::feval::{forward_builtin_feval, try_closure_builtin_fallback};
+use crate::call::feval::forward_builtin_feval;
 use runmat_builtins::{Closure, Value};
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId, SymbolName};
 use runmat_runtime::RuntimeError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,7 +57,6 @@ enum CallableTarget {
         identity: CallableIdentity,
         fallback_policy: CallableFallbackPolicy,
     },
-    NameOnlyBuiltinFallback(String),
     FevalForward(Value),
 }
 
@@ -150,24 +149,6 @@ impl CallableDescriptor {
         }
     }
 
-    fn name_only_builtin_fallback(
-        name: String,
-        args: Vec<Value>,
-        requested_outputs: usize,
-        call_kind: CallableCallKind,
-    ) -> Self {
-        Self {
-            target: CallableTarget::NameOnlyBuiltinFallback(name.clone()),
-            args,
-            requested_outputs,
-            metadata: CallableMetadata {
-                call_kind,
-                display_name: Some(name),
-                ..CallableMetadata::default()
-            },
-        }
-    }
-
     pub(crate) fn semantic_named(
         function: FunctionId,
         name: String,
@@ -181,6 +162,27 @@ impl CallableDescriptor {
             args,
             requested_outputs,
             CallableMetadata {
+                display_name: Some(name),
+                ..CallableMetadata::default()
+            },
+        )
+    }
+
+    pub(crate) fn dynamic_named(
+        name: String,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        fallback_policy: CallableFallbackPolicy,
+        call_kind: CallableCallKind,
+    ) -> Self {
+        Self::resolved_inner(
+            CallableIdentity::DynamicName(SymbolName(name.clone())),
+            Some(name.clone()),
+            fallback_policy,
+            args,
+            requested_outputs,
+            CallableMetadata {
+                call_kind,
                 display_name: Some(name),
                 ..CallableMetadata::default()
             },
@@ -212,7 +214,13 @@ impl CallableDescriptor {
                         requested_outputs,
                     );
                 }
-                Self::feval_forward(Value::FunctionHandle(name), args, requested_outputs)
+                Self::dynamic_named(
+                    name,
+                    args,
+                    requested_outputs,
+                    CallableFallbackPolicy::RuntimeNameResolution,
+                    CallableCallKind::Feval,
+                )
             }
             Value::SemanticFunctionHandle { name, function } => Self::feval_semantic(
                 function,
@@ -252,10 +260,11 @@ impl CallableDescriptor {
                 requested_outputs,
             );
         }
-        Self::name_only_builtin_fallback(
+        Self::dynamic_named(
             name,
             call_args,
             requested_outputs,
+            CallableFallbackPolicy::RuntimeNameResolution,
             CallableCallKind::Feval,
         )
     }
@@ -424,12 +433,6 @@ pub(crate) async fn execute_callable_descriptor(
             execute_resolved_callable(identity, args, requested_outputs, metadata, fallback_policy)
                 .await
         }
-        CallableTarget::NameOnlyBuiltinFallback(name) => {
-            if let Some(result) = try_closure_builtin_fallback(&name, &args).await? {
-                return Ok(result);
-            }
-            Err(undefined_name_error(&name, &metadata))
-        }
         CallableTarget::FevalForward(func_value) => forward_builtin_feval(func_value, args).await,
     }
 }
@@ -456,12 +459,6 @@ pub(crate) async fn try_execute_callable_descriptor(
                 fallback_policy,
             )
             .await
-        }
-        CallableTarget::NameOnlyBuiltinFallback(name) => {
-            if let Some(result) = try_closure_builtin_fallback(&name, &args).await? {
-                return Ok(Some(result));
-            }
-            Err(undefined_name_error(&name, &metadata))
         }
         CallableTarget::FevalForward(func_value) => {
             forward_builtin_feval(func_value, args).await.map(Some)

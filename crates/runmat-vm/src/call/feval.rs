@@ -1,6 +1,5 @@
 use crate::bytecode::SemanticFunctionRegistry;
 use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
-use crate::call::user::try_builtin_fallback_single;
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
 
@@ -16,13 +15,6 @@ pub async fn forward_builtin_feval(
 
 pub async fn call_runtime_feval(args: &[Value]) -> Result<Value, RuntimeError> {
     runmat_runtime::call_feval_async(args).await
-}
-
-pub async fn try_closure_builtin_fallback(
-    name: &str,
-    call_args: &[Value],
-) -> Result<Option<Value>, RuntimeError> {
-    try_builtin_fallback_single(name, call_args).await
 }
 
 pub enum FevalDispatch {

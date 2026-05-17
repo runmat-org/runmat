@@ -36,9 +36,25 @@ impl SemanticCallableRequest {
         requested_outputs: usize,
         kind: SemanticCallableKind,
     ) -> Self {
+        Self::named_with_policy(
+            name,
+            args,
+            requested_outputs,
+            kind,
+            CallableFallbackPolicy::RuntimeNameResolution,
+        )
+    }
+
+    pub fn named_with_policy(
+        name: String,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        kind: SemanticCallableKind,
+        fallback_policy: CallableFallbackPolicy,
+    ) -> Self {
         Self {
             identity: CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
-            fallback_policy: CallableFallbackPolicy::RuntimeNameResolution,
+            fallback_policy,
             args,
             requested_outputs,
             kind,

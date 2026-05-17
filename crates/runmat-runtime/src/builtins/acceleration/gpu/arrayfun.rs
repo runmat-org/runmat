@@ -632,11 +632,12 @@ impl Callable {
     async fn call(&self, args: &[Value]) -> crate::BuiltinResult<Value> {
         match self {
             Callable::Builtin { name } => {
-                let request = user_functions::SemanticCallableRequest::named(
+                let request = user_functions::SemanticCallableRequest::named_with_policy(
                     name.clone(),
                     args.to_vec(),
                     1,
                     user_functions::SemanticCallableKind::Arrayfun,
+                    runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
                 );
                 if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
                     return result;

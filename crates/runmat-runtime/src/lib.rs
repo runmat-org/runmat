@@ -1048,11 +1048,12 @@ async fn overidx_xor(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(name = "feval", builtin_path = "crate")]
 async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     async fn call_by_name(name: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
-        let request = crate::user_functions::SemanticCallableRequest::named(
+        let request = crate::user_functions::SemanticCallableRequest::named_with_policy(
             name.to_string(),
             args.to_vec(),
             1,
             crate::user_functions::SemanticCallableKind::Feval,
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
         );
         if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await {
             return result;

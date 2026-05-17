@@ -2,7 +2,7 @@ use crate::bytecode::{ArgSpec, Instr, SemanticFunctionRegistry};
 use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
-use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
+use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
     build_expanded_args_from_specs, call_object_subsref_brace_values, expand_cell_indices,
@@ -12,6 +12,7 @@ use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, Exce
 use crate::object::class_def as obj_class_def;
 use crate::object::resolve as obj_resolve;
 use runmat_builtins::{MException, Value};
+use runmat_hir::CallableFallbackPolicy;
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
@@ -459,7 +460,7 @@ pub async fn handle_prepared_user_function_call<BF, BFFut, IF, IFFut>(
     ctx: UserCallContext<'_>,
     args: Vec<Value>,
     refresh_vars: impl Fn(&[Value]),
-    builtin_fallback: BF,
+    _builtin_fallback: BF,
     _interpret_counts: IF,
 ) -> Result<UserCallHandling, RuntimeError>
 where
@@ -488,21 +489,32 @@ where
         return Ok(UserCallHandling::Completed);
     }
 
-    if let Some(result) = builtin_fallback(name.to_string(), args.clone(), out_count).await? {
-        stack.push(result);
-        return Ok(UserCallHandling::Completed);
-    }
-
-    let err = crate::interpreter::errors::mex(
-        "UndefinedFunction",
-        &format!("Undefined function: {name}"),
+    let descriptor = CallableDescriptor::dynamic_named(
+        name.to_string(),
+        args,
+        out_count,
+        CallableFallbackPolicy::BuiltinByName,
+        CallableCallKind::Direct,
     );
-    Ok(
-        match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc, refresh_vars) {
-            ExceptionHandling::Caught => UserCallHandling::Caught,
-            ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
-        },
-    )
+    match execute_callable_descriptor(descriptor).await {
+        Ok(result) => {
+            stack.push(result);
+            Ok(UserCallHandling::Completed)
+        }
+        Err(err) => Ok(
+            match redirect_exception_to_catch(
+                err,
+                try_stack,
+                vars,
+                last_exception,
+                pc,
+                refresh_vars,
+            ) {
+                ExceptionHandling::Caught => UserCallHandling::Caught,
+                ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
+            },
+        ),
+    }
 }
 
 pub async fn handle_user_function_call<BF, BFFut, IF, IFFut>(

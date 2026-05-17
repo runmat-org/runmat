@@ -1,7 +1,7 @@
 use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
 use crate::bytecode::{Bytecode, Instr, SemanticFunctionRegistry};
-use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
+use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::user as call_user;
 use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
 use crate::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
@@ -15,6 +15,7 @@ use crate::runtime::workspace::{
     workspace_snapshot,
 };
 use runmat_builtins::{CellArray, Value};
+use runmat_hir::CallableFallbackPolicy;
 use runmat_runtime::{
     user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
@@ -174,15 +175,14 @@ async fn invoke_user_function_value(
         ))
         .await;
     }
-
-    if let Some(result) = call_user::try_builtin_fallback_single(name, args).await? {
-        return Ok(result);
-    }
-
-    Err(mex(
-        "UndefinedFunction",
-        &format!("Undefined function: {name}"),
+    execute_callable_descriptor(CallableDescriptor::dynamic_named(
+        name.to_string(),
+        args.to_vec(),
+        1,
+        CallableFallbackPolicy::BuiltinByName,
+        CallableCallKind::EndExpr,
     ))
+    .await
 }
 
 pub async fn invoke_semantic_function_value(
