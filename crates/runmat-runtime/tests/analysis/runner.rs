@@ -3798,8 +3798,8 @@ pub(super) fn run_fixture(
                                 "FEA_PLASTIC_NONLINEAR",
                                 "severity_peak",
                             ),
-                            Some(0.8),
-                            Some(0.95),
+                            Some(0.82),
+                            Some(0.9),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3812,8 +3812,8 @@ pub(super) fn run_fixture(
                                 "FEA_PLASTIC_NONLINEAR",
                                 "severity_mean",
                             ),
-                            Some(0.6),
-                            Some(1.0),
+                            Some(0.65),
+                            Some(0.8),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3826,8 +3826,8 @@ pub(super) fn run_fixture(
                                 "FEA_PLASTIC_NONLINEAR",
                                 "load_realization_ratio",
                             ),
-                            Some(0.82),
-                            Some(0.84),
+                            Some(0.825),
+                            Some(0.835),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3840,8 +3840,8 @@ pub(super) fn run_fixture(
                                 "FEA_PLASTIC_NONLINEAR",
                                 "load_amplification_ratio",
                             ),
-                            Some(1.50),
-                            Some(1.53),
+                            Some(1.51),
+                            Some(1.525),
                         );
                     }
                     if spec.id == "nonlinear_plastic_hardening_reference_gpu_provider" {
@@ -3856,8 +3856,8 @@ pub(super) fn run_fixture(
                                 "FEA_PLASTIC_NONLINEAR",
                                 "severity_peak",
                             ),
-                            Some(0.15),
-                            Some(0.32),
+                            Some(0.18),
+                            Some(0.28),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3870,8 +3870,8 @@ pub(super) fn run_fixture(
                                 "FEA_PLASTIC_NONLINEAR",
                                 "severity_mean",
                             ),
-                            Some(0.12),
-                            Some(0.3),
+                            Some(0.15),
+                            Some(0.25),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3884,8 +3884,8 @@ pub(super) fn run_fixture(
                                 "FEA_PLASTIC_NONLINEAR",
                                 "load_realization_ratio",
                             ),
-                            Some(0.82),
-                            Some(0.84),
+                            Some(0.825),
+                            Some(0.835),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3898,8 +3898,8 @@ pub(super) fn run_fixture(
                                 "FEA_PLASTIC_NONLINEAR",
                                 "load_amplification_ratio",
                             ),
-                            Some(1.50),
-                            Some(1.53),
+                            Some(1.51),
+                            Some(1.525),
                         );
                     }
                     if spec.id == "nonlinear_plastic_hardening_reference_complex_gpu_provider" {
@@ -3914,8 +3914,8 @@ pub(super) fn run_fixture(
                                 "FEA_PLASTIC_NONLINEAR",
                                 "severity_peak",
                             ),
-                            Some(0.28),
-                            Some(0.48),
+                            Some(0.33),
+                            Some(0.43),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3928,8 +3928,8 @@ pub(super) fn run_fixture(
                                 "FEA_PLASTIC_NONLINEAR",
                                 "severity_mean",
                             ),
-                            Some(0.2),
-                            Some(0.4),
+                            Some(0.27),
+                            Some(0.36),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3942,8 +3942,8 @@ pub(super) fn run_fixture(
                                 "FEA_PLASTIC_NONLINEAR",
                                 "load_realization_ratio",
                             ),
-                            Some(0.82),
-                            Some(0.84),
+                            Some(0.825),
+                            Some(0.835),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3956,8 +3956,8 @@ pub(super) fn run_fixture(
                                 "FEA_PLASTIC_NONLINEAR",
                                 "load_amplification_ratio",
                             ),
-                            Some(1.50),
-                            Some(1.53),
+                            Some(1.51),
+                            Some(1.525),
                         );
                     }
                     if spec.id == "nonlinear_contact_proxy_gpu_provider" {
@@ -3972,8 +3972,8 @@ pub(super) fn run_fixture(
                                 "FEA_CONTACT_NONLINEAR",
                                 "severity_peak",
                             ),
-                            Some(0.9),
-                            Some(1.05),
+                            Some(0.92),
+                            Some(1.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -3986,8 +3986,8 @@ pub(super) fn run_fixture(
                                 "FEA_CONTACT_NONLINEAR",
                                 "severity_mean",
                             ),
-                            Some(0.6),
-                            Some(1.0),
+                            Some(0.72),
+                            Some(0.9),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -4000,8 +4000,8 @@ pub(super) fn run_fixture(
                                 "FEA_CONTACT_NONLINEAR",
                                 "load_realization_ratio",
                             ),
-                            Some(0.84),
-                            Some(0.87),
+                            Some(0.845),
+                            Some(0.865),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -4014,8 +4014,8 @@ pub(super) fn run_fixture(
                                 "FEA_CONTACT_NONLINEAR",
                                 "load_amplification_ratio",
                             ),
-                            Some(1.39),
-                            Some(1.43),
+                            Some(1.4),
+                            Some(1.42),
                         );
                     }
                     if spec.id == "nonlinear_contact_frictionless_reference_gpu_provider" {
@@ -4030,8 +4030,8 @@ pub(super) fn run_fixture(
                                 "FEA_CONTACT_NONLINEAR",
                                 "severity_peak",
                             ),
-                            Some(0.2),
-                            Some(0.35),
+                            Some(0.23),
+                            Some(0.31),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -4044,8 +4044,8 @@ pub(super) fn run_fixture(
                                 "FEA_CONTACT_NONLINEAR",
                                 "severity_mean",
                             ),
-                            Some(0.15),
-                            Some(0.35),
+                            Some(0.18),
+                            Some(0.28),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -4058,8 +4058,8 @@ pub(super) fn run_fixture(
                                 "FEA_CONTACT_NONLINEAR",
                                 "load_realization_ratio",
                             ),
-                            Some(0.84),
-                            Some(0.87),
+                            Some(0.845),
+                            Some(0.865),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -4072,8 +4072,8 @@ pub(super) fn run_fixture(
                                 "FEA_CONTACT_NONLINEAR",
                                 "load_amplification_ratio",
                             ),
-                            Some(1.39),
-                            Some(1.43),
+                            Some(1.4),
+                            Some(1.42),
                         );
                     }
                     if spec.id == "nonlinear_contact_frictionless_reference_complex_gpu_provider" {
@@ -4088,8 +4088,8 @@ pub(super) fn run_fixture(
                                 "FEA_CONTACT_NONLINEAR",
                                 "severity_peak",
                             ),
-                            Some(0.35),
-                            Some(0.5),
+                            Some(0.36),
+                            Some(0.46),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -4102,8 +4102,8 @@ pub(super) fn run_fixture(
                                 "FEA_CONTACT_NONLINEAR",
                                 "severity_mean",
                             ),
-                            Some(0.25),
-                            Some(0.45),
+                            Some(0.3),
+                            Some(0.39),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -4116,8 +4116,8 @@ pub(super) fn run_fixture(
                                 "FEA_CONTACT_NONLINEAR",
                                 "load_realization_ratio",
                             ),
-                            Some(0.84),
-                            Some(0.87),
+                            Some(0.845),
+                            Some(0.865),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -4130,8 +4130,8 @@ pub(super) fn run_fixture(
                                 "FEA_CONTACT_NONLINEAR",
                                 "load_amplification_ratio",
                             ),
-                            Some(1.39),
-                            Some(1.43),
+                            Some(1.4),
+                            Some(1.42),
                         );
                     }
                     if spec.id == "electromagnetic_reference_homogeneous_gpu_provider" {

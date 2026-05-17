@@ -42,4 +42,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - EM diagnostics/governance now include dispersive-loss scale and dispersive conductivity coupling ratios for frequency-dependent runs.
 - External-reference comparator generation now supports threshold-assertion-backed EM metrics in the M6 baseline artifact.
 - Thermal/thermo governance bands were tightened across gradient/ramp/shock and standalone thermal fixtures to reduce permissive drift windows.
+- Plastic/contact nonlinear proxy and reference fixtures now use tighter constitutive severity and load realization/amplification governance bands.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.
