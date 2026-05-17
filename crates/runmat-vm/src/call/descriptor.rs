@@ -396,9 +396,25 @@ async fn execute_resolved_callable(
                 };
                 forward_named_fallback(name, args, requested_outputs, fallback_policy).await
             }
-            CallableFallbackPolicy::None
-            | CallableFallbackPolicy::ObjectDispatch
-            | CallableFallbackPolicy::ExternalBoundary => {
+            CallableFallbackPolicy::ObjectDispatch => {
+                let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
+                    other.clone(),
+                    fallback_policy,
+                    args.clone(),
+                    requested_outputs,
+                    runmat_runtime::user_functions::SemanticCallableKind::Other,
+                );
+                if let Some(result) =
+                    runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
+                {
+                    return result;
+                }
+                let name = other
+                    .display_name()
+                    .unwrap_or_else(|| "<unnamed callable>".into());
+                Err(undefined_name_error(&name, &metadata))
+            }
+            CallableFallbackPolicy::None | CallableFallbackPolicy::ExternalBoundary => {
                 let name = other
                     .display_name()
                     .unwrap_or_else(|| "<unnamed callable>".into());
@@ -431,32 +447,42 @@ async fn try_execute_resolved_callable(
             }
             Ok(None)
         }
-        other => {
-            if !matches!(
-                fallback_policy,
-                CallableFallbackPolicy::RuntimeNameResolution
-            ) {
-                return Ok(None);
+        other => match fallback_policy {
+            CallableFallbackPolicy::RuntimeNameResolution => {
+                let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
+                    other.clone(),
+                    fallback_policy,
+                    args.clone(),
+                    requested_outputs,
+                    runmat_runtime::user_functions::SemanticCallableKind::Other,
+                );
+                if let Some(result) =
+                    runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
+                {
+                    return result.map(Some);
+                }
+                let Some(name) = other.display_name() else {
+                    return Ok(None);
+                };
+                forward_named_fallback(name, args, requested_outputs, fallback_policy)
+                    .await
+                    .map(Some)
             }
-            let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
-                other.clone(),
-                fallback_policy,
-                args.clone(),
-                requested_outputs,
-                runmat_runtime::user_functions::SemanticCallableKind::Other,
-            );
-            if let Some(result) =
-                runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
-            {
-                return result.map(Some);
+            CallableFallbackPolicy::ObjectDispatch => {
+                let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
+                    other,
+                    fallback_policy,
+                    args,
+                    requested_outputs,
+                    runmat_runtime::user_functions::SemanticCallableKind::Other,
+                );
+                match runmat_runtime::user_functions::try_call_semantic_descriptor(request).await {
+                    Some(result) => result.map(Some),
+                    None => Ok(None),
+                }
             }
-            let Some(name) = other.display_name() else {
-                return Ok(None);
-            };
-            forward_named_fallback(name, args, requested_outputs, fallback_policy)
-                .await
-                .map(Some)
-        }
+            CallableFallbackPolicy::None | CallableFallbackPolicy::ExternalBoundary => Ok(None),
+        },
     }
 }
 

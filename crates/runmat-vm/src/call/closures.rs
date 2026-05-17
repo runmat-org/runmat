@@ -185,7 +185,7 @@ pub async fn call_method_with_outputs(
                 qualified,
                 full_args.clone(),
                 requested_outputs,
-                CallableFallbackPolicy::None,
+                CallableFallbackPolicy::ObjectDispatch,
             )
             .await?
             {
@@ -282,7 +282,7 @@ pub async fn call_method_or_member_index_with_outputs(
                 qualified,
                 method_args.clone(),
                 requested_outputs,
-                CallableFallbackPolicy::None,
+                CallableFallbackPolicy::ObjectDispatch,
             )
             .await?
             {
@@ -292,7 +292,7 @@ pub async fn call_method_or_member_index_with_outputs(
                 name.clone(),
                 method_args.clone(),
                 requested_outputs,
-                CallableFallbackPolicy::None,
+                CallableFallbackPolicy::ObjectDispatch,
             )
             .await?
             {

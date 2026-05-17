@@ -141,7 +141,7 @@ pub async fn try_call_semantic_descriptor(
     }
     if !matches!(
         request.fallback_policy,
-        CallableFallbackPolicy::RuntimeNameResolution
+        CallableFallbackPolicy::RuntimeNameResolution | CallableFallbackPolicy::ObjectDispatch
     ) {
         return None;
     }
