@@ -26,6 +26,14 @@ pub(crate) fn external_qualified_identity(base: &str, member: &str) -> CallableI
     CallableIdentity::ExternalName(QualifiedName(segments))
 }
 
+pub(crate) fn object_property_getter_name(field: &str) -> String {
+    format!("get.{field}")
+}
+
+pub(crate) fn object_property_setter_name(field: &str) -> String {
+    format!("set.{field}")
+}
+
 pub(crate) async fn object_subsref_brace(
     base: Value,
     values: Vec<Value>,
@@ -255,6 +263,35 @@ pub(crate) async fn call_object_named_method_with_outputs(
     method_args.push(Value::String(method));
     method_args.extend(args);
     call_runtime_method(&method_args, requested_outputs).await
+}
+
+pub(crate) async fn call_object_property_getter_with_outputs(
+    base: Value,
+    field: &str,
+    requested_outputs: Option<usize>,
+) -> Result<Value, RuntimeError> {
+    call_object_named_method_with_outputs(
+        base,
+        object_property_getter_name(field),
+        vec![],
+        requested_outputs,
+    )
+    .await
+}
+
+pub(crate) async fn call_object_property_setter_with_outputs(
+    base: Value,
+    field: &str,
+    value: Value,
+    requested_outputs: Option<usize>,
+) -> Result<Value, RuntimeError> {
+    call_object_named_method_with_outputs(
+        base,
+        object_property_setter_name(field),
+        vec![value],
+        requested_outputs,
+    )
+    .await
 }
 
 async fn call_object_member_method(

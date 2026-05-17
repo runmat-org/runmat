@@ -1,6 +1,7 @@
 use crate::call::shared::{
-    call_object_member_subsasgn, call_object_member_subsref, class_defines_member_subsasgn,
-    class_defines_member_subsref, external_qualified_identity,
+    call_object_member_subsasgn, call_object_member_subsref,
+    call_object_property_getter_with_outputs, call_object_property_setter_with_outputs,
+    class_defines_member_subsasgn, class_defines_member_subsref, external_qualified_identity,
 };
 use crate::interpreter::errors::mex;
 use runmat_builtins::{self, Access, Closure, StructValue, Value};
@@ -25,11 +26,9 @@ pub async fn load_member(
                     return Err(format!("Property '{}' is private", field).into());
                 }
                 if p.is_dependent {
-                    let getter = format!("get.{field}");
-                    if let Ok(v) = crate::call::shared::call_object_named_method_with_outputs(
+                    if let Ok(v) = call_object_property_getter_with_outputs(
                         Value::Object(obj.clone()),
-                        getter,
-                        vec![],
+                        &field,
                         None,
                     )
                     .await
@@ -179,11 +178,10 @@ where
                     return Err(format!("Property '{}' is private", field).into());
                 }
                 if p.is_dependent {
-                    let setter = format!("set.{field}");
-                    if let Ok(v) = crate::call::shared::call_object_named_method_with_outputs(
+                    if let Ok(v) = call_object_property_setter_with_outputs(
                         Value::Object(obj.clone()),
-                        setter,
-                        vec![rhs.clone()],
+                        &field,
+                        rhs.clone(),
                         None,
                     )
                     .await

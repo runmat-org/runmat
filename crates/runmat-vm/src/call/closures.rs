@@ -108,7 +108,9 @@ pub fn create_semantic_closure(
 pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
-            let function_name = format!("{}.{}", obj.class_name, name);
+            let function_name = external_qualified_identity(&obj.class_name, &name)
+                .display_name()
+                .unwrap_or_else(|| format!("{}.{}", obj.class_name, name));
             Ok(Value::Closure(Closure {
                 semantic_function:
                     runmat_runtime::user_functions::resolve_semantic_function_by_name(
