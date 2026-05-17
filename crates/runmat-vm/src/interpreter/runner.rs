@@ -249,11 +249,7 @@ pub async fn invoke_semantic_function_value(
     )
     .await?;
     let output_values = collect_semantic_outputs(func, &result_vars, requested_outputs)?;
-    if requested_outputs > 1 {
-        let values = output_values.into_iter().take(requested_outputs).collect();
-        return Ok(Value::OutputList(values));
-    }
-    Ok(output_values.into_iter().next().unwrap_or(Value::Num(0.0)))
+    Ok(semantic_output_value(output_values, requested_outputs))
 }
 
 fn collect_semantic_outputs(
@@ -295,6 +291,14 @@ fn collect_semantic_outputs(
         values.push(Value::Num(0.0));
     }
     Ok(values)
+}
+
+fn semantic_output_value(output_values: Vec<Value>, requested_outputs: usize) -> Value {
+    match requested_outputs {
+        0 => Value::OutputList(Vec::new()),
+        1 => output_values.into_iter().next().unwrap_or(Value::Num(0.0)),
+        _ => Value::OutputList(output_values.into_iter().take(requested_outputs).collect()),
+    }
 }
 
 pub async fn interpret_with_vars(
@@ -760,7 +764,7 @@ pub async fn interpret_function_with_counts(
 
 #[cfg(test)]
 mod tests {
-    use super::collect_semantic_outputs;
+    use super::{collect_semantic_outputs, semantic_output_value};
     use crate::bytecode::program::SemanticFunctionBytecode;
     use crate::bytecode::Instr;
     use runmat_builtins::{CellArray, Value};
@@ -799,5 +803,20 @@ mod tests {
         let result_vars = vec![Value::Cell(varargout)];
         let outputs = collect_semantic_outputs(&func, &result_vars, 1).expect("collect");
         assert_eq!(outputs, vec![Value::Num(7.0)]);
+    }
+
+    #[test]
+    fn semantic_output_value_zero_requested_is_empty_output_list() {
+        let value = semantic_output_value(vec![Value::Num(1.0)], 0);
+        assert_eq!(value, Value::OutputList(Vec::new()));
+    }
+
+    #[test]
+    fn semantic_output_value_multi_requested_returns_output_list() {
+        let value = semantic_output_value(vec![Value::Num(1.0), Value::Num(2.0)], 2);
+        assert_eq!(
+            value,
+            Value::OutputList(vec![Value::Num(1.0), Value::Num(2.0)])
+        );
     }
 }
