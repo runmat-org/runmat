@@ -1658,7 +1658,6 @@ impl SemanticCtx {
             .filter(|import| import.wildcard)
             .filter_map(|import| import.path.display_name())
             .map(|prefix| format!("{prefix}.{name}"))
-            .filter(|qualified| is_builtin(qualified))
             .collect();
         if wildcard_matches.len() == 1 {
             let qualified = &wildcard_matches[0];
@@ -1719,7 +1718,6 @@ impl SemanticCtx {
             .filter(|import| import.wildcard)
             .filter_map(|import| import.path.display_name())
             .map(|prefix| format!("{prefix}.{name}"))
-            .filter(|qualified| is_builtin(qualified))
             .collect();
         if wildcard_matches.len() > 1 {
             return Err(SemanticError::new(format!(

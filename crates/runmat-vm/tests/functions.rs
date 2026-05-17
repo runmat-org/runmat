@@ -731,6 +731,21 @@ fn import_ambiguity_specific_conflict_errors() {
     let res = compile_semantic_source(program);
     assert!(res.is_err());
 }
+
+#[test]
+fn import_ambiguity_wildcard_conflict_errors() {
+    // Two wildcard imports that expose the same unqualified name should be ambiguous.
+    let program = "import PkgF.*; import PkgG.*; r = foo();";
+    let res = compile_semantic_source(program);
+    assert!(res.is_err());
+}
+
+#[test]
+fn import_ambiguity_wildcard_handle_conflict_errors() {
+    let program = "import PkgF.*; import PkgG.*; h = @foo;";
+    let res = compile_semantic_source(program);
+    assert!(res.is_err());
+}
 #[test]
 fn import_static_method_via_specific_class_import() {
     // import ClassName.* to allow unqualified static methods and properties
@@ -988,16 +1003,6 @@ fn metaclass_postfix_member_and_method() {
     assert!(vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
-}
-
-#[test]
-fn import_ambiguity_wildcard_conflict_errors() {
-    // Two wildcard packages both providing same builtin name should error at runtime resolution
-    // We simulate by trying resolution; since no actual builtins exist under these, it will fall through
-    // but our VM path collects multiple matches and would error if present. This serves as a guard.
-    let program = "import PkgA.*; import PkgB.*; x = 1;";
-    let vars = execute_semantic_source(program);
-    assert!(!vars.is_empty());
 }
 
 #[test]
