@@ -1883,7 +1883,7 @@ impl Compiler {
             IndexResultContext::ReadSingle | IndexResultContext::ReadCommaList
         ) {
             return Err(self.compile_error(
-                "MIR bytecode lowering for this indexing form is not implemented yet",
+                "MIR index lowering expected ReadSingle/ReadCommaList result context",
             ));
         }
 
@@ -1918,14 +1918,16 @@ impl Compiler {
         expected_context: IndexResultContext,
     ) -> Result<(), CompileError> {
         if !mir_indexing_context_matches(indexing.result_context.clone(), expected_context) {
-            return Err(self.compile_error(
-                "MIR bytecode lowering for this indexing form is not implemented yet",
-            ));
+            return Err(
+                self.compile_error("MIR index lowering received mismatched index result context")
+            );
         }
         for component in &indexing.components {
-            let MirIndexComponent::Expr(operand) = component else {
+            let (MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand)) =
+                component
+            else {
                 return Err(self.compile_error(
-                    "MIR bytecode lowering for non-expression indices is not implemented yet",
+                    "MIR fast-path index lowering expects expression/logical selector operands",
                 ));
             };
             self.compile_mir_operand(operand)?;
@@ -1938,9 +1940,11 @@ impl Compiler {
         indexing: &MirIndexing,
     ) -> Result<(), CompileError> {
         for component in &indexing.components {
-            let MirIndexComponent::Expr(operand) = component else {
+            let (MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand)) =
+                component
+            else {
                 return Err(self.compile_error(
-                    "MIR bytecode lowering for non-expression indices is not implemented yet",
+                    "MIR fast-path index lowering expects expression/logical selector operands",
                 ));
             };
             self.compile_mir_operand(operand)?;
@@ -1955,7 +1959,7 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         if !mir_indexing_context_matches(indexing.result_context.clone(), expected_context) {
             return Err(self.compile_error(
-                "MIR bytecode lowering for this indexing form is not implemented yet",
+                "MIR cell index lowering received mismatched index result context",
             ));
         }
         for component in &indexing.components {
@@ -1971,7 +1975,7 @@ impl Compiler {
                 }
                 _ => {
                     return Err(self.compile_error(
-                        "MIR bytecode lowering for non-expression indices is not implemented yet",
+                        "MIR cell index lowering expects expression/logical selectors or end/end-k",
                     ))
                 }
             }
@@ -1996,7 +2000,7 @@ impl Compiler {
                 }
                 _ => {
                     return Err(self.compile_error(
-                        "MIR bytecode lowering for non-expression indices is not implemented yet",
+                        "MIR cell index lowering expects expression/logical selectors or end/end-k",
                     ))
                 }
             }
@@ -2141,7 +2145,7 @@ impl Compiler {
                 }
                 MirIndexComponent::End { .. } => {
                     return Err(self.compile_error(
-                        "MIR bytecode lowering for this slice index is not implemented yet",
+                        "MIR slice lowering invariant violated: nonzero end offset must lower through IndexSliceExpr",
                     ))
                 }
             }
