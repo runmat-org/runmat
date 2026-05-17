@@ -259,6 +259,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO",
@@ -384,6 +386,16 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "electromagnetic_source_realization_ratio": 0.1,
                 "electromagnetic_source_region_coverage_ratio": 0.1,
                 "electromagnetic_source_material_alignment_ratio": 0.1,
+                "threshold_assertions": [
+                    {
+                        "name": "em_homogeneous_dispersive_phase_attenuation_mean",
+                        "observed": 0.6,
+                    },
+                    {
+                        "name": "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
+                        "observed": 0.55,
+                    },
+                ],
             }
         )
         rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
@@ -394,10 +406,16 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO"] = "0.8"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN"] = "0.9"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO"
+        ] = "0.9"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE"] = "0.2"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_ENERGY_IMBALANCE_RATIO_HIGH", codes)
+        self.assertIn("EM_DISPERSIVE_PHASE_ATTENUATION_MEAN_LOW", codes)
+        self.assertIn("EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO_LOW", codes)
         self.assertIn("EM_BREACH_RATE_HIGH", codes)
 
     def test_em_trend_worsening_reasons_are_emitted(self):
