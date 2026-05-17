@@ -5,7 +5,7 @@ use crate::call::descriptor::{
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
 use runmat_builtins::{builtin_functions, lookup_method, Access, CellArray, Closure, Value};
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, SymbolName};
 use runmat_runtime::RuntimeError;
 
 fn requested_output_arity(requested_outputs: Option<usize>) -> usize {
@@ -23,14 +23,20 @@ async fn call_explicit_builtin(
     }
 }
 
-async fn call_named_with_policy(
-    name: String,
+fn dynamic_identity(name: String) -> CallableIdentity {
+    CallableIdentity::DynamicName(SymbolName(name))
+}
+
+async fn call_identity_with_policy(
+    identity: CallableIdentity,
+    display_name: Option<String>,
     args: Vec<Value>,
     requested_outputs: Option<usize>,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
-    execute_callable_descriptor(CallableDescriptor::dynamic_named(
-        name,
+    execute_callable_descriptor(CallableDescriptor::resolved(
+        identity,
+        display_name,
         args,
         requested_output_arity(requested_outputs),
         fallback_policy,
@@ -39,14 +45,16 @@ async fn call_named_with_policy(
     .await
 }
 
-async fn try_call_named_with_policy(
-    name: String,
+async fn try_call_identity_with_policy(
+    identity: CallableIdentity,
+    display_name: Option<String>,
     args: Vec<Value>,
     requested_outputs: Option<usize>,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Option<Value>, RuntimeError> {
-    try_execute_callable_descriptor(CallableDescriptor::dynamic_named(
-        name,
+    try_execute_callable_descriptor(CallableDescriptor::resolved(
+        identity,
+        display_name,
         args,
         requested_output_arity(requested_outputs),
         fallback_policy,
@@ -157,8 +165,9 @@ pub async fn call_method_or_member_index_with_outputs(
                 let mut full_args = Vec::with_capacity(1 + args.len());
                 full_args.push(Value::Object(obj));
                 full_args.extend(args);
-                return call_named_with_policy(
-                    m.function_name,
+                return call_identity_with_policy(
+                    dynamic_identity(m.function_name.clone()),
+                    Some(m.function_name),
                     full_args,
                     requested_outputs,
                     fallback_policy,
@@ -170,8 +179,9 @@ pub async fn call_method_or_member_index_with_outputs(
             method_args.push(Value::Object(obj.clone()));
             method_args.extend(args.iter().cloned());
             let qualified = format!("{}.{}", obj.class_name, name);
-            if let Some(v) = try_call_named_with_policy(
-                qualified.clone(),
+            if let Some(v) = try_call_identity_with_policy(
+                dynamic_identity(qualified.clone()),
+                Some(qualified.clone()),
                 method_args.clone(),
                 requested_outputs,
                 CallableFallbackPolicy::ObjectDispatch,
@@ -180,8 +190,9 @@ pub async fn call_method_or_member_index_with_outputs(
             {
                 return Ok(v);
             }
-            if let Some(v) = try_call_named_with_policy(
-                name.clone(),
+            if let Some(v) = try_call_identity_with_policy(
+                dynamic_identity(name.clone()),
+                Some(name.clone()),
                 method_args.clone(),
                 requested_outputs,
                 CallableFallbackPolicy::ObjectDispatch,
@@ -191,8 +202,9 @@ pub async fn call_method_or_member_index_with_outputs(
                 return Ok(v);
             }
 
-            match call_named_with_policy(
-                qualified,
+            match call_identity_with_policy(
+                dynamic_identity(qualified.clone()),
+                Some(qualified),
                 method_args.clone(),
                 requested_outputs,
                 fallback_policy,
@@ -204,8 +216,9 @@ pub async fn call_method_or_member_index_with_outputs(
                 Err(err) => return Err(err),
             }
 
-            match call_named_with_policy(
-                name.clone(),
+            match call_identity_with_policy(
+                dynamic_identity(name.clone()),
+                Some(name.clone()),
                 method_args,
                 requested_outputs,
                 fallback_policy,
@@ -256,8 +269,9 @@ pub async fn call_method_or_member_index_with_outputs(
                 if !m.is_static {
                     return Err(format!("Method '{}' is not static", name).into());
                 }
-                return call_named_with_policy(
-                    m.function_name,
+                return call_identity_with_policy(
+                    dynamic_identity(m.function_name.clone()),
+                    Some(m.function_name),
                     args,
                     requested_outputs,
                     fallback_policy,
@@ -266,7 +280,14 @@ pub async fn call_method_or_member_index_with_outputs(
             }
 
             let qualified = format!("{cls}.{name}");
-            call_named_with_policy(qualified, args, requested_outputs, fallback_policy).await
+            call_identity_with_policy(
+                dynamic_identity(qualified.clone()),
+                Some(qualified),
+                args,
+                requested_outputs,
+                fallback_policy,
+            )
+            .await
         }
         other => {
             let mut getfield_args = Vec::with_capacity(3);
