@@ -591,6 +591,49 @@ fn analysis_create_model_supports_cfd_transient_profile_template() {
 }
 
 #[test]
+fn analysis_create_model_supports_cht_coupled_profile_template() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "cht_coupled_model".to_string(),
+            profile: AnalysisCreateModelProfile::ChtCoupled,
+            prep_context: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("cht coupled profile should be supported");
+
+    assert_eq!(envelope.data.steps.len(), 2);
+    assert!(envelope
+        .data
+        .steps
+        .iter()
+        .any(|step| step.kind == AnalysisStepKind::Cfd));
+    assert!(envelope
+        .data
+        .steps
+        .iter()
+        .any(|step| step.kind == AnalysisStepKind::Thermal));
+    let cfd = envelope
+        .data
+        .cfd
+        .as_ref()
+        .expect("cfd domain should be populated for cht profile");
+    assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
+    assert_eq!(cfd.time_profile.len(), 2);
+    assert!(
+        envelope
+            .data
+            .thermo_mechanical
+            .as_ref()
+            .expect("thermo-mechanical domain should be populated")
+            .enabled
+    );
+}
+
+#[test]
 fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence() {
     let _guard = analysis_test_guard();
     let geometry = sample_step_like_geometry_asset();

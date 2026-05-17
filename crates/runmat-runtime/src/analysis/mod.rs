@@ -278,7 +278,7 @@ pub fn analysis_create_model_op(
         prep_mapped_region_ids.as_ref(),
     );
 
-    let (default_bc, default_load, default_step) = match intent.profile {
+    let (default_bc, default_load, default_steps) = match intent.profile {
         AnalysisCreateModelProfile::LinearStaticStructural => (
             BoundaryCondition {
                 bc_id: "bc_default_fixed".to_string(),
@@ -294,10 +294,10 @@ pub fn analysis_create_model_op(
                     fz: 0.0,
                 },
             },
-            AnalysisStep {
+            vec![AnalysisStep {
                 step_id: "step_default_static".to_string(),
                 kind: AnalysisStepKind::Static,
-            },
+            }],
         ),
         AnalysisCreateModelProfile::ThermoMechanicalCoupled => (
             BoundaryCondition {
@@ -314,10 +314,10 @@ pub fn analysis_create_model_op(
                     fz: 0.0,
                 },
             },
-            AnalysisStep {
+            vec![AnalysisStep {
                 step_id: "step_default_thermo_mech".to_string(),
                 kind: AnalysisStepKind::Transient,
-            },
+            }],
         ),
         AnalysisCreateModelProfile::ThermalStandalone => (
             BoundaryCondition {
@@ -334,10 +334,10 @@ pub fn analysis_create_model_op(
                     gz: 0.0,
                 },
             },
-            AnalysisStep {
+            vec![AnalysisStep {
                 step_id: "step_default_thermal".to_string(),
                 kind: AnalysisStepKind::Thermal,
-            },
+            }],
         ),
         AnalysisCreateModelProfile::ModalStructural => (
             BoundaryCondition {
@@ -354,10 +354,10 @@ pub fn analysis_create_model_op(
                     gz: 0.0,
                 },
             },
-            AnalysisStep {
+            vec![AnalysisStep {
                 step_id: "step_default_modal".to_string(),
                 kind: AnalysisStepKind::Modal,
-            },
+            }],
         ),
         AnalysisCreateModelProfile::TransientStructural => (
             BoundaryCondition {
@@ -374,10 +374,10 @@ pub fn analysis_create_model_op(
                     fz: 0.0,
                 },
             },
-            AnalysisStep {
+            vec![AnalysisStep {
                 step_id: "step_default_transient".to_string(),
                 kind: AnalysisStepKind::Transient,
-            },
+            }],
         ),
         AnalysisCreateModelProfile::NonlinearStructural => (
             BoundaryCondition {
@@ -394,10 +394,10 @@ pub fn analysis_create_model_op(
                     fz: 0.0,
                 },
             },
-            AnalysisStep {
+            vec![AnalysisStep {
                 step_id: "step_default_nonlinear".to_string(),
                 kind: AnalysisStepKind::Nonlinear,
-            },
+            }],
         ),
         AnalysisCreateModelProfile::ElectromagneticStatic => (
             BoundaryCondition {
@@ -414,10 +414,10 @@ pub fn analysis_create_model_op(
                     gz: 0.0,
                 },
             },
-            AnalysisStep {
+            vec![AnalysisStep {
                 step_id: "step_default_electromagnetic".to_string(),
                 kind: AnalysisStepKind::Electromagnetic,
-            },
+            }],
         ),
         AnalysisCreateModelProfile::CfdSteadyState => (
             BoundaryCondition {
@@ -434,10 +434,10 @@ pub fn analysis_create_model_op(
                     gz: 0.0,
                 },
             },
-            AnalysisStep {
+            vec![AnalysisStep {
                 step_id: "step_default_cfd".to_string(),
                 kind: AnalysisStepKind::Cfd,
-            },
+            }],
         ),
         AnalysisCreateModelProfile::CfdTransient => (
             BoundaryCondition {
@@ -454,10 +454,36 @@ pub fn analysis_create_model_op(
                     gz: 0.0,
                 },
             },
-            AnalysisStep {
+            vec![AnalysisStep {
                 step_id: "step_default_cfd_transient".to_string(),
                 kind: AnalysisStepKind::Cfd,
+            }],
+        ),
+        AnalysisCreateModelProfile::ChtCoupled => (
+            BoundaryCondition {
+                bc_id: "bc_default_fixed".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::Fixed,
             },
+            LoadCase {
+                load_id: "load_default_cht_seed".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::BodyForce {
+                    gx: 0.0,
+                    gy: 0.0,
+                    gz: 0.0,
+                },
+            },
+            vec![
+                AnalysisStep {
+                    step_id: "step_default_cht_flow".to_string(),
+                    kind: AnalysisStepKind::Cfd,
+                },
+                AnalysisStep {
+                    step_id: "step_default_cht_thermal".to_string(),
+                    kind: AnalysisStepKind::Thermal,
+                },
+            ],
         ),
     };
 
@@ -489,6 +515,47 @@ pub fn analysis_create_model_op(
                 },
             ],
         }),
+        AnalysisCreateModelProfile::ChtCoupled => Some(runmat_analysis_core::CfdDomain {
+            enabled: true,
+            solve_family: runmat_analysis_core::CfdSolveFamily::Transient,
+            reference_density_kg_per_m3: 1.225,
+            dynamic_viscosity_pa_s: 1.81e-5,
+            inlet_velocity_m_per_s: 4.5,
+            turbulence_intensity: 0.07,
+            time_profile: vec![
+                runmat_analysis_core::CfdTimeProfilePoint {
+                    normalized_time: 0.0,
+                    inlet_scale: 0.7,
+                },
+                runmat_analysis_core::CfdTimeProfilePoint {
+                    normalized_time: 1.0,
+                    inlet_scale: 1.0,
+                },
+            ],
+        }),
+        _ => None,
+    };
+    let thermo_mechanical = match intent.profile {
+        AnalysisCreateModelProfile::ChtCoupled => {
+            Some(runmat_analysis_core::ThermoMechanicalDomain {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 35.0,
+                field_artifact_id: None,
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                time_profile: vec![
+                    runmat_analysis_core::ThermoTimeProfilePoint {
+                        normalized_time: 0.0,
+                        scale: 0.6,
+                    },
+                    runmat_analysis_core::ThermoTimeProfilePoint {
+                        normalized_time: 1.0,
+                        scale: 1.0,
+                    },
+                ],
+            })
+        }
         _ => None,
     };
 
@@ -500,14 +567,14 @@ pub fn analysis_create_model_op(
         frame: ReferenceFrame::Global,
         materials: inferred_materials,
         material_assignments: inferred_assignments,
-        thermo_mechanical: None,
+        thermo_mechanical,
         electro_thermal: None,
         electromagnetic: None,
         cfd,
         interfaces: Vec::new(),
         boundary_conditions: vec![default_bc],
         loads: vec![default_load],
-        steps: vec![default_step],
+        steps: default_steps,
     };
 
     validate_model_against_geometry(&model, geometry.units, &ReferenceFrame::Global).map_err(

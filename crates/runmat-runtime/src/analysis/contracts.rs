@@ -64,6 +64,7 @@ pub enum AnalysisCreateModelProfile {
     ElectromagneticStatic,
     CfdSteadyState,
     CfdTransient,
+    ChtCoupled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
