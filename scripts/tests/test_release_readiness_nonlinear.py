@@ -262,6 +262,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO",
@@ -641,6 +645,102 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn(
             "EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_WORSENING", codes
         )
+
+    def test_em_boundary_phased_assertion_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {
+                        "name": "em_boundary_penalty_real_residual_norm",
+                        "observed": 0.3,
+                    },
+                    {
+                        "name": "em_boundary_penalty_imag_residual_norm",
+                        "observed": 0.28,
+                    },
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {
+                        "name": "em_phased_source_overlap_ratio",
+                        "observed": 0.4,
+                    },
+                    {
+                        "name": "em_phased_source_interference_index",
+                        "observed": 0.45,
+                    },
+                ],
+            }
+        )
+
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {
+                        "name": "em_boundary_penalty_real_residual_norm",
+                        "observed": 0.1,
+                    },
+                    {
+                        "name": "em_boundary_penalty_imag_residual_norm",
+                        "observed": 0.1,
+                    },
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {
+                        "name": "em_phased_source_overlap_ratio",
+                        "observed": 0.1,
+                    },
+                    {
+                        "name": "em_phased_source_interference_index",
+                        "observed": 0.1,
+                    },
+                ],
+            }
+        )
+
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO"
+        ] = "1.5"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO"] = (
+            "1.5"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO"
+        ] = "1.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_WORSENING", codes)
+        self.assertIn("EM_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_WORSENING", codes)
+        self.assertIn("EM_PHASED_SOURCE_OVERLAP_TREND_WORSENING", codes)
+        self.assertIn("EM_PHASED_SOURCE_INTERFERENCE_TREND_WORSENING", codes)
 
     def test_prep_health_count_warns_non_protected(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

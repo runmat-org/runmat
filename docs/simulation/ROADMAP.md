@@ -185,3 +185,5 @@ Progress update (2026-05-17):
     M6 baseline plus external-reference and nonlinear schema validators now require boundary-penalty residual norm comparators (`em_boundary_penalty_real_residual_norm`, `em_boundary_penalty_imag_residual_norm`) and phased-source overlap/interference comparators (`em_phased_source_overlap_ratio`, `em_phased_source_interference_index`) so partial boundary/phased EM fidelity payloads fail enforce-mode policy.
 59. [x] EM release-readiness boundary/phased posture gating expanded:
     `release_readiness_nonlinear.py` now evaluates boundary-penalty residual norm assertions and phased-source overlap/interference assertions with profile-tuned thresholds, promoting boundary/phased EM fidelity regressions into explicit readiness reasons and EM breach-rate accounting.
+60. [x] EM release-readiness boundary/phased trend gating expanded:
+    `release_readiness_nonlinear.py` now evaluates rolling worsening ratios for boundary-penalty residual norm and phased-source overlap/interference assertions, emitting dedicated readiness reasons when boundary/phased EM fidelity posture regresses relative to baseline.

@@ -47,6 +47,7 @@ Last updated: 2026-05-17
    Baseline increment landed: release-readiness Maxwell posture governance now also consumes homogeneous/heterogeneous dispersive-coupling-ratio threshold assertions with profile-tuned maxima, so coupling-ratio excursions are branch-gated alongside other EM posture signals.
    Baseline increment landed: release-readiness Maxwell posture governance now also consumes homogeneous/heterogeneous boundary-anchor-ratio threshold assertions with profile-tuned minima, so anchor-ratio regressions are branch-gated alongside other EM posture signals.
    Baseline increment landed: release-readiness Maxwell posture governance now also consumes boundary-penalty residual norm assertions (`em_boundary_penalty_real_residual_norm`, `em_boundary_penalty_imag_residual_norm`) and phased-source overlap/interference assertions (`em_phased_source_overlap_ratio`, `em_phased_source_interference_index`) with profile-tuned maxima, so boundary/phased fidelity regressions are branch-gated alongside other EM posture signals.
+   Baseline increment landed: release-readiness Maxwell posture governance now also evaluates rolling worsening ratios for boundary-penalty residual norm and phased-source overlap/interference assertions, so boundary/phased baseline-relative fidelity drift is branch-gated alongside static threshold posture.
 
 ## Next Recommended EM Slice
 

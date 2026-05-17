@@ -142,6 +142,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.15",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO": "1e-16",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.95",
@@ -251,6 +255,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO": "1e-15",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.85",
@@ -360,6 +368,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO": "1e-14",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.7",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.7",
@@ -1392,6 +1404,39 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_max_boundary_penalty_real_residual_norm_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_boundary_penalty_imag_residual_norm_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_phased_source_overlap_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_OVERLAP_TREND_RATIO", "1.2"),
+        )
+    )
+    em_max_phased_source_interference_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_PHASED_SOURCE_INTERFERENCE_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
     em_min_dispersive_phase_attenuation_mean_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN",
@@ -1817,6 +1862,10 @@ def evaluate_release_readiness(
     em_flux_divergence_trend_ratio = None
     em_dispersive_phase_attenuation_trend_ratio = None
     em_dispersive_phase_conductivity_attenuation_trend_ratio = None
+    em_boundary_penalty_real_residual_norm_trend_ratio = None
+    em_boundary_penalty_imag_residual_norm_trend_ratio = None
+    em_phased_source_overlap_trend_ratio = None
+    em_phased_source_interference_trend_ratio = None
     plastic_max_nonlinear_severity = None
     plastic_load_realization_ratio_min = None
     plastic_load_realization_ratio_max = None
@@ -3411,7 +3460,7 @@ def evaluate_release_readiness(
                 return None
             return max(ratios)
 
-        def fixture_assertion_trend_ratio(assertion_name: str):
+        def fixture_assertion_trend_ratio(assertion_name: str, ratio_mode="drop"):
             ratios = []
             for fixture_id, latest_rec in latest_by_fixture.items():
                 baseline_records = rolling_by_fixture.get(fixture_id, [])
@@ -3428,6 +3477,16 @@ def evaluate_release_readiness(
                 if not baseline_values:
                     continue
                 baseline_value = statistics.median(baseline_values)
+                if ratio_mode == "increase":
+                    if baseline_value < 0 or latest_value < 0:
+                        continue
+                    if baseline_value == 0:
+                        if latest_value > 0:
+                            ratios.append(float("inf"))
+                        continue
+                    ratios.append(latest_value / baseline_value)
+                    continue
+
                 if baseline_value <= 0 or latest_value <= 0:
                     continue
                 ratios.append(baseline_value / latest_value)
@@ -3750,6 +3809,90 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
+
+        em_boundary_penalty_real_residual_norm_trend_ratio = fixture_assertion_trend_ratio(
+            "em_boundary_penalty_real_residual_norm",
+            ratio_mode="increase",
+        )
+        if (
+            em_boundary_penalty_real_residual_norm_trend_ratio is not None
+            and em_boundary_penalty_real_residual_norm_trend_ratio
+            > em_max_boundary_penalty_real_residual_norm_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM boundary-penalty real residual trend ratio "
+                        f"{em_boundary_penalty_real_residual_norm_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_boundary_penalty_real_residual_norm_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_boundary_penalty_imag_residual_norm_trend_ratio = fixture_assertion_trend_ratio(
+            "em_boundary_penalty_imag_residual_norm",
+            ratio_mode="increase",
+        )
+        if (
+            em_boundary_penalty_imag_residual_norm_trend_ratio is not None
+            and em_boundary_penalty_imag_residual_norm_trend_ratio
+            > em_max_boundary_penalty_imag_residual_norm_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM boundary-penalty imaginary residual trend ratio "
+                        f"{em_boundary_penalty_imag_residual_norm_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_boundary_penalty_imag_residual_norm_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_phased_source_overlap_trend_ratio = fixture_assertion_trend_ratio(
+            "em_phased_source_overlap_ratio",
+            ratio_mode="increase",
+        )
+        if (
+            em_phased_source_overlap_trend_ratio is not None
+            and em_phased_source_overlap_trend_ratio
+            > em_max_phased_source_overlap_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_PHASED_SOURCE_OVERLAP_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM phased-source overlap trend ratio "
+                        f"{em_phased_source_overlap_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_phased_source_overlap_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_phased_source_interference_trend_ratio = fixture_assertion_trend_ratio(
+            "em_phased_source_interference_index",
+            ratio_mode="increase",
+        )
+        if (
+            em_phased_source_interference_trend_ratio is not None
+            and em_phased_source_interference_trend_ratio
+            > em_max_phased_source_interference_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_PHASED_SOURCE_INTERFERENCE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM phased-source interference trend ratio "
+                        f"{em_phased_source_interference_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_phased_source_interference_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
 
         plastic_trend_ratio = fixture_trend_ratio("plastic_nonlinear_severity")
         if (
@@ -4308,6 +4451,14 @@ def evaluate_release_readiness(
         "em_max_dispersive_phase_attenuation_trend_ratio_threshold": em_max_dispersive_phase_attenuation_trend_ratio_threshold,
         "em_dispersive_phase_conductivity_attenuation_trend_ratio": em_dispersive_phase_conductivity_attenuation_trend_ratio,
         "em_max_dispersive_phase_conductivity_attenuation_trend_ratio_threshold": em_max_dispersive_phase_conductivity_attenuation_trend_ratio_threshold,
+        "em_boundary_penalty_real_residual_norm_trend_ratio": em_boundary_penalty_real_residual_norm_trend_ratio,
+        "em_max_boundary_penalty_real_residual_norm_trend_ratio_threshold": em_max_boundary_penalty_real_residual_norm_trend_ratio_threshold,
+        "em_boundary_penalty_imag_residual_norm_trend_ratio": em_boundary_penalty_imag_residual_norm_trend_ratio,
+        "em_max_boundary_penalty_imag_residual_norm_trend_ratio_threshold": em_max_boundary_penalty_imag_residual_norm_trend_ratio_threshold,
+        "em_phased_source_overlap_trend_ratio": em_phased_source_overlap_trend_ratio,
+        "em_max_phased_source_overlap_trend_ratio_threshold": em_max_phased_source_overlap_trend_ratio_threshold,
+        "em_phased_source_interference_trend_ratio": em_phased_source_interference_trend_ratio,
+        "em_max_phased_source_interference_trend_ratio_threshold": em_max_phased_source_interference_trend_ratio_threshold,
         "plastic_max_nonlinear_severity": plastic_max_nonlinear_severity,
         "plastic_max_nonlinear_severity_threshold": plastic_max_nonlinear_severity_threshold,
         "plastic_load_realization_ratio_min": plastic_load_realization_ratio_min,
