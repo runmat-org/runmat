@@ -471,6 +471,24 @@ fn fft_end_arithmetic_out_of_bounds_raises_error() {
 }
 
 #[test]
+fn scalar_slice_with_nonnumeric_selector_errors() {
+    let input = r#"
+        x = 42;
+        idx = "a";
+        y = x(idx);
+    "#;
+    let bytecode = compile_semantic_source(input).expect("compile semantic scalar slice script");
+    let err = interpret(&bytecode).expect_err("scalar slice with nonnumeric selector must error");
+    assert!(
+        err.to_string().contains("Unsupported index type")
+            || err
+                .to_string()
+                .contains("Slicing only supported on tensors"),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
 fn fft_complex_assignment_covers_scalar_slice_and_multidim_broadcast() {
     let input = r#"
         x = [1 2 3 4 5 6 7 8];

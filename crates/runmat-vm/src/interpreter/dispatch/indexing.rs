@@ -770,16 +770,22 @@ where
                                 "Slicing only supported on tensors",
                             ));
                         }
-                        let idx_val: f64 = if is_end {
-                            1.0
+                        let linear_indices: Vec<f64> = if is_end {
+                            vec![1.0]
                         } else {
-                            match numeric.first() {
-                                Some(Value::Num(n)) => *n,
-                                Some(Value::Int(i)) => i.to_f64(),
-                                _ => 1.0,
-                            }
+                            let value = numeric.first().ok_or_else(|| {
+                                crate::interpreter::errors::mex(
+                                    "MissingNumericIndex",
+                                    "missing numeric index for linear slice",
+                                )
+                            })?;
+                            indices_from_value_linear(value, 1)
+                                .await?
+                                .into_iter()
+                                .map(|idx| idx as f64)
+                                .collect()
                         };
-                        let v = runmat_runtime::perform_indexing(&other, &[idx_val])
+                        let v = runmat_runtime::perform_indexing(&other, &linear_indices)
                             .await
                             .map_err(|_| {
                                 crate::interpreter::errors::mex(
