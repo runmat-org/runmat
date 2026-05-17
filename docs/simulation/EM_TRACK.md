@@ -41,6 +41,7 @@ Last updated: 2026-05-17
    Baseline increment landed: external-reference and nonlinear schema validators now require both EM phase attenuation mean and phase conductivity attenuation ratio metrics for homogeneous/heterogeneous provider fixtures, preventing partial phase-fidelity comparator payloads from passing enforce-mode governance.
    Baseline increment landed: external-reference and nonlinear schema governance now also requires homogeneous/heterogeneous source-material-alignment assertion comparators, extending EM source-fidelity policy coverage in enforce-mode validation.
    Baseline increment landed: external-reference and nonlinear schema governance now also requires homogeneous/heterogeneous dispersive-coupling-ratio assertion comparators, extending EM dispersive-coupling fidelity policy coverage in enforce-mode validation.
+   Baseline increment landed: release-readiness Maxwell posture governance now also consumes homogeneous/heterogeneous dispersive-coupling-ratio threshold assertions with profile-tuned maxima, so coupling-ratio excursions are branch-gated alongside other EM posture signals.
 
 ## Next Recommended EM Slice
 

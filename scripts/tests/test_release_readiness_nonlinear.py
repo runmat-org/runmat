@@ -261,6 +261,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
@@ -394,6 +395,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 0.6,
                     },
                     {
+                        "name": "em_homogeneous_dispersive_coupling_ratio",
+                        "observed": 1.5e-6,
+                    },
+                    {
                         "name": "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
                         "observed": 0.55,
                     },
@@ -412,11 +417,13 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO"
         ] = "0.9"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO"] = "1e-7"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE"] = "0.2"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_ENERGY_IMBALANCE_RATIO_HIGH", codes)
         self.assertIn("EM_DISPERSIVE_PHASE_ATTENUATION_MEAN_LOW", codes)
+        self.assertIn("EM_DISPERSIVE_COUPLING_RATIO_HIGH", codes)
         self.assertIn("EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO_LOW", codes)
         self.assertIn("EM_BREACH_RATE_HIGH", codes)
 

@@ -171,3 +171,5 @@ Progress update (2026-05-17):
     M6 baseline and validator-required metric sets now include homogeneous/heterogeneous EM source-material-alignment assertion comparators, with nonlinear schema governance requiring the corresponding threshold assertions so source-fidelity evidence gaps fail benchmark/external-reference enforcement.
 52. [x] EM external-reference dispersive-coupling comparator enforcement expanded:
     M6 baseline and validator-required metric sets now include homogeneous/heterogeneous EM dispersive-coupling-ratio assertion comparators, with nonlinear schema governance requiring the corresponding threshold assertions so dispersive-coupling evidence gaps fail benchmark/external-reference enforcement.
+53. [x] EM release-readiness dispersive-coupling gating expanded:
+    `release_readiness_nonlinear.py` now evaluates homogeneous/heterogeneous EM dispersive-coupling-ratio threshold assertions with profile-tuned maximum thresholds, promoting excessive coupling-ratio excursions into explicit readiness reasons and breach-rate accounting.

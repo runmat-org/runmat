@@ -137,6 +137,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.15",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO": "1e-16",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.95",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.65",
@@ -240,6 +241,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO": "1e-15",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.75",
@@ -343,6 +345,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO": "1e-14",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.7",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.7",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.9",
@@ -1381,6 +1384,12 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_max_dispersive_coupling_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO", "1e-15"),
+        )
+    )
     plastic_max_nonlinear_severity_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
@@ -1739,6 +1748,7 @@ def evaluate_release_readiness(
     em_min_source_material_alignment_ratio = None
     em_min_dispersive_phase_attenuation_mean = None
     em_min_dispersive_phase_conductivity_attenuation_ratio = None
+    em_max_dispersive_coupling_ratio = None
     em_breach_rate = None
     em_energy_imbalance_trend_ratio = None
     em_flux_divergence_trend_ratio = None
@@ -2515,6 +2525,7 @@ def evaluate_release_readiness(
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
                 "em_homogeneous_dispersive_phase_attenuation_mean",
+                "min",
                 "EM_DISPERSIVE_PHASE_ATTENUATION_MEAN_LOW",
                 "EM homogeneous dispersive phase attenuation mean",
                 em_min_dispersive_phase_attenuation_mean_threshold,
@@ -2522,6 +2533,7 @@ def evaluate_release_readiness(
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "em_heterogeneous_dispersive_phase_attenuation_mean",
+                "min",
                 "EM_DISPERSIVE_PHASE_ATTENUATION_MEAN_LOW",
                 "EM heterogeneous dispersive phase attenuation mean",
                 em_min_dispersive_phase_attenuation_mean_threshold,
@@ -2529,6 +2541,7 @@ def evaluate_release_readiness(
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
                 "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
+                "min",
                 "EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO_LOW",
                 "EM homogeneous dispersive phase conductivity attenuation ratio",
                 em_min_dispersive_phase_conductivity_attenuation_ratio_threshold,
@@ -2536,9 +2549,26 @@ def evaluate_release_readiness(
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "em_heterogeneous_dispersive_phase_conductivity_attenuation_ratio",
+                "min",
                 "EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO_LOW",
                 "EM heterogeneous dispersive phase conductivity attenuation ratio",
                 em_min_dispersive_phase_conductivity_attenuation_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_dispersive_coupling_ratio",
+                "max",
+                "EM_DISPERSIVE_COUPLING_RATIO_HIGH",
+                "EM homogeneous dispersive coupling ratio",
+                em_max_dispersive_coupling_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_dispersive_coupling_ratio",
+                "max",
+                "EM_DISPERSIVE_COUPLING_RATIO_HIGH",
+                "EM heterogeneous dispersive coupling ratio",
+                em_max_dispersive_coupling_ratio_threshold,
             ),
         ]
         missing_metric_fields = []
@@ -2584,7 +2614,7 @@ def evaluate_release_readiness(
                     )
                 )
 
-        for fixture_id, assertion_name, code, label, threshold in phase_assertion_specs:
+        for fixture_id, assertion_name, mode, code, label, threshold in phase_assertion_specs:
             values = []
             for rec in em_records:
                 if rec.get("fixture_id") != fixture_id:
@@ -2596,28 +2626,37 @@ def evaluate_release_readiness(
                 missing_metric_fields.append(f"{fixture_id}.{assertion_name}")
                 continue
 
-            observed = min(values)
+            observed = max(values) if mode == "max" else min(values)
             if assertion_name.endswith("dispersive_phase_attenuation_mean"):
                 if (
                     em_min_dispersive_phase_attenuation_mean is None
                     or observed < em_min_dispersive_phase_attenuation_mean
                 ):
                     em_min_dispersive_phase_attenuation_mean = observed
-            elif (
+            elif assertion_name.endswith("dispersive_phase_conductivity_attenuation_ratio") and (
                 em_min_dispersive_phase_conductivity_attenuation_ratio is None
                 or observed < em_min_dispersive_phase_conductivity_attenuation_ratio
             ):
                 em_min_dispersive_phase_conductivity_attenuation_ratio = observed
+            elif assertion_name.endswith("dispersive_coupling_ratio"):
+                if (
+                    em_max_dispersive_coupling_ratio is None
+                    or observed > em_max_dispersive_coupling_ratio
+                ):
+                    em_max_dispersive_coupling_ratio = observed
 
-            breached = observed < threshold
+            breached = observed > threshold if mode == "max" else observed < threshold
             breaches.append(breached)
             if breached:
+                comparator = "exceeds" if mode == "max" else "below"
+                observed_text = f"{observed:.3e}" if mode == "max" else f"{observed:.3f}"
+                threshold_text = f"{threshold:.3e}" if mode == "max" else f"{threshold:.3f}"
                 reasons.append(
                     Reason(
                         code=code,
                         severity="fail" if protected else "warn",
                         detail=(
-                            f"{label} {observed:.3f} below threshold {threshold:.3f}"
+                            f"{label} {observed_text} {comparator} threshold {threshold_text}"
                         ),
                     )
                 )
@@ -4106,6 +4145,8 @@ def evaluate_release_readiness(
         "em_min_dispersive_phase_attenuation_mean_threshold": em_min_dispersive_phase_attenuation_mean_threshold,
         "em_min_dispersive_phase_conductivity_attenuation_ratio": em_min_dispersive_phase_conductivity_attenuation_ratio,
         "em_min_dispersive_phase_conductivity_attenuation_ratio_threshold": em_min_dispersive_phase_conductivity_attenuation_ratio_threshold,
+        "em_max_dispersive_coupling_ratio": em_max_dispersive_coupling_ratio,
+        "em_max_dispersive_coupling_ratio_threshold": em_max_dispersive_coupling_ratio_threshold,
         "em_breach_rate": em_breach_rate,
         "em_max_breach_rate_threshold": em_max_breach_rate_threshold,
         "em_energy_imbalance_trend_ratio": em_energy_imbalance_trend_ratio,
