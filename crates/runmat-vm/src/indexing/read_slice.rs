@@ -1,27 +1,9 @@
-use crate::call::shared::{
-    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexSelector,
-};
 use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::selectors::{
     build_slice_selectors, index_scalar_from_value, materialize_index_value, SliceSelector,
 };
 use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
-
-pub async fn object_subsref_paren(base: Value, numeric: &[Value]) -> Result<Value, RuntimeError> {
-    match base {
-        Value::Object(_) | Value::HandleObject(_) => {
-            call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_paren(
-                base,
-                ObjectIndexSelector::IndexValues {
-                    values: numeric.to_vec(),
-                },
-            ))
-            .await
-        }
-        other => Err(format!("slice subsref requires object/handle, got {other:?}").into()),
-    }
-}
 
 pub async fn read_tensor_slice_1d(
     tensor: &Tensor,

@@ -1,30 +1,7 @@
-use crate::call::shared::{
-    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexSelector,
-};
 use crate::indexing::plan::IndexPlan;
 use crate::interpreter::errors::mex;
 use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
-
-pub async fn object_subsasgn_paren(
-    base: Value,
-    numeric: &[Value],
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    match base {
-        Value::Object(_) | Value::HandleObject(_) => {
-            call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
-                base,
-                ObjectIndexSelector::IndexValues {
-                    values: numeric.to_vec(),
-                },
-                rhs,
-            ))
-            .await
-        }
-        other => Err(format!("slice subsasgn requires object/handle, got {other:?}").into()),
-    }
-}
 
 pub enum ComplexRhsView {
     Scalar((f64, f64)),

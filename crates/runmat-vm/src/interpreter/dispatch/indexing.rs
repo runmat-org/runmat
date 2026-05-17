@@ -425,6 +425,43 @@ fn build_end_range_descriptor(
     Ok(Value::Cell(cell))
 }
 
+fn build_object_paren_selector_values(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+) -> Result<Vec<Value>, RuntimeError> {
+    let mut values = Vec::with_capacity(dims);
+    let mut numeric_iter = 0usize;
+    for d in 0..dims {
+        let is_colon = (colon_mask & (1u32 << d)) != 0;
+        let is_end = (end_mask & (1u32 << d)) != 0;
+        if is_colon {
+            values.push(Value::String(":".to_string()));
+            continue;
+        }
+        if is_end {
+            values.push(Value::String("end".to_string()));
+            continue;
+        }
+        let selector = numeric
+            .get(numeric_iter)
+            .ok_or(crate::interpreter::errors::mex(
+                "MissingNumericIndex",
+                "missing numeric index",
+            ))?;
+        values.push(selector.clone());
+        numeric_iter += 1;
+    }
+    if numeric_iter != numeric.len() {
+        return Err(crate::interpreter::errors::mex(
+            "UnexpectedNumericIndex",
+            "unexpected extra numeric index values",
+        ));
+    }
+    Ok(values)
+}
+
 pub async fn dispatch_indexing<F>(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
@@ -834,13 +871,36 @@ where
                 other => other,
             };
             match base {
-                Value::Object(obj) => stack.push(
-                    idx_read_slice::object_subsref_paren(Value::Object(obj), &numeric).await?,
-                ),
-                Value::HandleObject(handle) => stack.push(
-                    idx_read_slice::object_subsref_paren(Value::HandleObject(handle), &numeric)
+                Value::Object(obj) => {
+                    let selectors = build_object_paren_selector_values(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                    )?;
+                    stack.push(
+                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_paren(
+                            Value::Object(obj),
+                            ObjectIndexSelector::IndexValues { values: selectors },
+                        ))
                         .await?,
-                ),
+                    );
+                }
+                Value::HandleObject(handle) => {
+                    let selectors = build_object_paren_selector_values(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                    )?;
+                    stack.push(
+                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_paren(
+                            Value::HandleObject(handle),
+                            ObjectIndexSelector::IndexValues { values: selectors },
+                        ))
+                        .await?,
+                    );
+                }
                 Value::Tensor(t) => {
                     if *dims == 1 {
                         stack.push(
@@ -979,18 +1039,38 @@ where
                 "stack underflow",
             ))?;
             match base {
-                Value::Object(obj) => stack.push(
-                    idx_write_slice::object_subsasgn_paren(Value::Object(obj), &numeric, rhs)
-                        .await?,
-                ),
-                Value::HandleObject(handle) => stack.push(
-                    idx_write_slice::object_subsasgn_paren(
-                        Value::HandleObject(handle),
+                Value::Object(obj) => {
+                    let selectors = build_object_paren_selector_values(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
                         &numeric,
-                        rhs,
-                    )
-                    .await?,
-                ),
+                    )?;
+                    stack.push(
+                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
+                            Value::Object(obj),
+                            ObjectIndexSelector::IndexValues { values: selectors },
+                            rhs,
+                        ))
+                        .await?,
+                    );
+                }
+                Value::HandleObject(handle) => {
+                    let selectors = build_object_paren_selector_values(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                    )?;
+                    stack.push(
+                        call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
+                            Value::HandleObject(handle),
+                            ObjectIndexSelector::IndexValues { values: selectors },
+                            rhs,
+                        ))
+                        .await?,
+                    );
+                }
                 Value::Tensor(t) => {
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &t.shape)
