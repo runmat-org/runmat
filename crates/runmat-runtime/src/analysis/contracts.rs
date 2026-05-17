@@ -1,6 +1,7 @@
 use runmat_analysis_core::AnalysisField;
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::{ComputeBackend, FeaRunResult};
+use runmat_geometry_core::GeometryAsset;
 use runmat_meshing_core::RegionMeshMapping;
 use serde::{Deserialize, Serialize};
 
@@ -950,6 +951,42 @@ impl Default for AnalysisTrendsQuery {
     fn default() -> Self {
         Self { window_size: 16 }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudySpec {
+    pub study_id: String,
+    pub geometry: GeometryAsset,
+    pub create_model_intent: AnalysisCreateModelIntentSpec,
+    pub run_kind: AnalysisRunKind,
+    pub backend: ComputeBackend,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisStudyValidateResult {
+    pub valid: bool,
+    pub issue_codes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudyPlanData {
+    pub study_id: String,
+    pub model_id: String,
+    pub run_kind: AnalysisRunKind,
+    pub backend: ComputeBackend,
+    pub operation_sequence: Vec<String>,
+    pub study_fingerprint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisStudyRunData {
+    pub study_id: String,
+    pub model_id: String,
+    pub run_kind: AnalysisRunKind,
+    pub backend: ComputeBackend,
+    pub run_id: String,
+    pub run_status: RunStatus,
+    pub publishable: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

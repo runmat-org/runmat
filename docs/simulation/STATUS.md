@@ -51,4 +51,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - CHT first run-path baseline landed: `analysis.run_cht/v1` now executes coupled CFD + thermal runs with typed transient+thermal payloads and first CHT diagnostics (`FEA_CHT_COUPLING`, `FEA_CFD_FLOW`) under existing quality/provenance posture.
 - CHT benchmark/trend baseline landed: conformance harness now includes CHT fixtures with coupled flow/coupling threshold assertions, and runtime trends classify CHT runs as a dedicated run family (`AnalysisRunKind::Cht`).
 - FSI contract kickoff landed: additive `analysis.create_model` now supports an `fsi_coupled` profile template to seed coupled transient-structural + CFD model scaffolding while dedicated FSI run/governance paths remain pending.
+- Study workflow kickoff landed: additive high-level runtime operations `analysis.validate_study/v1`, `analysis.plan_study/v1`, and `analysis.run_study/v1` now provide typed study validation/planning/execution for a canonical linear-static path with deterministic study fingerprinting.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.

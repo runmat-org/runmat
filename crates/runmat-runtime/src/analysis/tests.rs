@@ -320,6 +320,20 @@ fn sample_step_like_geometry_asset() -> GeometryAsset {
     asset
 }
 
+fn sample_linear_static_study_spec() -> AnalysisStudySpec {
+    AnalysisStudySpec {
+        study_id: "study_linear_static_001".to_string(),
+        geometry: sample_geometry_asset(),
+        create_model_intent: AnalysisCreateModelIntentSpec {
+            model_id: "study_model_linear_static_001".to_string(),
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            prep_context: None,
+        },
+        run_kind: AnalysisRunKind::LinearStatic,
+        backend: ComputeBackend::Cpu,
+    }
+}
+
 #[test]
 fn analysis_create_model_returns_v1_envelope() {
     let _guard = analysis_test_guard();
@@ -709,6 +723,73 @@ fn analysis_create_model_supports_fsi_coupled_profile_template() {
     assert_eq!(cfd.solve_family, CfdSolveFamily::Transient);
     assert_eq!(cfd.time_profile.len(), 2);
     assert!(envelope.data.thermo_mechanical.is_none());
+}
+
+#[test]
+fn analysis_validate_study_reports_invalid_study_id() {
+    let _guard = analysis_test_guard();
+    let mut spec = sample_linear_static_study_spec();
+    spec.study_id = "   ".to_string();
+
+    let envelope = analysis_validate_study_op(&spec, OperationContext::new(None, None))
+        .expect("study validation should return typed output");
+
+    assert_eq!(envelope.operation, "analysis.validate_study");
+    assert_eq!(envelope.op_version, "analysis.validate_study/v1");
+    assert!(!envelope.data.valid);
+    assert!(envelope
+        .data
+        .issue_codes
+        .iter()
+        .any(|code| code == "ANALYSIS_STUDY_ID_EMPTY"));
+}
+
+#[test]
+fn analysis_plan_study_returns_canonical_linear_static_sequence() {
+    let _guard = analysis_test_guard();
+    let spec = sample_linear_static_study_spec();
+
+    let envelope = analysis_plan_study_op(&spec, OperationContext::new(None, None))
+        .expect("study plan should succeed");
+
+    assert_eq!(envelope.operation, "analysis.plan_study");
+    assert_eq!(envelope.op_version, "analysis.plan_study/v1");
+    assert_eq!(envelope.data.study_id, spec.study_id);
+    assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
+    assert_eq!(
+        envelope.data.operation_sequence,
+        vec![
+            "analysis.create_model/v1".to_string(),
+            "analysis.validate/v1".to_string(),
+            "analysis.run_linear_static/v1".to_string(),
+        ]
+    );
+    assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
+}
+
+#[test]
+fn analysis_run_study_executes_linear_static_path() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let spec = sample_linear_static_study_spec();
+
+    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("study run should succeed");
+
+    assert_eq!(envelope.operation, "analysis.run_study");
+    assert_eq!(envelope.op_version, "analysis.run_study/v1");
+    assert_eq!(envelope.data.study_id, spec.study_id);
+    assert_eq!(envelope.data.model_id, spec.create_model_intent.model_id);
+    assert_eq!(envelope.data.run_kind, AnalysisRunKind::LinearStatic);
+    assert_eq!(envelope.data.backend, ComputeBackend::Cpu);
+    assert!(envelope.data.run_id.starts_with("run_"));
+
+    let persisted = storage::load_run_result(&envelope.data.run_id)
+        .expect("run load should succeed")
+        .expect("run should be persisted");
+    assert_eq!(persisted.run_id, envelope.data.run_id);
+    assert_eq!(persisted.run_status, envelope.data.run_status);
+    assert_eq!(persisted.publishable, envelope.data.publishable);
 }
 
 #[test]

@@ -55,6 +55,7 @@ pub use contracts::{
     AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsCompareData,
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
+    AnalysisStudyPlanData, AnalysisStudyRunData, AnalysisStudySpec, AnalysisStudyValidateResult,
     AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
     AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
     ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
@@ -68,6 +69,12 @@ pub use contracts::{
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
 const ANALYSIS_CREATE_MODEL_OP_VERSION: &str = "analysis.create_model/v1";
+const ANALYSIS_VALIDATE_STUDY_OPERATION: &str = "analysis.validate_study";
+const ANALYSIS_VALIDATE_STUDY_OP_VERSION: &str = "analysis.validate_study/v1";
+const ANALYSIS_PLAN_STUDY_OPERATION: &str = "analysis.plan_study";
+const ANALYSIS_PLAN_STUDY_OP_VERSION: &str = "analysis.plan_study/v1";
+const ANALYSIS_RUN_STUDY_OPERATION: &str = "analysis.run_study";
+const ANALYSIS_RUN_STUDY_OP_VERSION: &str = "analysis.run_study/v1";
 const ANALYSIS_VALIDATE_OPERATION: &str = "analysis.validate";
 const ANALYSIS_VALIDATE_OP_VERSION: &str = "analysis.validate/v1";
 const ANALYSIS_RUN_OPERATION: &str = "analysis.run_linear_static";
@@ -649,6 +656,134 @@ pub fn analysis_create_model_op(
         ANALYSIS_CREATE_MODEL_OP_VERSION,
         &context,
         model,
+    ))
+}
+
+pub fn analysis_validate_study_op(
+    spec: &AnalysisStudySpec,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisStudyValidateResult>, OperationErrorEnvelope> {
+    let issue_codes = validate_study_issue_codes(spec);
+    Ok(OperationEnvelope::new(
+        ANALYSIS_VALIDATE_STUDY_OPERATION,
+        ANALYSIS_VALIDATE_STUDY_OP_VERSION,
+        &context,
+        AnalysisStudyValidateResult {
+            valid: issue_codes.is_empty(),
+            issue_codes,
+        },
+    ))
+}
+
+pub fn analysis_plan_study_op(
+    spec: &AnalysisStudySpec,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisStudyPlanData>, OperationErrorEnvelope> {
+    let issue_codes = validate_study_issue_codes(spec);
+    if !issue_codes.is_empty() {
+        return Err(operation_error(
+            ANALYSIS_PLAN_STUDY_OPERATION,
+            ANALYSIS_PLAN_STUDY_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_PLAN_STUDY_INVALID_SPEC",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "study spec is invalid; run analysis.validate_study for issue details",
+            BTreeMap::from([("issue_codes".to_string(), issue_codes.join(","))]),
+        ));
+    }
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_PLAN_STUDY_OPERATION,
+        ANALYSIS_PLAN_STUDY_OP_VERSION,
+        &context,
+        AnalysisStudyPlanData {
+            study_id: spec.study_id.clone(),
+            model_id: spec.create_model_intent.model_id.clone(),
+            run_kind: spec.run_kind,
+            backend: spec.backend,
+            operation_sequence: vec![
+                ANALYSIS_CREATE_MODEL_OP_VERSION.to_string(),
+                ANALYSIS_VALIDATE_OP_VERSION.to_string(),
+                run_operation_version_for_kind(spec.run_kind).to_string(),
+            ],
+            study_fingerprint: study_fingerprint(spec),
+        },
+    ))
+}
+
+pub fn analysis_run_study_op(
+    spec: &AnalysisStudySpec,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let issue_codes = validate_study_issue_codes(spec);
+    if !issue_codes.is_empty() {
+        return Err(operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_STUDY_INVALID_SPEC",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "study spec is invalid; run analysis.validate_study for issue details",
+            BTreeMap::from([("issue_codes".to_string(), issue_codes.join(","))]),
+        ));
+    }
+
+    let created = analysis_create_model_op(
+        &spec.geometry,
+        spec.create_model_intent.clone(),
+        context.clone(),
+    )?;
+    analysis_validate(
+        &created.data,
+        spec.geometry.units,
+        &ReferenceFrame::Global,
+        context.clone(),
+    )?;
+
+    let run_envelope = match spec.run_kind {
+        AnalysisRunKind::LinearStatic => {
+            analysis_run_linear_static_op(&created.data, spec.backend, context.clone())
+        }
+        AnalysisRunKind::Modal => {
+            analysis_run_modal_op(&created.data, spec.backend, context.clone())
+        }
+        AnalysisRunKind::Thermal => {
+            analysis_run_thermal_op(&created.data, spec.backend, context.clone())
+        }
+        AnalysisRunKind::Transient => {
+            analysis_run_transient_op(&created.data, spec.backend, context.clone())
+        }
+        AnalysisRunKind::Cfd => analysis_run_cfd_op(&created.data, spec.backend, context.clone()),
+        AnalysisRunKind::Cht => analysis_run_cht_op(&created.data, spec.backend, context.clone()),
+        AnalysisRunKind::Nonlinear => {
+            analysis_run_nonlinear_op(&created.data, spec.backend, context.clone())
+        }
+        AnalysisRunKind::Electromagnetic => {
+            analysis_run_electromagnetic_op(&created.data, spec.backend, context.clone())
+        }
+    }?;
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RUN_STUDY_OPERATION,
+        ANALYSIS_RUN_STUDY_OP_VERSION,
+        &context,
+        AnalysisStudyRunData {
+            study_id: spec.study_id.clone(),
+            model_id: created.data.model_id.0.clone(),
+            run_kind: spec.run_kind,
+            backend: spec.backend,
+            run_id: run_envelope.data.run_id,
+            run_status: run_envelope.data.run_status,
+            publishable: run_envelope.data.publishable,
+        },
     ))
 }
 
@@ -6259,6 +6394,91 @@ fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
     } else {
         AnalysisRunKind::LinearStatic
     }
+}
+
+fn run_operation_version_for_kind(kind: AnalysisRunKind) -> &'static str {
+    match kind {
+        AnalysisRunKind::LinearStatic => ANALYSIS_RUN_OP_VERSION,
+        AnalysisRunKind::Modal => ANALYSIS_RUN_MODAL_OP_VERSION,
+        AnalysisRunKind::Thermal => ANALYSIS_RUN_THERMAL_OP_VERSION,
+        AnalysisRunKind::Transient => ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+        AnalysisRunKind::Cfd => ANALYSIS_RUN_CFD_OP_VERSION,
+        AnalysisRunKind::Cht => ANALYSIS_RUN_CHT_OP_VERSION,
+        AnalysisRunKind::Nonlinear => ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+        AnalysisRunKind::Electromagnetic => ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+    }
+}
+
+fn validate_study_issue_codes(spec: &AnalysisStudySpec) -> Vec<String> {
+    let mut issue_codes = Vec::new();
+
+    if spec.study_id.trim().is_empty() {
+        issue_codes.push("ANALYSIS_STUDY_ID_EMPTY".to_string());
+    }
+    if spec.create_model_intent.model_id.trim().is_empty() {
+        issue_codes.push("ANALYSIS_STUDY_MODEL_ID_EMPTY".to_string());
+    }
+    if spec.geometry.meshes.is_empty() {
+        issue_codes.push("ANALYSIS_STUDY_GEOMETRY_MESHES_EMPTY".to_string());
+    }
+    if spec.geometry.units == UnitSystem::Unspecified {
+        issue_codes.push("ANALYSIS_STUDY_GEOMETRY_UNITS_UNSPECIFIED".to_string());
+    }
+    if !profile_supports_run_kind(spec.create_model_intent.profile, spec.run_kind) {
+        issue_codes.push("ANALYSIS_STUDY_RUN_KIND_PROFILE_MISMATCH".to_string());
+    }
+
+    issue_codes
+}
+
+fn profile_supports_run_kind(
+    profile: AnalysisCreateModelProfile,
+    run_kind: AnalysisRunKind,
+) -> bool {
+    match run_kind {
+        AnalysisRunKind::LinearStatic => {
+            matches!(profile, AnalysisCreateModelProfile::LinearStaticStructural)
+        }
+        AnalysisRunKind::Modal => matches!(profile, AnalysisCreateModelProfile::ModalStructural),
+        AnalysisRunKind::Thermal => {
+            matches!(
+                profile,
+                AnalysisCreateModelProfile::ThermalStandalone
+                    | AnalysisCreateModelProfile::ChtCoupled
+            )
+        }
+        AnalysisRunKind::Transient => {
+            matches!(
+                profile,
+                AnalysisCreateModelProfile::TransientStructural
+                    | AnalysisCreateModelProfile::ThermoMechanicalCoupled
+                    | AnalysisCreateModelProfile::FsiCoupled
+            )
+        }
+        AnalysisRunKind::Cfd => {
+            matches!(
+                profile,
+                AnalysisCreateModelProfile::CfdSteadyState
+                    | AnalysisCreateModelProfile::CfdTransient
+                    | AnalysisCreateModelProfile::ChtCoupled
+                    | AnalysisCreateModelProfile::FsiCoupled
+            )
+        }
+        AnalysisRunKind::Cht => matches!(profile, AnalysisCreateModelProfile::ChtCoupled),
+        AnalysisRunKind::Nonlinear => {
+            matches!(profile, AnalysisCreateModelProfile::NonlinearStructural)
+        }
+        AnalysisRunKind::Electromagnetic => {
+            matches!(profile, AnalysisCreateModelProfile::ElectromagneticStatic)
+        }
+    }
+}
+
+fn study_fingerprint(spec: &AnalysisStudySpec) -> String {
+    let payload = serde_json::to_vec(spec).unwrap_or_else(|_| format!("{spec:?}").into_bytes());
+    let mut hasher = Sha256::new();
+    hasher.update(payload);
+    format!("sha256:{:x}", hasher.finalize())
 }
 
 fn to_fea_prep_context(
