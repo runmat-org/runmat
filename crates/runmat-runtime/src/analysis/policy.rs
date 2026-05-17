@@ -24,6 +24,8 @@ pub(crate) const EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED: f64 = 0.55;
 pub(crate) const EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED: f64 = 0.65;
 pub(crate) const EM_REAL_RESIDUAL_MAX_BALANCED: f64 = 0.30;
 pub(crate) const EM_IMAG_RESIDUAL_MAX_BALANCED: f64 = 0.65;
+pub(crate) const EM_SWEEP_COUNT_MIN_BALANCED: f64 = 5.0;
+pub(crate) const EM_RESONANCE_Q_MIN_BALANCED: f64 = 1.25;
 
 pub(crate) fn thermo_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
     match policy {
@@ -111,6 +113,14 @@ pub(crate) fn electromagnetic_thresholds_for_policy(
             3.0, 0.35, 0.5, 0.65, 1.8, 1.5e5, 0.2, 0.35, 0.25, 0.95, 0.85, 0.15, 0.4, 0.35, 0.9,
             0.8, 1.2, 0.03, 0.9, 0.25, 0.85, 1.2,
         ),
+    }
+}
+
+pub(crate) fn electromagnetic_sweep_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
+    match policy {
+        QualityPolicy::Strict => (7.0, 1.8),
+        QualityPolicy::Balanced => (EM_SWEEP_COUNT_MIN_BALANCED, EM_RESONANCE_Q_MIN_BALANCED),
+        QualityPolicy::Exploratory => (3.0, 0.75),
     }
 }
 

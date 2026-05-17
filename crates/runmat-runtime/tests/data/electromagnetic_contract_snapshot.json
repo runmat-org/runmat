@@ -45,7 +45,15 @@
         "source_operation": "analysis.run_electromagnetic"
       }
     },
-    "placeholder_mode": null
+    "placeholder_mode": null,
+    "sweep_frequency_hz": [],
+    "sweep_peak_flux_density": [],
+    "sweep_solve_quality": [],
+    "resonance_peak_frequency_hz": null,
+    "resonance_peak_flux_density": null,
+    "resonance_bandwidth_hz": null,
+    "resonance_q_proxy": null,
+    "resonance_flux_gain": null
   },
   "summary": {
     "field_count": 0,
@@ -142,6 +150,12 @@
     "electromagnetic_boundary_penalty_conditioning_contribution": null,
     "electromagnetic_source_region_energy_consistency_ratio": null,
     "electromagnetic_real_residual_norm": null,
-    "electromagnetic_imag_residual_norm": null
+    "electromagnetic_imag_residual_norm": null,
+    "electromagnetic_sweep_count": null,
+    "electromagnetic_resonance_peak_frequency_hz": null,
+    "electromagnetic_resonance_peak_flux_density": null,
+    "electromagnetic_resonance_bandwidth_hz": null,
+    "electromagnetic_resonance_q_proxy": null,
+    "electromagnetic_resonance_flux_gain": null
   }
 }

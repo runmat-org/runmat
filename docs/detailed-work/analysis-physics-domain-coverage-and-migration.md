@@ -302,6 +302,20 @@ Not required for this milestone:
 - Switched harmonic EM solve RHS handling to true complex-source forcing (`rhs_real` + `rhs_imag`) and computed source overlap/interference readiness from complex source vectors actually used by the solver.
 - Moved boundary penalty from diagnostic-only posture to operator-applied behavior by injecting boundary penalty terms into assembled stiffness diagonals and measuring contribution from actual assembled coefficients.
 
+### Maxwell EM Phase-16 Status (2026-05-16)
+
+- Added optional EM frequency-sweep controls to runtime EM run options:
+  - `sweep_enabled`,
+  - `sweep_frequency_hz`.
+- Extended typed EM payload and runtime summary/trend surfaces with sweep/resonance readiness signals:
+  - payload: sweep frequency/peak/quality vectors plus resonance peak/bandwidth/Q/flux-gain fields,
+  - summary: `electromagnetic_sweep_count` + resonance posture fields,
+  - trends: sweep-coverage and resonance-sharpness breach-rate signals.
+- Added runtime governance for sweep/resonance only when sweep mode is explicitly enabled:
+  - quality reasons: `ElectromagneticSweepCoverageLow`, `ElectromagneticResonanceSharpnessLow`,
+  - thresholds are policy-profiled in `analysis/policy.rs`,
+  - default single-frequency EM runs remain backward-compatible and keep prior publishability posture.
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.

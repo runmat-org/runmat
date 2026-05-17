@@ -26,20 +26,21 @@ use crate::operations::{
     OperationErrorSeverity, OperationErrorSpec, OperationErrorType,
 };
 use policy::{
-    breach_rate_greater_than, breach_rate_less_than, electromagnetic_thresholds_for_policy,
-    thermo_field_quality_thresholds_for_policy, thermo_gradient_thresholds_for_policy,
-    thermo_thresholds_for_policy, EM_ASSIGNMENT_COVERAGE_MIN_BALANCED,
-    EM_BOUNDARY_ANCHOR_MIN_BALANCED, EM_BOUNDARY_ENERGY_MIN_BALANCED,
-    EM_BOUNDARY_LOCALIZATION_MIN_BALANCED, EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED,
-    EM_CONDITIONING_MAX_BALANCED, EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
-    EM_ENERGY_IMBALANCE_MAX_BALANCED, EM_FALLBACK_COEFFICIENT_MAX_BALANCED,
-    EM_FLUX_DIVERGENCE_MAX_BALANCED, EM_GROUND_EFFECTIVENESS_MIN_BALANCED,
-    EM_HETEROGENEITY_THRESHOLD_BALANCED, EM_IMAG_RESIDUAL_MAX_BALANCED,
-    EM_INSULATION_LEAKAGE_MAX_BALANCED, EM_REAL_RESIDUAL_MAX_BALANCED,
-    EM_REGION_CONTRAST_MAX_BALANCED, EM_SOURCE_INTERFERENCE_MAX_BALANCED,
-    EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED, EM_SOURCE_OVERLAP_MAX_BALANCED,
-    EM_SOURCE_REALIZATION_MIN_BALANCED, EM_SOURCE_REGION_COVERAGE_MIN_BALANCED,
-    EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED, THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
+    breach_rate_greater_than, breach_rate_less_than, electromagnetic_sweep_thresholds_for_policy,
+    electromagnetic_thresholds_for_policy, thermo_field_quality_thresholds_for_policy,
+    thermo_gradient_thresholds_for_policy, thermo_thresholds_for_policy,
+    EM_ASSIGNMENT_COVERAGE_MIN_BALANCED, EM_BOUNDARY_ANCHOR_MIN_BALANCED,
+    EM_BOUNDARY_ENERGY_MIN_BALANCED, EM_BOUNDARY_LOCALIZATION_MIN_BALANCED,
+    EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED, EM_CONDITIONING_MAX_BALANCED,
+    EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED, EM_ENERGY_IMBALANCE_MAX_BALANCED,
+    EM_FALLBACK_COEFFICIENT_MAX_BALANCED, EM_FLUX_DIVERGENCE_MAX_BALANCED,
+    EM_GROUND_EFFECTIVENESS_MIN_BALANCED, EM_HETEROGENEITY_THRESHOLD_BALANCED,
+    EM_IMAG_RESIDUAL_MAX_BALANCED, EM_INSULATION_LEAKAGE_MAX_BALANCED,
+    EM_REAL_RESIDUAL_MAX_BALANCED, EM_REGION_CONTRAST_MAX_BALANCED, EM_RESONANCE_Q_MIN_BALANCED,
+    EM_SOURCE_INTERFERENCE_MAX_BALANCED, EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED,
+    EM_SOURCE_OVERLAP_MAX_BALANCED, EM_SOURCE_REALIZATION_MIN_BALANCED,
+    EM_SOURCE_REGION_COVERAGE_MIN_BALANCED, EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED,
+    EM_SWEEP_COUNT_MIN_BALANCED, THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
     THERMO_SPREAD_THRESHOLD_BALANCED,
 };
 
@@ -2588,34 +2589,84 @@ pub fn analysis_run_electromagnetic_with_options_op(
         &context,
     )?;
 
-    let em_run = run_electromagnetic_with_options(
-        model,
-        backend,
-        ElectromagneticSolveOptions {
-            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
-            residual_target: 1.0e-6,
-        },
+    let sweep_frequency_hz = normalize_em_sweep_frequency_hz(
+        em_domain.reference_frequency_hz,
+        options.sweep_enabled,
+        &options.sweep_frequency_hz,
     )
-    .map_err(|err| {
+    .ok_or_else(|| {
         operation_error(
             ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
             ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
             &context,
             OperationErrorSpec {
-                error_code: "SOLVER_MODEL_INVALID",
-                error_type: OperationErrorType::Validation,
+                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            err.to_string(),
-            BTreeMap::from([
-                ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                ("geometry_id".to_string(), model.geometry_id.clone()),
-            ]),
+            "analysis.run_electromagnetic sweep_frequency_hz must contain finite positive values",
+            BTreeMap::new(),
         )
     })?;
-
-    let run = em_run.run;
+    let solve_options = ElectromagneticSolveOptions {
+        prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+        residual_target: 1.0e-6,
+    };
+    let mut sweep_runs = Vec::with_capacity(sweep_frequency_hz.len());
+    let mut sweep_peak_flux_density = Vec::with_capacity(sweep_frequency_hz.len());
+    let mut sweep_solve_quality = Vec::with_capacity(sweep_frequency_hz.len());
+    for frequency_hz in &sweep_frequency_hz {
+        let mut sweep_model = model.clone();
+        if let Some(domain) = sweep_model.electromagnetic.as_mut() {
+            domain.reference_frequency_hz = *frequency_hz;
+        }
+        let sweep_run =
+            run_electromagnetic_with_options(&sweep_model, backend, solve_options.clone())
+                .map_err(|err| {
+                    operation_error(
+                        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+                        ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+                        &context,
+                        OperationErrorSpec {
+                            error_code: "SOLVER_MODEL_INVALID",
+                            error_type: OperationErrorType::Validation,
+                            retryable: false,
+                            severity: OperationErrorSeverity::Error,
+                        },
+                        err.to_string(),
+                        BTreeMap::from([
+                            ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                            ("geometry_id".to_string(), model.geometry_id.clone()),
+                        ]),
+                    )
+                })?;
+        sweep_peak_flux_density.push(peak_abs_field_value(&sweep_run.flux_density_field));
+        sweep_solve_quality.push(sweep_run.solve_quality);
+        sweep_runs.push(sweep_run);
+    }
+    let sweep_metrics = summarize_em_sweep(&sweep_frequency_hz, &sweep_peak_flux_density);
+    let primary_index =
+        nearest_frequency_index(&sweep_frequency_hz, em_domain.reference_frequency_hz).unwrap_or(0);
+    let em_run = sweep_runs[primary_index].clone();
+    let mut run = em_run.run.clone();
+    run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_EM_SWEEP".to_string(),
+        severity: if sweep_metrics.sweep_count > 1 {
+            runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+        } else {
+            runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "sweep_count={} resonance_peak_frequency_hz={} resonance_peak_flux_density={} resonance_bandwidth_hz={} resonance_q_proxy={} resonance_flux_gain={}",
+            sweep_metrics.sweep_count,
+            sweep_metrics.resonance_peak_frequency_hz.unwrap_or(0.0),
+            sweep_metrics.resonance_peak_flux_density.unwrap_or(0.0),
+            sweep_metrics.resonance_bandwidth_hz.unwrap_or(0.0),
+            sweep_metrics.resonance_q_proxy.unwrap_or(0.0),
+            sweep_metrics.resonance_flux_gain.unwrap_or(0.0),
+        ),
+    });
     let solver_convergence = if run.diagnostics.iter().any(|diag| {
         diag.code == "FEA_EM_STATIC"
             && diag.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -2721,6 +2772,9 @@ pub fn analysis_run_electromagnetic_with_options_op(
         diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "real_residual_norm");
     let em_imag_residual_norm =
         diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "imag_residual_norm");
+    let em_sweep_count = diagnostic_metric(&run.diagnostics, "FEA_EM_SWEEP", "sweep_count");
+    let em_resonance_q_proxy =
+        diagnostic_metric(&run.diagnostics, "FEA_EM_SWEEP", "resonance_q_proxy");
     let (
         em_spread_threshold,
         em_heterogeneity_threshold,
@@ -2745,6 +2799,8 @@ pub fn analysis_run_electromagnetic_with_options_op(
         em_real_residual_max_threshold,
         em_imag_residual_max_threshold,
     ) = electromagnetic_thresholds_for_policy(options.quality_policy);
+    let (em_sweep_count_min_threshold, em_resonance_q_min_threshold) =
+        electromagnetic_sweep_thresholds_for_policy(options.quality_policy);
     let em_spread_breach = em_conductivity_spread_ratio
         .map(|value| value > em_spread_threshold)
         .unwrap_or(false);
@@ -2811,6 +2867,15 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let em_imag_residual_breach = em_imag_residual_norm
         .map(|value| value > em_imag_residual_max_threshold)
         .unwrap_or(false);
+    let sweep_governance_active = options.sweep_enabled || !options.sweep_frequency_hz.is_empty();
+    let em_sweep_coverage_breach = sweep_governance_active
+        && em_sweep_count
+            .map(|value| value < em_sweep_count_min_threshold)
+            .unwrap_or(false);
+    let em_resonance_sharpness_breach = sweep_governance_active
+        && em_resonance_q_proxy
+            .map(|value| value < em_resonance_q_min_threshold)
+            .unwrap_or(false);
     if (em_spread_breach
         || em_heterogeneity_breach
         || em_coverage_breach
@@ -2832,7 +2897,9 @@ pub fn analysis_run_electromagnetic_with_options_op(
         || em_boundary_penalty_contribution_breach
         || em_source_region_energy_consistency_breach
         || em_real_residual_breach
-        || em_imag_residual_breach)
+        || em_imag_residual_breach
+        || em_sweep_coverage_breach
+        || em_resonance_sharpness_breach)
         && result_quality == QualityGate::Pass
     {
         result_quality = QualityGate::Warn;
@@ -3069,6 +3136,26 @@ pub fn analysis_run_electromagnetic_with_options_op(
             ),
         });
     }
+    if em_sweep_coverage_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticSweepCoverageLow,
+            detail: format!(
+                "electromagnetic sweep count {} is below threshold {}",
+                em_sweep_count.unwrap_or(0.0),
+                em_sweep_count_min_threshold
+            ),
+        });
+    }
+    if em_resonance_sharpness_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticResonanceSharpnessLow,
+            detail: format!(
+                "electromagnetic resonance q proxy {} is below threshold {}",
+                em_resonance_q_proxy.unwrap_or(0.0),
+                em_resonance_q_min_threshold
+            ),
+        });
+    }
 
     let publishable = match options.quality_policy {
         QualityPolicy::Strict => {
@@ -3110,6 +3197,14 @@ pub fn analysis_run_electromagnetic_with_options_op(
             vector_potential_proxy: em_run.vector_potential_field,
             flux_density_proxy: em_run.flux_density_field,
             placeholder_mode: false,
+            sweep_frequency_hz,
+            sweep_peak_flux_density,
+            sweep_solve_quality,
+            resonance_peak_frequency_hz: sweep_metrics.resonance_peak_frequency_hz,
+            resonance_peak_flux_density: sweep_metrics.resonance_peak_flux_density,
+            resonance_bandwidth_hz: sweep_metrics.resonance_bandwidth_hz,
+            resonance_q_proxy: sweep_metrics.resonance_q_proxy,
+            resonance_flux_gain: sweep_metrics.resonance_flux_gain,
         }),
         model_validity: QualityGate::Pass,
         solver_convergence,
@@ -3714,6 +3809,33 @@ pub fn analysis_results_op(
         "FEA_EM_STATIC",
         "imag_residual_norm",
     );
+    let electromagnetic_sweep_count =
+        diagnostic_metric(&run_result.run.diagnostics, "FEA_EM_SWEEP", "sweep_count");
+    let electromagnetic_resonance_peak_frequency_hz = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SWEEP",
+        "resonance_peak_frequency_hz",
+    );
+    let electromagnetic_resonance_peak_flux_density = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SWEEP",
+        "resonance_peak_flux_density",
+    );
+    let electromagnetic_resonance_bandwidth_hz = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SWEEP",
+        "resonance_bandwidth_hz",
+    );
+    let electromagnetic_resonance_q_proxy = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SWEEP",
+        "resonance_q_proxy",
+    );
+    let electromagnetic_resonance_flux_gain = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_SWEEP",
+        "resonance_flux_gain",
+    );
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -3811,6 +3933,12 @@ pub fn analysis_results_op(
         electromagnetic_source_region_energy_consistency_ratio,
         electromagnetic_real_residual_norm,
         electromagnetic_imag_residual_norm,
+        electromagnetic_sweep_count,
+        electromagnetic_resonance_peak_frequency_hz,
+        electromagnetic_resonance_peak_flux_density,
+        electromagnetic_resonance_bandwidth_hz,
+        electromagnetic_resonance_q_proxy,
+        electromagnetic_resonance_flux_gain,
     };
 
     let modal_results = if query.include_modal_results {
@@ -4800,6 +4928,30 @@ pub fn analysis_trends_op(
         } else {
             None
         };
+        let electromagnetic_sweep_coverage_breach_rate = if kind == AnalysisRunKind::Electromagnetic
+        {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(&run.run.diagnostics, "FEA_EM_SWEEP", "sweep_count")
+                })
+                .collect::<Vec<_>>();
+            breach_rate_less_than(&values, EM_SWEEP_COUNT_MIN_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_resonance_sharpness_breach_rate =
+            if kind == AnalysisRunKind::Electromagnetic {
+                let values = entries
+                    .iter()
+                    .filter_map(|run| {
+                        diagnostic_metric(&run.run.diagnostics, "FEA_EM_SWEEP", "resonance_q_proxy")
+                    })
+                    .collect::<Vec<_>>();
+                breach_rate_less_than(&values, EM_RESONANCE_Q_MIN_BALANCED)
+            } else {
+                None
+            };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -4850,6 +5002,8 @@ pub fn analysis_trends_op(
             electromagnetic_source_region_energy_consistency_breach_rate,
             electromagnetic_real_residual_breach_rate,
             electromagnetic_imag_residual_breach_rate,
+            electromagnetic_sweep_coverage_breach_rate,
+            electromagnetic_resonance_sharpness_breach_rate,
         });
     }
 
@@ -6442,6 +6596,102 @@ fn select_load_region_id(
                 || key.contains("free")
         })
         .map(|region| region.region_id.clone())
+}
+
+#[derive(Debug, Clone, Default)]
+struct EmSweepSummary {
+    sweep_count: usize,
+    resonance_peak_frequency_hz: Option<f64>,
+    resonance_peak_flux_density: Option<f64>,
+    resonance_bandwidth_hz: Option<f64>,
+    resonance_q_proxy: Option<f64>,
+    resonance_flux_gain: Option<f64>,
+}
+
+fn normalize_em_sweep_frequency_hz(
+    reference_frequency_hz: f64,
+    sweep_enabled: bool,
+    requested: &[f64],
+) -> Option<Vec<f64>> {
+    let mut values = if sweep_enabled {
+        requested.to_vec()
+    } else {
+        Vec::new()
+    };
+    if values.is_empty() {
+        values.push(reference_frequency_hz);
+    }
+    if !values
+        .iter()
+        .all(|frequency_hz| frequency_hz.is_finite() && *frequency_hz > 0.0)
+    {
+        return None;
+    }
+    values.sort_by(|a, b| a.total_cmp(b));
+    values.dedup_by(|a, b| (*a - *b).abs() <= 1.0e-9);
+    Some(values)
+}
+
+fn nearest_frequency_index(frequencies_hz: &[f64], target_hz: f64) -> Option<usize> {
+    frequencies_hz
+        .iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| (*a - target_hz).abs().total_cmp(&(*b - target_hz).abs()))
+        .map(|(index, _)| index)
+}
+
+fn peak_abs_field_value(field: &runmat_analysis_core::AnalysisField) -> f64 {
+    field
+        .as_host_f64()
+        .map(|values| values.iter().copied().map(f64::abs).fold(0.0_f64, f64::max))
+        .unwrap_or(0.0)
+}
+
+fn summarize_em_sweep(frequencies_hz: &[f64], peak_flux_density: &[f64]) -> EmSweepSummary {
+    if frequencies_hz.is_empty() || frequencies_hz.len() != peak_flux_density.len() {
+        return EmSweepSummary::default();
+    }
+    let sweep_count = frequencies_hz.len();
+    let (peak_index, peak_flux_density_value) = peak_flux_density
+        .iter()
+        .copied()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.total_cmp(b))
+        .unwrap_or((0, 0.0));
+    let peak_frequency_hz = frequencies_hz[peak_index];
+    let min_flux_density_value = peak_flux_density
+        .iter()
+        .copied()
+        .fold(f64::INFINITY, f64::min);
+    let resonance_flux_gain =
+        (peak_flux_density_value / min_flux_density_value.max(1.0e-12)).max(1.0);
+
+    let half_power = peak_flux_density_value * std::f64::consts::FRAC_1_SQRT_2;
+    let mut left = peak_index;
+    while left > 0 && peak_flux_density[left - 1] >= half_power {
+        left -= 1;
+    }
+    let mut right = peak_index;
+    while right + 1 < peak_flux_density.len() && peak_flux_density[right + 1] >= half_power {
+        right += 1;
+    }
+    let resonance_bandwidth_hz = if right > left {
+        Some((frequencies_hz[right] - frequencies_hz[left]).max(0.0))
+    } else {
+        None
+    };
+    let resonance_q_proxy = resonance_bandwidth_hz
+        .filter(|bandwidth| *bandwidth > 0.0)
+        .map(|bandwidth| (peak_frequency_hz / bandwidth).max(0.0));
+
+    EmSweepSummary {
+        sweep_count,
+        resonance_peak_frequency_hz: Some(peak_frequency_hz),
+        resonance_peak_flux_density: Some(peak_flux_density_value),
+        resonance_bandwidth_hz,
+        resonance_q_proxy,
+        resonance_flux_gain: Some(resonance_flux_gain),
+    }
 }
 
 fn infer_material_assignments(

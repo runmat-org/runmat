@@ -1742,6 +1742,22 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_EM_STATIC"));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_EM_SWEEP"));
+    let em_payload = envelope
+        .data
+        .electromagnetic_results
+        .as_ref()
+        .expect("electromagnetic payload expected");
+    assert_eq!(em_payload.sweep_frequency_hz.len(), 1);
+    assert_eq!(em_payload.sweep_peak_flux_density.len(), 1);
+    assert_eq!(em_payload.sweep_solve_quality.len(), 1);
+    assert!(em_payload.resonance_peak_frequency_hz.is_some());
+    assert!(em_payload.resonance_peak_flux_density.is_some());
     let em_diag = envelope
         .data
         .run
@@ -1751,6 +1767,52 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
         .expect("EM static diagnostic must be present");
     assert!(em_diag.message.contains("relative_permittivity_mean="));
     assert!(em_diag.message.contains("relative_permeability_mean="));
+}
+
+#[test]
+fn analysis_run_electromagnetic_sweep_emits_resonance_metrics() {
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    model.materials[0].electrical = Some(MaterialElectricalModel {
+        reference_temperature_k: 293.15,
+        conductivity_s_per_m: 5.8e7,
+        resistive_heating_coefficient: 0.0039,
+        relative_permittivity: 3.2,
+        relative_permeability: 1.8,
+    });
+    model.electromagnetic = Some(ElectromagneticDomain {
+        enabled: true,
+        reference_frequency_hz: 60.0,
+        applied_current_a: 120.0,
+    });
+    let envelope = analysis_run_electromagnetic_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisElectromagneticRunOptions {
+            sweep_enabled: true,
+            sweep_frequency_hz: vec![20.0, 40.0, 60.0, 120.0, 240.0],
+            ..AnalysisElectromagneticRunOptions::default()
+        },
+        OperationContext::new(Some("trace-em-run-sweep".to_string()), None),
+    )
+    .expect("electromagnetic sweep run should succeed");
+    let payload = envelope
+        .data
+        .electromagnetic_results
+        .as_ref()
+        .expect("electromagnetic payload expected");
+    assert_eq!(payload.sweep_frequency_hz.len(), 5);
+    assert_eq!(payload.sweep_peak_flux_density.len(), 5);
+    assert_eq!(payload.sweep_solve_quality.len(), 5);
+    assert!(payload.resonance_peak_frequency_hz.is_some());
+    assert!(payload.resonance_peak_flux_density.is_some());
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .filter(|diag| diag.code == "FEA_EM_SWEEP")
+        .any(|diag| diag.message.contains("sweep_count=5")));
 }
 
 #[test]

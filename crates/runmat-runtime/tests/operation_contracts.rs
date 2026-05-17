@@ -801,6 +801,22 @@ fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_EM_STATIC"));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_EM_SWEEP"));
+    let em_payload = envelope
+        .data
+        .electromagnetic_results
+        .as_ref()
+        .expect("electromagnetic payload expected");
+    assert_eq!(em_payload.sweep_frequency_hz.len(), 1);
+    assert_eq!(em_payload.sweep_peak_flux_density.len(), 1);
+    assert_eq!(em_payload.sweep_solve_quality.len(), 1);
+    assert!(em_payload.resonance_peak_frequency_hz.is_some());
+    assert!(em_payload.resonance_q_proxy.is_none());
 }
 
 #[test]

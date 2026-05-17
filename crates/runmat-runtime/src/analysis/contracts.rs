@@ -230,6 +230,8 @@ pub enum QualityReasonCode {
     ElectromagneticSourceRegionEnergyConsistencyLow,
     ElectromagneticRealResidualHigh,
     ElectromagneticImagResidualHigh,
+    ElectromagneticSweepCoverageLow,
+    ElectromagneticResonanceSharpnessLow,
     PlasticityNonlinearStress,
     ContactNonlinearStress,
     NonlinearResidualExceeded,
@@ -270,6 +272,10 @@ pub struct AnalysisElectromagneticRunOptions {
     pub prep_artifact_id: Option<String>,
     #[serde(default)]
     pub prep_calibration_profile: Option<PrepCalibrationProfile>,
+    #[serde(default)]
+    pub sweep_enabled: bool,
+    #[serde(default)]
+    pub sweep_frequency_hz: Vec<f64>,
 }
 
 impl Default for AnalysisElectromagneticRunOptions {
@@ -281,6 +287,8 @@ impl Default for AnalysisElectromagneticRunOptions {
             prep_context: None,
             prep_artifact_id: None,
             prep_calibration_profile: None,
+            sweep_enabled: false,
+            sweep_frequency_hz: Vec::new(),
         }
     }
 }
@@ -811,6 +819,12 @@ pub struct AnalysisResultsSummary {
     pub electromagnetic_source_region_energy_consistency_ratio: Option<f64>,
     pub electromagnetic_real_residual_norm: Option<f64>,
     pub electromagnetic_imag_residual_norm: Option<f64>,
+    pub electromagnetic_sweep_count: Option<f64>,
+    pub electromagnetic_resonance_peak_frequency_hz: Option<f64>,
+    pub electromagnetic_resonance_peak_flux_density: Option<f64>,
+    pub electromagnetic_resonance_bandwidth_hz: Option<f64>,
+    pub electromagnetic_resonance_q_proxy: Option<f64>,
+    pub electromagnetic_resonance_flux_gain: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -923,6 +937,8 @@ pub struct AnalysisTrendKindSummary {
     pub electromagnetic_source_region_energy_consistency_breach_rate: Option<f64>,
     pub electromagnetic_real_residual_breach_rate: Option<f64>,
     pub electromagnetic_imag_residual_breach_rate: Option<f64>,
+    pub electromagnetic_sweep_coverage_breach_rate: Option<f64>,
+    pub electromagnetic_resonance_sharpness_breach_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -994,6 +1010,22 @@ pub struct ElectromagneticResultsData {
     pub vector_potential_proxy: AnalysisField,
     pub flux_density_proxy: AnalysisField,
     pub placeholder_mode: bool,
+    #[serde(default)]
+    pub sweep_frequency_hz: Vec<f64>,
+    #[serde(default)]
+    pub sweep_peak_flux_density: Vec<f64>,
+    #[serde(default)]
+    pub sweep_solve_quality: Vec<f64>,
+    #[serde(default)]
+    pub resonance_peak_frequency_hz: Option<f64>,
+    #[serde(default)]
+    pub resonance_peak_flux_density: Option<f64>,
+    #[serde(default)]
+    pub resonance_bandwidth_hz: Option<f64>,
+    #[serde(default)]
+    pub resonance_q_proxy: Option<f64>,
+    #[serde(default)]
+    pub resonance_flux_gain: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

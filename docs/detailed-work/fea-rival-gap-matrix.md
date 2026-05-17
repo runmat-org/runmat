@@ -171,6 +171,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. Upgraded harmonic EM solve to consume true complex RHS source vectors (`rhs_real`, `rhs_imag`) instead of synthetic imag forcing, and compute overlap/interference posture from complex source vectors.
 3. Applied boundary-penalty terms directly into assembled operator diagonal coefficients and kept penalty contribution as a measured first-class readiness metric.
 
+## Maxwell EM Bring-Up Status (Phase 16)
+
+1. Added EM frequency-sweep runtime controls (`sweep_enabled`, `sweep_frequency_hz`) to execute optional multi-frequency EM runs within `analysis.run_electromagnetic/v1`.
+2. Extended EM typed payload + runtime summary with first-class sweep/resonance posture metrics (sweep count, resonance peak/bandwidth/Q, flux-gain).
+3. Added policy-governed sweep/resonance readiness gates and trend breach-rate tracking while keeping default single-frequency EM behavior backward-compatible.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:
