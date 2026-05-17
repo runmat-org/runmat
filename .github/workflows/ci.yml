@@ -361,6 +361,7 @@ jobs:
             scripts.tests.test_generate_threshold_ratchet_report \
             scripts.tests.test_generate_promotion_threshold_calibration \
             scripts.tests.test_generate_external_reference_benchmark \
+            scripts.tests.test_external_reference_baseline \
             scripts.tests.test_validate_threshold_ratchet_report \
             scripts.tests.test_validate_promotion_threshold_calibration \
             scripts.tests.test_validate_external_reference_benchmark \

@@ -107,3 +107,5 @@ Progress update (2026-05-17):
     M6 baseline external-reference data now includes threshold-assertion metrics for CFD/CHT/FSI provider fixtures (`cfd_steady_gpu_provider`, `cht_coupled_gpu_provider`, `fsi_coupled_gpu_provider`) so coupled-family regressions are evaluated by governance reference comparisons.
 20. [x] External-reference artifact validator coverage hardened for coupled families:
     `validate_external_reference_benchmark.py` now requires coupled CFD/CHT/FSI metric sets to be present in generated comparator artifacts so incomplete payloads fail governance validation in enforce mode.
+21. [x] External-reference baseline guard test promoted into CI governance suite:
+    release-readiness governance unit tests now include `scripts.tests.test_external_reference_baseline` so coupled-family comparator baseline coverage regressions fail CI before artifact generation.
