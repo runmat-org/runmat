@@ -10,6 +10,9 @@ pub(crate) const EM_REGION_CONTRAST_MAX_BALANCED: f64 = 0.85;
 pub(crate) const EM_CONDITIONING_MAX_BALANCED: f64 = 2.0e4;
 pub(crate) const EM_SOURCE_REALIZATION_MIN_BALANCED: f64 = 0.55;
 pub(crate) const EM_BOUNDARY_ANCHOR_MIN_BALANCED: f64 = 0.45;
+pub(crate) const EM_FLUX_DIVERGENCE_MAX_BALANCED: f64 = 0.30;
+pub(crate) const EM_ENERGY_IMBALANCE_MAX_BALANCED: f64 = 0.40;
+pub(crate) const EM_BOUNDARY_ENERGY_MIN_BALANCED: f64 = 0.12;
 
 pub(crate) fn thermo_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
     match policy {
@@ -40,9 +43,11 @@ pub(crate) fn thermo_field_quality_thresholds_for_policy(policy: QualityPolicy) 
 
 pub(crate) fn electromagnetic_thresholds_for_policy(
     policy: QualityPolicy,
-) -> (f64, f64, f64, f64, f64, f64, f64, f64) {
+) -> (f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) {
     match policy {
-        QualityPolicy::Strict => (1.5, 0.12, 0.95, 0.05, 0.45, 8.0e3, 0.85, 0.7),
+        QualityPolicy::Strict => (
+            1.5, 0.12, 0.95, 0.05, 0.45, 8.0e3, 0.85, 0.7, 0.18, 0.25, 0.25,
+        ),
         QualityPolicy::Balanced => (
             EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED,
             EM_HETEROGENEITY_THRESHOLD_BALANCED,
@@ -52,8 +57,11 @@ pub(crate) fn electromagnetic_thresholds_for_policy(
             EM_CONDITIONING_MAX_BALANCED,
             EM_SOURCE_REALIZATION_MIN_BALANCED,
             EM_BOUNDARY_ANCHOR_MIN_BALANCED,
+            EM_FLUX_DIVERGENCE_MAX_BALANCED,
+            EM_ENERGY_IMBALANCE_MAX_BALANCED,
+            EM_BOUNDARY_ENERGY_MIN_BALANCED,
         ),
-        QualityPolicy::Exploratory => (3.0, 0.35, 0.5, 0.65, 1.8, 1.5e5, 0.2, 0.15),
+        QualityPolicy::Exploratory => (3.0, 0.35, 0.5, 0.65, 1.8, 1.5e5, 0.2, 0.15, 0.8, 1.2, 0.03),
     }
 }
 

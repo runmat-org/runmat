@@ -1657,6 +1657,9 @@ pub(super) fn run_fixture(
     let mut electromagnetic_solver_conditioning_proxy = None;
     let mut electromagnetic_source_realization_ratio = None;
     let mut electromagnetic_boundary_anchor_ratio = None;
+    let mut electromagnetic_flux_divergence_proxy = None;
+    let mut electromagnetic_energy_imbalance_ratio = None;
+    let mut electromagnetic_boundary_energy_ratio = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -1752,6 +1755,9 @@ pub(super) fn run_fixture(
                     electromagnetic_solver_conditioning_proxy,
                     electromagnetic_source_realization_ratio,
                     electromagnetic_boundary_anchor_ratio,
+                    electromagnetic_flux_divergence_proxy,
+                    electromagnetic_energy_imbalance_ratio,
+                    electromagnetic_boundary_energy_ratio,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -3685,6 +3691,48 @@ pub(super) fn run_fixture(
                             Some(0.95),
                             Some(1.0),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_flux_divergence_proxy",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "flux_divergence_proxy",
+                            ),
+                            Some(0.0),
+                            Some(0.35),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_energy_imbalance_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "energy_imbalance_ratio",
+                            ),
+                            Some(0.0),
+                            Some(0.40),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_boundary_energy_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "boundary_energy_ratio",
+                            ),
+                            Some(0.12),
+                            Some(1.0),
+                        );
                     }
                     if spec.id == "electromagnetic_reference_heterogeneous_gpu_provider" {
                         push_threshold_assertion(
@@ -3771,6 +3819,34 @@ pub(super) fn run_fixture(
                             Some(0.7),
                             Some(0.85),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_flux_divergence_proxy",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "flux_divergence_proxy",
+                            ),
+                            Some(0.15),
+                            Some(2.5),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_energy_imbalance_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "energy_imbalance_ratio",
+                            ),
+                            Some(0.1),
+                            Some(1.0),
+                        );
                     }
                     if spec.id == "electromagnetic_reference_sparse_assignments_gpu_provider" {
                         push_threshold_assertion(
@@ -3829,6 +3905,20 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(0.35),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_sparse_energy_imbalance_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "energy_imbalance_ratio",
+                            ),
+                            Some(0.35),
+                            Some(1.0),
+                        );
                     }
                     if spec.id == "electromagnetic_reference_fallback_heavy_gpu_provider" {
                         push_threshold_assertion(
@@ -3886,6 +3976,20 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.15),
                             Some(0.3),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_fallback_heavy_energy_imbalance_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "energy_imbalance_ratio",
+                            ),
+                            Some(0.35),
+                            Some(1.0),
                         );
                     }
 
@@ -3992,6 +4096,9 @@ pub(super) fn run_fixture(
                                 electromagnetic_solver_conditioning_proxy,
                                 electromagnetic_source_realization_ratio,
                                 electromagnetic_boundary_anchor_ratio,
+                                electromagnetic_flux_divergence_proxy,
+                                electromagnetic_energy_imbalance_ratio,
+                                electromagnetic_boundary_energy_ratio,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -4134,6 +4241,18 @@ pub(super) fn run_fixture(
                         .data
                         .summary
                         .electromagnetic_boundary_anchor_ratio;
+                    electromagnetic_flux_divergence_proxy = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_flux_divergence_proxy;
+                    electromagnetic_energy_imbalance_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_energy_imbalance_ratio;
+                    electromagnetic_boundary_energy_ratio = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_boundary_energy_ratio;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -4333,6 +4452,9 @@ pub(super) fn run_fixture(
                                     electromagnetic_solver_conditioning_proxy,
                                     electromagnetic_source_realization_ratio,
                                     electromagnetic_boundary_anchor_ratio,
+                                    electromagnetic_flux_divergence_proxy,
+                                    electromagnetic_energy_imbalance_ratio,
+                                    electromagnetic_boundary_energy_ratio,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -4477,6 +4599,9 @@ pub(super) fn run_fixture(
         electromagnetic_solver_conditioning_proxy,
         electromagnetic_source_realization_ratio,
         electromagnetic_boundary_anchor_ratio,
+        electromagnetic_flux_divergence_proxy,
+        electromagnetic_energy_imbalance_ratio,
+        electromagnetic_boundary_energy_ratio,
         publishable,
         parity,
         threshold_assertions,

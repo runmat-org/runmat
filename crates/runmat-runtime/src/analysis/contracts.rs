@@ -216,6 +216,9 @@ pub enum QualityReasonCode {
     ElectromagneticConditioningHigh,
     ElectromagneticSourceRealizationLow,
     ElectromagneticBoundaryAnchoringLow,
+    ElectromagneticFluxDivergenceHigh,
+    ElectromagneticEnergyImbalanceHigh,
+    ElectromagneticBoundaryEnergyLow,
     PlasticityNonlinearStress,
     ContactNonlinearStress,
     NonlinearResidualExceeded,
@@ -782,6 +785,9 @@ pub struct AnalysisResultsSummary {
     pub electromagnetic_solver_conditioning_proxy: Option<f64>,
     pub electromagnetic_source_realization_ratio: Option<f64>,
     pub electromagnetic_boundary_anchor_ratio: Option<f64>,
+    pub electromagnetic_flux_divergence_proxy: Option<f64>,
+    pub electromagnetic_energy_imbalance_ratio: Option<f64>,
+    pub electromagnetic_boundary_energy_ratio: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -880,6 +886,9 @@ pub struct AnalysisTrendKindSummary {
     pub electromagnetic_conditioning_breach_rate: Option<f64>,
     pub electromagnetic_source_realization_breach_rate: Option<f64>,
     pub electromagnetic_boundary_anchor_breach_rate: Option<f64>,
+    pub electromagnetic_divergence_breach_rate: Option<f64>,
+    pub electromagnetic_energy_imbalance_breach_rate: Option<f64>,
+    pub electromagnetic_boundary_energy_breach_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

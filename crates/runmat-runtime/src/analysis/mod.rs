@@ -29,8 +29,9 @@ use policy::{
     breach_rate_greater_than, breach_rate_less_than, electromagnetic_thresholds_for_policy,
     thermo_field_quality_thresholds_for_policy, thermo_gradient_thresholds_for_policy,
     thermo_thresholds_for_policy, EM_ASSIGNMENT_COVERAGE_MIN_BALANCED,
-    EM_BOUNDARY_ANCHOR_MIN_BALANCED, EM_CONDITIONING_MAX_BALANCED,
-    EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED, EM_FALLBACK_COEFFICIENT_MAX_BALANCED,
+    EM_BOUNDARY_ANCHOR_MIN_BALANCED, EM_BOUNDARY_ENERGY_MIN_BALANCED, EM_CONDITIONING_MAX_BALANCED,
+    EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED, EM_ENERGY_IMBALANCE_MAX_BALANCED,
+    EM_FALLBACK_COEFFICIENT_MAX_BALANCED, EM_FLUX_DIVERGENCE_MAX_BALANCED,
     EM_HETEROGENEITY_THRESHOLD_BALANCED, EM_REGION_CONTRAST_MAX_BALANCED,
     EM_SOURCE_REALIZATION_MIN_BALANCED, THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
     THERMO_SPREAD_THRESHOLD_BALANCED,
@@ -2662,6 +2663,12 @@ pub fn analysis_run_electromagnetic_with_options_op(
     );
     let em_boundary_anchor_ratio =
         diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "boundary_anchor_ratio");
+    let em_flux_divergence_proxy =
+        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "flux_divergence_proxy");
+    let em_energy_imbalance_ratio =
+        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "energy_imbalance_ratio");
+    let em_boundary_energy_ratio =
+        diagnostic_metric(&run.diagnostics, "FEA_EM_STATIC", "boundary_energy_ratio");
     let (
         em_spread_threshold,
         em_heterogeneity_threshold,
@@ -2671,6 +2678,9 @@ pub fn analysis_run_electromagnetic_with_options_op(
         em_conditioning_max_threshold,
         em_source_realization_min_threshold,
         em_boundary_anchor_min_threshold,
+        em_divergence_max_threshold,
+        em_energy_imbalance_max_threshold,
+        em_boundary_energy_min_threshold,
     ) = electromagnetic_thresholds_for_policy(options.quality_policy);
     let em_spread_breach = em_conductivity_spread_ratio
         .map(|value| value > em_spread_threshold)
@@ -2696,6 +2706,15 @@ pub fn analysis_run_electromagnetic_with_options_op(
     let em_boundary_anchor_breach = em_boundary_anchor_ratio
         .map(|value| value < em_boundary_anchor_min_threshold)
         .unwrap_or(false);
+    let em_divergence_breach = em_flux_divergence_proxy
+        .map(|value| value > em_divergence_max_threshold)
+        .unwrap_or(false);
+    let em_energy_imbalance_breach = em_energy_imbalance_ratio
+        .map(|value| value > em_energy_imbalance_max_threshold)
+        .unwrap_or(false);
+    let em_boundary_energy_breach = em_boundary_energy_ratio
+        .map(|value| value < em_boundary_energy_min_threshold)
+        .unwrap_or(false);
     if (em_spread_breach
         || em_heterogeneity_breach
         || em_coverage_breach
@@ -2703,7 +2722,10 @@ pub fn analysis_run_electromagnetic_with_options_op(
         || em_contrast_breach
         || em_conditioning_breach
         || em_source_realization_breach
-        || em_boundary_anchor_breach)
+        || em_boundary_anchor_breach
+        || em_divergence_breach
+        || em_energy_imbalance_breach
+        || em_boundary_energy_breach)
         && result_quality == QualityGate::Pass
     {
         result_quality = QualityGate::Warn;
@@ -2797,6 +2819,36 @@ pub fn analysis_run_electromagnetic_with_options_op(
                 "electromagnetic boundary anchor ratio {} is below threshold {}",
                 em_boundary_anchor_ratio.unwrap_or(0.0),
                 em_boundary_anchor_min_threshold
+            ),
+        });
+    }
+    if em_divergence_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticFluxDivergenceHigh,
+            detail: format!(
+                "electromagnetic flux divergence proxy {} exceeds threshold {}",
+                em_flux_divergence_proxy.unwrap_or(0.0),
+                em_divergence_max_threshold
+            ),
+        });
+    }
+    if em_energy_imbalance_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticEnergyImbalanceHigh,
+            detail: format!(
+                "electromagnetic energy imbalance ratio {} exceeds threshold {}",
+                em_energy_imbalance_ratio.unwrap_or(0.0),
+                em_energy_imbalance_max_threshold
+            ),
+        });
+    }
+    if em_boundary_energy_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticBoundaryEnergyLow,
+            detail: format!(
+                "electromagnetic boundary energy ratio {} is below threshold {}",
+                em_boundary_energy_ratio.unwrap_or(0.0),
+                em_boundary_energy_min_threshold
             ),
         });
     }
@@ -3370,6 +3422,21 @@ pub fn analysis_results_op(
         "FEA_EM_STATIC",
         "boundary_anchor_ratio",
     );
+    let electromagnetic_flux_divergence_proxy = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "flux_divergence_proxy",
+    );
+    let electromagnetic_energy_imbalance_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "energy_imbalance_ratio",
+    );
+    let electromagnetic_boundary_energy_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_STATIC",
+        "boundary_energy_ratio",
+    );
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -3452,6 +3519,9 @@ pub fn analysis_results_op(
         electromagnetic_solver_conditioning_proxy,
         electromagnetic_source_realization_ratio,
         electromagnetic_boundary_anchor_ratio,
+        electromagnetic_flux_divergence_proxy,
+        electromagnetic_energy_imbalance_ratio,
+        electromagnetic_boundary_energy_ratio,
     };
 
     let modal_results = if query.include_modal_results {
@@ -4226,6 +4296,53 @@ pub fn analysis_trends_op(
             } else {
                 None
             };
+        let electromagnetic_divergence_breach_rate = if kind == AnalysisRunKind::Electromagnetic {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_EM_STATIC",
+                        "flux_divergence_proxy",
+                    )
+                })
+                .collect::<Vec<_>>();
+            breach_rate_greater_than(&values, EM_FLUX_DIVERGENCE_MAX_BALANCED)
+        } else {
+            None
+        };
+        let electromagnetic_energy_imbalance_breach_rate =
+            if kind == AnalysisRunKind::Electromagnetic {
+                let values = entries
+                    .iter()
+                    .filter_map(|run| {
+                        diagnostic_metric(
+                            &run.run.diagnostics,
+                            "FEA_EM_STATIC",
+                            "energy_imbalance_ratio",
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                breach_rate_greater_than(&values, EM_ENERGY_IMBALANCE_MAX_BALANCED)
+            } else {
+                None
+            };
+        let electromagnetic_boundary_energy_breach_rate =
+            if kind == AnalysisRunKind::Electromagnetic {
+                let values = entries
+                    .iter()
+                    .filter_map(|run| {
+                        diagnostic_metric(
+                            &run.run.diagnostics,
+                            "FEA_EM_STATIC",
+                            "boundary_energy_ratio",
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                breach_rate_less_than(&values, EM_BOUNDARY_ENERGY_MIN_BALANCED)
+            } else {
+                None
+            };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -4262,6 +4379,9 @@ pub fn analysis_trends_op(
             electromagnetic_conditioning_breach_rate,
             electromagnetic_source_realization_breach_rate,
             electromagnetic_boundary_anchor_breach_rate,
+            electromagnetic_divergence_breach_rate,
+            electromagnetic_energy_imbalance_breach_rate,
+            electromagnetic_boundary_energy_breach_rate,
         });
     }
 

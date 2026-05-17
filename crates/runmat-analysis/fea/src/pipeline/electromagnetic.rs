@@ -237,6 +237,43 @@ pub fn run_electromagnetic_with_options(
         (options.residual_target / (max_residual_norm + options.residual_target)).clamp(0.0, 1.0)
     };
     let energy_proxy = flux_density.iter().map(|v| v * v).sum::<f64>();
+    let max_flux_density = flux_density
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max)
+        .max(1.0e-9);
+    let mut divergence_sum = 0.0_f64;
+    let mut divergence_count = 0usize;
+    for i in 1..(node_count.saturating_sub(1)) {
+        let divergence = ((flux_density[i + 1] - flux_density[i - 1]) / (2.0 * h)).abs();
+        divergence_sum += divergence;
+        divergence_count += 1;
+    }
+    let flux_divergence_proxy = if divergence_count == 0 {
+        0.0
+    } else {
+        ((divergence_sum / divergence_count as f64) * h) / max_flux_density
+    };
+    let residual_imbalance = (1.0 - solve_quality).clamp(0.0, 1.0);
+    let heterogeneity_imbalance = material_stats.assignment_heterogeneity_index.clamp(0.0, 1.0);
+    let fallback_imbalance = material_stats.fallback_coefficient_ratio.clamp(0.0, 1.0);
+    let source_imbalance = (1.0 - source_realization_ratio).clamp(0.0, 1.0);
+    let energy_imbalance_ratio = (0.15 * residual_imbalance
+        + 0.35 * heterogeneity_imbalance
+        + 0.35 * fallback_imbalance
+        + 0.15 * source_imbalance)
+        .clamp(0.0, 1.0);
+    let boundary_band = (node_count / 4).max(1);
+    let mut boundary_coupling_energy = 0.0_f64;
+    let mut total_coupling_energy = 0.0_f64;
+    for (i, value) in summary.operator.stiffness_upper.iter().enumerate() {
+        let edge_energy = value * value;
+        total_coupling_energy += edge_energy;
+        if i < boundary_band || i + boundary_band >= summary.operator.stiffness_upper.len() {
+            boundary_coupling_energy += edge_energy;
+        }
+    }
+    let boundary_energy_ratio = boundary_coupling_energy / total_coupling_energy.max(1.0e-9);
     let unconstrained_diagonals = summary
         .operator
         .stiffness_diag
@@ -271,7 +308,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} boundary_anchor_ratio={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
+            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} boundary_anchor_ratio={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
             domain.enabled,
             domain.reference_frequency_hz,
             domain.applied_current_a,
@@ -288,6 +325,9 @@ pub fn run_electromagnetic_with_options(
             solver_conditioning_proxy,
             source_realization_ratio,
             boundary_anchor_ratio,
+            flux_divergence_proxy,
+            energy_imbalance_ratio,
+            boundary_energy_ratio,
             reluctivity,
             effective_permittivity,
             max_residual_norm,

@@ -123,6 +123,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. EM assembly/solve posture now reflects source-realization and boundary-anchoring semantics instead of only generic structural load/BC carryover.
 3. Governance/readiness now includes EM source/boundary posture signals and threshold/breach tracking (`source_realization_ratio`, `boundary_anchor_ratio`).
 
+## Maxwell EM Bring-Up Status (Phase 8)
+
+1. Added first EM field-consistency governance metrics (`flux_divergence_proxy`, `energy_imbalance_ratio`, `boundary_energy_ratio`) as contracted runtime summary/trend signals.
+2. Reworked EM imbalance/boundary metric formulas to be assembly/material-aware and stable across constrained-boundary fixtures.
+3. Extended quality gates and EM reference-fixture conformance thresholds to enforce these metrics without regressing publishability split expectations.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

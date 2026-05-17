@@ -217,6 +217,17 @@ Not required for this milestone:
   - `boundary_anchor_ratio`,
   - plus quality-policy thresholding and breach-rate tracking in `analysis.results` / `analysis.trends`.
 
+### Maxwell EM Phase-8 Status (2026-05-16)
+
+- Added EM field-consistency readiness metrics as first-class governance signals:
+  - `flux_divergence_proxy`,
+  - `energy_imbalance_ratio`,
+  - `boundary_energy_ratio`.
+- Upgraded EM metric definitions to be assembly/material-aware instead of residual-only proxies:
+  - energy imbalance now blends solver residual posture with material heterogeneity, fallback-coefficient pressure, and source-realization coverage,
+  - boundary energy ratio now reflects boundary-coupling share of assembled operator energy (stable under strongly constrained boundary potentials).
+- Wired these metrics through runtime quality policy gates, `analysis.results` summary, `analysis.trends` breach rates, and baseline/conformance harness assertions for EM reference fixtures.
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.

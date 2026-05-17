@@ -127,6 +127,9 @@
     "electromagnetic_region_coefficient_contrast_index": null,
     "electromagnetic_solver_conditioning_proxy": null,
     "electromagnetic_source_realization_ratio": null,
-    "electromagnetic_boundary_anchor_ratio": null
+    "electromagnetic_boundary_anchor_ratio": null,
+    "electromagnetic_flux_divergence_proxy": null,
+    "electromagnetic_energy_imbalance_ratio": null,
+    "electromagnetic_boundary_energy_ratio": null
   }
 }
