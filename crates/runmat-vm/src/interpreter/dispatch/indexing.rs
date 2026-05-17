@@ -2,7 +2,8 @@ use crate::bytecode::EndExpr;
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::shared::{
     build_object_paren_expr_selector_values, build_object_paren_selector_values,
-    call_object_index_descriptor_method, ObjectIndexDescriptor, ObjectIndexSelector,
+    call_object_index_descriptor_method, expand_brace_values, object_subsref_brace,
+    ObjectIndexDescriptor, ObjectIndexSelector,
 };
 use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
@@ -147,14 +148,6 @@ async fn object_subsref_paren(base: Value, values: Vec<Value>) -> Result<Value, 
     .await
 }
 
-async fn object_subsref_brace(base: Value, values: Vec<Value>) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-        base,
-        ObjectIndexSelector::IndexValues { values },
-    ))
-    .await
-}
-
 async fn object_subsasgn_paren(
     base: Value,
     values: Vec<Value>,
@@ -219,67 +212,15 @@ async fn execute_brace_expand(
     raw_indices: &[Value],
     out_count: usize,
 ) -> Result<Vec<Value>, RuntimeError> {
-    match base {
-        Value::Cell(ca) => {
-            let mut values = if raw_indices.is_empty() {
-                crate::ops::cells::expand_cell_values(&ca, &[], out_count)?
-            } else {
-                crate::call::shared::expand_cell_indices(&ca, raw_indices)?
-            };
-            if values.len() > out_count {
-                values.truncate(out_count);
-            } else {
-                values.resize(out_count, Value::Num(0.0));
-            }
-            Ok(values)
-        }
-        Value::Object(obj) => {
-            let value = object_subsref_brace(Value::Object(obj), raw_indices.to_vec()).await?;
-            let mut out = vec![value];
-            out.resize(out_count, Value::Num(0.0));
-            Ok(out)
-        }
-        Value::HandleObject(handle) => {
-            let value =
-                object_subsref_brace(Value::HandleObject(handle), raw_indices.to_vec()).await?;
-            let mut out = vec![value];
-            out.resize(out_count, Value::Num(0.0));
-            Ok(out)
-        }
-        _ => Err(crate::interpreter::errors::mex(
-            "CellExpansionOnNonCell",
-            "Cell expansion on non-cell",
-        )),
-    }
+    expand_brace_values(base, raw_indices, Some(out_count)).await
 }
 
 async fn execute_brace_list(base: Value, raw_indices: &[Value]) -> Result<Value, RuntimeError> {
-    match base {
-        Value::Cell(ca) => {
-            let values = if raw_indices.is_empty() {
-                crate::ops::cells::expand_all_cell_values(&ca)?
-            } else {
-                crate::call::shared::expand_cell_indices(&ca, raw_indices)?
-            };
-            if values.len() == 1 {
-                Ok(values.into_iter().next().unwrap_or(Value::Num(0.0)))
-            } else {
-                Ok(Value::OutputList(values))
-            }
-        }
-        Value::Object(obj) => {
-            let value = object_subsref_brace(Value::Object(obj), raw_indices.to_vec()).await?;
-            Ok(Value::OutputList(vec![value]))
-        }
-        Value::HandleObject(handle) => {
-            let value =
-                object_subsref_brace(Value::HandleObject(handle), raw_indices.to_vec()).await?;
-            Ok(Value::OutputList(vec![value]))
-        }
-        _ => Err(crate::interpreter::errors::mex(
-            "CellExpansionOnNonCell",
-            "Cell expansion on non-cell",
-        )),
+    let values = expand_brace_values(base, raw_indices, None).await?;
+    if values.len() == 1 {
+        Ok(values.into_iter().next().unwrap_or(Value::Num(0.0)))
+    } else {
+        Ok(Value::OutputList(values))
     }
 }
 

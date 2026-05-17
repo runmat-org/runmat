@@ -15,6 +15,57 @@ pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Result<Vec<Value>, 
     crate::ops::cells::expand_all_cell_values(cell)
 }
 
+pub(crate) async fn object_subsref_brace(
+    base: Value,
+    values: Vec<Value>,
+) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+        base,
+        ObjectIndexSelector::IndexValues { values },
+    ))
+    .await
+}
+
+pub(crate) async fn expand_brace_values(
+    base: Value,
+    raw_indices: &[Value],
+    pad_to_outputs: Option<usize>,
+) -> Result<Vec<Value>, RuntimeError> {
+    let mut values = match base {
+        Value::Cell(ca) => {
+            if raw_indices.is_empty() {
+                if let Some(out_count) = pad_to_outputs {
+                    crate::ops::cells::expand_cell_values(&ca, &[], out_count)?
+                } else {
+                    expand_all_cell(&ca)?
+                }
+            } else {
+                expand_cell_indices(&ca, raw_indices)?
+            }
+        }
+        Value::Object(obj) => {
+            vec![object_subsref_brace(Value::Object(obj), raw_indices.to_vec()).await?]
+        }
+        Value::HandleObject(handle) => {
+            vec![object_subsref_brace(Value::HandleObject(handle), raw_indices.to_vec()).await?]
+        }
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "CellExpansionOnNonCell",
+                "Cell expansion on non-cell",
+            ))
+        }
+    };
+    if let Some(out_count) = pad_to_outputs {
+        if values.len() > out_count {
+            values.truncate(out_count);
+        } else {
+            values.resize(out_count, Value::Num(0.0));
+        }
+    }
+    Ok(values)
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum ObjectIndexOp {
     Subsref,

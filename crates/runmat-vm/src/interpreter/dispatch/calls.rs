@@ -4,8 +4,7 @@ use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::shared::{
-    build_expanded_args_from_specs, call_object_index_descriptor_method, expand_cell_indices,
-    ObjectIndexDescriptor, ObjectIndexSelector,
+    build_expanded_args_from_specs, expand_brace_values, expand_cell_indices,
 };
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -29,14 +28,6 @@ pub enum UserCallHandling {
     Completed,
     Caught,
     Uncaught(Box<RuntimeError>),
-}
-
-async fn object_subsref_brace(base: Value, values: Vec<Value>) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-        base,
-        ObjectIndexSelector::IndexValues { values },
-    ))
-    .await
 }
 
 pub(crate) fn normalize_requested_outputs(value: Value, requested_outputs: usize) -> Value {
@@ -85,33 +76,8 @@ pub async fn build_builtin_expand_multi_args(
         specs,
         "CallBuiltinExpandMulti requires cell or object for expand_all",
         "CallBuiltinExpandMulti requires cell or object cell access",
-        |base| async move {
-            match base {
-                Value::Object(obj) => {
-                    let v = object_subsref_brace(Value::Object(obj), vec![]).await?;
-                    match v {
-                        Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
-                        other => Ok(vec![other]),
-                    }
-                }
-                _ => Err(crate::interpreter::errors::mex(
-                    "ExpandError",
-                    "CallBuiltinExpandMulti requires cell or object for expand_all",
-                )),
-            }
-        },
-        |base, indices| async move {
-            match base {
-                Value::Object(obj) => {
-                    let v = object_subsref_brace(Value::Object(obj), indices).await?;
-                    Ok(vec![v])
-                }
-                _ => Err(crate::interpreter::errors::mex(
-                    "ExpandError",
-                    "CallBuiltinExpandMulti requires cell or object cell access",
-                )),
-            }
-        },
+        |base| async move { expand_brace_values(base, &[], None).await },
+        |base, indices| async move { expand_brace_values(base, &indices, None).await },
     )
     .await
 }
@@ -125,33 +91,8 @@ pub async fn build_feval_expand_multi_args(
         specs,
         "CallFevalExpandMulti requires cell or object for expand_all",
         "CallFevalExpandMulti requires cell or object cell access",
-        |base| async move {
-            match base {
-                Value::Object(obj) => {
-                    let v = object_subsref_brace(Value::Object(obj), vec![]).await?;
-                    match v {
-                        Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
-                        other => Ok(vec![other]),
-                    }
-                }
-                _ => Err(crate::interpreter::errors::mex(
-                    "InvalidExpandAllTarget",
-                    "CallFevalExpandMulti requires cell or object for expand_all",
-                )),
-            }
-        },
-        |base, indices| async move {
-            match base {
-                Value::Object(obj) => {
-                    let v = object_subsref_brace(Value::Object(obj), indices).await?;
-                    Ok(vec![v])
-                }
-                _ => Err(crate::interpreter::errors::mex(
-                    "ExpandError",
-                    "CallFevalExpandMulti requires cell or object cell access",
-                )),
-            }
-        },
+        |base| async move { expand_brace_values(base, &[], None).await },
+        |base, indices| async move { expand_brace_values(base, &indices, None).await },
     )
     .await
 }
@@ -165,33 +106,11 @@ pub async fn build_user_function_expand_multi_args(
         specs,
         "CallFunctionExpandMultiOutput requires cell or object for expand_all",
         "CallFunctionExpandMultiOutput requires cell or object cell access",
-        |base| async move {
-            match base {
-                Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
-                Value::Object(obj) => {
-                    let v = object_subsref_brace(Value::Object(obj), vec![]).await?;
-                    match v {
-                        Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
-                        other => Ok(vec![other]),
-                    }
-                }
-                _ => Err(crate::interpreter::errors::mex(
-                    "InvalidExpandAllTarget",
-                    "CallFunctionExpandMultiOutput requires cell or object for expand_all",
-                )),
-            }
-        },
+        |base| async move { expand_brace_values(base, &[], None).await },
         |base, indices| async move {
             match (base, indices.len()) {
                 (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices),
-                (Value::Object(obj), _) => {
-                    let v = object_subsref_brace(Value::Object(obj), indices).await?;
-                    Ok(vec![v])
-                }
-                _ => Err(crate::interpreter::errors::mex(
-                    "ExpandError",
-                    "CallFunctionExpandMultiOutput requires cell or object cell access",
-                )),
+                (base, _) => expand_brace_values(base, &indices, None).await,
             }
         },
     )
