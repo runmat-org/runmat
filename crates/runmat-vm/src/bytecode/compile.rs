@@ -131,7 +131,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_builtins::Value;
     use runmat_hir::{
-        lower, CallableFallbackPolicy, FunctionId, LoweringContext, RequestedOutputCount,
+        lower, CallableFallbackPolicy, FunctionId, IndexKind, LoweringContext, RequestedOutputCount,
     };
     use runmat_mir::lowering::lower_assembly;
     use runmat_mir::{MirRvalue, MirStmtKind, MirTerminatorKind};
@@ -432,6 +432,40 @@ mod tests {
 
         let err = compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).expect_err("error");
         assert!(err.message.contains("UnknownDynamic is unsupported"));
+    }
+
+    #[test]
+    fn primary_compile_rejects_transitional_dot_index_kind() {
+        let ast = runmat_parser::parse("x = [1 2 3]; y = x(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint_target = hir.assembly.entrypoints[0].target;
+        let body = mir
+            .bodies
+            .get_mut(&entrypoint_target)
+            .expect("entrypoint body");
+
+        let mut patched = false;
+        for stmt in &mut body.blocks[0].statements {
+            if let MirStmtKind::Assign {
+                value: MirRvalue::Index { indexing, .. },
+                ..
+            } = &mut stmt.kind
+            {
+                indexing.kind = IndexKind::Dot;
+                patched = true;
+                break;
+            }
+        }
+        assert!(
+            patched,
+            "expected entrypoint block to contain index assignment"
+        );
+
+        let err = compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id).expect_err("error");
+        assert!(err
+            .message
+            .contains("dot-index read should lower through member expressions"));
     }
 
     #[test]
