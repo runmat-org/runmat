@@ -149,3 +149,5 @@ Progress update (2026-05-17):
     additive `analysis.plan_study/v1` typed output now includes planned run operation identity (`run_operation`, `run_op_version`) so automation clients can select downstream run-contract handlers without parsing `operation_sequence`.
 41. [x] Study validation typed issue details added:
     additive `analysis.validate_study/v1` payload now includes structured `issues` entries (`code`, `message`) alongside existing `issue_codes`, preserving machine-stable code interfaces while improving automation/debug ergonomics without out-of-band code-to-message mapping tables.
+42. [x] Study run typed extraction expanded with solver gates and provenance:
+    additive `analysis.run_study/v1` typed payload now exposes `solver_convergence`, `result_quality`, and full `provenance`, allowing automation to consume gate posture and backend/solver lineage without immediate secondary results queries.

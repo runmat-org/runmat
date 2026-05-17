@@ -1082,8 +1082,11 @@ pub struct AnalysisStudyRunData {
     pub run_id: String,
     pub run_status: RunStatus,
     pub publishable: bool,
+    pub solver_convergence: QualityGate,
+    pub result_quality: QualityGate,
     #[serde(default)]
     pub quality_reasons: Vec<QualityReason>,
+    pub provenance: RunProvenance,
     pub evidence_artifact_path: String,
 }
 

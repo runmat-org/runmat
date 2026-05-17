@@ -1028,7 +1028,13 @@ fn analysis_run_study_executes_linear_static_path() {
     assert_eq!(persisted.run_id, envelope.data.run_id);
     assert_eq!(persisted.run_status, envelope.data.run_status);
     assert_eq!(persisted.publishable, envelope.data.publishable);
+    assert_eq!(
+        persisted.solver_convergence,
+        envelope.data.solver_convergence
+    );
+    assert_eq!(persisted.result_quality, envelope.data.result_quality);
     assert_eq!(persisted.quality_reasons, envelope.data.quality_reasons);
+    assert_eq!(persisted.provenance, envelope.data.provenance);
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
 }
@@ -1082,7 +1088,13 @@ fn analysis_run_study_honors_electromagnetic_run_options() {
         .expect("harmonic coupling diagnostic should be present");
     assert!(harmonic_diag.message.contains("tolerance=0.00012345"));
     assert!(harmonic_diag.message.contains("iterations="));
+    assert_eq!(
+        persisted.solver_convergence,
+        envelope.data.solver_convergence
+    );
+    assert_eq!(persisted.result_quality, envelope.data.result_quality);
     assert_eq!(persisted.quality_reasons, envelope.data.quality_reasons);
+    assert_eq!(persisted.provenance, envelope.data.provenance);
 }
 
 #[test]

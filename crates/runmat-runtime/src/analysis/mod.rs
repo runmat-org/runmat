@@ -926,7 +926,10 @@ pub fn analysis_run_study_op(
             "run_id": run_envelope.data.run_id.clone(),
             "run_status": run_envelope.data.run_status,
             "publishable": run_envelope.data.publishable,
+            "solver_convergence": run_envelope.data.solver_convergence,
+            "result_quality": run_envelope.data.result_quality,
             "quality_reasons": run_envelope.data.quality_reasons.clone(),
+            "provenance": run_envelope.data.provenance.clone(),
         }),
     )
     .map_err(|err| {
@@ -965,7 +968,10 @@ pub fn analysis_run_study_op(
             run_id: run_envelope.data.run_id,
             run_status: run_envelope.data.run_status,
             publishable: run_envelope.data.publishable,
+            solver_convergence: run_envelope.data.solver_convergence,
+            result_quality: run_envelope.data.result_quality,
             quality_reasons: run_envelope.data.quality_reasons,
+            provenance: run_envelope.data.provenance,
             evidence_artifact_path,
         },
     ))

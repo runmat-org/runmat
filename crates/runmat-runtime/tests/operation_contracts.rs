@@ -15,7 +15,7 @@ use runmat_runtime::analysis::{
     AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery,
     AnalysisResultsQuery, AnalysisRunKind, AnalysisRunOptions, AnalysisStudySpec,
     AnalysisTransientRunOptions, AnalysisTrendsQuery, ModalFrequencyBasis, ModalFrequencyUnits,
-    PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode, RunStatus,
+    PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy, QualityReasonCode, RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -422,7 +422,10 @@ fn analysis_study_workflow_contract_persists_evidence_artifacts() {
     assert!(run.data.electromagnetic_run_options.is_none());
     assert_eq!(run.data.run_operation, "analysis.run_linear_static");
     assert_eq!(run.data.run_op_version, "analysis.run_linear_static/v1");
+    assert_eq!(run.data.solver_convergence, QualityGate::Pass);
+    assert_eq!(run.data.result_quality, QualityGate::Pass);
     assert_eq!(run.data.quality_reasons.len(), 0);
+    assert_eq!(run.data.provenance.backend, ComputeBackend::Cpu);
     assert!(PathBuf::from(&run.data.evidence_artifact_path).exists());
 
     drop(env_guard);
