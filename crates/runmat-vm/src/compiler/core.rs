@@ -1158,14 +1158,7 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         match indexing.kind {
             IndexKind::Paren => {
-                if self.mir_indexing_is_simple_expr_indices(indexing) {
-                    self.compile_mir_index_components(
-                        indexing,
-                        IndexResultContext::AssignmentTarget,
-                    )?;
-                    self.compile_mir_rvalue(value)?;
-                    self.emit(Instr::StoreIndex(indexing.components.len()));
-                } else if self.indexing_needs_slice_expr(indexing) {
+                if self.indexing_needs_slice_expr(indexing) {
                     let components = self.compile_mir_slice_expr_components(
                         indexing,
                         MirRangeParamOrder::AfterNumeric,
@@ -1267,14 +1260,7 @@ impl Compiler {
 
     fn compile_mir_index_after_base(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
         match indexing.kind {
-            IndexKind::Paren => {
-                if self.mir_indexing_is_simple_expr_indices(indexing) {
-                    self.compile_mir_index_components_any_context(indexing)?;
-                    self.emit(Instr::Index(indexing.components.len()));
-                } else {
-                    self.compile_mir_slice_index(indexing)?;
-                }
-            }
+            IndexKind::Paren => self.compile_mir_slice_index(indexing)?,
             IndexKind::Brace => {
                 self.compile_mir_cell_index_components_any_context(indexing)?;
                 self.emit(Instr::IndexCell(indexing.components.len()));
@@ -1284,76 +1270,12 @@ impl Compiler {
         Ok(())
     }
 
-    fn mir_indexing_is_simple_expr_indices(&self, indexing: &MirIndexing) -> bool {
-        if indexing.components.len() > 2 {
-            return false;
-        }
-        indexing
-            .components
-            .iter()
-            .all(|component| matches!(component, MirIndexComponent::Expr(_)))
-            && !indexing.components.iter().any(|component| match component {
-                MirIndexComponent::Expr(MirOperand::Local(local)) => {
-                    self.mir_local_is_colon(*local)
-                        || !self.mir_operand_is_definitely_scalar_index(&MirOperand::Local(*local))
-                }
-                MirIndexComponent::Expr(operand) => {
-                    self.mir_operand_end_expr(operand).is_some()
-                        || !self.mir_operand_is_definitely_scalar_index(operand)
-                }
-                _ => true,
-            })
-    }
-
-    fn mir_operand_is_definitely_scalar_index(&self, operand: &MirOperand) -> bool {
-        match operand {
-            MirOperand::Constant(MirConstant::Number(_)) => true,
-            MirOperand::Local(local) => self.mir_local_matches_rvalue(*local, |value| {
-                self.mir_rvalue_is_definitely_scalar_index(value)
-            }),
-            MirOperand::Temp(_) | MirOperand::FunctionHandle(_) | MirOperand::Constant(_) => false,
-        }
-    }
-
-    fn mir_rvalue_is_definitely_scalar_index(&self, value: &MirRvalue) -> bool {
-        match value {
-            MirRvalue::Use(operand) => self.mir_operand_is_definitely_scalar_index(operand),
-            MirRvalue::Unary(op, operand) => {
-                matches!(op, OperatorKind::UnaryPlus | OperatorKind::UnaryMinus)
-                    && self.mir_operand_is_definitely_scalar_index(operand)
-            }
-            MirRvalue::Binary(left, op, right) => {
-                matches!(
-                    op,
-                    OperatorKind::Add
-                        | OperatorKind::Subtract
-                        | OperatorKind::MatrixMultiply
-                        | OperatorKind::ElementwiseMultiply
-                        | OperatorKind::Mrdivide
-                        | OperatorKind::Mldivide
-                        | OperatorKind::ElementwiseDivide
-                        | OperatorKind::ElementwiseLeftDivide
-                        | OperatorKind::MatrixPower
-                        | OperatorKind::ElementwisePower
-                ) && self.mir_operand_is_definitely_scalar_index(left)
-                    && self.mir_operand_is_definitely_scalar_index(right)
-            }
-            _ => false,
-        }
-    }
-
     fn compile_mir_store_indexed_value_from_temp(
         &mut self,
         indexing: &MirIndexing,
         tmp: usize,
     ) -> Result<(), CompileError> {
         match indexing.kind {
-            IndexKind::Paren if self.mir_indexing_is_simple_expr_indices(indexing) => {
-                self.compile_mir_index_components_any_context(indexing)?;
-                self.emit(Instr::LoadVar(tmp));
-                self.emit(Instr::StoreIndex(indexing.components.len()));
-                Ok(())
-            }
             IndexKind::Paren => {
                 if self.indexing_needs_slice_expr(indexing) {
                     let components = self.compile_mir_slice_expr_components(
@@ -1908,60 +1830,13 @@ impl Compiler {
 
         self.compile_mir_operand(base)?;
         match indexing.kind {
-            IndexKind::Paren => {
-                if self.mir_indexing_is_simple_expr_indices(indexing) {
-                    self.compile_mir_index_components(indexing, IndexResultContext::ReadSingle)?;
-                    self.emit(Instr::Index(indexing.components.len()));
-                } else {
-                    self.compile_mir_slice_index(indexing)?;
-                }
-            }
+            IndexKind::Paren => self.compile_mir_slice_index(indexing)?,
             IndexKind::Brace => {
                 self.compile_mir_cell_index_components(indexing, indexing.result_context.clone())?;
                 self.emit(Instr::IndexCell(indexing.components.len()));
             }
             IndexKind::Dot => self.compile_mir_dot_read(indexing)?,
         };
-        Ok(())
-    }
-
-    fn compile_mir_index_components(
-        &mut self,
-        indexing: &MirIndexing,
-        expected_context: IndexResultContext,
-    ) -> Result<(), CompileError> {
-        if !mir_indexing_context_matches(indexing.result_context.clone(), expected_context) {
-            return Err(
-                self.compile_error("MIR index lowering received mismatched index result context")
-            );
-        }
-        for component in &indexing.components {
-            let (MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand)) =
-                component
-            else {
-                return Err(self.compile_error(
-                    "MIR fast-path index lowering expects expression/logical selector operands",
-                ));
-            };
-            self.compile_mir_operand(operand)?;
-        }
-        Ok(())
-    }
-
-    fn compile_mir_index_components_any_context(
-        &mut self,
-        indexing: &MirIndexing,
-    ) -> Result<(), CompileError> {
-        for component in &indexing.components {
-            let (MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand)) =
-                component
-            else {
-                return Err(self.compile_error(
-                    "MIR fast-path index lowering expects expression/logical selector operands",
-                ));
-            };
-            self.compile_mir_operand(operand)?;
-        }
         Ok(())
     }
 

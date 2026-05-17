@@ -252,6 +252,10 @@ mod tests {
         assert!(bytecode
             .instructions
             .iter()
+            .any(|instr| matches!(instr, Instr::IndexSlice(2, 2, 0, 0))));
+        assert!(!bytecode
+            .instructions
+            .iter()
             .any(|instr| matches!(instr, Instr::Index(2))));
 
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
@@ -369,6 +373,10 @@ mod tests {
             .expect("x export");
 
         assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::StoreSlice(2, 2, 0, 0))));
+        assert!(!bytecode
             .instructions
             .iter()
             .any(|instr| matches!(instr, Instr::StoreIndex(2))));
