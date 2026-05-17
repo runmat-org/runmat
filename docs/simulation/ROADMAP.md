@@ -81,3 +81,5 @@ Progress update (2026-05-17):
    tightened nonlinear assembly/stress/softening convergence threshold assertions (line-search backtracks, increment/residual norms, spike/stall counts, and tangent rebuild bands) to reduce permissive drift windows; validated with `cargo test -p runmat-runtime --test analysis` and `cargo test -p runmat-runtime --lib -- --test-threads=1`.
 7. [x] CFD contract kickoff landed:
    additive core CFD domain schema (`AnalysisStepKind::Cfd`, model-owned CFD domain fields) plus `analysis.create_model` steady/transient CFD profile templates with runtime coverage tests; validated with `cargo test -p runmat-analysis-core`, `cargo test -p runmat-runtime --lib -- --test-threads=1`, and `cargo test -p runmat-runtime --test analysis`.
+8. [x] CFD first run-path baseline landed:
+   added additive runtime operation contract `analysis.run_cfd/v1` with `AnalysisCfdRunOptions`, model/domain + option validation, prep-context integration, typed run envelope output, and CFD flow diagnostics (`FEA_CFD_FLOW`) backed by runtime coverage tests.

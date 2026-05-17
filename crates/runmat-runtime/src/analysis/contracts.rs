@@ -366,6 +366,42 @@ impl Default for AnalysisTransientRunOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisCfdRunOptions {
+    pub deterministic_mode: bool,
+    pub precision_mode: PrecisionMode,
+    pub quality_policy: QualityPolicy,
+    pub time_step_s: f64,
+    pub step_count: usize,
+    pub max_linear_iters: usize,
+    pub tolerance: f64,
+    pub residual_warn_threshold: f64,
+    #[serde(default)]
+    pub prep_context: Option<AnalysisRunPrepContext>,
+    #[serde(default)]
+    pub prep_artifact_id: Option<String>,
+    #[serde(default)]
+    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
+}
+
+impl Default for AnalysisCfdRunOptions {
+    fn default() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            time_step_s: 1.0e-3,
+            step_count: 12,
+            max_linear_iters: 128,
+            tolerance: 1.0e-8,
+            residual_warn_threshold: 1.0e-5,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisThermalRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,

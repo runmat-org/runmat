@@ -50,11 +50,11 @@ mod promotion;
 pub mod storage;
 
 pub use contracts::{
-    AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
-    AnalysisElectromagneticRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
-    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisResultsData,
-    AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind, AnalysisRunOptions,
-    AnalysisRunPrepContext, AnalysisRunResult, AnalysisThermalRunOptions,
+    AnalysisCfdRunOptions, AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext,
+    AnalysisCreateModelProfile, AnalysisElectromagneticRunOptions, AnalysisModalRunOptions,
+    AnalysisNonlinearRunOptions, AnalysisResultsCompareData, AnalysisResultsCompareQuery,
+    AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunKind,
+    AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult, AnalysisThermalRunOptions,
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
     AnalysisValidateResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
     ElectroThermalCouplingOptions, ElectroTimeProfilePoint, ElectromagneticResultsData,
@@ -82,6 +82,8 @@ const ANALYSIS_RUN_NONLINEAR_OPERATION: &str = "analysis.run_nonlinear";
 const ANALYSIS_RUN_NONLINEAR_OP_VERSION: &str = "analysis.run_nonlinear/v1";
 const ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION: &str = "analysis.run_electromagnetic";
 const ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION: &str = "analysis.run_electromagnetic/v1";
+const ANALYSIS_RUN_CFD_OPERATION: &str = "analysis.run_cfd";
+const ANALYSIS_RUN_CFD_OP_VERSION: &str = "analysis.run_cfd/v1";
 const ANALYSIS_RESULTS_OPERATION: &str = "analysis.results";
 const ANALYSIS_RESULTS_OP_VERSION: &str = "analysis.results/v1";
 const ANALYSIS_RESULTS_COMPARE_OPERATION: &str = "analysis.results_compare";
@@ -933,6 +935,462 @@ pub fn analysis_run_transient_op(
         AnalysisTransientRunOptions::default(),
         context,
     )
+}
+
+pub fn analysis_run_cfd_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    analysis_run_cfd_with_options_op(model, backend, AnalysisCfdRunOptions::default(), context)
+}
+
+pub fn analysis_run_cfd_with_options_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: AnalysisCfdRunOptions,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let has_cfd_step = model
+        .steps
+        .iter()
+        .any(|step| step.kind == AnalysisStepKind::Cfd);
+    if !has_cfd_step {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_CFD_INVALID_MODEL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis model must include at least one cfd step for analysis.run_cfd",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        ));
+    }
+
+    let Some(cfd_domain) = model.cfd.as_ref() else {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_CFD_INVALID_MODEL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_cfd requires model.cfd to be configured",
+            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
+        ));
+    };
+
+    if !cfd_domain.enabled {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_cfd requires cfd domain enabled=true",
+            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
+        ));
+    }
+    if !cfd_domain.reference_density_kg_per_m3.is_finite()
+        || cfd_domain.reference_density_kg_per_m3 <= 0.0
+    {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_cfd requires finite positive reference_density_kg_per_m3",
+            BTreeMap::from([(
+                "reference_density_kg_per_m3".to_string(),
+                cfd_domain.reference_density_kg_per_m3.to_string(),
+            )]),
+        ));
+    }
+    if !cfd_domain.dynamic_viscosity_pa_s.is_finite() || cfd_domain.dynamic_viscosity_pa_s <= 0.0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_cfd requires finite positive dynamic_viscosity_pa_s",
+            BTreeMap::from([(
+                "dynamic_viscosity_pa_s".to_string(),
+                cfd_domain.dynamic_viscosity_pa_s.to_string(),
+            )]),
+        ));
+    }
+    if !cfd_domain.inlet_velocity_m_per_s.is_finite() || cfd_domain.inlet_velocity_m_per_s < 0.0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_cfd requires finite non-negative inlet_velocity_m_per_s",
+            BTreeMap::from([(
+                "inlet_velocity_m_per_s".to_string(),
+                cfd_domain.inlet_velocity_m_per_s.to_string(),
+            )]),
+        ));
+    }
+    if !cfd_domain.turbulence_intensity.is_finite()
+        || cfd_domain.turbulence_intensity < 0.0
+        || cfd_domain.turbulence_intensity > 1.0
+    {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_cfd requires turbulence_intensity in [0, 1]",
+            BTreeMap::from([(
+                "turbulence_intensity".to_string(),
+                cfd_domain.turbulence_intensity.to_string(),
+            )]),
+        ));
+    }
+
+    if !options.time_step_s.is_finite() || options.time_step_s <= 0.0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_cfd options require finite positive time_step_s",
+            BTreeMap::from([("time_step_s".to_string(), options.time_step_s.to_string())]),
+        ));
+    }
+    if options.step_count == 0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_cfd options require step_count greater than zero",
+            BTreeMap::from([("step_count".to_string(), options.step_count.to_string())]),
+        ));
+    }
+    if options.max_linear_iters == 0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_cfd options require max_linear_iters greater than zero",
+            BTreeMap::from([(
+                "max_linear_iters".to_string(),
+                options.max_linear_iters.to_string(),
+            )]),
+        ));
+    }
+    if !options.tolerance.is_finite() || options.tolerance <= 0.0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_cfd options require finite positive tolerance",
+            BTreeMap::from([("tolerance".to_string(), options.tolerance.to_string())]),
+        ));
+    }
+    if !options.residual_warn_threshold.is_finite() || options.residual_warn_threshold <= 0.0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_CFD_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_cfd options require finite positive residual_warn_threshold",
+            BTreeMap::from([(
+                "residual_warn_threshold".to_string(),
+                options.residual_warn_threshold.to_string(),
+            )]),
+        ));
+    }
+
+    let prep_context = resolve_run_prep_context(
+        model,
+        options.prep_artifact_id.as_deref(),
+        options.prep_context,
+        ANALYSIS_RUN_CFD_OPERATION,
+        ANALYSIS_RUN_CFD_OP_VERSION,
+        &context,
+    )?;
+
+    let transient_run = run_transient_with_options(
+        model,
+        backend,
+        runmat_analysis_fea::solve::transient::TransientSolveOptions {
+            time_step_s: options.time_step_s,
+            min_time_step_s: options.time_step_s,
+            max_time_step_s: options.time_step_s,
+            step_count: options.step_count,
+            max_linear_iters: options.max_linear_iters,
+            tolerance: options.tolerance,
+            residual_target: options.tolerance,
+            adaptive_time_step: false,
+            max_step_retries: 0,
+            adapt_min_scale: 0.8,
+            adapt_max_scale: 1.2,
+            adapt_growth_exponent: 0.35,
+            adapt_retry_growth_cap: 1.05,
+            adapt_nonconverged_shrink: 0.75,
+            dt_bucket_rel_tolerance: 0.0,
+            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            thermo_mechanical_context: None,
+            electro_thermal_context: None,
+        },
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "SOLVER_MODEL_INVALID",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            err.to_string(),
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        )
+    })?;
+
+    let mut run = transient_run.run;
+    let mut fallback_events = Vec::new();
+    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
+    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
+        fallback_events.push(
+            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
+        );
+    }
+
+    let reynolds_proxy = cfd_domain.reference_density_kg_per_m3 * cfd_domain.inlet_velocity_m_per_s
+        / cfd_domain.dynamic_viscosity_pa_s;
+    let solve_family = match cfd_domain.solve_family {
+        runmat_analysis_core::CfdSolveFamily::SteadyState => "steady_state",
+        runmat_analysis_core::CfdSolveFamily::Transient => "transient",
+    };
+    run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_CFD_FLOW".to_string(),
+        severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info,
+        message: format!(
+            "density={} viscosity={} inlet_velocity={} turbulence_intensity={} reynolds_proxy={} solve_family={} profile_point_count={}",
+            cfd_domain.reference_density_kg_per_m3,
+            cfd_domain.dynamic_viscosity_pa_s,
+            cfd_domain.inlet_velocity_m_per_s,
+            cfd_domain.turbulence_intensity,
+            reynolds_proxy,
+            solve_family,
+            cfd_domain.time_profile.len(),
+        ),
+    });
+
+    let solver_convergence = if run.diagnostics.iter().any(|item| {
+        item.code == "FEA_TRANSIENT_CONVERGENCE"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    }) {
+        QualityGate::Pass
+    } else {
+        QualityGate::Warn
+    };
+    let result_quality = if transient_run.displacement_snapshots.is_empty()
+        || transient_run.time_points_s.is_empty()
+        || transient_run
+            .residual_norms
+            .iter()
+            .any(|residual| !residual.is_finite())
+    {
+        QualityGate::Fail
+    } else if transient_run
+        .residual_norms
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max)
+        > options.residual_warn_threshold
+    {
+        QualityGate::Warn
+    } else {
+        QualityGate::Pass
+    };
+
+    let mut quality_reasons = Vec::new();
+    if solver_convergence == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverNotConverged,
+            detail: "cfd solver convergence gate is warning".to_string(),
+        });
+    }
+    if result_quality == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::TransientResidualExceeded,
+            detail: format!(
+                "cfd residual exceeds threshold {}",
+                options.residual_warn_threshold
+            ),
+        });
+    }
+    if fallback_events
+        .iter()
+        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+    {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverBackendFallback,
+            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+        });
+    }
+    if fallback_events.iter().any(|event| {
+        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
+    }) {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::FieldPromotionFallback,
+            detail: "field promotion fell back to host-backed values".to_string(),
+        });
+    }
+
+    let publishable = match options.quality_policy {
+        QualityPolicy::Strict => {
+            solver_convergence == QualityGate::Pass
+                && result_quality == QualityGate::Pass
+                && quality_reasons.is_empty()
+        }
+        QualityPolicy::Balanced => {
+            solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass
+        }
+        QualityPolicy::Exploratory => {
+            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
+        }
+    };
+    let run_status = if publishable {
+        RunStatus::Publishable
+    } else if result_quality == QualityGate::Fail {
+        RunStatus::Rejected
+    } else {
+        RunStatus::Degraded
+    };
+    let solver_backend = run.solver_backend.clone();
+    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
+    let solver_host_sync_count = run.solver_host_sync_count;
+    let solver_method = run.solver_method.clone();
+    let selected_preconditioner = run.preconditioner.clone();
+
+    let result = AnalysisRunResult {
+        run_id: storage::next_run_id(),
+        run,
+        modal_results: None,
+        thermal_results: None,
+        transient_results: Some(TransientResultsData {
+            transient_payload_version: "transient_results/v1".to_string(),
+            time_points_s: transient_run.time_points_s,
+            displacement_snapshots: transient_run.displacement_snapshots,
+            residual_norms: transient_run.residual_norms,
+            integration_method: TransientIntegrationMethod::ImplicitEuler,
+        }),
+        nonlinear_results: None,
+        electromagnetic_results: None,
+        model_validity: QualityGate::Pass,
+        solver_convergence,
+        result_quality,
+        run_status,
+        publishable,
+        quality_reasons,
+        provenance: RunProvenance {
+            backend,
+            solver_backend,
+            solver_device_apply_k_ratio,
+            solver_host_sync_count,
+            precision_mode: contracts::format_precision_mode(options.precision_mode),
+            deterministic_mode: options.deterministic_mode,
+            solver_method,
+            preconditioner: selected_preconditioner,
+            quality_policy: contracts::format_quality_policy(options.quality_policy),
+            fallback_events,
+        },
+    };
+
+    storage::persist_run_result(&result).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_CFD_OPERATION,
+            ANALYSIS_RUN_CFD_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist analysis run artifact: {err}"),
+            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
+        )
+    })?;
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RUN_CFD_OPERATION,
+        ANALYSIS_RUN_CFD_OP_VERSION,
+        &context,
+        result,
+    ))
 }
 
 pub fn analysis_run_thermal_op(

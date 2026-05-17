@@ -46,4 +46,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - Electro-thermal benign/pathological fixtures and nonlinear mixed-load coupling now use tighter Joule/conductivity/severity/time-scale governance bands.
 - Nonlinear assembly/stress/softening fixtures now use tighter convergence governance bands for backtracks, norms, and spike/stall behavior.
 - CFD schema/profile kickoff landed: additive core domain contracts plus `analysis.create_model` steady/transient CFD templates are in place as the first Phase C step.
+- CFD first run-path baseline landed: `analysis.run_cfd/v1` now executes through the runtime/FEA stack with typed outputs and first fluid diagnostics (`FEA_CFD_FLOW`) under existing governance posture.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.

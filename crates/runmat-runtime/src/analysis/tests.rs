@@ -104,6 +104,21 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
     model
 }
 
+fn sample_cfd_domain(
+    solve_family: CfdSolveFamily,
+    enabled: bool,
+) -> runmat_analysis_core::CfdDomain {
+    runmat_analysis_core::CfdDomain {
+        enabled,
+        solve_family,
+        reference_density_kg_per_m3: 1.225,
+        dynamic_viscosity_pa_s: 1.81e-5,
+        inlet_velocity_m_per_s: 5.0,
+        turbulence_intensity: 0.06,
+        time_profile: Vec::new(),
+    }
+}
+
 fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: ThermoMechanicalCouplingOptions) {
     model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
         enabled: coupling.enabled,
@@ -1758,6 +1773,57 @@ fn analysis_run_transient_rejects_models_without_transient_step() {
 }
 
 #[test]
+fn analysis_run_cfd_rejects_models_without_cfd_step() {
+    let _guard = analysis_test_guard();
+    let model = sample_model();
+    let err = analysis_run_cfd_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("cfd run should fail for missing cfd step");
+
+    assert_eq!(err.operation, "analysis.run_cfd");
+    assert_eq!(err.op_version, "analysis.run_cfd/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_CFD_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_cfd_rejects_model_without_cfd_domain() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Cfd;
+    let err = analysis_run_cfd_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("cfd run should fail when cfd domain is missing");
+
+    assert_eq!(err.operation, "analysis.run_cfd");
+    assert_eq!(err.op_version, "analysis.run_cfd/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_CFD_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_cfd_rejects_disabled_cfd_domain() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, false));
+    let err = analysis_run_cfd_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("cfd run should fail for disabled cfd domain");
+
+    assert_eq!(err.operation, "analysis.run_cfd");
+    assert_eq!(err.op_version, "analysis.run_cfd/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_CFD_INVALID_OPTIONS");
+}
+
+#[test]
 fn analysis_run_thermal_rejects_models_without_thermal_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();
@@ -2553,6 +2619,48 @@ fn analysis_run_transient_returns_native_transient_result() {
         transient.time_points_s.len(),
         transient.displacement_snapshots.len()
     );
+}
+
+#[test]
+fn analysis_run_cfd_returns_typed_payload_and_flow_diagnostics() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Cfd;
+    model.cfd = Some(sample_cfd_domain(CfdSolveFamily::SteadyState, true));
+
+    let envelope = analysis_run_cfd_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisCfdRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            time_step_s: 1.0e-3,
+            step_count: 4,
+            max_linear_iters: 64,
+            tolerance: 1.0e-8,
+            residual_warn_threshold: 1.0e-4,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("cfd run should return envelope");
+
+    assert_eq!(envelope.operation, "analysis.run_cfd");
+    assert_eq!(envelope.op_version, "analysis.run_cfd/v1");
+    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
+    assert_eq!(envelope.data.provenance.solver_method, "implicit_euler_pcg");
+    assert!(envelope.data.transient_results.is_some());
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_CFD_FLOW"
+            && diag.message.contains("reynolds_proxy=")
+            && diag.message.contains("solve_family=steady_state")));
 }
 
 #[test]
