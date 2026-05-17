@@ -154,9 +154,7 @@ async fn call_runtime_method(
     requested_outputs: Option<usize>,
 ) -> Result<Value, RuntimeError> {
     match requested_outputs {
-        Some(count) => {
-            runmat_runtime::call_builtin_async_with_outputs("call_method", args, count).await
-        }
+        Some(count) => runmat_runtime::call_method_async_with_outputs(args, count).await,
         None => runmat_runtime::call_method_async(args).await,
     }
 }

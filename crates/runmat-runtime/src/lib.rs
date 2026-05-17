@@ -71,7 +71,8 @@ extern crate openblas_src;
 
 pub use dispatcher::{
     call_builtin, call_builtin_async, call_builtin_async_with_outputs, call_feval_async,
-    call_method_async, gather_if_needed, gather_if_needed_async, is_gpu_value, value_contains_gpu,
+    call_method_async, call_method_async_with_outputs, gather_if_needed, gather_if_needed_async,
+    is_gpu_value, value_contains_gpu,
 };
 
 #[cfg(feature = "plot-core")]
@@ -219,6 +220,18 @@ async fn call_method_builtin(
     method: String,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    async fn dispatch_with_current_outputs(
+        name: &str,
+        args: &[Value],
+    ) -> crate::BuiltinResult<Value> {
+        match crate::output_count::current_output_count() {
+            Some(out_count) if out_count != 1 => {
+                crate::call_builtin_async_with_outputs(name, args, out_count).await
+            }
+            _ => crate::call_builtin_async(name, args).await,
+        }
+    }
+
     match base {
         Value::Object(obj) => {
             // Simple dynamic dispatch via builtin registry: method name may be qualified as Class.method
@@ -227,11 +240,11 @@ async fn call_method_builtin(
             let mut args = Vec::with_capacity(1 + rest.len());
             args.push(Value::Object(obj.clone()));
             args.extend(rest);
-            if let Ok(v) = crate::call_builtin_async(&qualified, &args).await {
+            if let Ok(v) = dispatch_with_current_outputs(&qualified, &args).await {
                 return Ok(v);
             }
             // Fallback to global method name
-            Ok(crate::call_builtin_async(&method, &args).await?)
+            Ok(dispatch_with_current_outputs(&method, &args).await?)
         }
         Value::HandleObject(h) => {
             // Methods on handle classes dispatch to the underlying target's class namespace
@@ -245,10 +258,10 @@ async fn call_method_builtin(
             let mut args = Vec::with_capacity(1 + rest.len());
             args.push(Value::HandleObject(h.clone()));
             args.extend(rest);
-            if let Ok(v) = crate::call_builtin_async(&qualified, &args).await {
+            if let Ok(v) = dispatch_with_current_outputs(&qualified, &args).await {
                 return Ok(v);
             }
-            Ok(crate::call_builtin_async(&method, &args).await?)
+            Ok(dispatch_with_current_outputs(&method, &args).await?)
         }
         other => {
             Err((format!("call_method unsupported on {other:?} for method '{method}'")).into())
@@ -264,12 +277,27 @@ async fn subsasgn_dispatch(
     payload: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<Value> {
+    async fn dispatch_with_current_outputs(
+        name: &str,
+        args: &[Value],
+    ) -> crate::BuiltinResult<Value> {
+        match crate::output_count::current_output_count() {
+            Some(out_count) if out_count != 1 => {
+                crate::call_builtin_async_with_outputs(name, args, out_count).await
+            }
+            _ => crate::call_builtin_async(name, args).await,
+        }
+    }
+
     match &obj {
         Value::Object(o) => {
             let qualified = format!("{}.{}", o.class_name, OBJECT_SUBSASGN_METHOD);
             Ok(
-                crate::call_builtin_async(&qualified, &[obj, Value::String(kind), payload, rhs])
-                    .await?,
+                dispatch_with_current_outputs(
+                    &qualified,
+                    &[obj, Value::String(kind), payload, rhs],
+                )
+                .await?,
             )
         }
         Value::HandleObject(h) => {
@@ -280,8 +308,11 @@ async fn subsasgn_dispatch(
             };
             let qualified = format!("{class_name}.{OBJECT_SUBSASGN_METHOD}");
             Ok(
-                crate::call_builtin_async(&qualified, &[obj, Value::String(kind), payload, rhs])
-                    .await?,
+                dispatch_with_current_outputs(
+                    &qualified,
+                    &[obj, Value::String(kind), payload, rhs],
+                )
+                .await?,
             )
         }
         other => Err((format!("subsasgn: receiver must be object, got {other:?}")).into()),
@@ -290,10 +321,25 @@ async fn subsasgn_dispatch(
 
 #[runmat_macros::runtime_builtin(name = "subsref", builtin_path = "crate")]
 async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
+    async fn dispatch_with_current_outputs(
+        name: &str,
+        args: &[Value],
+    ) -> crate::BuiltinResult<Value> {
+        match crate::output_count::current_output_count() {
+            Some(out_count) if out_count != 1 => {
+                crate::call_builtin_async_with_outputs(name, args, out_count).await
+            }
+            _ => crate::call_builtin_async(name, args).await,
+        }
+    }
+
     match &obj {
         Value::Object(o) => {
             let qualified = format!("{}.{}", o.class_name, OBJECT_SUBSREF_METHOD);
-            Ok(crate::call_builtin_async(&qualified, &[obj, Value::String(kind), payload]).await?)
+            Ok(
+                dispatch_with_current_outputs(&qualified, &[obj, Value::String(kind), payload])
+                    .await?,
+            )
         }
         Value::HandleObject(h) => {
             let target = unsafe { &*h.target.as_raw() };
@@ -302,7 +348,10 @@ async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::Bu
                 _ => h.class_name.clone(),
             };
             let qualified = format!("{class_name}.{OBJECT_SUBSREF_METHOD}");
-            Ok(crate::call_builtin_async(&qualified, &[obj, Value::String(kind), payload]).await?)
+            Ok(
+                dispatch_with_current_outputs(&qualified, &[obj, Value::String(kind), payload])
+                    .await?,
+            )
         }
         other => Err((format!("subsref: receiver must be object, got {other:?}")).into()),
     }
@@ -1557,6 +1606,30 @@ mod tests {
             .expect("runtime resolution should attempt semantic resolver")
             .expect("semantic invoker should succeed");
         assert_eq!(result, Value::Num(11.0));
+    }
+
+    #[test]
+    fn call_method_fallback_preserves_requested_outputs() {
+        let _output_guard = crate::output_count::push_output_count(Some(2));
+        let base = Value::Object(runmat_builtins::ObjectInstance::new(
+            "NoSuchMethodClass".to_string(),
+        ));
+        let result = block_on(call_method_builtin(
+            base.clone(),
+            "deal".to_string(),
+            vec![Value::Num(9.0), Value::Num(10.0)],
+        ))
+        .expect("call_method fallback should succeed");
+        match result {
+            Value::OutputList(values) => {
+                assert!(values.len() >= 2);
+                assert_eq!(values[0], base);
+                assert_eq!(values[1], Value::Num(9.0));
+            }
+            other => {
+                panic!("expected output list from multi-output call_method fallback, got {other:?}")
+            }
+        }
     }
 
     #[test]
