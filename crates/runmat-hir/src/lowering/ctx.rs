@@ -2057,6 +2057,9 @@ fn member_access(value: &str) -> Option<crate::MemberAccess> {
 }
 
 fn is_builtin(name: &str) -> bool {
+    if matches!(name, NARGIN_BUILTIN_NAME | NARGOUT_BUILTIN_NAME) {
+        return true;
+    }
     runmat_builtins::builtin_functions()
         .iter()
         .any(|builtin| builtin.name == name)
