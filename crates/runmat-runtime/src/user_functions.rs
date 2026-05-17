@@ -30,37 +30,6 @@ pub struct SemanticCallableRequest {
 }
 
 impl SemanticCallableRequest {
-    pub fn named(
-        name: String,
-        args: Vec<Value>,
-        requested_outputs: usize,
-        kind: SemanticCallableKind,
-    ) -> Self {
-        Self::named_with_policy(
-            name,
-            args,
-            requested_outputs,
-            kind,
-            CallableFallbackPolicy::RuntimeNameResolution,
-        )
-    }
-
-    pub fn named_with_policy(
-        name: String,
-        args: Vec<Value>,
-        requested_outputs: usize,
-        kind: SemanticCallableKind,
-        fallback_policy: CallableFallbackPolicy,
-    ) -> Self {
-        Self {
-            identity: CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
-            fallback_policy,
-            args,
-            requested_outputs,
-            kind,
-        }
-    }
-
     pub fn semantic(
         function: usize,
         args: Vec<Value>,

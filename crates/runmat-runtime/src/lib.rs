@@ -1101,12 +1101,12 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         args: &[Value],
         requested_outputs: usize,
     ) -> crate::BuiltinResult<Value> {
-        let request = crate::user_functions::SemanticCallableRequest::named_with_policy(
-            name.to_string(),
+        let request = crate::user_functions::SemanticCallableRequest::resolved(
+            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name.to_string())),
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
             args.to_vec(),
             requested_outputs,
             crate::user_functions::SemanticCallableKind::Feval,
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
         );
         if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await {
             return result;
@@ -1591,12 +1591,14 @@ mod tests {
             }),
         ));
 
-        let request = crate::user_functions::SemanticCallableRequest::named_with_policy(
-            "resolved_target".to_string(),
+        let request = crate::user_functions::SemanticCallableRequest::resolved(
+            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+                "resolved_target".to_string(),
+            )),
+            runmat_hir::CallableFallbackPolicy::None,
             vec![Value::Num(4.0)],
             1,
             crate::user_functions::SemanticCallableKind::Other,
-            runmat_hir::CallableFallbackPolicy::None,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request));
@@ -1618,12 +1620,14 @@ mod tests {
             }),
         ));
 
-        let request = crate::user_functions::SemanticCallableRequest::named_with_policy(
-            "resolved_target".to_string(),
+        let request = crate::user_functions::SemanticCallableRequest::resolved(
+            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
+                "resolved_target".to_string(),
+            )),
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
             crate::user_functions::SemanticCallableKind::Other,
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
