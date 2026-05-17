@@ -259,6 +259,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
@@ -447,6 +449,58 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_ENERGY_IMBALANCE_TREND_WORSENING", codes)
         self.assertIn("EM_FLUX_DIVERGENCE_TREND_WORSENING", codes)
+
+    def test_em_dispersive_phase_assertion_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {
+                        "name": "em_homogeneous_dispersive_phase_attenuation_mean",
+                        "observed": 0.30,
+                    },
+                    {
+                        "name": "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
+                        "observed": 0.25,
+                    },
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {
+                        "name": "em_homogeneous_dispersive_phase_attenuation_mean",
+                        "observed": 0.90,
+                    },
+                    {
+                        "name": "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
+                        "observed": 0.80,
+                    },
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO"
+        ] = "1.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_DISPERSIVE_PHASE_ATTENUATION_TREND_WORSENING", codes)
+        self.assertIn(
+            "EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_WORSENING", codes
+        )
 
     def test_prep_health_count_warns_non_protected(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

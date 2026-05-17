@@ -165,3 +165,5 @@ Progress update (2026-05-17):
     `release_readiness_nonlinear.py` now evaluates EM homogeneous/heterogeneous phase attenuation threshold assertions (`em_*_dispersive_phase_attenuation_mean`, `em_*_dispersive_phase_conductivity_attenuation_ratio`) with profile-tuned minimum thresholds and breach-rate integration so phase-fidelity regressions become branch readiness reasons instead of passive telemetry.
 49. [x] EM phase attenuation external/schema enforcement depth expanded:
     external-reference and nonlinear benchmark-schema validators now require both phase attenuation mean and phase conductivity attenuation ratio metrics for homogeneous/heterogeneous EM provider fixtures, with M6 baseline and governance tests updated so missing phase-ratio evidence fails enforcement.
+50. [x] EM release-readiness phase-attenuation trend gating expanded:
+    `release_readiness_nonlinear.py` now evaluates rolling trend ratios for homogeneous/heterogeneous EM phase attenuation assertions (mean and conductivity attenuation ratio) under profile-tuned thresholds, emitting dedicated readiness reasons when phase-fidelity posture regresses relative to baseline.

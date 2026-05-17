@@ -135,6 +135,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.15",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.95",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.65",
@@ -236,6 +238,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.25",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.75",
@@ -337,6 +341,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN": "0.7",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO": "0.7",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.9",
@@ -1340,6 +1346,24 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_max_dispersive_phase_attenuation_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_dispersive_phase_conductivity_attenuation_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
     em_min_dispersive_phase_attenuation_mean_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN",
@@ -1718,6 +1742,8 @@ def evaluate_release_readiness(
     em_breach_rate = None
     em_energy_imbalance_trend_ratio = None
     em_flux_divergence_trend_ratio = None
+    em_dispersive_phase_attenuation_trend_ratio = None
+    em_dispersive_phase_conductivity_attenuation_trend_ratio = None
     plastic_max_nonlinear_severity = None
     plastic_load_realization_ratio_min = None
     plastic_load_realization_ratio_max = None
@@ -3205,6 +3231,30 @@ def evaluate_release_readiness(
                 return None
             return max(ratios)
 
+        def fixture_assertion_trend_ratio(assertion_name: str):
+            ratios = []
+            for fixture_id, latest_rec in latest_by_fixture.items():
+                baseline_records = rolling_by_fixture.get(fixture_id, [])
+                if not baseline_records:
+                    continue
+                latest_value = threshold_assertion_observed(latest_rec, assertion_name)
+                if latest_value is None:
+                    continue
+                baseline_values = []
+                for rec in baseline_records:
+                    observed = threshold_assertion_observed(rec, assertion_name)
+                    if observed is not None:
+                        baseline_values.append(observed)
+                if not baseline_values:
+                    continue
+                baseline_value = statistics.median(baseline_values)
+                if baseline_value <= 0 or latest_value <= 0:
+                    continue
+                ratios.append(baseline_value / latest_value)
+            if not ratios:
+                return None
+            return max(ratios)
+
         thermo_spread_trend_ratio = fixture_trend_ratio(
             "thermo_constitutive_material_spread_ratio"
         )
@@ -3457,6 +3507,69 @@ def evaluate_release_readiness(
                     ),
                 )
             )
+
+        phase_attenuation_trend_candidates = [
+            fixture_assertion_trend_ratio(
+                "em_homogeneous_dispersive_phase_attenuation_mean"
+            ),
+            fixture_assertion_trend_ratio(
+                "em_heterogeneous_dispersive_phase_attenuation_mean"
+            ),
+        ]
+        phase_attenuation_trend_candidates = [
+            value for value in phase_attenuation_trend_candidates if value is not None
+        ]
+        if phase_attenuation_trend_candidates:
+            em_dispersive_phase_attenuation_trend_ratio = max(
+                phase_attenuation_trend_candidates
+            )
+            if (
+                em_dispersive_phase_attenuation_trend_ratio
+                > em_max_dispersive_phase_attenuation_trend_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="EM_DISPERSIVE_PHASE_ATTENUATION_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "EM dispersive phase attenuation trend ratio "
+                            f"{em_dispersive_phase_attenuation_trend_ratio:.3f} exceeds "
+                            f"threshold {em_max_dispersive_phase_attenuation_trend_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        phase_conductivity_trend_candidates = [
+            fixture_assertion_trend_ratio(
+                "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio"
+            ),
+            fixture_assertion_trend_ratio(
+                "em_heterogeneous_dispersive_phase_conductivity_attenuation_ratio"
+            ),
+        ]
+        phase_conductivity_trend_candidates = [
+            value for value in phase_conductivity_trend_candidates if value is not None
+        ]
+        if phase_conductivity_trend_candidates:
+            em_dispersive_phase_conductivity_attenuation_trend_ratio = max(
+                phase_conductivity_trend_candidates
+            )
+            if (
+                em_dispersive_phase_conductivity_attenuation_trend_ratio
+                > em_max_dispersive_phase_conductivity_attenuation_trend_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "EM dispersive phase conductivity attenuation trend ratio "
+                            f"{em_dispersive_phase_conductivity_attenuation_trend_ratio:.3f} exceeds "
+                            "threshold "
+                            f"{em_max_dispersive_phase_conductivity_attenuation_trend_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
 
         plastic_trend_ratio = fixture_trend_ratio("plastic_nonlinear_severity")
         if (
@@ -3999,6 +4112,10 @@ def evaluate_release_readiness(
         "em_max_energy_imbalance_trend_ratio_threshold": em_max_energy_imbalance_trend_ratio_threshold,
         "em_flux_divergence_trend_ratio": em_flux_divergence_trend_ratio,
         "em_max_flux_divergence_trend_ratio_threshold": em_max_flux_divergence_trend_ratio_threshold,
+        "em_dispersive_phase_attenuation_trend_ratio": em_dispersive_phase_attenuation_trend_ratio,
+        "em_max_dispersive_phase_attenuation_trend_ratio_threshold": em_max_dispersive_phase_attenuation_trend_ratio_threshold,
+        "em_dispersive_phase_conductivity_attenuation_trend_ratio": em_dispersive_phase_conductivity_attenuation_trend_ratio,
+        "em_max_dispersive_phase_conductivity_attenuation_trend_ratio_threshold": em_max_dispersive_phase_conductivity_attenuation_trend_ratio_threshold,
         "plastic_max_nonlinear_severity": plastic_max_nonlinear_severity,
         "plastic_max_nonlinear_severity_threshold": plastic_max_nonlinear_severity_threshold,
         "plastic_load_realization_ratio_min": plastic_load_realization_ratio_min,
