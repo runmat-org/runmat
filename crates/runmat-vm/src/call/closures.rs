@@ -5,7 +5,7 @@ use crate::call::descriptor::{
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
 use runmat_builtins::{builtin_functions, lookup_method, Access, CellArray, Closure, Value};
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, SymbolName};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
 
 fn requested_output_arity(requested_outputs: Option<usize>) -> usize {
@@ -25,6 +25,16 @@ async fn call_explicit_builtin(
 
 fn dynamic_identity(name: String) -> CallableIdentity {
     CallableIdentity::DynamicName(SymbolName(name))
+}
+
+fn external_qualified_identity(base: &str, member: &str) -> CallableIdentity {
+    let mut segments: Vec<SymbolName> = base
+        .split('.')
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| SymbolName(segment.to_string()))
+        .collect();
+    segments.push(SymbolName(member.to_string()));
+    CallableIdentity::ExternalName(QualifiedName(segments))
 }
 
 fn method_identity(name: String) -> CallableIdentity {
@@ -131,14 +141,17 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
                     captures: vec![],
                 }));
             }
-            let qualified = format!("{cls}.{name}");
-            if builtin_functions().iter().any(|b| b.name == qualified) {
+            let qualified_identity = external_qualified_identity(&cls, &name);
+            let Some(qualified_name) = qualified_identity.display_name() else {
+                return Err(format!("Unknown static method '{}' on class {}", name, cls).into());
+            };
+            if builtin_functions().iter().any(|b| b.name == qualified_name) {
                 Ok(Value::Closure(Closure {
                     semantic_function:
                         runmat_runtime::user_functions::resolve_semantic_function_by_name(
-                            &qualified,
+                            &qualified_name,
                         ),
-                    function_name: qualified,
+                    function_name: qualified_name,
                     captures: vec![],
                 }))
             } else {
@@ -194,10 +207,13 @@ pub async fn call_method_or_member_index_with_outputs(
             let mut method_args = Vec::with_capacity(1 + args.len());
             method_args.push(Value::Object(obj.clone()));
             method_args.extend(args.iter().cloned());
-            let qualified = format!("{}.{}", obj.class_name, name);
+            let qualified_identity = external_qualified_identity(&obj.class_name, &name);
+            let qualified_display_name = qualified_identity
+                .display_name()
+                .unwrap_or_else(|| format!("{}.{}", obj.class_name, name));
             if let Some(v) = try_call_identity_with_policy(
-                dynamic_identity(qualified.clone()),
-                Some(qualified.clone()),
+                qualified_identity.clone(),
+                Some(qualified_display_name.clone()),
                 method_args.clone(),
                 requested_outputs,
                 CallableFallbackPolicy::ObjectDispatch,
@@ -219,8 +235,8 @@ pub async fn call_method_or_member_index_with_outputs(
             }
 
             match call_identity_with_policy(
-                dynamic_identity(qualified.clone()),
-                Some(qualified),
+                qualified_identity,
+                Some(qualified_display_name),
                 method_args.clone(),
                 requested_outputs,
                 fallback_policy,
@@ -296,10 +312,13 @@ pub async fn call_method_or_member_index_with_outputs(
                 .await;
             }
 
-            let qualified = format!("{cls}.{name}");
+            let qualified_identity = external_qualified_identity(&cls, &name);
+            let qualified_display_name = qualified_identity
+                .display_name()
+                .unwrap_or_else(|| format!("{cls}.{name}"));
             call_identity_with_policy(
-                dynamic_identity(qualified.clone()),
-                Some(qualified),
+                qualified_identity,
+                Some(qualified_display_name),
                 args,
                 requested_outputs,
                 classref_fallback,
