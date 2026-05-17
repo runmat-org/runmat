@@ -124,6 +124,7 @@ impl<'a> GraphBuilder<'a> {
             Instr::UPlus => self.handle_unary_primitive(pc, PrimitiveOp::UPlus),
             Instr::Transpose | Instr::ConjugateTranspose => self.handle_transpose(pc),
             Instr::CallBuiltin(name, argc) => self.handle_call_builtin(pc, name, *argc),
+            Instr::CallBuiltinMulti(name, argc, _) => self.handle_call_builtin(pc, name, *argc),
             Instr::Pop => {
                 let _ = self.pop_value();
             }

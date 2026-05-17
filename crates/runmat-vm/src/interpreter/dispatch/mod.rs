@@ -24,11 +24,12 @@ pub use arrays::{
 };
 pub use calls::{
     build_builtin_expand_at_args, build_builtin_expand_multi_args, build_feval_expand_multi_args,
-    build_user_function_expand_multi_args, handle_builtin_call, handle_builtin_expand_at_call,
-    handle_builtin_expand_last_call, handle_builtin_expand_multi_call, handle_create_closure,
-    handle_create_semantic_closure, handle_feval_dispatch, handle_load_method,
-    handle_load_static_property, handle_method_call, handle_method_or_member_index_call,
-    handle_method_or_member_index_expand_multi_call, handle_prepared_user_function_call,
+    build_user_function_expand_multi_args, handle_builtin_call, handle_builtin_call_multi,
+    handle_builtin_expand_at_call, handle_builtin_expand_last_call,
+    handle_builtin_expand_multi_call, handle_create_closure, handle_create_semantic_closure,
+    handle_feval_dispatch, handle_load_method, handle_load_static_property, handle_method_call,
+    handle_method_or_member_index_call, handle_method_or_member_index_expand_multi_call,
+    handle_method_or_member_index_multi_call, handle_prepared_user_function_call,
     handle_register_class, handle_static_method_call, handle_user_function_call, BuiltinHandling,
     FevalHandling, UserCallHandling,
 };
@@ -469,6 +470,41 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CallBuiltinMulti(name, arg_count, out_count) => {
+            match handle_builtin_call_multi(
+                calls::BuiltinCallContext {
+                    stack,
+                    name,
+                    arg_count: *arg_count,
+                    next_instr,
+                    source_id,
+                    call_arg_spans: call_arg_spans.clone(),
+                    imports: imports.as_slice(),
+                    call_counts,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                *out_count,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                BuiltinHandling::Completed => {}
+                BuiltinHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                BuiltinHandling::Uncaught(err) => return Err(*err),
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CallFeval(argc) => {
             let args = crate::call::builtins::collect_call_args(stack, *argc)?;
             let func_val = crate::interpreter::stack::pop_value(stack)?;
@@ -771,6 +807,13 @@ pub async fn dispatch_instruction(
         }
         Instr::CallMethodOrMemberIndex(name, arg_count) => {
             handle_method_or_member_index_call(stack, name.clone(), *arg_count, next_instr).await?;
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallMethodOrMemberIndexMulti(name, arg_count, out_count) => {
+            handle_method_or_member_index_multi_call(stack, name.clone(), *arg_count, *out_count)
+                .await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

@@ -388,11 +388,30 @@ pub async fn handle_builtin_call(
     ctx: BuiltinCallContext<'_>,
     refresh_vars: impl Fn(&[Value]),
 ) -> Result<BuiltinHandling, RuntimeError> {
+    let requested_outputs = requested_output_count_from_next(ctx.next_instr);
+    let output_hint = output_hint_for_next(ctx.next_instr);
+    handle_builtin_call_inner(ctx, refresh_vars, requested_outputs, output_hint).await
+}
+
+pub async fn handle_builtin_call_multi(
+    ctx: BuiltinCallContext<'_>,
+    out_count: usize,
+    refresh_vars: impl Fn(&[Value]),
+) -> Result<BuiltinHandling, RuntimeError> {
+    handle_builtin_call_inner(ctx, refresh_vars, Some(out_count), out_count).await
+}
+
+async fn handle_builtin_call_inner(
+    ctx: BuiltinCallContext<'_>,
+    refresh_vars: impl Fn(&[Value]),
+    requested_outputs: Option<usize>,
+    output_hint: usize,
+) -> Result<BuiltinHandling, RuntimeError> {
     let BuiltinCallContext {
         stack,
         name,
         arg_count,
-        next_instr,
+        next_instr: _,
         source_id,
         call_arg_spans,
         imports,
@@ -411,11 +430,9 @@ pub async fn handle_builtin_call(
         stack.push(value);
         return Ok(BuiltinHandling::Completed);
     }
-    let requested_outputs = requested_output_count_from_next(next_instr);
     let args = call_builtins::collect_call_args(stack, arg_count)?;
 
     let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
-    let output_hint = output_hint_for_next(next_instr);
     let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
 
     let prepared_primary = call_builtins::prepare_builtin_args(name, &args).await?;
@@ -600,9 +617,30 @@ pub async fn handle_method_or_member_index_call(
     arg_count: usize,
     next_instr: Option<&Instr>,
 ) -> Result<MethodHandling, RuntimeError> {
-    let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
     let requested_outputs = requested_output_count_from_next(next_instr);
     let output_hint = output_hint_for_next(next_instr);
+    handle_method_or_member_index_call_inner(stack, name, arg_count, requested_outputs, output_hint)
+        .await
+}
+
+pub async fn handle_method_or_member_index_multi_call(
+    stack: &mut Vec<Value>,
+    name: String,
+    arg_count: usize,
+    out_count: usize,
+) -> Result<MethodHandling, RuntimeError> {
+    handle_method_or_member_index_call_inner(stack, name, arg_count, Some(out_count), out_count)
+        .await
+}
+
+async fn handle_method_or_member_index_call_inner(
+    stack: &mut Vec<Value>,
+    name: String,
+    arg_count: usize,
+    requested_outputs: Option<usize>,
+    output_hint: usize,
+) -> Result<MethodHandling, RuntimeError> {
+    let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
     let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
     let value = call_closures::call_method_or_member_index_with_outputs(
         base,

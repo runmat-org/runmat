@@ -158,6 +158,7 @@ pub enum Instr {
 
     // Ambiguous `obj.name(...)` shape resolved at runtime as method call or member indexing.
     CallMethodOrMemberIndex(String, usize),
+    CallMethodOrMemberIndexMulti(String, usize, usize),
     CallMethodOrMemberIndexExpandMulti(String, Vec<ArgSpec>),
     CallMethodOrMemberIndexExpandMultiOutput(String, Vec<ArgSpec>, usize),
 
@@ -193,6 +194,7 @@ pub enum Instr {
     // User-function invocation variants.
     CallFunction(String, usize),
     CallSemanticFunction(FunctionId, usize),
+    CallBuiltinMulti(String, usize, usize),
 
     // Calls a user function and shapes the result list to `out_count`.
     CallFunctionMulti(String, usize, usize),
@@ -300,11 +302,13 @@ impl Instr {
             Instr::CallBuiltin(_, argc)
             | Instr::CallFunction(_, argc)
             | Instr::CallSemanticFunction(_, argc) => effect(*argc, 1),
+            Instr::CallBuiltinMulti(_, argc, _) => effect(*argc, 1),
             Instr::CallFunctionMulti(_, argc, out_count)
             | Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
             Instr::CallMethod(_, argc) | Instr::CallMethodOrMemberIndex(_, argc) => {
                 effect(argc + 1, 1)
             }
+            Instr::CallMethodOrMemberIndexMulti(_, argc, _) => effect(argc + 1, 1),
             Instr::CallStaticMethod(_, _, argc) => effect(*argc, 1),
             Instr::CallFeval(argc) => effect(argc + 1, 1),
             Instr::CallFevalMulti(argc, _) => effect(argc + 1, 1),
