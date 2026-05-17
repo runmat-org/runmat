@@ -80,14 +80,14 @@ async fn call_builtin_auto(name: &str, args: &[Value]) -> Result<Value, RuntimeE
     runmat_runtime::call_builtin_async(name, &prepared).await
 }
 
-fn output_hint_for_next(next_instr: Option<&Instr>) -> usize {
+pub(crate) fn output_hint_for_next(next_instr: Option<&Instr>) -> usize {
     match next_instr {
         Some(Instr::Pop) | Some(Instr::EmitStackTop { .. }) => 0,
         _ => 1,
     }
 }
 
-fn requested_output_count_from_next(next_instr: Option<&Instr>) -> Option<usize> {
+pub(crate) fn requested_output_count_from_next(next_instr: Option<&Instr>) -> Option<usize> {
     match next_instr {
         Some(Instr::Unpack(count)) => Some(*count),
         _ => None,
@@ -619,7 +619,8 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     stack: &mut Vec<Value>,
     name: String,
     specs: &[ArgSpec],
-    next_instr: Option<&Instr>,
+    requested_outputs: Option<usize>,
+    output_hint: usize,
 ) -> Result<MethodHandling, RuntimeError> {
     let mut args = build_user_function_expand_multi_args(stack, specs).await?;
     if args.is_empty() {
@@ -629,8 +630,6 @@ pub async fn handle_method_or_member_index_expand_multi_call(
         ));
     }
     let base = args.remove(0);
-    let requested_outputs = requested_output_count_from_next(next_instr);
-    let output_hint = output_hint_for_next(next_instr);
     let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
     let value = call_closures::call_method_or_member_index_with_outputs(
         base,

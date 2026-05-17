@@ -776,8 +776,27 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::CallMethodOrMemberIndexExpandMulti(name, specs) => {
-            handle_method_or_member_index_expand_multi_call(stack, name.clone(), specs, next_instr)
-                .await?;
+            handle_method_or_member_index_expand_multi_call(
+                stack,
+                name.clone(),
+                specs,
+                calls::requested_output_count_from_next(next_instr),
+                calls::output_hint_for_next(next_instr),
+            )
+            .await?;
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CallMethodOrMemberIndexExpandMultiOutput(name, specs, out_count) => {
+            handle_method_or_member_index_expand_multi_call(
+                stack,
+                name.clone(),
+                specs,
+                Some(*out_count),
+                *out_count,
+            )
+            .await?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

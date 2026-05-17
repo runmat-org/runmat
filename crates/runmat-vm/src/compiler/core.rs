@@ -1791,7 +1791,19 @@ impl Compiler {
         }
         if has_expansion {
             let (specs, _) = self.mir_call_arg_specs(&call.args);
-            self.emit(Instr::CallMethodOrMemberIndexExpandMulti(name, specs));
+            if let Some(output_count) = self.call_requested_output_count(call) {
+                if output_count == 1 {
+                    self.emit(Instr::CallMethodOrMemberIndexExpandMulti(name, specs));
+                } else {
+                    self.emit(Instr::CallMethodOrMemberIndexExpandMultiOutput(
+                        name,
+                        specs,
+                        output_count,
+                    ));
+                }
+            } else {
+                self.emit(Instr::CallMethodOrMemberIndexExpandMulti(name, specs));
+            }
             return Ok(());
         }
         self.emit(Instr::CallMethodOrMemberIndex(

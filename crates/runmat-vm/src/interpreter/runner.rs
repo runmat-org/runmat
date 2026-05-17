@@ -630,6 +630,7 @@ async fn run_interpreter_inner(
             | Instr::CallMethod(_, _)
             | Instr::CallMethodOrMemberIndex(_, _)
             | Instr::CallMethodOrMemberIndexExpandMulti(_, _)
+            | Instr::CallMethodOrMemberIndexExpandMultiOutput(_, _, _)
             | Instr::LoadMethod(_)
             | Instr::CreateFunctionHandle(_)
             | Instr::CreateSemanticFunctionHandle(_, _)

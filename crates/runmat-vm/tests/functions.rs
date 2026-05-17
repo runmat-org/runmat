@@ -1076,6 +1076,24 @@ fn object_cell_expansion_via_subsref() {
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
 }
 
+#[cfg(any(feature = "test-classes", test))]
+#[test]
+fn method_expand_multi_output_uses_typed_instruction() {
+    let source = "obj = new_object('Point'); C = deal(7, 3); [a,b] = obj.deal(C{:}); s = b;";
+    let bytecode =
+        compile_semantic_source(source).expect("compile method expand multi-output source");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput(name, specs, out_count)
+            if name == "deal" && *out_count == 2 && specs.len() == 2 && specs[1].is_expand && specs[1].expand_all
+    )));
+
+    let vars = interpret(&bytecode).expect("execute method expand multi-output");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 7.0).abs() < 1e-9)));
+}
+
 #[test]
 fn expand_all_elements_in_args() {
     // C{:} expands all elements of C into separate arguments
