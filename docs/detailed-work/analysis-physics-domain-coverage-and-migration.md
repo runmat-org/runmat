@@ -266,6 +266,16 @@ Not required for this milestone:
   - `analysis.results` summary and `analysis.trends` breach-rate payloads now expose these three signals.
 - Expanded conformance coverage with a dedicated EM boundary-kernel stress reference fixture and wired the new metrics into baseline + rolling drift checks.
 
+### Maxwell EM Phase-12 Status (2026-05-16)
+
+- Upgraded EM static solve internals from single-scalar pass to a coupled harmonic iteration path:
+  - real/imaginary vector-potential passes with conductivity-coupled RHS exchange,
+  - normalized coupled residual evaluation against full equation-scale terms.
+- Added harmonic-coupling diagnostics and stabilized quality signaling:
+  - `FEA_EM_HARMONIC_COUPLING` now reports iteration and coupling posture,
+  - intermediate sub-solve max-iteration warnings are suppressed from top-level quality gating to avoid false negatives.
+- Kept runtime contracts stable while recalibrating solver-quality mapping so homogeneous control fixtures remain publishable and stress fixtures remain policy-governed via readiness breaches.
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.

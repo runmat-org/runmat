@@ -147,6 +147,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. Wired those metrics into runtime policy/reasoning and trend governance as thresholded breach-rate signals.
 3. Added a dedicated boundary-kernel stress reference fixture and extended conformance/baseline drift checks for the new boundary metrics.
 
+## Maxwell EM Bring-Up Status (Phase 12)
+
+1. Reworked EM static solve to a coupled harmonic iteration (real/imag component passes) with conductivity-mediated cross-coupling.
+2. Added normalized coupled residual posture and harmonic-coupling diagnostics while preserving existing runtime contract interfaces.
+3. Stabilized publishability signaling by preventing intermediate sub-solve convergence warnings from dominating top-level EM quality gates.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

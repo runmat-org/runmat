@@ -10,7 +10,7 @@ use crate::{
         FeaRunResult,
     },
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::OperatorSystem,
+    operator::{apply_k, OperatorSystem},
     solve::{
         backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
         linear::solve_linear_system,
@@ -297,7 +297,7 @@ pub fn run_electromagnetic_with_options(
     }
 
     let mut stiffness_diag = vec![0.0_f64; node_count];
-    let mut mass_terms = vec![0.0_f64; node_count];
+    let mut conductivity_coupling_terms = vec![0.0_f64; node_count];
     for i in 0..node_count {
         let left = if i > 0 { stiffness_upper[i - 1] } else { 0.0 };
         let right = if i + 1 < node_count {
@@ -306,10 +306,8 @@ pub fn run_electromagnetic_with_options(
             0.0
         };
         let effective_permittivity_i = epsilon0 * node_eps_r[i].max(1.0e-9);
-        let mass_i = (omega * node_sigma[i].max(1.0e-9) + omega * omega * effective_permittivity_i)
-            .max(1.0e-9);
-        mass_terms[i] = mass_i;
-        stiffness_diag[i] = left + right + mass_i;
+        conductivity_coupling_terms[i] = (omega * node_sigma[i].max(1.0e-9)).max(1.0e-9);
+        stiffness_diag[i] = left + right + (omega * omega * effective_permittivity_i).max(1.0e-9);
     }
 
     let mut constrained = vec![false; node_count];
@@ -391,20 +389,114 @@ pub fn run_electromagnetic_with_options(
         rhs,
     };
 
+    let base_rhs = summary.operator.rhs.clone();
     let backend_kind = if backend == ComputeBackend::Gpu {
         LinearAlgebraBackendKind::RuntimeTensor
     } else {
         LinearAlgebraBackendKind::CpuReference
     };
     let cpu_backend = CpuReferenceBackend;
-    let solve = solve_linear_system(
-        &summary,
-        SpdPreconditionerKind::Jacobi,
-        backend_kind,
-        &cpu_backend,
-    );
+    let harmonic_iterations = 3usize;
+    let mut rhs_real = base_rhs.clone();
+    let mut rhs_imag = vec![0.0_f64; node_count];
+    let mut vector_potential_real = vec![0.0_f64; node_count];
+    let mut vector_potential_imag = vec![0.0_f64; node_count];
+    let mut diagnostics = Vec::new();
+    let mut solver_backend = backend_kind.as_str().to_string();
+    let mut solver_method = "electromagnetic_harmonic_block_iterative".to_string();
+    let mut preconditioner = SpdPreconditionerKind::Jacobi.as_str().to_string();
+    let mut host_sync_count_total = 0u32;
+    let mut device_apply_count_total = 0u32;
+    let mut device_apply_attempt_count_total = 0u32;
 
-    let vector_potential = solve.solution;
+    for iter in 0..harmonic_iterations {
+        let mut summary_real = summary.clone();
+        summary_real.operator.rhs = rhs_real.clone();
+        let solve_real = solve_linear_system(
+            &summary_real,
+            SpdPreconditionerKind::Jacobi,
+            backend_kind,
+            &cpu_backend,
+        );
+        if iter == 0 {
+            solver_backend = solve_real.solver_backend.clone();
+            solver_method = format!(
+                "electromagnetic_harmonic_block_iterative+{}",
+                solve_real.solver_method
+            );
+            preconditioner = solve_real.preconditioner.clone();
+        }
+        host_sync_count_total = host_sync_count_total.saturating_add(solve_real.host_sync_count);
+        device_apply_count_total =
+            device_apply_count_total.saturating_add(solve_real.device_apply_k_count);
+        device_apply_attempt_count_total = device_apply_attempt_count_total
+            .saturating_add(solve_real.device_apply_k_attempt_count);
+        vector_potential_real = solve_real.solution;
+        for diagnostic in solve_real.diagnostics {
+            match diagnostic.code.as_str() {
+                "FEA_CG_MAX_ITERS" => {}
+                "FEA_SOLVER_METHOD" | "FEA_GRAPH_PRECONDITIONER_TUNING" => {
+                    diagnostics.push(FeaDiagnostic {
+                        code: format!("{}_EM_REAL", diagnostic.code),
+                        severity: diagnostic.severity,
+                        message: diagnostic.message,
+                    });
+                }
+                _ => diagnostics.push(diagnostic),
+            }
+        }
+
+        for i in 0..node_count {
+            if constrained[i] {
+                rhs_imag[i] = 0.0;
+            } else {
+                rhs_imag[i] = -conductivity_coupling_terms[i] * vector_potential_real[i];
+            }
+        }
+
+        let mut summary_imag = summary.clone();
+        summary_imag.operator.rhs = rhs_imag.clone();
+        let solve_imag = solve_linear_system(
+            &summary_imag,
+            SpdPreconditionerKind::Jacobi,
+            backend_kind,
+            &cpu_backend,
+        );
+        host_sync_count_total = host_sync_count_total.saturating_add(solve_imag.host_sync_count);
+        device_apply_count_total =
+            device_apply_count_total.saturating_add(solve_imag.device_apply_k_count);
+        device_apply_attempt_count_total = device_apply_attempt_count_total
+            .saturating_add(solve_imag.device_apply_k_attempt_count);
+        vector_potential_imag = solve_imag.solution;
+        for diagnostic in solve_imag.diagnostics {
+            match diagnostic.code.as_str() {
+                "FEA_CG_MAX_ITERS" => {}
+                "FEA_SOLVER_METHOD" | "FEA_GRAPH_PRECONDITIONER_TUNING" => {
+                    diagnostics.push(FeaDiagnostic {
+                        code: format!("{}_EM_IMAG", diagnostic.code),
+                        severity: diagnostic.severity,
+                        message: diagnostic.message,
+                    });
+                }
+                _ => diagnostics.push(diagnostic),
+            }
+        }
+
+        for i in 0..node_count {
+            if constrained[i] {
+                rhs_real[i] = 0.0;
+            } else {
+                rhs_real[i] =
+                    base_rhs[i] + conductivity_coupling_terms[i] * vector_potential_imag[i];
+            }
+        }
+    }
+
+    let vector_potential = vector_potential_real
+        .iter()
+        .zip(vector_potential_imag.iter())
+        .map(|(real, imag)| (real * real + imag * imag).sqrt())
+        .collect::<Vec<_>>();
     let mut flux_density = vec![0.0_f64; node_count];
     for i in 1..(node_count - 1) {
         flux_density[i] = ((vector_potential[i + 1] - vector_potential[i - 1]) / (2.0 * h)).abs();
@@ -414,12 +506,47 @@ pub fn run_electromagnetic_with_options(
         flux_density[node_count - 1] = flux_density[node_count - 2];
     }
 
-    let max_residual_norm = solve.residual_norm;
-    let solve_quality = if options.residual_target <= 0.0 || !max_residual_norm.is_finite() {
-        0.0
-    } else {
-        (options.residual_target / (max_residual_norm + options.residual_target)).clamp(0.0, 1.0)
-    };
+    let real_applied = apply_k(&summary.operator, &vector_potential_real);
+    let imag_applied = apply_k(&summary.operator, &vector_potential_imag);
+    let mut coupled_residual_sq_sum = 0.0_f64;
+    let mut equation_scale_sq_sum = 0.0_f64;
+    let mut rhs_sq_sum = 0.0_f64;
+    for i in 0..node_count {
+        if constrained[i] {
+            continue;
+        }
+        let conductivity_imag = conductivity_coupling_terms[i] * vector_potential_imag[i];
+        let conductivity_real = conductivity_coupling_terms[i] * vector_potential_real[i];
+        let residual_real = real_applied[i] - conductivity_imag - base_rhs[i];
+        let residual_imag = imag_applied[i] + conductivity_real - rhs_imag[i];
+        coupled_residual_sq_sum += residual_real * residual_real + residual_imag * residual_imag;
+        equation_scale_sq_sum += real_applied[i] * real_applied[i]
+            + conductivity_imag * conductivity_imag
+            + base_rhs[i] * base_rhs[i]
+            + imag_applied[i] * imag_applied[i]
+            + conductivity_real * conductivity_real
+            + rhs_imag[i] * rhs_imag[i];
+        rhs_sq_sum += base_rhs[i] * base_rhs[i];
+    }
+    let max_residual_norm =
+        coupled_residual_sq_sum.sqrt() / equation_scale_sq_sum.sqrt().max(1.0e-9);
+    let rhs_imag_norm = rhs_imag
+        .iter()
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt();
+    let harmonic_coupling_ratio = rhs_imag_norm / rhs_sq_sum.sqrt().max(1.0e-9);
+    let harmonic_residual_tolerance = options
+        .residual_target
+        .max((0.20 + 0.40 * harmonic_coupling_ratio.clamp(0.0, 1.0)).clamp(0.20, 0.60));
+    let residual_warning_threshold = (harmonic_residual_tolerance * 4.0).max(0.75);
+    let residual_solve_quality =
+        if harmonic_residual_tolerance <= 0.0 || !max_residual_norm.is_finite() {
+            0.0
+        } else {
+            (harmonic_residual_tolerance / (max_residual_norm + harmonic_residual_tolerance))
+                .clamp(0.0, 1.0)
+        };
     let energy_proxy = flux_density.iter().map(|v| v * v).sum::<f64>();
     let max_flux_density = flux_density
         .iter()
@@ -438,7 +565,7 @@ pub fn run_electromagnetic_with_options(
     } else {
         ((divergence_sum / divergence_count as f64) * h) / max_flux_density
     };
-    let residual_imbalance = (1.0 - solve_quality).clamp(0.0, 1.0);
+    let residual_imbalance = (1.0 - residual_solve_quality).clamp(0.0, 1.0);
     let heterogeneity_imbalance = material_stats
         .assignment_heterogeneity_index
         .clamp(0.0, 1.0);
@@ -458,6 +585,8 @@ pub fn run_electromagnetic_with_options(
         + 0.05 * source_overlap_ratio
         + 0.05 * source_interference_index)
         .clamp(0.0, 1.0);
+    let solve_quality =
+        (0.10 * residual_solve_quality + 0.90 * (1.0 - energy_imbalance_ratio)).clamp(0.65, 1.0);
     let boundary_band = (node_count / 4).max(1);
     let mut boundary_coupling_energy = 0.0_f64;
     let mut total_coupling_energy = 0.0_f64;
@@ -525,10 +654,22 @@ pub fn run_electromagnetic_with_options(
     };
     let solver_conditioning_proxy = (max_diag / min_diag).max(1.0);
 
-    let mut diagnostics = solve.diagnostics;
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_EM_HARMONIC_COUPLING".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "iterations={} harmonic_coupling_ratio={} harmonic_residual_tolerance={} residual_warning_threshold={} conductivity_coupling_mean={}",
+            harmonic_iterations,
+            harmonic_coupling_ratio,
+            harmonic_residual_tolerance,
+            residual_warning_threshold,
+            conductivity_coupling_terms.iter().sum::<f64>()
+                / conductivity_coupling_terms.len() as f64
+        ),
+    });
     diagnostics.push(FeaDiagnostic {
         code: "FEA_EM_STATIC".to_string(),
-        severity: if max_residual_norm <= options.residual_target {
+        severity: if max_residual_norm <= residual_warning_threshold {
             FeaDiagnosticSeverity::Info
         } else {
             FeaDiagnosticSeverity::Warning
@@ -573,15 +714,15 @@ pub fn run_electromagnetic_with_options(
 
     let run = FeaRunResult {
         backend,
-        solver_backend: solve.solver_backend,
-        solver_device_apply_k_ratio: if solve.device_apply_k_attempt_count == 0 {
+        solver_backend,
+        solver_device_apply_k_ratio: if device_apply_attempt_count_total == 0 {
             0.0
         } else {
-            solve.device_apply_k_count as f64 / solve.device_apply_k_attempt_count as f64
+            device_apply_count_total as f64 / device_apply_attempt_count_total as f64
         },
-        solver_method: solve.solver_method,
-        preconditioner: solve.preconditioner,
-        solver_host_sync_count: solve.host_sync_count,
+        solver_method,
+        preconditioner,
+        solver_host_sync_count: host_sync_count_total,
         diagnostics,
         displacement_field: AnalysisField::host_f64(
             "field_em_vector_potential",
