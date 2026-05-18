@@ -355,6 +355,22 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_HIT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_ADAPT_SCALE_MIN",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_SCALE_MAX",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_ADAPT_SCALE_MEAN",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_DECREASE_STEPS",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_PHYSICS_JUMP_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_PHYSICS_NONFINITE_COUNT",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_SHOCK_PHYSICS_JUMP_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_SHOCK_PHYSICS_NONFINITE_COUNT",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_SCALE_MIN_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_SCALE_MAX_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_SCALE_MEAN_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_DECREASE_STEPS_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_PHYSICS_JUMP_RATIO_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_PHYSICS_NONFINITE_COUNT_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_SHOCK_PHYSICS_JUMP_RATIO_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_SHOCK_PHYSICS_NONFINITE_COUNT_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY",
@@ -4794,6 +4810,197 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("COUPLED_FLOW_TRANSIENT_ENERGY_GROWTH_TREND_WORSENING", codes)
         self.assertIn("COUPLED_FLOW_TRANSIENT_CACHE_HIT_TREND_WORSENING", codes)
         self.assertIn("COUPLED_FLOW_TRANSIENT_CACHE_MISSES_TREND_WORSENING", codes)
+
+    def test_transient_provider_metric_breaches_emit_reasons(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cfd_reynolds_proxy", "observed": 250000.0}
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "transient_long_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "transient_adapt_scale_min", "observed": 0.20},
+                    {"name": "transient_adapt_scale_max", "observed": 2.2},
+                    {"name": "transient_adapt_scale_mean", "observed": 0.30},
+                    {"name": "transient_adapt_decrease_steps", "observed": 8.0},
+                    {"name": "transient_physics_jump_ratio", "observed": 0.02},
+                    {"name": "transient_physics_nonfinite_count", "observed": 2.0},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "transient_shock_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "transient_shock_physics_jump_ratio", "observed": 0.03},
+                    {"name": "transient_shock_physics_nonfinite_count", "observed": 1.0},
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_ADAPT_SCALE_MIN"
+        ] = "0.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_SCALE_MAX"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_ADAPT_SCALE_MEAN"
+        ] = "0.8"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_DECREASE_STEPS"
+        ] = "2.0"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_PHYSICS_JUMP_RATIO"
+        ] = "0.001"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_PHYSICS_NONFINITE_COUNT"
+        ] = "0.0"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_SHOCK_PHYSICS_JUMP_RATIO"
+        ] = "0.001"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_SHOCK_PHYSICS_NONFINITE_COUNT"
+        ] = "0.0"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("TRANSIENT_PROVIDER_ADAPT_SCALE_MIN_LOW", codes)
+        self.assertIn("TRANSIENT_PROVIDER_ADAPT_SCALE_MAX_HIGH", codes)
+        self.assertIn("TRANSIENT_PROVIDER_ADAPT_SCALE_MEAN_LOW", codes)
+        self.assertIn("TRANSIENT_PROVIDER_ADAPT_DECREASE_STEPS_HIGH", codes)
+        self.assertIn("TRANSIENT_PROVIDER_PHYSICS_JUMP_RATIO_HIGH", codes)
+        self.assertIn("TRANSIENT_PROVIDER_PHYSICS_NONFINITE_COUNT_HIGH", codes)
+        self.assertIn("TRANSIENT_SHOCK_PROVIDER_PHYSICS_JUMP_RATIO_HIGH", codes)
+        self.assertIn("TRANSIENT_SHOCK_PROVIDER_PHYSICS_NONFINITE_COUNT_HIGH", codes)
+
+    def test_transient_provider_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cfd_reynolds_proxy", "observed": 250000.0}
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "transient_long_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "transient_adapt_scale_min", "observed": 0.5},
+                    {"name": "transient_adapt_scale_max", "observed": 1.6},
+                    {"name": "transient_adapt_scale_mean", "observed": 0.6},
+                    {"name": "transient_adapt_decrease_steps", "observed": 3.0},
+                    {"name": "transient_physics_jump_ratio", "observed": 0.002},
+                    {"name": "transient_physics_nonfinite_count", "observed": 1.0},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "transient_shock_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "transient_shock_physics_jump_ratio", "observed": 0.003},
+                    {"name": "transient_shock_physics_nonfinite_count", "observed": 1.0},
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "transient_long_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "transient_adapt_scale_min", "observed": 1.0},
+                    {"name": "transient_adapt_scale_max", "observed": 1.0},
+                    {"name": "transient_adapt_scale_mean", "observed": 1.0},
+                    {"name": "transient_adapt_decrease_steps", "observed": 0.0},
+                    {"name": "transient_physics_jump_ratio", "observed": 0.001},
+                    {"name": "transient_physics_nonfinite_count", "observed": 0.0},
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "transient_shock_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "transient_shock_physics_jump_ratio", "observed": 0.001},
+                    {"name": "transient_shock_physics_nonfinite_count", "observed": 0.0},
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_SCALE_MIN_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_SCALE_MAX_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_SCALE_MEAN_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_DECREASE_STEPS_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_PHYSICS_JUMP_RATIO_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_PHYSICS_NONFINITE_COUNT_TREND_RATIO"
+        ] = "1.0"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_SHOCK_PHYSICS_JUMP_RATIO_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_SHOCK_PHYSICS_NONFINITE_COUNT_TREND_RATIO"
+        ] = "1.0"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("TRANSIENT_PROVIDER_ADAPT_SCALE_MIN_TREND_WORSENING", codes)
+        self.assertIn("TRANSIENT_PROVIDER_ADAPT_SCALE_MAX_TREND_WORSENING", codes)
+        self.assertIn("TRANSIENT_PROVIDER_ADAPT_SCALE_MEAN_TREND_WORSENING", codes)
+        self.assertIn("TRANSIENT_PROVIDER_ADAPT_DECREASE_STEPS_TREND_WORSENING", codes)
+        self.assertIn("TRANSIENT_PROVIDER_PHYSICS_JUMP_RATIO_TREND_WORSENING", codes)
+        self.assertIn(
+            "TRANSIENT_PROVIDER_PHYSICS_NONFINITE_COUNT_TREND_WORSENING", codes
+        )
+        self.assertIn(
+            "TRANSIENT_SHOCK_PROVIDER_PHYSICS_JUMP_RATIO_TREND_WORSENING", codes
+        )
+        self.assertIn(
+            "TRANSIENT_SHOCK_PROVIDER_PHYSICS_NONFINITE_COUNT_TREND_WORSENING", codes
+        )
 
     def test_plastic_nonlinear_severity_high_reason_is_emitted(self):
         latest = report(
