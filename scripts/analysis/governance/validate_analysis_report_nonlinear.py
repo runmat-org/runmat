@@ -290,7 +290,75 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
+    "nonlinear_assembly_stress_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "nonlinear_softening_proxy_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "nonlinear_load_path_mix_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "nonlinear_plasticity_proxy_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "nonlinear_contact_proxy_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "nonlinear_contact_frictionless_reference_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "nonlinear_contact_frictionless_reference_complex_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "nonlinear_plastic_hardening_reference_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "nonlinear_plastic_hardening_reference_complex_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "thermo_mech_kickoff_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "thermo_gradient_benign_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
     "thermo_gradient_pathological_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "thermo_ramp_smooth_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "thermo_ramp_smooth_field_artifact_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "thermo_shock_oscillatory_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "thermo_shock_oscillatory_field_artifact_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "thermal_standalone_ramp_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "electro_thermal_joule_benign_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },

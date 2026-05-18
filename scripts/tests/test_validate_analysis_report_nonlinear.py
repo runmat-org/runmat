@@ -548,6 +548,18 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             rc = self._run_main_with_report(path)
             self.assertEqual(rc, 1)
 
+    def test_fails_when_expanded_performance_field_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "electro_thermal_joule_benign_gpu_provider":
+                    record.pop("gpu_solver_solve_ms", None)
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
