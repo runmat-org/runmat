@@ -58,6 +58,31 @@ fn gltf_accessor_data_uri_payload() -> Vec<u8> {
     .into_bytes()
 }
 
+fn binary_ply_payload() -> Vec<u8> {
+    let header = b"ply\nformat binary_little_endian 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n";
+    let vertices = [
+        [0.0f32, 0.0f32, 0.0f32],
+        [1.0f32, 0.0f32, 0.0f32],
+        [1.0f32, 1.0f32, 0.0f32],
+        [0.0f32, 1.0f32, 0.0f32],
+    ];
+    let faces = [[0i32, 1, 2], [0i32, 2, 3]];
+
+    let mut payload = header.to_vec();
+    for vertex in vertices {
+        payload.extend_from_slice(&vertex[0].to_le_bytes());
+        payload.extend_from_slice(&vertex[1].to_le_bytes());
+        payload.extend_from_slice(&vertex[2].to_le_bytes());
+    }
+    for face in faces {
+        payload.push(3u8);
+        payload.extend_from_slice(&face[0].to_le_bytes());
+        payload.extend_from_slice(&face[1].to_le_bytes());
+        payload.extend_from_slice(&face[2].to_le_bytes());
+    }
+    payload
+}
+
 #[test]
 fn inspect_detects_stl() {
     let result =
@@ -221,6 +246,18 @@ fn inspect_and_load_ply_work_without_extension_with_utf8_bom() {
         .map(|diag| diag.code.as_str())
         .collect::<Vec<_>>();
     assert!(codes.contains(&"GEOMETRY_IMPORT_UTF8_BOM_STRIPPED"));
+}
+
+#[test]
+fn inspect_and_load_binary_ply_work_without_extension() {
+    let payload = binary_ply_payload();
+    let inspect = geometry_inspect("/part.mesh", &payload).expect("inspect should work");
+    assert_eq!(inspect.format, "ply");
+
+    let asset = geometry_load("/part.mesh", &payload).expect("load should work");
+    assert_eq!(asset.source.importer_version, "ply/v1");
+    assert_eq!(asset.meshes[0].element_count, 2);
+    assert_eq!(asset.meshes[0].vertex_count, 4);
 }
 
 #[test]
