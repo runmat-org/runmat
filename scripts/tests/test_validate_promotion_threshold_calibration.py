@@ -131,6 +131,56 @@ class ValidatePromotionThresholdCalibrationTests(unittest.TestCase):
                 )
             self.assertEqual(rc, 1)
 
+    def test_fails_when_rationale_is_invalid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "promotion_calibration.json"
+            payload = _payload(datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+            payload["rationale"] = "custom_rationale"
+            path.write_text(json.dumps(payload))
+
+            os.environ["RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT"] = str(path)
+            os.environ["RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE"] = "true"
+            try:
+                rc = main()
+            finally:
+                os.environ.pop("RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT", None)
+                os.environ.pop("RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE", None)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_profile_sets_are_incomplete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "promotion_calibration.json"
+            payload = _payload(datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+            payload["by_profile"].pop("feature")
+            payload["cadence_days"].pop("feature")
+            path.write_text(json.dumps(payload))
+
+            os.environ["RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT"] = str(path)
+            os.environ["RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE"] = "true"
+            try:
+                rc = main()
+            finally:
+                os.environ.pop("RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT", None)
+                os.environ.pop("RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE", None)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_profile_sets_have_unexpected_profiles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "promotion_calibration.json"
+            payload = _payload(datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+            payload["by_profile"]["experimental"] = payload["by_profile"]["feature"].copy()
+            payload["cadence_days"]["experimental"] = 90
+            path.write_text(json.dumps(payload))
+
+            os.environ["RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT"] = str(path)
+            os.environ["RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE"] = "true"
+            try:
+                rc = main()
+            finally:
+                os.environ.pop("RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT", None)
+                os.environ.pop("RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE", None)
+            self.assertEqual(rc, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

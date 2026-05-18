@@ -4,6 +4,9 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+EXPECTED_RATIONALE = "rolling_median_reference_fixtures"
+EXPECTED_PROFILES = ("release", "development", "feature")
+
 
 def is_true(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
@@ -59,13 +62,50 @@ def main() -> int:
 
     if payload.get("schema_version") != "promotion-threshold-calibration/v1":
         errors.append("schema_version must be promotion-threshold-calibration/v1")
+    if payload.get("rationale") != EXPECTED_RATIONALE:
+        errors.append(f"rationale must be {EXPECTED_RATIONALE}")
+
+    max_missed_cycles = payload.get("max_missed_cycles_allowed")
+    if not isinstance(max_missed_cycles, int) or max_missed_cycles < 0:
+        errors.append("max_missed_cycles_allowed must be non-negative int")
+        max_missed_cycles = 1
+
+    cadence_days = payload.get("cadence_days")
+    if not isinstance(cadence_days, dict):
+        errors.append("cadence_days missing or invalid")
+        cadence_days = {}
+    cadence_keys = set(cadence_days.keys())
+    expected_profile_set = set(EXPECTED_PROFILES)
+    missing_cadence_profiles = sorted(expected_profile_set - cadence_keys)
+    unexpected_cadence_profiles = sorted(cadence_keys - expected_profile_set)
+    if missing_cadence_profiles:
+        errors.append(
+            "cadence_days missing profiles: " + ", ".join(missing_cadence_profiles)
+        )
+    if unexpected_cadence_profiles:
+        errors.append(
+            "cadence_days has unexpected profiles: "
+            + ", ".join(unexpected_cadence_profiles)
+        )
+    for profile in EXPECTED_PROFILES:
+        cadence = cadence_days.get(profile)
+        if not isinstance(cadence, (int, float)) or float(cadence) <= 0:
+            errors.append(f"cadence_days.{profile} must be positive number")
 
     by_profile = payload.get("by_profile")
     if not isinstance(by_profile, dict):
         errors.append("by_profile missing or invalid")
         by_profile = {}
 
-    for profile in ("release", "development", "feature"):
+    profile_keys = set(by_profile.keys())
+    missing_profiles = sorted(set(EXPECTED_PROFILES) - profile_keys)
+    unexpected_profiles = sorted(profile_keys - set(EXPECTED_PROFILES))
+    if missing_profiles:
+        errors.append("by_profile missing profiles: " + ", ".join(missing_profiles))
+    if unexpected_profiles:
+        errors.append("by_profile has unexpected profiles: " + ", ".join(unexpected_profiles))
+
+    for profile in EXPECTED_PROFILES:
         entry = by_profile.get(profile)
         if not isinstance(entry, dict):
             errors.append(f"missing profile calibration entry: {profile}")
@@ -123,20 +163,14 @@ def main() -> int:
         if max_age_override is not None:
             max_age_days = float(max_age_override)
         else:
-            cadence_days = payload.get("cadence_days")
             profile = governance_profile_name()
             if require_cadence:
-                if not isinstance(cadence_days, dict) or not isinstance(
-                    cadence_days.get(profile), (int, float)
-                ):
-                    errors.append("cadence_days missing or invalid for active profile")
+                cadence_value = cadence_days.get(profile)
+                if not isinstance(cadence_value, (int, float)) or float(cadence_value) <= 0:
+                    errors.append("cadence_days missing/invalid for active profile")
                     max_age_days = 0.0
                 else:
-                    missed_cycles = payload.get("max_missed_cycles_allowed", 1)
-                    if not isinstance(missed_cycles, int) or missed_cycles < 0:
-                        errors.append("max_missed_cycles_allowed must be non-negative int")
-                        missed_cycles = 1
-                    max_age_days = float(cadence_days.get(profile)) * (1 + missed_cycles)
+                    max_age_days = float(cadence_value) * (1 + max_missed_cycles)
             else:
                 max_age_days = 30.0
         if age_days > max_age_days:
