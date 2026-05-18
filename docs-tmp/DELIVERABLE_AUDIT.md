@@ -49,8 +49,9 @@ This audit maps the active objective to concrete repository evidence and marks e
     - parse/load (`parse_project_manifest_toml`, `load_project_manifest`)
     - validation of required shape + relative/existing paths + entrypoint target forms
   - tests in [project_manifest.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/tests/project_manifest.rs)
+  - CLI run-path integration in [script.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-cli/src/commands/script.rs) now resolves manifest entrypoint names for both path targets and module/function targets through configured source roots.
 - Gap:
-  - CLI/core entrypoint selection by project target and composition-graph-driven resolution are not yet wired end-to-end.
+  - core/session-level project composition graph and resolver ownership are not yet wired end-to-end.
   - source-index discovery for MATLAB layout (`+pkg`, `@ClassName`, `private`) not yet evidenced as Plan 5-complete.
 
 ### 5) Unified nominal class/builtin metadata (`partial`)

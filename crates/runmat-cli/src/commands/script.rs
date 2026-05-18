@@ -64,8 +64,8 @@ fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
     let Some(entrypoint) = manifest.entrypoints.iter().find(|entry| entry.name == name) else {
         return Ok(script);
     };
+    let project_root = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     if let Some(path) = &entrypoint.path {
-        let project_root = manifest_path.parent().unwrap_or_else(|| Path::new("."));
         if let Some(resolved) = resolve_entrypoint_file(project_root, path) {
             info!(
                 "Resolved project entrypoint '{}' via {} -> {}",
@@ -82,11 +82,26 @@ fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
             path.display()
         ));
     }
-    if entrypoint.module.is_some() && entrypoint.function.is_some() {
+    if let (Some(module), Some(function)) = (&entrypoint.module, &entrypoint.function) {
+        if let Some(resolved) =
+            resolve_module_entrypoint_file(project_root, &manifest.sources.roots, module)
+        {
+            info!(
+                "Resolved project entrypoint '{}' via {} module={} function={} -> {}",
+                name,
+                manifest_path.display(),
+                module,
+                function,
+                resolved.display()
+            );
+            return Ok(resolved);
+        }
         return Err(anyhow::anyhow!(
-            "entrypoint '{}' in {} targets module/function and is not yet executable from CLI `run`",
+            "entrypoint '{}' resolved from {} but module target '{}.{}' did not resolve under configured source roots",
             name,
-            manifest_path.display()
+            manifest_path.display(),
+            module,
+            function
         ));
     }
     Ok(script)
@@ -116,6 +131,24 @@ fn resolve_entrypoint_file(project_root: &Path, path: &Path) -> Option<PathBuf> 
         let with_ext = direct.with_extension("m");
         if with_ext.is_file() {
             return Some(with_ext);
+        }
+    }
+    None
+}
+
+fn resolve_module_entrypoint_file(
+    project_root: &Path,
+    source_roots: &[PathBuf],
+    module: &str,
+) -> Option<PathBuf> {
+    let module_path = module.replace('.', "/");
+    for root in source_roots {
+        let candidate = project_root
+            .join(root)
+            .join(&module_path)
+            .with_extension("m");
+        if candidate.is_file() {
+            return Some(candidate);
         }
     }
     None
@@ -471,7 +504,46 @@ path = "src/main"
     }
 
     #[test]
-    fn rejects_module_function_entrypoint_for_cli_run_path() {
+    fn resolves_module_function_entrypoint_to_source_root_file() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src/app")).unwrap();
+        fs::write(
+            tmp.path().join("src/app/server.m"),
+            "function y = main(); y = 1; end",
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "server"
+module = "app.server"
+function = "main"
+"#,
+        )
+        .unwrap();
+
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let resolved = resolve_script_input(PathBuf::from("server"))
+            .expect("module/function entrypoint should resolve to module file");
+        std::env::set_current_dir(original).unwrap();
+
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            tmp.path().join("src/app/server.m").canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn module_function_entrypoint_errors_when_module_file_missing() {
         let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join("src")).unwrap();
@@ -495,12 +567,12 @@ function = "main"
         let original = std::env::current_dir().unwrap();
         std::env::set_current_dir(tmp.path()).unwrap();
         let err = resolve_script_input(PathBuf::from("server"))
-            .expect_err("module/function entrypoint is not a script path");
+            .expect_err("missing module file should return explicit error");
         std::env::set_current_dir(original).unwrap();
 
         assert!(err
             .to_string()
-            .contains("not yet executable from CLI `run`"));
+            .contains("did not resolve under configured source roots"));
     }
 }
 

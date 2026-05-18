@@ -37,8 +37,8 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - (pending commit) Plan 5 CLI integration step
   - `runmat-cli` script execution now resolves named entrypoints from discovered `runmat.toml` manifests when the provided run target is not an existing file.
-  - Path entrypoints are resolved with optional `.m` inference; module/function entrypoints return an explicit "not yet executable from CLI run path" error instead of silently misrouting.
-  - Added `runmat-cli` unit coverage for both path-target resolution and module/function-target rejection.
+  - Path entrypoints are resolved with optional `.m` inference; module/function entrypoints now resolve to module files under configured source roots (`module` dotted path -> `<root>/<module path>.m`) with explicit errors when unresolved.
+  - Added `runmat-cli` unit coverage for path-target resolution, module/function-target resolution, and unresolved-module diagnostics.
   - Validation: `cargo test -p runmat --lib`, `cargo fmt --all --check`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
 
 - (pending commit) Plan 7 visibility bridge in fusion snapshots
