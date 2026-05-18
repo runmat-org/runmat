@@ -391,6 +391,30 @@
       "tolerance_rel": 0.1
     },
     {
+      "name": "electromagnetic_assignment_coverage_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_assignment_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_fallback_coefficient_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_fallback_coefficient_ratio",
+      "reference": 0.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "electromagnetic_boundary_anchor_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_boundary_anchor_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
       "name": "electromagnetic_energy_imbalance_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "electromagnetic_energy_imbalance_ratio",
@@ -827,6 +851,30 @@
       "reference": 1.0,
       "tolerance_abs": 0.1,
       "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_assignment_coverage_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_assignment_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_fallback_coefficient_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_fallback_coefficient_ratio",
+      "reference": 0.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "electromagnetic_boundary_anchor_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_boundary_anchor_ratio",
+      "reference": 0.75,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.25
     },
     {
       "name": "electromagnetic_energy_imbalance_ratio",
