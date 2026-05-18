@@ -169,6 +169,10 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "thermo_mech_assignment_heterogeneity_index",
                     "thermo_mech_transient_severity",
                     "thermo_mech_transient_time_scale_mean",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                    "transient_prepared_cache_hit_ratio",
+                    "transient_prepared_cache_misses",
                 },
             )
             | {
@@ -339,6 +343,10 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "electro_thermal_benign_transient_severity_peak",
                     "electro_thermal_benign_temporal_variation",
                     "electro_thermal_benign_time_scale_mean",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                    "transient_prepared_cache_hit_ratio",
+                    "transient_prepared_cache_misses",
                 },
             )
             | {
@@ -357,6 +365,10 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "electro_thermal_pathological_transient_severity_peak",
                     "electro_thermal_pathological_temporal_variation",
                     "electro_thermal_pathological_time_scale_mean",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                    "transient_prepared_cache_hit_ratio",
+                    "transient_prepared_cache_misses",
                 },
             )
             | {
