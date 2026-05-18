@@ -1454,32 +1454,16 @@ impl SemanticCtx {
         args.iter()
             .enumerate()
             .map(|(index, arg)| {
-                let mut requested_outputs = match (
+                let requested_outputs = match (
                     Some(index) == args.len().checked_sub(1),
                     expanded_last_outputs,
                 ) {
                     (true, Some(count)) => RequestedOutputCount::Exactly(count),
                     _ => RequestedOutputCount::One,
                 };
-                if matches!(name, "max" | "min")
-                    && args.len() == 1
-                    && self.call_argument_has_varargout(arg)
-                {
-                    requested_outputs = RequestedOutputCount::Exactly(2);
-                }
                 self.lower_call_argument(arg, requested_outputs)
             })
             .collect()
-    }
-
-    fn call_argument_has_varargout(&self, arg: &AstExpr) -> bool {
-        match arg {
-            AstExpr::FuncCall(name, _, _) => self
-                .function_output_signatures
-                .get(name)
-                .is_some_and(|(_, has_varargout)| *has_varargout),
-            _ => false,
-        }
     }
 
     fn expanded_last_output_count_for_call(&self, name: &str, args: &[AstExpr]) -> Option<usize> {
@@ -1491,15 +1475,26 @@ impl SemanticCtx {
             return None;
         }
 
+        if let Some(min_inputs) = variadic_builtin_min_inputs(name) {
+            if min_inputs <= arg_count {
+                return None;
+            }
+            let requested = min_inputs - arg_count + 1;
+            return self
+                .call_argument_can_supply_outputs(args.last()?, requested)
+                .then_some(requested);
+        }
+
         if self.lookup_binding(name).is_some() {
             return None;
         }
 
         let builtin = runmat_builtins::builtin_function_by_name(name)?;
-        if builtin_has_variadic_tail(builtin) {
+        let fixed_inputs = if builtin_has_variadic_tail(builtin) {
             return None;
-        }
-        let fixed_inputs = builtin.param_types.len();
+        } else {
+            builtin.param_types.len()
+        };
         if fixed_inputs <= arg_count {
             return None;
         }
@@ -1510,9 +1505,19 @@ impl SemanticCtx {
 
     fn call_argument_can_supply_outputs(&self, arg: &AstExpr, requested: usize) -> bool {
         match arg {
-            AstExpr::FuncCall(name, _, _) => self.function_output_signatures.get(name).is_some_and(
-                |(fixed_outputs, has_varargout)| *has_varargout || *fixed_outputs >= requested,
-            ),
+            AstExpr::FuncCall(name, _, _) => {
+                if let Some((fixed_outputs, has_varargout)) =
+                    self.function_output_signatures.get(name)
+                {
+                    return *has_varargout || *fixed_outputs >= requested;
+                }
+                if runmat_builtins::builtin_function_by_name(name).is_some() {
+                    return builtin_can_supply_requested_outputs(name, requested);
+                }
+                // If the callee resolves at runtime (import/path/external), allow the expansion
+                // request and let runtime call ABI enforce arity diagnostics.
+                true
+            }
             _ => false,
         }
     }
@@ -2070,6 +2075,36 @@ fn builtin_has_variadic_tail(builtin: &runmat_builtins::BuiltinFunction) -> bool
     matches!(
         builtin.param_types.last(),
         Some(runmat_builtins::Type::Cell { length: None, .. })
+    )
+}
+
+fn variadic_builtin_min_inputs(name: &str) -> Option<usize> {
+    match name {
+        "max" | "min" | "cat" => Some(2),
+        _ => None,
+    }
+}
+
+fn builtin_can_supply_requested_outputs(name: &str, requested: usize) -> bool {
+    if requested <= 1 {
+        return true;
+    }
+    matches!(
+        name,
+        "size"
+            | "max"
+            | "min"
+            | "sort"
+            | "unique"
+            | "find"
+            | "union"
+            | "ismember"
+            | "sortrows"
+            | "chol"
+            | "lu"
+            | "qr"
+            | "svd"
+            | "eig"
     )
 }
 

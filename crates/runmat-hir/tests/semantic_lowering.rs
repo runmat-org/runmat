@@ -272,6 +272,59 @@ fn multi_output_assignment_records_requested_outputs_and_discard() {
 }
 
 #[test]
+fn variadic_builtin_missing_args_request_outputs_from_last_call_argument() {
+    let result = lower_result(
+        r#"
+function [a,b] = pair(x)
+  a = x;
+  b = x + 1;
+end
+r = max(pair(3));
+"#,
+    );
+
+    assert!(
+        result.semantic_index.calls.iter().any(|call| {
+            call.name.0[0].0 == "pair"
+                && matches!(call.requested_outputs, RequestedOutputCount::Exactly(2))
+        }),
+        "calls: {:?}",
+        result
+            .semantic_index
+            .calls
+            .iter()
+            .map(|call| (call.name.display_name(), call.requested_outputs.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn variadic_builtin_cat_requests_minimum_outputs_from_last_call_argument() {
+    let result = lower_result(
+        r#"
+function varargout = g()
+  varargout = {1, [2,3]};
+end
+r = cat(g());
+"#,
+    );
+
+    assert!(
+        result.semantic_index.calls.iter().any(|call| {
+            call.name.0[0].0 == "g"
+                && matches!(call.requested_outputs, RequestedOutputCount::Exactly(2))
+        }),
+        "calls: {:?}",
+        result
+            .semantic_index
+            .calls
+            .iter()
+            .map(|call| (call.name.display_name(), call.requested_outputs.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn lowering_emits_only_fixed_requested_output_counts() {
     fn is_fixed(outputs: &RequestedOutputCount) -> bool {
         matches!(
