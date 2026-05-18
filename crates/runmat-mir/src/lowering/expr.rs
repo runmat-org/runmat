@@ -1,6 +1,6 @@
 use crate::{
-    MirAggregateKind, MirCall, MirCallArg, MirCallee, MirConstant, MirIndexComponent, MirIndexing,
-    MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind,
+    MirAggregateKind, MirCall, MirCallArg, MirCallee, MirConstant, MirIndexComponent, MirIndexPlan,
+    MirIndexing, MirOperand, MirPlace, MirRvalue, MirStmt, MirStmtKind,
 };
 use runmat_builtins::{BuiltinAsyncBehavior, BuiltinSemantics};
 use runmat_hir::{
@@ -246,6 +246,7 @@ pub(crate) fn lower_indexing_with_replacements(
     }
     Ok(MirIndexing {
         kind: indexing.kind.clone(),
+        plan: classify_mir_index_plan(indexing),
         components: indexing
             .components
             .iter()
@@ -256,6 +257,93 @@ pub(crate) fn lower_indexing_with_replacements(
             .collect::<Result<_, _>>()?,
         result_context: indexing.result_context.clone(),
     })
+}
+
+fn classify_mir_index_plan(indexing: &IndexingSemantics) -> MirIndexPlan {
+    match indexing.kind {
+        IndexKind::Brace => MirIndexPlan::Cell,
+        IndexKind::Paren => {
+            if indexing
+                .components
+                .iter()
+                .any(index_component_needs_slice_expr)
+            {
+                MirIndexPlan::SliceExpr
+            } else if indexing
+                .components
+                .iter()
+                .all(index_component_is_definitely_scalar)
+            {
+                MirIndexPlan::Scalar
+            } else {
+                MirIndexPlan::Slice
+            }
+        }
+        IndexKind::Dot => MirIndexPlan::Slice,
+    }
+}
+
+fn index_component_needs_slice_expr(component: &IndexComponent) -> bool {
+    match component {
+        IndexComponent::Colon => false,
+        IndexComponent::End { offset, .. } => *offset != 0,
+        IndexComponent::Expr(expr) | IndexComponent::Logical(expr) => {
+            hir_expr_needs_slice_expr(expr)
+        }
+    }
+}
+
+fn hir_expr_needs_slice_expr(expr: &HirExpr) -> bool {
+    match &expr.kind {
+        HirExprKind::End => true,
+        HirExprKind::Range(start, step, end) => {
+            hir_expr_needs_slice_expr(start)
+                || step
+                    .as_ref()
+                    .is_some_and(|step| hir_expr_needs_slice_expr(step))
+                || hir_expr_needs_slice_expr(end)
+        }
+        HirExprKind::Unary(_, inner) => hir_expr_needs_slice_expr(inner),
+        HirExprKind::Binary(left, _, right) => {
+            hir_expr_needs_slice_expr(left) || hir_expr_needs_slice_expr(right)
+        }
+        HirExprKind::Tensor(rows) | HirExprKind::Cell(rows) => rows
+            .iter()
+            .flat_map(|row| row.iter())
+            .any(hir_expr_needs_slice_expr),
+        HirExprKind::Call(call) => call.args.iter().any(hir_expr_needs_slice_expr),
+        HirExprKind::CommandCall(_) => false,
+        HirExprKind::Index(base, indexing) => {
+            hir_expr_needs_slice_expr(base)
+                || indexing
+                    .components
+                    .iter()
+                    .any(index_component_needs_slice_expr)
+        }
+        HirExprKind::Member(base, _) => hir_expr_needs_slice_expr(base),
+        HirExprKind::MemberDynamic(base, member) => {
+            hir_expr_needs_slice_expr(base) || hir_expr_needs_slice_expr(member)
+        }
+        HirExprKind::Spawn(inner) => hir_expr_needs_slice_expr(inner),
+        HirExprKind::Await(inner) => hir_expr_needs_slice_expr(inner),
+        _ => false,
+    }
+}
+
+fn index_component_is_definitely_scalar(component: &IndexComponent) -> bool {
+    matches!(component, IndexComponent::Expr(expr) if hir_expr_is_definitely_scalar_index(expr))
+}
+
+fn hir_expr_is_definitely_scalar_index(expr: &HirExpr) -> bool {
+    match &expr.kind {
+        HirExprKind::Number(_) => true,
+        HirExprKind::Constant(name)
+            if name.0.eq_ignore_ascii_case("true") || name.0.eq_ignore_ascii_case("false") =>
+        {
+            true
+        }
+        _ => false,
+    }
 }
 
 fn lower_index_component(

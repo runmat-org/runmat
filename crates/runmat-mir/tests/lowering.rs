@@ -11,8 +11,8 @@ use runmat_mir::{
     },
     lowering::lower_assembly,
     AsyncBehaviorFact, CacheProduct, MirAggregateKind, MirBody, MirCallArg, MirCallee,
-    MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind,
-    MirTerminatorKind, ProductCacheKey,
+    MirIndexPlan, MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt,
+    MirStmtKind, MirTerminatorKind, ProductCacheKey,
 };
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
@@ -50,6 +50,21 @@ fn first_call<'a>(body: &'a MirBody) -> &'a runmat_mir::MirCall {
             _ => None,
         })
         .expect("expected at least one lowered call")
+}
+
+fn first_indexing<'a>(body: &'a MirBody) -> &'a runmat_mir::MirIndexing {
+    body.blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .find_map(|stmt| match &stmt.kind {
+            MirStmtKind::Assign {
+                value: MirRvalue::Index { indexing, .. },
+                ..
+            }
+            | MirStmtKind::Expr(MirRvalue::Index { indexing, .. }) => Some(indexing),
+            _ => None,
+        })
+        .expect("expected at least one lowered index expression")
 }
 
 fn patch_entrypoint_call_requested_outputs(
@@ -1769,6 +1784,34 @@ fn index_components_lower_to_mir_operands() {
             ..
         }
     ));
+}
+
+#[test]
+fn paren_index_plan_is_scalar_for_literal_scalar_indices() {
+    let mir = lower_mir("function y = f(a); y = a(2, 1); end");
+    let body = mir.bodies.values().next().expect("body");
+    assert_eq!(first_indexing(body).plan, MirIndexPlan::Scalar);
+}
+
+#[test]
+fn paren_index_plan_is_slice_for_general_index_operands() {
+    let mir = lower_mir("function y = f(a, idx); y = a(idx); end");
+    let body = mir.bodies.values().next().expect("body");
+    assert_eq!(first_indexing(body).plan, MirIndexPlan::Slice);
+}
+
+#[test]
+fn paren_index_plan_is_slice_expr_for_range_or_end_selectors() {
+    let mir = lower_mir("function y = f(a); y = a(1:end-1); end");
+    let body = mir.bodies.values().next().expect("body");
+    assert_eq!(first_indexing(body).plan, MirIndexPlan::SliceExpr);
+}
+
+#[test]
+fn brace_index_plan_is_cell() {
+    let mir = lower_mir("function y = f(c); y = c{1}; end");
+    let body = mir.bodies.values().next().expect("body");
+    assert_eq!(first_indexing(body).plan, MirIndexPlan::Cell);
 }
 
 #[test]

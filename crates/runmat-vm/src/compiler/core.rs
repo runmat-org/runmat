@@ -9,8 +9,8 @@ use runmat_hir::{
 };
 use runmat_mir::{
     BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirCallee,
-    MirConstant, MirIndexComponent, MirIndexing, MirOperand, MirOutputTarget, MirPlace, MirRvalue,
-    MirStmt, MirStmtKind, MirTerminatorKind,
+    MirConstant, MirIndexComponent, MirIndexPlan, MirIndexing, MirOperand, MirOutputTarget,
+    MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -1208,12 +1208,13 @@ impl Compiler {
         value: &MirRvalue,
     ) -> Result<(), CompileError> {
         match indexing.kind {
-            IndexKind::Paren => {
-                if self.indexing_uses_scalar_index_opcode(indexing) {
+            IndexKind::Paren => match indexing.plan {
+                MirIndexPlan::Scalar => {
                     self.compile_mir_scalar_index_components(indexing)?;
                     self.compile_mir_rvalue(value)?;
                     self.emit(Instr::StoreIndex(indexing.components.len()));
-                } else if self.indexing_needs_slice_expr(indexing) {
+                }
+                MirIndexPlan::SliceExpr => {
                     let components = self.compile_mir_slice_expr_components(
                         indexing,
                         MirRangeParamOrder::AfterNumeric,
@@ -1231,7 +1232,8 @@ impl Compiler {
                         range_end_exprs: components.range_end_exprs,
                         end_numeric_exprs: components.end_numeric_exprs,
                     });
-                } else {
+                }
+                MirIndexPlan::Slice => {
                     let (numeric_count, colon_mask, end_mask) =
                         self.compile_mir_slice_components(indexing)?;
                     self.compile_mir_rvalue(value)?;
@@ -1242,7 +1244,11 @@ impl Compiler {
                         end_mask,
                     ));
                 }
-            }
+                MirIndexPlan::Cell => {
+                    return Err(self
+                        .compile_error("MIR paren assignment lowering received cell index plan"));
+                }
+            },
             IndexKind::Brace => {
                 self.compile_mir_cell_index_components(
                     indexing,
@@ -1336,38 +1342,47 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         match indexing.kind {
             IndexKind::Paren => {
-                if self.indexing_uses_scalar_index_opcode(indexing) {
-                    self.compile_mir_scalar_index_components(indexing)?;
-                    self.emit(Instr::LoadVar(tmp));
-                    self.emit(Instr::StoreIndex(indexing.components.len()));
-                } else if self.indexing_needs_slice_expr(indexing) {
-                    let components = self.compile_mir_slice_expr_components(
-                        indexing,
-                        MirRangeParamOrder::AfterNumeric,
-                    )?;
-                    self.emit(Instr::LoadVar(tmp));
-                    self.emit(Instr::StoreSliceExpr {
-                        dims: indexing.components.len(),
-                        numeric_count: components.numeric_count,
-                        colon_mask: components.colon_mask,
-                        end_mask: components.end_mask,
-                        range_dims: components.range_dims,
-                        range_has_step: components.range_has_step,
-                        range_start_exprs: components.range_start_exprs,
-                        range_step_exprs: components.range_step_exprs,
-                        range_end_exprs: components.range_end_exprs,
-                        end_numeric_exprs: components.end_numeric_exprs,
-                    });
-                } else {
-                    let (numeric_count, colon_mask, end_mask) =
-                        self.compile_mir_slice_components(indexing)?;
-                    self.emit(Instr::LoadVar(tmp));
-                    self.emit(Instr::StoreSlice(
-                        indexing.components.len(),
-                        numeric_count,
-                        colon_mask,
-                        end_mask,
-                    ));
+                match indexing.plan {
+                    MirIndexPlan::Scalar => {
+                        self.compile_mir_scalar_index_components(indexing)?;
+                        self.emit(Instr::LoadVar(tmp));
+                        self.emit(Instr::StoreIndex(indexing.components.len()));
+                    }
+                    MirIndexPlan::SliceExpr => {
+                        let components = self.compile_mir_slice_expr_components(
+                            indexing,
+                            MirRangeParamOrder::AfterNumeric,
+                        )?;
+                        self.emit(Instr::LoadVar(tmp));
+                        self.emit(Instr::StoreSliceExpr {
+                            dims: indexing.components.len(),
+                            numeric_count: components.numeric_count,
+                            colon_mask: components.colon_mask,
+                            end_mask: components.end_mask,
+                            range_dims: components.range_dims,
+                            range_has_step: components.range_has_step,
+                            range_start_exprs: components.range_start_exprs,
+                            range_step_exprs: components.range_step_exprs,
+                            range_end_exprs: components.range_end_exprs,
+                            end_numeric_exprs: components.end_numeric_exprs,
+                        });
+                    }
+                    MirIndexPlan::Slice => {
+                        let (numeric_count, colon_mask, end_mask) =
+                            self.compile_mir_slice_components(indexing)?;
+                        self.emit(Instr::LoadVar(tmp));
+                        self.emit(Instr::StoreSlice(
+                            indexing.components.len(),
+                            numeric_count,
+                            colon_mask,
+                            end_mask,
+                        ));
+                    }
+                    MirIndexPlan::Cell => {
+                        return Err(self.compile_error(
+                            "MIR paren assignment lowering received cell index plan",
+                        ));
+                    }
                 }
                 Ok(())
             }
@@ -1970,37 +1985,46 @@ impl Compiler {
     }
 
     fn compile_mir_slice_index(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
-        if self.indexing_uses_scalar_index_opcode(indexing) {
-            self.compile_mir_scalar_index_components(indexing)?;
-            self.emit(Instr::Index(indexing.components.len()));
-            return Ok(());
+        match indexing.plan {
+            MirIndexPlan::Scalar => {
+                self.compile_mir_scalar_index_components(indexing)?;
+                self.emit(Instr::Index(indexing.components.len()));
+                Ok(())
+            }
+            MirIndexPlan::SliceExpr => {
+                let components = self.compile_mir_slice_expr_components(
+                    indexing,
+                    MirRangeParamOrder::BeforeNumeric,
+                )?;
+                self.emit(Instr::IndexSliceExpr {
+                    dims: indexing.components.len(),
+                    numeric_count: components.numeric_count,
+                    colon_mask: components.colon_mask,
+                    end_mask: components.end_mask,
+                    range_dims: components.range_dims,
+                    range_has_step: components.range_has_step,
+                    range_start_exprs: components.range_start_exprs,
+                    range_step_exprs: components.range_step_exprs,
+                    range_end_exprs: components.range_end_exprs,
+                    end_numeric_exprs: components.end_numeric_exprs,
+                });
+                Ok(())
+            }
+            MirIndexPlan::Slice => {
+                let (numeric_count, colon_mask, end_mask) =
+                    self.compile_mir_slice_components(indexing)?;
+                self.emit(Instr::IndexSlice(
+                    indexing.components.len(),
+                    numeric_count,
+                    colon_mask,
+                    end_mask,
+                ));
+                Ok(())
+            }
+            MirIndexPlan::Cell => {
+                Err(self.compile_error("MIR paren index lowering received cell index plan"))
+            }
         }
-        if self.indexing_needs_slice_expr(indexing) {
-            let components = self
-                .compile_mir_slice_expr_components(indexing, MirRangeParamOrder::BeforeNumeric)?;
-            self.emit(Instr::IndexSliceExpr {
-                dims: indexing.components.len(),
-                numeric_count: components.numeric_count,
-                colon_mask: components.colon_mask,
-                end_mask: components.end_mask,
-                range_dims: components.range_dims,
-                range_has_step: components.range_has_step,
-                range_start_exprs: components.range_start_exprs,
-                range_step_exprs: components.range_step_exprs,
-                range_end_exprs: components.range_end_exprs,
-                end_numeric_exprs: components.end_numeric_exprs,
-            });
-            return Ok(());
-        }
-
-        let (numeric_count, colon_mask, end_mask) = self.compile_mir_slice_components(indexing)?;
-        self.emit(Instr::IndexSlice(
-            indexing.components.len(),
-            numeric_count,
-            colon_mask,
-            end_mask,
-        ));
-        Ok(())
     }
 
     fn compile_mir_scalar_index_components(
@@ -2016,48 +2040,6 @@ impl Compiler {
             self.compile_mir_operand(operand)?;
         }
         Ok(())
-    }
-
-    fn indexing_uses_scalar_index_opcode(&self, indexing: &MirIndexing) -> bool {
-        indexing.components.iter().all(|component| {
-            matches!(
-                component,
-                MirIndexComponent::Expr(operand)
-                    if self.mir_operand_is_definitely_scalar_index(operand)
-            )
-        })
-    }
-
-    fn mir_operand_is_definitely_scalar_index(&self, operand: &MirOperand) -> bool {
-        match operand {
-            MirOperand::Constant(MirConstant::Number(_))
-            | MirOperand::Constant(MirConstant::Bool(_)) => true,
-            MirOperand::Local(local) => self
-                .mir_local_rvalue(*local)
-                .is_some_and(|rvalue| self.mir_rvalue_is_definitely_scalar_index(&rvalue)),
-            _ => false,
-        }
-    }
-
-    fn mir_rvalue_is_definitely_scalar_index(&self, rvalue: &MirRvalue) -> bool {
-        match rvalue {
-            MirRvalue::Use(operand) => self.mir_operand_is_definitely_scalar_index(operand),
-            MirRvalue::Unary(OperatorKind::UnaryPlus | OperatorKind::UnaryMinus, operand) => {
-                self.mir_operand_is_definitely_scalar_index(operand)
-            }
-            _ => false,
-        }
-    }
-
-    fn indexing_needs_slice_expr(&self, indexing: &MirIndexing) -> bool {
-        indexing.components.iter().any(|component| match component {
-            MirIndexComponent::End { offset, .. } => *offset != 0,
-            MirIndexComponent::Expr(operand) => {
-                self.mir_operand_range_end_spec(operand).is_some()
-                    || self.mir_operand_end_expr(operand).is_some()
-            }
-            _ => false,
-        })
     }
 
     fn compile_mir_slice_components(
