@@ -1350,6 +1350,17 @@ def evaluate_release_readiness(
             ),
         ),
     )
+    if key_perf_require_trend_baselines and key_perf_min_trend_baseline_samples < 2:
+        reasons.append(
+            Reason(
+                code="KEY_PERF_TREND_BASELINE_POLICY_WEAK",
+                severity="fail" if protected else "warn",
+                detail=(
+                    "key-performance trend baseline policy requires at least 2 samples; "
+                    f"configured {key_perf_min_trend_baseline_samples}"
+                ),
+            )
+        )
     key_perf_max_run_ms = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS",
