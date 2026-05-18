@@ -48,6 +48,7 @@ REQUIRED_FIXTURES = {
     "nonlinear_contact_frictionless_reference_complex_gpu_provider": {
         "contact_frictionless_complex_severity_peak",
         "contact_frictionless_complex_severity_mean",
+        "contact_frictionless_complex_load_amplification_ratio",
     },
     "nonlinear_plastic_hardening_reference_gpu_provider": {
         "plasticity_hardening_reference_severity_peak",
@@ -56,6 +57,7 @@ REQUIRED_FIXTURES = {
     "nonlinear_plastic_hardening_reference_complex_gpu_provider": {
         "plasticity_hardening_reference_complex_severity_peak",
         "plasticity_hardening_reference_complex_severity_mean",
+        "plasticity_hardening_reference_complex_load_realization_ratio",
     },
     "thermo_mech_kickoff_gpu_provider": {
         "thermo_mech_thermal_strain_scale",

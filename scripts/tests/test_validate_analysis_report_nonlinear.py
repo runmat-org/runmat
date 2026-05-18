@@ -142,6 +142,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 {
                     "contact_frictionless_complex_severity_peak",
                     "contact_frictionless_complex_severity_mean",
+                    "contact_frictionless_complex_load_amplification_ratio",
                 },
             )
             | {"contact_nonlinear_severity": 0.1},
@@ -157,6 +158,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 {
                     "plasticity_hardening_reference_complex_severity_peak",
                     "plasticity_hardening_reference_complex_severity_mean",
+                    "plasticity_hardening_reference_complex_load_realization_ratio",
                 },
             ),
             _record(
@@ -686,6 +688,46 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "thermo_ramp_smooth_field_clamp_ratio"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_contact_complex_load_amplification_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if (
+                    record["fixture_id"]
+                    == "nonlinear_contact_frictionless_reference_complex_gpu_provider"
+                ):
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"]
+                        != "contact_frictionless_complex_load_amplification_ratio"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_plastic_complex_load_realization_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if (
+                    record["fixture_id"]
+                    == "nonlinear_plastic_hardening_reference_complex_gpu_provider"
+                ):
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"]
+                        != "plasticity_hardening_reference_complex_load_realization_ratio"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
