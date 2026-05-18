@@ -187,65 +187,82 @@ async fn object_subsasgn_brace(
     .await
 }
 
-async fn execute_brace_read_single(
-    base: Value,
-    raw_indices: &[Value],
-) -> Result<Value, RuntimeError> {
-    match base {
-        Value::Object(obj) => object_subsref_brace(Value::Object(obj), raw_indices.to_vec()).await,
-        Value::HandleObject(handle) => {
-            object_subsref_brace(Value::HandleObject(handle), raw_indices.to_vec()).await
-        }
-        Value::Cell(ca) => {
-            let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;
-            crate::ops::cells::index_cell_value(&ca, &indices)
-        }
-        _ => Err(crate::interpreter::errors::mex(
-            "CellIndexingOnNonCell",
-            "Cell indexing on non-cell",
-        )),
-    }
+enum BraceIndexOperation {
+    ReadSingle,
+    Expand { out_count: usize },
+    List,
+    Store { rhs: Value },
 }
 
-async fn execute_brace_expand(
-    base: Value,
-    raw_indices: &[Value],
-    out_count: usize,
-) -> Result<Vec<Value>, RuntimeError> {
-    expand_brace_values(base, raw_indices, Some(out_count)).await
+enum BraceIndexOutcome {
+    Value(Value),
+    Expanded(Vec<Value>),
 }
 
-async fn execute_brace_list(base: Value, raw_indices: &[Value]) -> Result<Value, RuntimeError> {
-    let values = expand_brace_values(base, raw_indices, None).await?;
-    if values.len() == 1 {
-        Ok(values.into_iter().next().unwrap_or(Value::Num(0.0)))
-    } else {
-        Ok(Value::OutputList(values))
-    }
-}
-
-async fn execute_brace_store(
+async fn execute_brace_operation(
     base: Value,
     raw_indices: &[Value],
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    match base {
-        Value::Object(obj) => {
-            object_subsasgn_brace(Value::Object(obj), raw_indices.to_vec(), rhs).await
+    operation: BraceIndexOperation,
+) -> Result<BraceIndexOutcome, RuntimeError> {
+    match operation {
+        BraceIndexOperation::ReadSingle => {
+            let value = match base {
+                Value::Object(obj) => {
+                    object_subsref_brace(Value::Object(obj), raw_indices.to_vec()).await?
+                }
+                Value::HandleObject(handle) => {
+                    object_subsref_brace(Value::HandleObject(handle), raw_indices.to_vec()).await?
+                }
+                Value::Cell(ca) => {
+                    let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;
+                    crate::ops::cells::index_cell_value(&ca, &indices)?
+                }
+                _ => {
+                    return Err(crate::interpreter::errors::mex(
+                        "CellIndexingOnNonCell",
+                        "Cell indexing on non-cell",
+                    ))
+                }
+            };
+            Ok(BraceIndexOutcome::Value(value))
         }
-        Value::HandleObject(handle) => {
-            object_subsasgn_brace(Value::HandleObject(handle), raw_indices.to_vec(), rhs).await
+        BraceIndexOperation::Expand { out_count } => {
+            let values = expand_brace_values(base, raw_indices, Some(out_count)).await?;
+            Ok(BraceIndexOutcome::Expanded(values))
         }
-        Value::Cell(ca) => {
-            let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;
-            crate::ops::cells::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
-                runmat_gc::gc_record_write(oldv, newv);
-            })
+        BraceIndexOperation::List => {
+            let values = expand_brace_values(base, raw_indices, None).await?;
+            let value = if values.len() == 1 {
+                values.into_iter().next().unwrap_or(Value::Num(0.0))
+            } else {
+                Value::OutputList(values)
+            };
+            Ok(BraceIndexOutcome::Value(value))
         }
-        _ => Err(crate::interpreter::errors::mex(
-            "CellAssignmentOnNonCell",
-            "Cell assignment on non-cell",
-        )),
+        BraceIndexOperation::Store { rhs } => {
+            let value = match base {
+                Value::Object(obj) => {
+                    object_subsasgn_brace(Value::Object(obj), raw_indices.to_vec(), rhs).await?
+                }
+                Value::HandleObject(handle) => {
+                    object_subsasgn_brace(Value::HandleObject(handle), raw_indices.to_vec(), rhs)
+                        .await?
+                }
+                Value::Cell(ca) => {
+                    let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;
+                    crate::ops::cells::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
+                        runmat_gc::gc_record_write(oldv, newv);
+                    })?
+                }
+                _ => {
+                    return Err(crate::interpreter::errors::mex(
+                        "CellAssignmentOnNonCell",
+                        "Cell assignment on non-cell",
+                    ))
+                }
+            };
+            Ok(BraceIndexOutcome::Value(value))
+        }
     }
 }
 
@@ -455,21 +472,60 @@ pub async fn dispatch_indexing(
         crate::bytecode::Instr::IndexCell(num_indices) => {
             let raw_indices = pop_index_values(stack, *num_indices)?;
             let base = pop_index_base(stack)?;
-            stack.push(execute_brace_read_single(base, &raw_indices).await?);
+            let outcome =
+                execute_brace_operation(base, &raw_indices, BraceIndexOperation::ReadSingle)
+                    .await?;
+            match outcome {
+                BraceIndexOutcome::Value(value) => stack.push(value),
+                BraceIndexOutcome::Expanded(_) => {
+                    return Err(crate::interpreter::errors::mex(
+                        "InvalidBraceIndexOutcome",
+                        "IndexCell expected a single value outcome",
+                    ))
+                }
+            }
             Ok(true)
         }
         crate::bytecode::Instr::IndexCellExpand(num_indices, out_count) => {
             let raw_indices = pop_index_values(stack, *num_indices)?;
             let base = pop_index_base(stack)?;
-            for value in execute_brace_expand(base, &raw_indices, *out_count).await? {
-                stack.push(value);
+            let outcome = execute_brace_operation(
+                base,
+                &raw_indices,
+                BraceIndexOperation::Expand {
+                    out_count: *out_count,
+                },
+            )
+            .await?;
+            match outcome {
+                BraceIndexOutcome::Expanded(values) => {
+                    for value in values {
+                        stack.push(value);
+                    }
+                }
+                BraceIndexOutcome::Value(_) => {
+                    return Err(crate::interpreter::errors::mex(
+                        "InvalidBraceIndexOutcome",
+                        "IndexCellExpand expected an expanded value list",
+                    ))
+                }
             }
             Ok(true)
         }
         crate::bytecode::Instr::IndexCellList(num_indices) => {
             let raw_indices = pop_index_values(stack, *num_indices)?;
             let base = pop_index_base(stack)?;
-            stack.push(execute_brace_list(base, &raw_indices).await?);
+            let outcome =
+                execute_brace_operation(base, &raw_indices, BraceIndexOperation::List).await?;
+            match outcome {
+                BraceIndexOutcome::Value(value) => stack.push(value),
+                BraceIndexOutcome::Expanded(_) => {
+                    return Err(crate::interpreter::errors::mex(
+                        "InvalidBraceIndexOutcome",
+                        "IndexCellList expected a single list value",
+                    ))
+                }
+            }
             Ok(true)
         }
         crate::bytecode::Instr::StoreIndexCell(num_indices) => {
@@ -479,7 +535,18 @@ pub async fn dispatch_indexing(
             ))?;
             let raw_indices = pop_index_values(stack, *num_indices)?;
             let base = pop_index_base(stack)?;
-            stack.push(execute_brace_store(base, &raw_indices, rhs).await?);
+            let outcome =
+                execute_brace_operation(base, &raw_indices, BraceIndexOperation::Store { rhs })
+                    .await?;
+            match outcome {
+                BraceIndexOutcome::Value(value) => stack.push(value),
+                BraceIndexOutcome::Expanded(_) => {
+                    return Err(crate::interpreter::errors::mex(
+                        "InvalidBraceIndexOutcome",
+                        "StoreIndexCell expected a single base value",
+                    ))
+                }
+            }
             Ok(true)
         }
         crate::bytecode::Instr::StoreIndex(num_indices) => {
