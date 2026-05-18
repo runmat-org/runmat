@@ -236,7 +236,7 @@ Completed implementation slices:
 
 Observed older-HIR artifacts worth collapsing:
 
-- `CompatibilityHirProgram`, `CompatibilityHirStmt`, and `CompatibilityHirExpr` now name the source-level compatibility AST; the old legacy-prefixed public type names have been removed from `runmat-hir`.
+- The compatibility AST/lowering seam in `runmat-hir` has been removed; `runmat_hir` now exposes semantic lowering only.
 - The legacy-shaped user-function record and `runmat_vm::legacy::*` compatibility namespace have been removed. Downstream callers should use semantic function bytecode/registry APIs.
 - VM execution internals such as `CallFrame` and `ExecutionContext` are no longer root-level `runmat_vm` exports or bytecode prelude exports; call-stack diagnostics use runtime call-frame types instead.
 - Legacy bytecode compilation is no longer exposed through VM public modules or used by VM dispatch.
@@ -297,8 +297,7 @@ Current state:
 - MIR calls and function-handle operands now carry `CallableIdentity`, while VM lowering still maps known identities onto the existing bytecode instructions.
 - `CallableDescriptor` and runtime `SemanticCallableRequest` now accept resolved `CallableIdentity` instead of open `{function, name}` request fields, while preserving current semantic and name-fallback behavior.
 - VM callback coverage now asserts unresolved external function handles and `cellfun` callbacks fail with `RunMat:UndefinedFunction` rather than entering legacy fallback execution.
-- Stale `runmat-hir` compatibility tests now either assert semantic assembly/index shapes directly or use an explicit `lower_compatibility` helper for the retained compatibility inference APIs; `cargo test -p runmat-hir` is green.
-- Compatibility lowering, inference, import validation, and classdef validation are now exposed through `runmat_hir::compatibility`; the root `runmat_hir` export surface no longer re-exports compatibility HIR types or compatibility inference APIs.
+- `runmat-hir` tests now assert semantic assembly/index shapes directly; compatibility-lowering helper coverage has been removed with the compatibility seam.
 
 Target state:
 
@@ -457,7 +456,7 @@ Current ratchet status:
 - Remaining `functions.rs` legacy execution sites cover semantic gaps for struct-field vector/range indexing through member reads, test-class constructor resolution, metaclass postfix member/method lowering, dependent property backing behavior, `containers.Map` package calls, and string aggregate concatenation.
 - Turbine mixed arithmetic/function-call, simple scalar function compilation, scalar callback variable-isolation, compute-intensive scalar callback, nested scalar callback, function-parameter validation, and error-handling success-path coverage now use semantic registry-backed named calls instead of hand-built legacy function metadata.
 - Turbine fallback-boundary tests now use unresolved-name bytecode or semantic registry fixtures; no `LegacyUserFunction` test fixtures remain.
-- Remaining production legacy recompilation usage is gone; source-level compatibility AST references are confined to `runmat-hir` compatibility/inference code and tests.
+- Remaining production legacy recompilation usage is gone.
 
 ## Validation Cadence
 

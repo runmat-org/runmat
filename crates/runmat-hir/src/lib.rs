@@ -7,21 +7,6 @@ mod ids;
 pub(crate) mod lowering;
 mod lowering_context;
 mod span;
-mod validation;
-
-pub mod compatibility {
-    use crate::{LoweringContext, SemanticError};
-    use runmat_parser::Program as AstProgram;
-
-    pub use crate::hir::CompatibilityLoweringResult as LoweringResult;
-
-    pub fn lower(
-        prog: &AstProgram,
-        context: &LoweringContext<'_>,
-    ) -> Result<LoweringResult, SemanticError> {
-        crate::lowering::ctx::lower_compatibility(prog, context)
-    }
-}
 
 pub use diagnostic::{
     HirDiagnostic, HirDiagnosticNote, HirDiagnosticSeverity, HirDiagnosticSpan,

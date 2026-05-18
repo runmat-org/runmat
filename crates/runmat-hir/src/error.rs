@@ -19,13 +19,6 @@ pub fn set_error_namespace(namespace: &str) {
     }
 }
 
-pub(crate) fn error_namespace() -> String {
-    error_namespace_store()
-        .read()
-        .map(|guard| guard.clone())
-        .unwrap_or_else(|_| DEFAULT_ERROR_NAMESPACE.to_string())
-}
-
 #[derive(Debug, Clone)]
 pub struct SemanticError {
     pub message: String,
