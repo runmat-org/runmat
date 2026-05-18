@@ -383,7 +383,8 @@ impl CallableFallbackPolicy {
     }
 
     pub fn allows_vm_name_fallback_for(self, identity: &CallableIdentity) -> bool {
-        self.allows_semantic_name_resolution_for(identity)
+        matches!(identity, CallableIdentity::DynamicName(_))
+            && self.allows_runtime_name_resolution()
     }
 
     pub fn supports_vm_static_call(self) -> bool {

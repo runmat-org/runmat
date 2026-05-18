@@ -672,6 +672,22 @@ mod tests {
     }
 
     #[test]
+    fn external_name_descriptor_external_boundary_does_not_fallback_to_builtin_name_resolution() {
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::ExternalName(QualifiedName(vec![SymbolName("sqrt".to_string())])),
+            Some("sqrt".to_string()),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::ExternalBoundary,
+            CallableCallKind::Direct,
+        );
+        let err = block_on(execute_callable_descriptor(descriptor)).expect_err(
+            "external boundary names should remain unresolved without semantic resolution",
+        );
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
     fn dynamic_name_descriptor_runtime_name_resolution_can_reach_builtin() {
         let descriptor = CallableDescriptor::resolved(
             CallableIdentity::DynamicName(SymbolName("sqrt".to_string())),
