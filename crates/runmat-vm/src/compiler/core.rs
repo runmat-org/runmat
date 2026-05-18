@@ -1249,29 +1249,53 @@ impl Compiler {
                         MirRangeParamOrder::AfterNumeric,
                     )?;
                     self.compile_mir_rvalue(value)?;
-                    self.emit(Instr::StoreSliceExpr {
-                        dims: indexing.components.len(),
-                        numeric_count: components.numeric_count,
-                        colon_mask: components.colon_mask,
-                        end_mask: components.end_mask,
-                        range_dims: components.range_dims,
-                        range_has_step: components.range_has_step,
-                        range_start_exprs: components.range_start_exprs,
-                        range_step_exprs: components.range_step_exprs,
-                        range_end_exprs: components.range_end_exprs,
-                        end_numeric_exprs: components.end_numeric_exprs,
-                    });
+                    if delete {
+                        self.emit(Instr::StoreSliceExprDelete {
+                            dims: indexing.components.len(),
+                            numeric_count: components.numeric_count,
+                            colon_mask: components.colon_mask,
+                            end_mask: components.end_mask,
+                            range_dims: components.range_dims,
+                            range_has_step: components.range_has_step,
+                            range_start_exprs: components.range_start_exprs,
+                            range_step_exprs: components.range_step_exprs,
+                            range_end_exprs: components.range_end_exprs,
+                            end_numeric_exprs: components.end_numeric_exprs,
+                        });
+                    } else {
+                        self.emit(Instr::StoreSliceExpr {
+                            dims: indexing.components.len(),
+                            numeric_count: components.numeric_count,
+                            colon_mask: components.colon_mask,
+                            end_mask: components.end_mask,
+                            range_dims: components.range_dims,
+                            range_has_step: components.range_has_step,
+                            range_start_exprs: components.range_start_exprs,
+                            range_step_exprs: components.range_step_exprs,
+                            range_end_exprs: components.range_end_exprs,
+                            end_numeric_exprs: components.end_numeric_exprs,
+                        });
+                    }
                 }
                 MirIndexPlan::Slice => {
                     let (numeric_count, colon_mask, end_mask) =
                         self.compile_mir_slice_components(indexing)?;
                     self.compile_mir_rvalue(value)?;
-                    self.emit(Instr::StoreSlice(
-                        indexing.components.len(),
-                        numeric_count,
-                        colon_mask,
-                        end_mask,
-                    ));
+                    self.emit(if delete {
+                        Instr::StoreSliceDelete(
+                            indexing.components.len(),
+                            numeric_count,
+                            colon_mask,
+                            end_mask,
+                        )
+                    } else {
+                        Instr::StoreSlice(
+                            indexing.components.len(),
+                            numeric_count,
+                            colon_mask,
+                            end_mask,
+                        )
+                    });
                 }
                 MirIndexPlan::Cell => {
                     return Err(self
@@ -1392,29 +1416,53 @@ impl Compiler {
                             MirRangeParamOrder::AfterNumeric,
                         )?;
                         self.emit(Instr::LoadVar(tmp));
-                        self.emit(Instr::StoreSliceExpr {
-                            dims: indexing.components.len(),
-                            numeric_count: components.numeric_count,
-                            colon_mask: components.colon_mask,
-                            end_mask: components.end_mask,
-                            range_dims: components.range_dims,
-                            range_has_step: components.range_has_step,
-                            range_start_exprs: components.range_start_exprs,
-                            range_step_exprs: components.range_step_exprs,
-                            range_end_exprs: components.range_end_exprs,
-                            end_numeric_exprs: components.end_numeric_exprs,
-                        });
+                        if delete {
+                            self.emit(Instr::StoreSliceExprDelete {
+                                dims: indexing.components.len(),
+                                numeric_count: components.numeric_count,
+                                colon_mask: components.colon_mask,
+                                end_mask: components.end_mask,
+                                range_dims: components.range_dims,
+                                range_has_step: components.range_has_step,
+                                range_start_exprs: components.range_start_exprs,
+                                range_step_exprs: components.range_step_exprs,
+                                range_end_exprs: components.range_end_exprs,
+                                end_numeric_exprs: components.end_numeric_exprs,
+                            });
+                        } else {
+                            self.emit(Instr::StoreSliceExpr {
+                                dims: indexing.components.len(),
+                                numeric_count: components.numeric_count,
+                                colon_mask: components.colon_mask,
+                                end_mask: components.end_mask,
+                                range_dims: components.range_dims,
+                                range_has_step: components.range_has_step,
+                                range_start_exprs: components.range_start_exprs,
+                                range_step_exprs: components.range_step_exprs,
+                                range_end_exprs: components.range_end_exprs,
+                                end_numeric_exprs: components.end_numeric_exprs,
+                            });
+                        }
                     }
                     MirIndexPlan::Slice => {
                         let (numeric_count, colon_mask, end_mask) =
                             self.compile_mir_slice_components(indexing)?;
                         self.emit(Instr::LoadVar(tmp));
-                        self.emit(Instr::StoreSlice(
-                            indexing.components.len(),
-                            numeric_count,
-                            colon_mask,
-                            end_mask,
-                        ));
+                        self.emit(if delete {
+                            Instr::StoreSliceDelete(
+                                indexing.components.len(),
+                                numeric_count,
+                                colon_mask,
+                                end_mask,
+                            )
+                        } else {
+                            Instr::StoreSlice(
+                                indexing.components.len(),
+                                numeric_count,
+                                colon_mask,
+                                end_mask,
+                            )
+                        });
                     }
                     MirIndexPlan::Cell => {
                         return Err(self.compile_error(

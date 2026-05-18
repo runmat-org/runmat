@@ -290,14 +290,6 @@ pub fn assign_cell_paren_with_policy(
     ))
 }
 
-pub fn assign_cell_paren_linear_indices(
-    ca: CellArray,
-    indices: &[usize],
-    rhs: &Value,
-) -> Result<Value, RuntimeError> {
-    assign_cell_paren_linear_indices_with_policy(ca, indices, rhs, is_empty_tensor(rhs))
-}
-
 pub fn assign_cell_paren_linear_indices_with_policy(
     mut ca: CellArray,
     indices: &[usize],

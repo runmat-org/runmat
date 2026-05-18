@@ -82,7 +82,9 @@ pub fn fusion_span_has_vm_barrier(instructions: &[Instr], span: &InstrSpan) -> b
             Instr::StoreIndex(_)
                 | Instr::StoreIndexDelete(_)
                 | Instr::StoreSlice(_, _, _, _)
+                | Instr::StoreSliceDelete(_, _, _, _)
                 | Instr::StoreSliceExpr { .. }
+                | Instr::StoreSliceExprDelete { .. }
                 | Instr::StoreIndexCell(_)
                 | Instr::StoreIndexCellDelete(_)
                 | Instr::StoreMember(_)

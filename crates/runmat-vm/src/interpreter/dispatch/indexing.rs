@@ -824,7 +824,9 @@ pub async fn dispatch_indexing(
             }
             Ok(true)
         }
-        crate::bytecode::Instr::StoreSlice(dims, numeric_count, colon_mask, end_mask) => {
+        crate::bytecode::Instr::StoreSlice(dims, numeric_count, colon_mask, end_mask)
+        | crate::bytecode::Instr::StoreSliceDelete(dims, numeric_count, colon_mask, end_mask) => {
+            let delete = matches!(instr, crate::bytecode::Instr::StoreSliceDelete(_, _, _, _));
             let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
@@ -863,6 +865,12 @@ pub async fn dispatch_indexing(
                     );
                 }
                 Value::Tensor(t) => {
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedSliceDeletion",
+                            "Slice deletion currently supports cell arrays only",
+                        ));
+                    }
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &t.shape)
                             .await?;
@@ -870,6 +878,12 @@ pub async fn dispatch_indexing(
                     stack.push(idx_write_slice::assign_tensor_with_plan(t, &plan, &rhs).await?);
                 }
                 Value::GpuTensor(handle) => stack.push({
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedSliceDeletion",
+                            "Slice deletion currently supports cell arrays only",
+                        ));
+                    }
                     let selectors = build_slice_selectors(
                         *dims,
                         *colon_mask,
@@ -882,6 +896,12 @@ pub async fn dispatch_indexing(
                     idx_write_slice::assign_gpu_slice_with_plan(&handle, &plan, &rhs).await?
                 }),
                 Value::ComplexTensor(mut ct) => {
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedSliceDeletion",
+                            "Slice deletion currently supports cell arrays only",
+                        ));
+                    }
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ct.shape)
                             .await
@@ -908,11 +928,19 @@ pub async fn dispatch_indexing(
                         .map_err(|e| map_slice_plan_error("cell slice assign", e))?;
                     let selected: Vec<usize> =
                         plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
-                    stack.push(crate::ops::cells::assign_cell_paren_linear_indices(
-                        ca, &selected, &rhs,
-                    )?);
+                    stack.push(
+                        crate::ops::cells::assign_cell_paren_linear_indices_with_policy(
+                            ca, &selected, &rhs, delete,
+                        )?,
+                    );
                 }
                 Value::StringArray(mut sa) => {
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedSliceDeletion",
+                            "Slice deletion currently supports cell arrays only",
+                        ));
+                    }
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
                             .await
@@ -1160,7 +1188,20 @@ pub async fn dispatch_indexing(
             range_step_exprs,
             range_end_exprs,
             end_numeric_exprs,
+        }
+        | crate::bytecode::Instr::StoreSliceExprDelete {
+            dims,
+            numeric_count,
+            colon_mask,
+            end_mask,
+            range_dims,
+            range_has_step,
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            end_numeric_exprs,
         } => {
+            let delete = matches!(instr, crate::bytecode::Instr::StoreSliceExprDelete { .. });
             let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
@@ -1251,6 +1292,12 @@ pub async fn dispatch_indexing(
             }
             match base {
                 Value::ComplexTensor(mut t) => {
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedSliceDeletion",
+                            "Slice deletion currently supports cell arrays only",
+                        ));
+                    }
                     let vm_plan = build_expr_index_plan(
                         ExprPlanSpec {
                             dims: *dims,
@@ -1283,6 +1330,12 @@ pub async fn dispatch_indexing(
                     stack.push(Value::ComplexTensor(t));
                 }
                 Value::Tensor(t) => {
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedSliceDeletion",
+                            "Slice deletion currently supports cell arrays only",
+                        ));
+                    }
                     let vm_plan = build_expr_index_plan(
                         ExprPlanSpec {
                             dims: *dims,
@@ -1306,6 +1359,12 @@ pub async fn dispatch_indexing(
                     stack.push(idx_write_slice::assign_tensor_with_plan(t, &vm_plan, &rhs).await?);
                 }
                 Value::GpuTensor(h) => {
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedSliceDeletion",
+                            "Slice deletion currently supports cell arrays only",
+                        ));
+                    }
                     let vm_plan = build_expr_index_plan(
                         ExprPlanSpec {
                             dims: *dims,
@@ -1361,6 +1420,12 @@ pub async fn dispatch_indexing(
                     );
                 }
                 Value::StringArray(mut sa) => {
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedSliceDeletion",
+                            "Slice deletion currently supports cell arrays only",
+                        ));
+                    }
                     let vm_plan = build_expr_index_plan(
                         ExprPlanSpec {
                             dims: *dims,
@@ -1418,9 +1483,11 @@ pub async fn dispatch_indexing(
                         .iter()
                         .map(|idx| (*idx as usize) + 1)
                         .collect();
-                    stack.push(crate::ops::cells::assign_cell_paren_linear_indices(
-                        ca, &selected, &rhs,
-                    )?);
+                    stack.push(
+                        crate::ops::cells::assign_cell_paren_linear_indices_with_policy(
+                            ca, &selected, &rhs, delete,
+                        )?,
+                    );
                 }
                 _ => {
                     return Err(

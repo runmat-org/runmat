@@ -123,6 +123,18 @@ pub enum Instr {
         range_end_exprs: Vec<EndExpr>,
         end_numeric_exprs: Vec<(usize, EndExpr)>,
     },
+    StoreSliceExprDelete {
+        dims: usize,
+        numeric_count: usize,
+        colon_mask: u32,
+        end_mask: u32,
+        range_dims: Vec<usize>,
+        range_has_step: Vec<bool>,
+        range_start_exprs: Vec<Option<EndExpr>>,
+        range_step_exprs: Vec<Option<EndExpr>>,
+        range_end_exprs: Vec<EndExpr>,
+        end_numeric_exprs: Vec<(usize, EndExpr)>,
+    },
 
     // Cell array construction and indexing.
     CreateCell2D(usize, usize),
@@ -142,6 +154,7 @@ pub enum Instr {
 
     // Slice assignment with compiler-encoded colon and plain `end` masks.
     StoreSlice(usize, usize, u32, u32),
+    StoreSliceDelete(usize, usize, u32, u32),
 
     // Struct, object, and class member access.
     LoadMember(String),
@@ -331,9 +344,13 @@ impl Instr {
             | Instr::StoreIndexDelete(n)
             | Instr::StoreIndexCellDelete(n) => effect(n + 2, 1),
             Instr::IndexSlice(dims, numeric_count, _, _)
-            | Instr::StoreSlice(dims, numeric_count, _, _) => {
+            | Instr::StoreSlice(dims, numeric_count, _, _)
+            | Instr::StoreSliceDelete(dims, numeric_count, _, _) => {
                 let pops = 1 + numeric_count;
-                if matches!(self, Instr::StoreSlice(_, _, _, _)) {
+                if matches!(
+                    self,
+                    Instr::StoreSlice(_, _, _, _) | Instr::StoreSliceDelete(_, _, _, _)
+                ) {
                     effect(pops + 1, 1)
                 } else {
                     let _ = dims;
@@ -346,6 +363,11 @@ impl Instr {
                 ..
             } => effect(1 + numeric_count + range_dims.len(), 1),
             Instr::StoreSliceExpr {
+                numeric_count,
+                range_dims,
+                ..
+            }
+            | Instr::StoreSliceExprDelete {
                 numeric_count,
                 range_dims,
                 ..

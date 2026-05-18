@@ -565,7 +565,9 @@ async fn run_interpreter_inner(
             | Instr::StoreIndexDelete(_)
             | Instr::StoreIndexCellDelete(_)
             | Instr::StoreSlice(_, _, _, _)
+            | Instr::StoreSliceDelete(_, _, _, _)
             | Instr::StoreSliceExpr { .. }
+            | Instr::StoreSliceExprDelete { .. }
             | Instr::CallMethodOrMemberIndexMulti { .. }
             | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. }
             | Instr::LoadMethod(_)

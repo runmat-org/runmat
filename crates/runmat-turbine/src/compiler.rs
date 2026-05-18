@@ -785,7 +785,9 @@ impl BytecodeCompiler {
                     | Instr::OrOr(_)
                     | Instr::IndexSliceExpr { .. }
                     | Instr::StoreSliceExpr { .. }
+                    | Instr::StoreSliceExprDelete { .. }
                     | Instr::StoreSlice(_, _, _, _)
+                    | Instr::StoreSliceDelete(_, _, _, _)
                     | Instr::LoadMember(_)
                     | Instr::LoadMemberOrInit(_)
                     | Instr::LoadMemberDynamic
