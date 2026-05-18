@@ -4155,6 +4155,80 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("ACOUSTIC_MODE_COUNT_TREND_WORSENING", codes)
         self.assertIn("ACOUSTIC_RESIDUAL_WARN_THRESHOLD_TREND_WORSENING", codes)
 
+    def test_modal_metric_breaches_emit_reasons(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "modal_large_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "modal_max_m_orthogonality_offdiag", "observed": 0.2},
+                    {
+                        "name": "modal_min_relative_frequency_separation",
+                        "observed": 0.002,
+                    },
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG"] = "0.05"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION"
+        ] = "0.01"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("MODAL_MAX_M_ORTHOGONALITY_OFFDIAG_HIGH", codes)
+        self.assertIn("MODAL_MIN_RELATIVE_FREQUENCY_SEPARATION_LOW", codes)
+
+    def test_modal_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "modal_large_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "modal_max_m_orthogonality_offdiag", "observed": 0.20},
+                    {
+                        "name": "modal_min_relative_frequency_separation",
+                        "observed": 0.01,
+                    },
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "modal_large_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "modal_max_m_orthogonality_offdiag", "observed": 0.05},
+                    {
+                        "name": "modal_min_relative_frequency_separation",
+                        "observed": 0.04,
+                    },
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO"
+        ] = "1.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("MODAL_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_WORSENING", codes)
+        self.assertIn("MODAL_MIN_RELATIVE_FREQUENCY_SEPARATION_TREND_WORSENING", codes)
+
     def test_coupled_flow_metric_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(

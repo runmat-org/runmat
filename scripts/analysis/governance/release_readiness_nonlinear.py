@@ -4498,10 +4498,14 @@ def evaluate_release_readiness(
     acoustic_min_relative_frequency_separation = None
     acoustic_min_mode_count = None
     acoustic_max_residual_warn_threshold = None
+    modal_max_m_orthogonality_offdiag = None
+    modal_min_relative_frequency_separation = None
     acoustic_m_orthogonality_offdiag_trend_ratio = None
     acoustic_relative_frequency_separation_drop_trend_ratio = None
     acoustic_mode_count_drop_trend_ratio = None
     acoustic_residual_warn_threshold_trend_ratio = None
+    modal_m_orthogonality_offdiag_trend_ratio = None
+    modal_relative_frequency_separation_drop_trend_ratio = None
     nonlinear_max_assembly_total_increments = None
     nonlinear_max_assembly_failed_increments = None
     nonlinear_max_assembly_spike_count = None
@@ -5651,6 +5655,83 @@ def evaluate_release_readiness(
                     detail=(
                         "acoustic threshold assertions missing required fields: "
                         + ", ".join(sorted(set(missing_acoustic_fields)))
+                    ),
+                )
+            )
+
+    modal_records = [
+        rec
+        for rec in report_records(latest)
+        if rec.get("fixture_id")
+        in {
+            "modal_large_cpu",
+            "modal_large_cpu_stress16",
+            "modal_large_gpu_fallback",
+            "modal_large_gpu_provider",
+            "modal_large_gpu_provider_stress16",
+        }
+    ]
+    if not modal_records:
+        if protected or acoustic_require_metrics:
+            reasons.append(
+                Reason(
+                    code="MODAL_METRICS_MISSING",
+                    severity="warn",
+                    detail="modal posture metrics missing from report records",
+                )
+            )
+    else:
+        modal_metric_specs = [
+            (
+                "modal_max_m_orthogonality_offdiag",
+                "max",
+                acoustic_max_m_orthogonality_offdiag_threshold,
+                "MODAL_MAX_M_ORTHOGONALITY_OFFDIAG_HIGH",
+                "modal max m-orthogonality offdiag",
+            ),
+            (
+                "modal_min_relative_frequency_separation",
+                "min",
+                acoustic_min_relative_frequency_separation_threshold,
+                "MODAL_MIN_RELATIVE_FREQUENCY_SEPARATION_LOW",
+                "modal min relative frequency separation",
+            ),
+        ]
+        missing_modal_fields = []
+        for assertion_name, mode, threshold, code, label in modal_metric_specs:
+            values = []
+            for rec in modal_records:
+                observed = threshold_assertion_observed(rec, assertion_name)
+                if observed is not None:
+                    values.append(observed)
+            if not values:
+                missing_modal_fields.append(assertion_name)
+                continue
+            observed = max(values) if mode == "max" else min(values)
+            if assertion_name == "modal_max_m_orthogonality_offdiag":
+                modal_max_m_orthogonality_offdiag = observed
+            elif assertion_name == "modal_min_relative_frequency_separation":
+                modal_min_relative_frequency_separation = observed
+            breached = observed > threshold if mode == "max" else observed < threshold
+            if breached:
+                comparator = "exceeds" if mode == "max" else "below"
+                reasons.append(
+                    Reason(
+                        code=code,
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"{label} {observed:.3f} {comparator} threshold {threshold:.3f}"
+                        ),
+                    )
+                )
+        if missing_modal_fields and (protected or acoustic_require_metrics):
+            reasons.append(
+                Reason(
+                    code="MODAL_METRIC_FIELDS_MISSING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "modal threshold assertions missing required fields: "
+                        + ", ".join(sorted(set(missing_modal_fields)))
                     ),
                 )
             )
@@ -8879,6 +8960,47 @@ def evaluate_release_readiness(
                     detail=(
                         "acoustic min relative-frequency separation drop trend ratio "
                         f"{acoustic_relative_frequency_separation_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{acoustic_max_relative_frequency_separation_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        modal_m_orthogonality_offdiag_trend_ratio = fixture_assertion_trend_ratio(
+            "modal_max_m_orthogonality_offdiag",
+            ratio_mode="increase",
+        )
+        if (
+            modal_m_orthogonality_offdiag_trend_ratio is not None
+            and modal_m_orthogonality_offdiag_trend_ratio
+            > acoustic_max_m_orthogonality_offdiag_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="MODAL_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "modal max m-orthogonality offdiag trend ratio "
+                        f"{modal_m_orthogonality_offdiag_trend_ratio:.3f} exceeds threshold "
+                        f"{acoustic_max_m_orthogonality_offdiag_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        modal_relative_frequency_separation_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "modal_min_relative_frequency_separation"
+        )
+        if (
+            modal_relative_frequency_separation_drop_trend_ratio is not None
+            and modal_relative_frequency_separation_drop_trend_ratio
+            > acoustic_max_relative_frequency_separation_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="MODAL_MIN_RELATIVE_FREQUENCY_SEPARATION_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "modal min relative-frequency separation drop trend ratio "
+                        f"{modal_relative_frequency_separation_drop_trend_ratio:.3f} exceeds threshold "
                         f"{acoustic_max_relative_frequency_separation_drop_trend_ratio_threshold:.3f}"
                     ),
                 )
@@ -12393,6 +12515,10 @@ def evaluate_release_readiness(
         "acoustic_min_mode_count_threshold": acoustic_min_mode_count_threshold,
         "acoustic_max_residual_warn_threshold": acoustic_max_residual_warn_threshold,
         "acoustic_max_residual_warn_threshold_threshold": acoustic_max_residual_warn_threshold_threshold,
+        "modal_max_m_orthogonality_offdiag": modal_max_m_orthogonality_offdiag,
+        "modal_max_m_orthogonality_offdiag_threshold": acoustic_max_m_orthogonality_offdiag_threshold,
+        "modal_min_relative_frequency_separation": modal_min_relative_frequency_separation,
+        "modal_min_relative_frequency_separation_threshold": acoustic_min_relative_frequency_separation_threshold,
         "acoustic_m_orthogonality_offdiag_trend_ratio": acoustic_m_orthogonality_offdiag_trend_ratio,
         "acoustic_max_m_orthogonality_offdiag_trend_ratio_threshold": acoustic_max_m_orthogonality_offdiag_trend_ratio_threshold,
         "acoustic_relative_frequency_separation_drop_trend_ratio": acoustic_relative_frequency_separation_drop_trend_ratio,
@@ -12401,6 +12527,8 @@ def evaluate_release_readiness(
         "acoustic_max_mode_count_drop_trend_ratio_threshold": acoustic_max_mode_count_drop_trend_ratio_threshold,
         "acoustic_residual_warn_threshold_trend_ratio": acoustic_residual_warn_threshold_trend_ratio,
         "acoustic_max_residual_warn_threshold_trend_ratio_threshold": acoustic_max_residual_warn_threshold_trend_ratio_threshold,
+        "modal_m_orthogonality_offdiag_trend_ratio": modal_m_orthogonality_offdiag_trend_ratio,
+        "modal_relative_frequency_separation_drop_trend_ratio": modal_relative_frequency_separation_drop_trend_ratio,
         "nonlinear_max_assembly_total_increments": nonlinear_max_assembly_total_increments,
         "nonlinear_max_assembly_total_increments_threshold": nonlinear_max_assembly_total_increments_threshold,
         "nonlinear_max_assembly_failed_increments": nonlinear_max_assembly_failed_increments,
@@ -13362,6 +13490,18 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Acoustic trend ratios (orthogonality, frequency separation, mode count, residual threshold): "
         f"`{result.get('acoustic_m_orthogonality_offdiag_trend_ratio') if result.get('acoustic_m_orthogonality_offdiag_trend_ratio') is not None else '-'}`/`{result.get('acoustic_relative_frequency_separation_drop_trend_ratio') if result.get('acoustic_relative_frequency_separation_drop_trend_ratio') is not None else '-'}`/`{result.get('acoustic_mode_count_drop_trend_ratio') if result.get('acoustic_mode_count_drop_trend_ratio') is not None else '-'}`/`{result.get('acoustic_residual_warn_threshold_trend_ratio') if result.get('acoustic_residual_warn_threshold_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Structural modal max m-orthogonality offdiag/threshold: "
+        f"`{result.get('modal_max_m_orthogonality_offdiag') if result.get('modal_max_m_orthogonality_offdiag') is not None else '-'}`/`{result.get('modal_max_m_orthogonality_offdiag_threshold') if result.get('modal_max_m_orthogonality_offdiag_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Structural modal min relative frequency separation/threshold: "
+        f"`{result.get('modal_min_relative_frequency_separation') if result.get('modal_min_relative_frequency_separation') is not None else '-'}`/`{result.get('modal_min_relative_frequency_separation_threshold') if result.get('modal_min_relative_frequency_separation_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Structural modal trend ratios (orthogonality, frequency separation): "
+        f"`{result.get('modal_m_orthogonality_offdiag_trend_ratio') if result.get('modal_m_orthogonality_offdiag_trend_ratio') is not None else '-'}`/`{result.get('modal_relative_frequency_separation_drop_trend_ratio') if result.get('modal_relative_frequency_separation_drop_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Coupled Flow Posture")
