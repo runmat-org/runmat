@@ -5461,7 +5461,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="THERMAL_METRICS_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="standalone thermal posture metrics missing from report records",
                 )
             )
@@ -5803,7 +5803,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="THERMO_COUPLING_METRICS_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="thermo coupling posture metrics missing from report records",
                 )
             )
@@ -5832,7 +5832,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="THERMO_COUPLING_ENABLED_RATE_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="thermo coupling enabled-rate metric missing from report records",
                 )
             )
@@ -6089,7 +6089,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="ELECTRO_COUPLING_METRICS_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="electro-thermal coupling posture metrics missing from report records",
                 )
             )
@@ -6119,7 +6119,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="ELECTRO_COUPLING_ENABLED_RATE_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="electro-thermal coupling enabled-rate metric missing from report records",
                 )
             )
