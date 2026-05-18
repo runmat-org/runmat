@@ -1263,7 +1263,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="TREND_DATA_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="no rolling reports available for trend comparison",
                 )
             )

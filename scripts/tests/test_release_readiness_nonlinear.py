@@ -572,6 +572,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_CALIBRATION",
             "RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS",
             "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION_MAX_AGE_DAYS",
+            "RUNMAT_RELEASE_READINESS_REQUIRE_TRENDS",
             "RUNMAT_RELEASE_READINESS_REQUIRE_KEY_PERF_FIXTURES",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO",
@@ -614,6 +615,35 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn(result["verdict"], {"warn", "fail"})
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("NONLINEAR_TREND_SLOWDOWN", codes)
+
+    def test_trend_data_missing_warns_when_required_on_non_protected(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        os.environ["RUNMAT_RELEASE_READINESS_REQUIRE_TRENDS"] = "true"
+        result = evaluate_release_readiness(latest, [], protected=False)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "TREND_DATA_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "warn")
+
+    def test_trend_data_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "TREND_DATA_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
 
     def test_nonlinear_trend_baseline_ignores_failed_rolling_reports(self):
         latest = report(passed=True, publishable=True, gpu_ms=200.0)
