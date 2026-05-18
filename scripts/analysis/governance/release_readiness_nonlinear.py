@@ -4891,7 +4891,17 @@ def evaluate_release_readiness(
     )
     promotion_calibration_applied = False
     promotion_calibration_age_days = None
-    promotion_history_sufficient = len(rolling) >= promotion_min_rolling_reports
+    promotion_history_trusted_count = sum(
+        1
+        for report in rolling
+        if report.get("passed", True) is True
+        and (
+            report.get("publishable") is None or report.get("publishable") is True
+        )
+    )
+    promotion_history_sufficient = (
+        promotion_history_trusted_count >= promotion_min_rolling_reports
+    )
 
     profile = governance_profile_name()
     if isinstance(promotion_calibration, dict):
@@ -4948,7 +4958,8 @@ def evaluate_release_readiness(
                 code="PROMOTION_HISTORY_INSUFFICIENT",
                 severity="fail" if protected else "warn",
                 detail=(
-                    f"rolling report count {len(rolling)} below minimum {promotion_min_rolling_reports}"
+                    f"trusted rolling report count {promotion_history_trusted_count} "
+                    f"below minimum {promotion_min_rolling_reports}"
                 ),
             )
         )

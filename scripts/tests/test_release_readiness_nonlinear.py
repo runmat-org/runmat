@@ -6475,6 +6475,27 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("PLASTIC_PROMOTION_BLOCKER_BASELINE_MISSING", codes)
         self.assertIn("CONTACT_PROMOTION_BLOCKER_BASELINE_MISSING", codes)
 
+    def test_promotion_history_insufficient_ignores_failed_rolling_reports(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        rolling = [report(passed=False, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY"] = "true"
+        os.environ["RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS"] = "1"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        self.assertFalse(result["promotion_history_sufficient"])
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PROMOTION_HISTORY_INSUFFICIENT", codes)
+
+    def test_promotion_history_insufficient_ignores_non_publishable_rolling_reports(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["publishable"] = False
+        os.environ["RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY"] = "true"
+        os.environ["RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS"] = "1"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        self.assertFalse(result["promotion_history_sufficient"])
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PROMOTION_HISTORY_INSUFFICIENT", codes)
+
     def test_promotion_calibration_stale_reason_is_emitted_when_required(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
