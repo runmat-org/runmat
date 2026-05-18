@@ -257,6 +257,17 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY",
@@ -2341,6 +2352,156 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("ACOUSTIC_MODE_COUNT_TREND_WORSENING", codes)
         self.assertIn("ACOUSTIC_RESIDUAL_WARN_THRESHOLD_TREND_WORSENING", codes)
 
+    def test_coupled_flow_metric_breaches_emit_reasons(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cfd_reynolds_proxy", "observed": 100000.0}
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "cht_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cht_reynolds_proxy", "observed": 100000.0},
+                    {"name": "cht_applied_temperature_delta_k", "observed": 20.0},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "fsi_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "fsi_reynolds_proxy", "observed": 50000.0},
+                    {"name": "fsi_structural_step_count", "observed": 0.0},
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY"] = "200000.0"
+        os.environ["RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY"] = "200000.0"
+        os.environ["RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K"] = "45.0"
+        os.environ["RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY"] = "150000.0"
+        os.environ["RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT"] = "1.0"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CFD_REYNOLDS_PROXY_LOW", codes)
+        self.assertIn("CHT_REYNOLDS_PROXY_LOW", codes)
+        self.assertIn("CHT_APPLIED_TEMPERATURE_DELTA_K_LOW", codes)
+        self.assertIn("FSI_REYNOLDS_PROXY_LOW", codes)
+        self.assertIn("FSI_STRUCTURAL_STEP_COUNT_LOW", codes)
+
+    def test_coupled_flow_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cfd_reynolds_proxy", "observed": 200000.0}
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "cht_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cht_reynolds_proxy", "observed": 200000.0},
+                    {"name": "cht_applied_temperature_delta_k", "observed": 40.0},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "fsi_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "fsi_reynolds_proxy", "observed": 120000.0},
+                    {"name": "fsi_structural_step_count", "observed": 1.0},
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cfd_reynolds_proxy", "observed": 300000.0}
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cht_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cht_reynolds_proxy", "observed": 300000.0},
+                    {"name": "cht_applied_temperature_delta_k", "observed": 60.0},
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "fsi_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "fsi_reynolds_proxy", "observed": 240000.0},
+                    {"name": "fsi_structural_step_count", "observed": 2.0},
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO"] = (
+            "1.4"
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO"] = (
+            "1.4"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO"
+        ] = "1.4"
+        os.environ["RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO"] = (
+            "1.4"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO"
+        ] = "1.4"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CFD_REYNOLDS_PROXY_TREND_WORSENING", codes)
+        self.assertIn("CHT_REYNOLDS_PROXY_TREND_WORSENING", codes)
+        self.assertIn("CHT_APPLIED_TEMPERATURE_DELTA_K_TREND_WORSENING", codes)
+        self.assertIn("FSI_REYNOLDS_PROXY_TREND_WORSENING", codes)
+        self.assertIn("FSI_STRUCTURAL_STEP_COUNT_TREND_WORSENING", codes)
+
     def test_plastic_nonlinear_severity_high_reason_is_emitted(self):
         latest = report(
             passed=True,
@@ -3219,6 +3380,9 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("### Acoustic Posture", summary)
         self.assertIn("Acoustic mode count/threshold", summary)
         self.assertIn("Acoustic trend ratios (orthogonality, frequency separation, mode count, residual threshold)", summary)
+        self.assertIn("### Coupled Flow Posture", summary)
+        self.assertIn("CFD min Reynolds proxy/threshold", summary)
+        self.assertIn("Coupled-flow trend ratios (CFD Reynolds, CHT Reynolds, CHT delta K, FSI Reynolds, FSI structural steps)", summary)
         self.assertIn("### EM Posture", summary)
         self.assertIn("Max EM energy imbalance ratio", summary)
         self.assertIn("Max EM boundary-penalty residual norms (real/imag)", summary)

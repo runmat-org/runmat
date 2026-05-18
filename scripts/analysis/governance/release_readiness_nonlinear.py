@@ -137,6 +137,17 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "true",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "250000.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "250000.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K": "50.0",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY": "180000.0",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT": "1.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.35",
@@ -326,6 +337,17 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "200000.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "200000.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K": "45.0",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY": "150000.0",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT": "1.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.45",
@@ -515,6 +537,17 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "150000.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "150000.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K": "35.0",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY": "100000.0",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT": "1.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.6",
@@ -1603,6 +1636,90 @@ def evaluate_release_readiness(
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    coupled_flow_require_metrics = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS",
+            profile_default("RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS", "false"),
+        )
+    )
+    cfd_min_reynolds_proxy_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY",
+            profile_default("RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY", "200000.0"),
+        )
+    )
+    cht_min_reynolds_proxy_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY",
+            profile_default("RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY", "200000.0"),
+        )
+    )
+    cht_min_applied_temperature_delta_k_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K",
+                "45.0",
+            ),
+        )
+    )
+    fsi_min_reynolds_proxy_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY",
+            profile_default("RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY", "150000.0"),
+        )
+    )
+    fsi_min_structural_step_count_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT",
+            profile_default("RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT", "1.0"),
+        )
+    )
+    cfd_max_reynolds_proxy_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    cht_max_reynolds_proxy_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    cht_max_applied_temperature_delta_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    fsi_max_reynolds_proxy_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    fsi_max_structural_step_count_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -2720,6 +2837,16 @@ def evaluate_release_readiness(
     acoustic_relative_frequency_separation_drop_trend_ratio = None
     acoustic_mode_count_drop_trend_ratio = None
     acoustic_residual_warn_threshold_trend_ratio = None
+    cfd_min_reynolds_proxy = None
+    cht_min_reynolds_proxy = None
+    cht_min_applied_temperature_delta_k = None
+    fsi_min_reynolds_proxy = None
+    fsi_min_structural_step_count = None
+    cfd_reynolds_proxy_drop_trend_ratio = None
+    cht_reynolds_proxy_drop_trend_ratio = None
+    cht_applied_temperature_delta_drop_trend_ratio = None
+    fsi_reynolds_proxy_drop_trend_ratio = None
+    fsi_structural_step_count_drop_trend_ratio = None
     em_max_energy_imbalance_ratio = None
     em_max_flux_divergence_proxy = None
     em_max_real_residual_norm = None
@@ -3592,6 +3719,106 @@ def evaluate_release_readiness(
                     detail=(
                         "acoustic threshold assertions missing required fields: "
                         + ", ".join(sorted(set(missing_acoustic_fields)))
+                    ),
+                )
+            )
+
+    coupled_flow_records = [
+        rec
+        for rec in report_records(latest)
+        if rec.get("fixture_id")
+        in {
+            "cfd_steady_gpu_provider",
+            "cht_coupled_gpu_provider",
+            "fsi_coupled_gpu_provider",
+        }
+    ]
+    if not coupled_flow_records:
+        if protected or coupled_flow_require_metrics:
+            reasons.append(
+                Reason(
+                    code="COUPLED_FLOW_METRICS_MISSING",
+                    severity="warn",
+                    detail="coupled-flow posture metrics missing from report records",
+                )
+            )
+    else:
+        coupled_flow_assertion_specs = [
+            (
+                "cfd_steady_gpu_provider",
+                "cfd_reynolds_proxy",
+                cfd_min_reynolds_proxy_threshold,
+                "CFD_REYNOLDS_PROXY_LOW",
+                "CFD Reynolds proxy",
+            ),
+            (
+                "cht_coupled_gpu_provider",
+                "cht_reynolds_proxy",
+                cht_min_reynolds_proxy_threshold,
+                "CHT_REYNOLDS_PROXY_LOW",
+                "CHT Reynolds proxy",
+            ),
+            (
+                "cht_coupled_gpu_provider",
+                "cht_applied_temperature_delta_k",
+                cht_min_applied_temperature_delta_k_threshold,
+                "CHT_APPLIED_TEMPERATURE_DELTA_K_LOW",
+                "CHT applied temperature delta K",
+            ),
+            (
+                "fsi_coupled_gpu_provider",
+                "fsi_reynolds_proxy",
+                fsi_min_reynolds_proxy_threshold,
+                "FSI_REYNOLDS_PROXY_LOW",
+                "FSI Reynolds proxy",
+            ),
+            (
+                "fsi_coupled_gpu_provider",
+                "fsi_structural_step_count",
+                fsi_min_structural_step_count_threshold,
+                "FSI_STRUCTURAL_STEP_COUNT_LOW",
+                "FSI structural step count",
+            ),
+        ]
+        missing_coupled_flow_fields = []
+        for fixture_id, assertion_name, threshold, code, label in coupled_flow_assertion_specs:
+            values = []
+            for rec in coupled_flow_records:
+                if rec.get("fixture_id") != fixture_id:
+                    continue
+                observed = threshold_assertion_observed(rec, assertion_name)
+                if observed is not None:
+                    values.append(observed)
+            if not values:
+                missing_coupled_flow_fields.append(f"{fixture_id}.{assertion_name}")
+                continue
+            observed = min(values)
+            if assertion_name == "cfd_reynolds_proxy":
+                cfd_min_reynolds_proxy = observed
+            elif assertion_name == "cht_reynolds_proxy":
+                cht_min_reynolds_proxy = observed
+            elif assertion_name == "cht_applied_temperature_delta_k":
+                cht_min_applied_temperature_delta_k = observed
+            elif assertion_name == "fsi_reynolds_proxy":
+                fsi_min_reynolds_proxy = observed
+            elif assertion_name == "fsi_structural_step_count":
+                fsi_min_structural_step_count = observed
+            if observed < threshold:
+                reasons.append(
+                    Reason(
+                        code=code,
+                        severity="fail" if protected else "warn",
+                        detail=f"{label} {observed:.3f} below threshold {threshold:.3f}",
+                    )
+                )
+        if missing_coupled_flow_fields and (protected or coupled_flow_require_metrics):
+            reasons.append(
+                Reason(
+                    code="COUPLED_FLOW_ASSERTIONS_MISSING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "coupled-flow threshold assertions missing required fields: "
+                        + ", ".join(sorted(set(missing_coupled_flow_fields)))
                     ),
                 )
             )
@@ -5324,6 +5551,106 @@ def evaluate_release_readiness(
                 )
             )
 
+        cfd_reynolds_proxy_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "cfd_reynolds_proxy"
+        )
+        if (
+            cfd_reynolds_proxy_drop_trend_ratio is not None
+            and cfd_reynolds_proxy_drop_trend_ratio
+            > cfd_max_reynolds_proxy_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CFD_REYNOLDS_PROXY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "CFD Reynolds proxy drop trend ratio "
+                        f"{cfd_reynolds_proxy_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{cfd_max_reynolds_proxy_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        cht_reynolds_proxy_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "cht_reynolds_proxy"
+        )
+        if (
+            cht_reynolds_proxy_drop_trend_ratio is not None
+            and cht_reynolds_proxy_drop_trend_ratio
+            > cht_max_reynolds_proxy_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CHT_REYNOLDS_PROXY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "CHT Reynolds proxy drop trend ratio "
+                        f"{cht_reynolds_proxy_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{cht_max_reynolds_proxy_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        cht_applied_temperature_delta_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "cht_applied_temperature_delta_k"
+        )
+        if (
+            cht_applied_temperature_delta_drop_trend_ratio is not None
+            and cht_applied_temperature_delta_drop_trend_ratio
+            > cht_max_applied_temperature_delta_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CHT_APPLIED_TEMPERATURE_DELTA_K_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "CHT applied temperature delta K drop trend ratio "
+                        f"{cht_applied_temperature_delta_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{cht_max_applied_temperature_delta_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        fsi_reynolds_proxy_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "fsi_reynolds_proxy"
+        )
+        if (
+            fsi_reynolds_proxy_drop_trend_ratio is not None
+            and fsi_reynolds_proxy_drop_trend_ratio
+            > fsi_max_reynolds_proxy_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="FSI_REYNOLDS_PROXY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "FSI Reynolds proxy drop trend ratio "
+                        f"{fsi_reynolds_proxy_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{fsi_max_reynolds_proxy_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        fsi_structural_step_count_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "fsi_structural_step_count"
+        )
+        if (
+            fsi_structural_step_count_drop_trend_ratio is not None
+            and fsi_structural_step_count_drop_trend_ratio
+            > fsi_max_structural_step_count_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="FSI_STRUCTURAL_STEP_COUNT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "FSI structural step-count drop trend ratio "
+                        f"{fsi_structural_step_count_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{fsi_max_structural_step_count_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         em_energy_imbalance_trend_ratio = fixture_trend_ratio(
             "electromagnetic_energy_imbalance_ratio"
         )
@@ -6841,6 +7168,26 @@ def evaluate_release_readiness(
         "acoustic_max_mode_count_drop_trend_ratio_threshold": acoustic_max_mode_count_drop_trend_ratio_threshold,
         "acoustic_residual_warn_threshold_trend_ratio": acoustic_residual_warn_threshold_trend_ratio,
         "acoustic_max_residual_warn_threshold_trend_ratio_threshold": acoustic_max_residual_warn_threshold_trend_ratio_threshold,
+        "cfd_min_reynolds_proxy": cfd_min_reynolds_proxy,
+        "cfd_min_reynolds_proxy_threshold": cfd_min_reynolds_proxy_threshold,
+        "cht_min_reynolds_proxy": cht_min_reynolds_proxy,
+        "cht_min_reynolds_proxy_threshold": cht_min_reynolds_proxy_threshold,
+        "cht_min_applied_temperature_delta_k": cht_min_applied_temperature_delta_k,
+        "cht_min_applied_temperature_delta_k_threshold": cht_min_applied_temperature_delta_k_threshold,
+        "fsi_min_reynolds_proxy": fsi_min_reynolds_proxy,
+        "fsi_min_reynolds_proxy_threshold": fsi_min_reynolds_proxy_threshold,
+        "fsi_min_structural_step_count": fsi_min_structural_step_count,
+        "fsi_min_structural_step_count_threshold": fsi_min_structural_step_count_threshold,
+        "cfd_reynolds_proxy_drop_trend_ratio": cfd_reynolds_proxy_drop_trend_ratio,
+        "cfd_max_reynolds_proxy_drop_trend_ratio_threshold": cfd_max_reynolds_proxy_drop_trend_ratio_threshold,
+        "cht_reynolds_proxy_drop_trend_ratio": cht_reynolds_proxy_drop_trend_ratio,
+        "cht_max_reynolds_proxy_drop_trend_ratio_threshold": cht_max_reynolds_proxy_drop_trend_ratio_threshold,
+        "cht_applied_temperature_delta_drop_trend_ratio": cht_applied_temperature_delta_drop_trend_ratio,
+        "cht_max_applied_temperature_delta_drop_trend_ratio_threshold": cht_max_applied_temperature_delta_drop_trend_ratio_threshold,
+        "fsi_reynolds_proxy_drop_trend_ratio": fsi_reynolds_proxy_drop_trend_ratio,
+        "fsi_max_reynolds_proxy_drop_trend_ratio_threshold": fsi_max_reynolds_proxy_drop_trend_ratio_threshold,
+        "fsi_structural_step_count_drop_trend_ratio": fsi_structural_step_count_drop_trend_ratio,
+        "fsi_max_structural_step_count_drop_trend_ratio_threshold": fsi_max_structural_step_count_drop_trend_ratio_threshold,
         "em_max_energy_imbalance_ratio": em_max_energy_imbalance_ratio,
         "em_max_energy_imbalance_ratio_threshold": em_max_energy_imbalance_ratio_threshold,
         "em_max_flux_divergence_proxy": em_max_flux_divergence_proxy,
@@ -7403,6 +7750,24 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Acoustic trend ratios (orthogonality, frequency separation, mode count, residual threshold): "
         f"`{result.get('acoustic_m_orthogonality_offdiag_trend_ratio') if result.get('acoustic_m_orthogonality_offdiag_trend_ratio') is not None else '-'}`/`{result.get('acoustic_relative_frequency_separation_drop_trend_ratio') if result.get('acoustic_relative_frequency_separation_drop_trend_ratio') is not None else '-'}`/`{result.get('acoustic_mode_count_drop_trend_ratio') if result.get('acoustic_mode_count_drop_trend_ratio') is not None else '-'}`/`{result.get('acoustic_residual_warn_threshold_trend_ratio') if result.get('acoustic_residual_warn_threshold_trend_ratio') is not None else '-'}`"
+    )
+    lines.append("")
+    lines.append("### Coupled Flow Posture")
+    lines.append(
+        "- CFD min Reynolds proxy/threshold: "
+        f"`{result.get('cfd_min_reynolds_proxy') if result.get('cfd_min_reynolds_proxy') is not None else '-'}`/`{result.get('cfd_min_reynolds_proxy_threshold') if result.get('cfd_min_reynolds_proxy_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- CHT min Reynolds proxy and temperature delta K thresholds: "
+        f"`{result.get('cht_min_reynolds_proxy') if result.get('cht_min_reynolds_proxy') is not None else '-'}`/`{result.get('cht_min_reynolds_proxy_threshold') if result.get('cht_min_reynolds_proxy_threshold') is not None else '-'}` and `{result.get('cht_min_applied_temperature_delta_k') if result.get('cht_min_applied_temperature_delta_k') is not None else '-'}`/`{result.get('cht_min_applied_temperature_delta_k_threshold') if result.get('cht_min_applied_temperature_delta_k_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- FSI min Reynolds proxy and structural step-count thresholds: "
+        f"`{result.get('fsi_min_reynolds_proxy') if result.get('fsi_min_reynolds_proxy') is not None else '-'}`/`{result.get('fsi_min_reynolds_proxy_threshold') if result.get('fsi_min_reynolds_proxy_threshold') is not None else '-'}` and `{result.get('fsi_min_structural_step_count') if result.get('fsi_min_structural_step_count') is not None else '-'}`/`{result.get('fsi_min_structural_step_count_threshold') if result.get('fsi_min_structural_step_count_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Coupled-flow trend ratios (CFD Reynolds, CHT Reynolds, CHT delta K, FSI Reynolds, FSI structural steps): "
+        f"`{result.get('cfd_reynolds_proxy_drop_trend_ratio') if result.get('cfd_reynolds_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_reynolds_proxy_drop_trend_ratio') if result.get('cht_reynolds_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_applied_temperature_delta_drop_trend_ratio') if result.get('cht_applied_temperature_delta_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_reynolds_proxy_drop_trend_ratio') if result.get('fsi_reynolds_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_structural_step_count_drop_trend_ratio') if result.get('fsi_structural_step_count_drop_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### EM Posture")
