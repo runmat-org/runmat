@@ -23,6 +23,8 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
         record["electromagnetic_enabled"] = True
         record["electromagnetic_energy_imbalance_ratio"] = 0.0
         record["electromagnetic_flux_divergence_proxy"] = 0.0
+        record["electromagnetic_real_residual_norm"] = 0.0
+        record["electromagnetic_imag_residual_norm"] = 0.0
     return record
 
 
@@ -843,6 +845,21 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     == "electromagnetic_reference_sparse_assignments_gpu_provider"
                 ):
                     record.pop("electromagnetic_energy_imbalance_ratio", None)
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_non_core_em_residual_field_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if (
+                    record["fixture_id"]
+                    == "electromagnetic_reference_sparse_assignments_gpu_provider"
+                ):
+                    record.pop("electromagnetic_real_residual_norm", None)
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))
