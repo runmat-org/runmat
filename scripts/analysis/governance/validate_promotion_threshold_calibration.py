@@ -131,6 +131,45 @@ def main() -> int:
                 f"{profile}.rolling_trusted_report_count must be less than or equal to "
                 f"{profile}.rolling_report_count"
             )
+        if isinstance(source_count := payload.get("source_report_count"), int) and isinstance(
+            rolling_count, int
+        ):
+            if rolling_count != source_count:
+                errors.append(
+                    f"{profile}.rolling_report_count must equal source_report_count"
+                )
+        if isinstance(
+            source_trusted := payload.get("source_trusted_report_count"), int
+        ) and isinstance(trusted_rolling_count, int):
+            if trusted_rolling_count != source_trusted:
+                errors.append(
+                    f"{profile}.rolling_trusted_report_count must equal source_trusted_report_count"
+                )
+
+    release_entry = by_profile.get("release")
+    development_entry = by_profile.get("development")
+    feature_entry = by_profile.get("feature")
+    if all(
+        isinstance(entry, dict)
+        for entry in (release_entry, development_entry, feature_entry)
+    ):
+        for key in (
+            "plastic_promotion_max_blockers",
+            "contact_promotion_max_blockers",
+            "promotion_max_blocker_regression",
+        ):
+            release_value = release_entry.get(key)
+            development_value = development_entry.get(key)
+            feature_value = feature_entry.get(key)
+            if all(
+                isinstance(value, int)
+                for value in (release_value, development_value, feature_value)
+            ):
+                if not (release_value <= development_value <= feature_value):
+                    errors.append(
+                        f"{key} must be monotonic by profile "
+                        "(release <= development <= feature)"
+                    )
 
     source_count = payload.get("source_report_count")
     if not isinstance(source_count, int) or source_count < 0:

@@ -181,6 +181,41 @@ class ValidatePromotionThresholdCalibrationTests(unittest.TestCase):
                 os.environ.pop("RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE", None)
             self.assertEqual(rc, 1)
 
+    def test_fails_when_profile_budgets_are_not_monotonic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "promotion_calibration.json"
+            payload = _payload(datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+            payload["by_profile"]["release"]["plastic_promotion_max_blockers"] = 2
+            payload["by_profile"]["development"]["plastic_promotion_max_blockers"] = 1
+            payload["by_profile"]["feature"]["plastic_promotion_max_blockers"] = 2
+            path.write_text(json.dumps(payload))
+
+            os.environ["RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT"] = str(path)
+            os.environ["RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE"] = "true"
+            try:
+                rc = main()
+            finally:
+                os.environ.pop("RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT", None)
+                os.environ.pop("RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE", None)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_profile_rolling_counts_mismatch_source_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "promotion_calibration.json"
+            payload = _payload(datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+            payload["by_profile"]["feature"]["rolling_report_count"] = 3
+            payload["by_profile"]["feature"]["rolling_trusted_report_count"] = 3
+            path.write_text(json.dumps(payload))
+
+            os.environ["RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT"] = str(path)
+            os.environ["RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE"] = "true"
+            try:
+                rc = main()
+            finally:
+                os.environ.pop("RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT", None)
+                os.environ.pop("RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE", None)
+            self.assertEqual(rc, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
