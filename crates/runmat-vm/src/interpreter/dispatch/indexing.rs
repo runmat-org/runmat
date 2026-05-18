@@ -449,6 +449,40 @@ async fn resolve_range_end_index(
         .floor() as i64)
 }
 
+async fn build_expr_slice_plan(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    range_dims: &[usize],
+    range_params: &[(f64, f64)],
+    range_start_exprs: &[Option<EndExpr>],
+    range_step_exprs: &[Option<EndExpr>],
+    range_end_exprs: &[EndExpr],
+    numeric: &[Value],
+    shape: &[usize],
+    vars: &[Value],
+) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+    build_expr_index_plan(
+        ExprPlanSpec {
+            dims,
+            colon_mask,
+            end_mask,
+            range_dims,
+            range_params,
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            numeric,
+            shape,
+        },
+        |dim_len, expr| {
+            let expr = expr.clone();
+            async move { resolve_range_end_index(dim_len, &expr, vars).await }
+        },
+    )
+    .await
+}
+
 pub async fn dispatch_indexing(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
@@ -1127,24 +1161,18 @@ pub async fn dispatch_indexing(
                 };
             }
             if let Value::GpuTensor(handle) = &base {
-                let vm_plan = build_expr_index_plan(
-                    ExprPlanSpec {
-                        dims: *dims,
-                        colon_mask: *colon_mask,
-                        end_mask: *end_mask,
-                        range_dims,
-                        range_params: &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        numeric: &numeric,
-                        shape: &handle.shape,
-                    },
-                    |dim_len, expr| {
-                        let expr = expr.clone();
-                        let vars_ref = &*vars;
-                        async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
-                    },
+                let vm_plan = build_expr_slice_plan(
+                    *dims,
+                    *colon_mask,
+                    *end_mask,
+                    range_dims,
+                    &range_params,
+                    range_start_exprs,
+                    range_step_exprs,
+                    range_end_exprs,
+                    &numeric,
+                    &handle.shape,
+                    vars,
                 )
                 .await?;
 
@@ -1169,24 +1197,18 @@ pub async fn dispatch_indexing(
             }
             match base {
                 Value::ComplexTensor(t) => {
-                    let vm_plan = build_expr_index_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &t.shape,
-                        },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
-                        },
+                    let vm_plan = build_expr_slice_plan(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &t.shape,
+                        vars,
                     )
                     .await?;
                     stack.push(
@@ -1195,24 +1217,18 @@ pub async fn dispatch_indexing(
                     );
                 }
                 Value::Tensor(t) => {
-                    let vm_plan = build_expr_index_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &t.shape,
-                        },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
-                        },
+                    let vm_plan = build_expr_slice_plan(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &t.shape,
+                        vars,
                     )
                     .await?;
                     stack.push(
@@ -1221,24 +1237,18 @@ pub async fn dispatch_indexing(
                     );
                 }
                 Value::StringArray(sa) => {
-                    let vm_plan = build_expr_index_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &sa.shape,
-                        },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
-                        },
+                    let vm_plan = build_expr_slice_plan(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &sa.shape,
+                        vars,
                     )
                     .await?;
                     stack.push(
@@ -1247,24 +1257,18 @@ pub async fn dispatch_indexing(
                     );
                 }
                 Value::Cell(ca) => {
-                    let vm_plan = build_expr_index_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &ca.shape,
-                        },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
-                        },
+                    let vm_plan = build_expr_slice_plan(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &ca.shape,
+                        vars,
                     )
                     .await?;
                     stack.push(gather_cell_with_plan(&ca, &vm_plan)?);
@@ -1399,24 +1403,18 @@ pub async fn dispatch_indexing(
             }
             match base {
                 Value::ComplexTensor(mut t) => {
-                    let vm_plan = build_expr_index_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &t.shape,
-                        },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
-                        },
+                    let vm_plan = build_expr_slice_plan(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &t.shape,
+                        vars,
                     )
                     .await?;
                     if delete {
@@ -1437,24 +1435,18 @@ pub async fn dispatch_indexing(
                     stack.push(Value::ComplexTensor(t));
                 }
                 Value::Tensor(t) => {
-                    let vm_plan = build_expr_index_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &t.shape,
-                        },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
-                        },
+                    let vm_plan = build_expr_slice_plan(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &t.shape,
+                        vars,
                     )
                     .await?;
                     stack.push(if delete {
@@ -1464,24 +1456,18 @@ pub async fn dispatch_indexing(
                     });
                 }
                 Value::GpuTensor(h) => {
-                    let vm_plan = build_expr_index_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &h.shape,
-                        },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
-                        },
+                    let vm_plan = build_expr_slice_plan(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &h.shape,
+                        vars,
                     )
                     .await?;
                     let updated = if delete {
@@ -1530,24 +1516,18 @@ pub async fn dispatch_indexing(
                             "Slice deletion currently supports cell arrays only",
                         ));
                     }
-                    let vm_plan = build_expr_index_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &sa.shape,
-                        },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
-                        },
+                    let vm_plan = build_expr_slice_plan(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &sa.shape,
+                        vars,
                     )
                     .await?;
                     if !vm_plan.indices.is_empty() {
@@ -1562,24 +1542,18 @@ pub async fn dispatch_indexing(
                     stack.push(Value::StringArray(sa));
                 }
                 Value::Cell(ca) => {
-                    let vm_plan = build_expr_index_plan(
-                        ExprPlanSpec {
-                            dims: *dims,
-                            colon_mask: *colon_mask,
-                            end_mask: *end_mask,
-                            range_dims,
-                            range_params: &range_params,
-                            range_start_exprs,
-                            range_step_exprs,
-                            range_end_exprs,
-                            numeric: &numeric,
-                            shape: &ca.shape,
-                        },
-                        |dim_len, expr| {
-                            let expr = expr.clone();
-                            let vars_ref = &*vars;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
-                        },
+                    let vm_plan = build_expr_slice_plan(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &ca.shape,
+                        vars,
                     )
                     .await?;
                     let selected: Vec<usize> = vm_plan
