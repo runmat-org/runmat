@@ -679,6 +679,35 @@ fn range_assignment_vector_rhs_uses_semantic_vm() {
 }
 
 #[test]
+fn range_deletion_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "A = [1, 2, 3, 4]; A(2:3) = []; y = A(2);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile range deletion");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "range deletion should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceDelete(..))),
+        "range deletion should lower to explicit slice deletion bytecode"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "4");
+}
+
+#[test]
 fn range_complex_assignment_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "A = [1, 2, 3, 4]; A(2:3) = 8+9i; y = A(3);";
@@ -1466,6 +1495,35 @@ fn cell_end_offset_range_paren_deletion_uses_semantic_vm() {
             .iter()
             .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceExprDelete { .. })),
         "cell end-offset range paren deletion should lower to expression slice deletion bytecode"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "4");
+}
+
+#[test]
+fn end_offset_range_deletion_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "A = [1, 2, 3, 4]; A(1:end-1) = []; y = A(1);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile end-offset range deletion");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "end-offset range deletion should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceExprDelete { .. })),
+        "end-offset range deletion should lower to expression slice deletion bytecode"
     );
 
     block_on(session.execute_outcome(source)).expect("exec succeeds");

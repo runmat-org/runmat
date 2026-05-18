@@ -865,25 +865,17 @@ pub async fn dispatch_indexing(
                     );
                 }
                 Value::Tensor(t) => {
-                    if delete {
-                        return Err(crate::interpreter::errors::mex(
-                            "UnsupportedSliceDeletion",
-                            "Slice deletion currently supports cell arrays only",
-                        ));
-                    }
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &t.shape)
                             .await?;
                     let plan = build_index_plan(&selectors, *dims, &t.shape)?;
-                    stack.push(idx_write_slice::assign_tensor_with_plan(t, &plan, &rhs).await?);
+                    stack.push(if delete {
+                        idx_write_slice::delete_tensor_with_plan(t, &plan, &rhs)?
+                    } else {
+                        idx_write_slice::assign_tensor_with_plan(t, &plan, &rhs).await?
+                    });
                 }
                 Value::GpuTensor(handle) => stack.push({
-                    if delete {
-                        return Err(crate::interpreter::errors::mex(
-                            "UnsupportedSliceDeletion",
-                            "Slice deletion currently supports cell arrays only",
-                        ));
-                    }
                     let selectors = build_slice_selectors(
                         *dims,
                         *colon_mask,
@@ -893,21 +885,23 @@ pub async fn dispatch_indexing(
                     )
                     .await?;
                     let plan = build_index_plan(&selectors, *dims, &handle.shape)?;
-                    idx_write_slice::assign_gpu_slice_with_plan(&handle, &plan, &rhs).await?
+                    if delete {
+                        idx_write_slice::delete_gpu_slice_with_plan(&handle, &plan, &rhs).await?
+                    } else {
+                        idx_write_slice::assign_gpu_slice_with_plan(&handle, &plan, &rhs).await?
+                    }
                 }),
                 Value::ComplexTensor(mut ct) => {
-                    if delete {
-                        return Err(crate::interpreter::errors::mex(
-                            "UnsupportedSliceDeletion",
-                            "Slice deletion currently supports cell arrays only",
-                        ));
-                    }
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ct.shape)
                             .await
                             .map_err(|e| format!("slice assign: {e}"))?;
                     let plan = build_index_plan(&selectors, *dims, &ct.shape)
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
+                    if delete {
+                        stack.push(idx_write_slice::delete_complex_with_plan(ct, &plan, &rhs)?);
+                        return Ok(true);
+                    }
                     if plan.indices.is_empty() {
                         stack.push(Value::ComplexTensor(ct));
                         return Ok(true);
@@ -1292,12 +1286,6 @@ pub async fn dispatch_indexing(
             }
             match base {
                 Value::ComplexTensor(mut t) => {
-                    if delete {
-                        return Err(crate::interpreter::errors::mex(
-                            "UnsupportedSliceDeletion",
-                            "Slice deletion currently supports cell arrays only",
-                        ));
-                    }
                     let vm_plan = build_expr_index_plan(
                         ExprPlanSpec {
                             dims: *dims,
@@ -1318,6 +1306,12 @@ pub async fn dispatch_indexing(
                         },
                     )
                     .await?;
+                    if delete {
+                        stack.push(idx_write_slice::delete_complex_with_plan(
+                            t, &vm_plan, &rhs,
+                        )?);
+                        return Ok(true);
+                    }
                     if !vm_plan.indices.is_empty() {
                         let rhs_view = idx_write_slice::build_complex_rhs_view(
                             &rhs,
@@ -1330,12 +1324,6 @@ pub async fn dispatch_indexing(
                     stack.push(Value::ComplexTensor(t));
                 }
                 Value::Tensor(t) => {
-                    if delete {
-                        return Err(crate::interpreter::errors::mex(
-                            "UnsupportedSliceDeletion",
-                            "Slice deletion currently supports cell arrays only",
-                        ));
-                    }
                     let vm_plan = build_expr_index_plan(
                         ExprPlanSpec {
                             dims: *dims,
@@ -1356,15 +1344,13 @@ pub async fn dispatch_indexing(
                         },
                     )
                     .await?;
-                    stack.push(idx_write_slice::assign_tensor_with_plan(t, &vm_plan, &rhs).await?);
+                    stack.push(if delete {
+                        idx_write_slice::delete_tensor_with_plan(t, &vm_plan, &rhs)?
+                    } else {
+                        idx_write_slice::assign_tensor_with_plan(t, &vm_plan, &rhs).await?
+                    });
                 }
                 Value::GpuTensor(h) => {
-                    if delete {
-                        return Err(crate::interpreter::errors::mex(
-                            "UnsupportedSliceDeletion",
-                            "Slice deletion currently supports cell arrays only",
-                        ));
-                    }
                     let vm_plan = build_expr_index_plan(
                         ExprPlanSpec {
                             dims: *dims,
@@ -1385,8 +1371,11 @@ pub async fn dispatch_indexing(
                         },
                     )
                     .await?;
-                    let updated =
-                        idx_write_slice::assign_gpu_slice_with_plan(&h, &vm_plan, &rhs).await?;
+                    let updated = if delete {
+                        idx_write_slice::delete_gpu_slice_with_plan(&h, &vm_plan, &rhs).await?
+                    } else {
+                        idx_write_slice::assign_gpu_slice_with_plan(&h, &vm_plan, &rhs).await?
+                    };
                     stack.push(updated);
                 }
                 Value::Object(obj) => {

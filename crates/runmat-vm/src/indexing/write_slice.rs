@@ -3,6 +3,46 @@ use crate::interpreter::errors::mex;
 use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
+fn is_empty_delete_rhs(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Tensor(t)
+            if t.data.is_empty() || t.rows == 0 || t.cols == 0
+    ) || matches!(
+        value,
+        Value::ComplexTensor(t)
+            if t.data.is_empty() || t.rows == 0 || t.cols == 0
+    )
+}
+
+fn deleted_vector_shape(rows: usize, _cols: usize, len: usize) -> Vec<usize> {
+    if len == 0 {
+        vec![0, 0]
+    } else if rows == 1 {
+        vec![1, len]
+    } else {
+        vec![len, 1]
+    }
+}
+
+fn sorted_unique_positions_desc(
+    plan: &IndexPlan,
+    total: usize,
+) -> Result<Vec<usize>, RuntimeError> {
+    let mut positions = Vec::with_capacity(plan.indices.len());
+    for &idx in &plan.indices {
+        let pos = idx as usize;
+        if pos >= total {
+            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+        }
+        positions.push(pos);
+    }
+    positions.sort_unstable();
+    positions.dedup();
+    positions.reverse();
+    Ok(positions)
+}
+
 pub enum ComplexRhsView {
     Scalar((f64, f64)),
     Tensor {
@@ -299,6 +339,68 @@ pub async fn assign_tensor_with_plan(
     Ok(Value::Tensor(t))
 }
 
+pub fn delete_tensor_with_plan(
+    mut t: Tensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if !is_empty_delete_rhs(rhs) {
+        return Err(mex(
+            "DeletionRequiresEmptyRhs",
+            "Indexed deletion requires empty RHS",
+        ));
+    }
+    if plan.indices.is_empty() {
+        return Ok(Value::Tensor(t));
+    }
+    if !(t.rows == 1 || t.cols == 1) {
+        return Err(mex(
+            "UnsupportedDeletion",
+            "Linear deletion is only supported for vectors",
+        ));
+    }
+    let positions = sorted_unique_positions_desc(plan, t.data.len())?;
+    for pos in positions {
+        t.data.remove(pos);
+    }
+    let shape = deleted_vector_shape(t.rows, t.cols, t.data.len());
+    t.rows = shape.first().copied().unwrap_or(0);
+    t.cols = shape.get(1).copied().unwrap_or(0);
+    t.shape = shape;
+    Ok(Value::Tensor(t))
+}
+
+pub fn delete_complex_with_plan(
+    mut t: ComplexTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if !is_empty_delete_rhs(rhs) {
+        return Err(mex(
+            "DeletionRequiresEmptyRhs",
+            "Indexed deletion requires empty RHS",
+        ));
+    }
+    if plan.indices.is_empty() {
+        return Ok(Value::ComplexTensor(t));
+    }
+    if !(t.rows == 1 || t.cols == 1) {
+        return Err(mex(
+            "UnsupportedDeletion",
+            "Linear deletion is only supported for vectors",
+        ));
+    }
+    let positions = sorted_unique_positions_desc(plan, t.data.len())?;
+    for pos in positions {
+        t.data.remove(pos);
+    }
+    let shape = deleted_vector_shape(t.rows, t.cols, t.data.len());
+    t.rows = shape.first().copied().unwrap_or(0);
+    t.cols = shape.get(1).copied().unwrap_or(0);
+    t.shape = shape;
+    Ok(Value::ComplexTensor(t))
+}
+
 pub async fn assign_gpu_slice_with_plan(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     plan: &IndexPlan,
@@ -370,6 +472,37 @@ pub async fn assign_gpu_slice_with_plan(
     let mut t = Tensor::new(host.data, host.shape).map_err(|e| format!("slice assign: {e}"))?;
     scatter_real_with_plan(&mut t, plan, &rhs_values)?;
     upload_tensor_to_gpu(&t)
+}
+
+pub async fn delete_gpu_slice_with_plan(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if !is_empty_delete_rhs(rhs) {
+        return Err(mex(
+            "DeletionRequiresEmptyRhs",
+            "Indexed deletion requires empty RHS",
+        ));
+    }
+    if plan.indices.is_empty() {
+        return Ok(Value::GpuTensor(handle.clone()));
+    }
+    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+        mex(
+            "AccelerationProviderUnavailable",
+            "No acceleration provider registered",
+        )
+    })?;
+    let host = provider
+        .download(handle)
+        .await
+        .map_err(|e| format!("gather for slice deletion: {e}"))?;
+    let t = Tensor::new(host.data, host.shape).map_err(|e| format!("slice deletion: {e}"))?;
+    let Value::Tensor(updated) = delete_tensor_with_plan(t, plan, rhs)? else {
+        unreachable!()
+    };
+    upload_tensor_to_gpu(&updated)
 }
 
 pub async fn materialize_rhs_linear_real(
