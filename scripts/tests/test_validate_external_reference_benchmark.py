@@ -416,6 +416,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "thermo_gradient_pathological_temporal_variation",
+            "fixture_id": "thermo_gradient_pathological_gpu_provider",
+            "observed": 0.55,
+            "reference": 0.55,
+            "pass": True,
+        },
+        {
             "name": "thermo_shock_oscillatory_temporal_variation",
             "fixture_id": "thermo_shock_oscillatory_gpu_provider",
             "observed": 0.5,
@@ -427,6 +434,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
             "observed": 3.27,
             "reference": 3.27,
+            "pass": True,
+        },
+        {
+            "name": "electro_thermal_pathological_temporal_variation",
+            "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+            "observed": 0.5,
+            "reference": 0.5,
             "pass": True,
         },
         {

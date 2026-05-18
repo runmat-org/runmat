@@ -619,6 +619,16 @@
       "tolerance_rel": 0.25
     },
     {
+      "name": "thermo_gradient_pathological_temporal_variation",
+      "fixture_id": "thermo_gradient_pathological_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermo_gradient_pathological_temporal_variation",
+      "reference": 0.55,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.3
+    },
+    {
       "name": "thermo_shock_oscillatory_temporal_variation",
       "fixture_id": "thermo_shock_oscillatory_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -636,6 +646,16 @@
       "assertion_name": "electro_thermal_pathological_conductivity_spread_ratio",
       "reference": 3.2727272727272725,
       "tolerance_abs": 0.8,
+      "tolerance_rel": 0.3
+    },
+    {
+      "name": "electro_thermal_pathological_temporal_variation",
+      "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_thermal_pathological_temporal_variation",
+      "reference": 0.5,
+      "tolerance_abs": 0.15,
       "tolerance_rel": 0.3
     },
     {

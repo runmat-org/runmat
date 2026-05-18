@@ -86,12 +86,14 @@ REQUIRED_METRICS_BY_FIXTURE = {
     },
     "thermo_gradient_pathological_gpu_provider": {
         "thermo_gradient_pathological_spread_ratio",
+        "thermo_gradient_pathological_temporal_variation",
     },
     "thermo_shock_oscillatory_gpu_provider": {
         "thermo_shock_oscillatory_temporal_variation",
     },
     "electro_thermal_joule_pathological_gpu_provider": {
         "electro_thermal_pathological_conductivity_spread_ratio",
+        "electro_thermal_pathological_temporal_variation",
     },
     "nonlinear_plastic_hardening_reference_complex_gpu_provider": {
         "plasticity_hardening_reference_complex_load_realization_ratio",
