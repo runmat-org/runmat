@@ -102,7 +102,7 @@ async fn call_member_index_on_object_like(
         Some(qualified_display_name.clone()),
         method_args.clone(),
         requested_outputs,
-        CallableFallbackPolicy::ObjectDispatch,
+        CallableFallbackPolicy::ExternalBoundary,
     )
     .await?
     {
@@ -125,7 +125,7 @@ async fn call_member_index_on_object_like(
         Some(qualified_display_name),
         method_args.clone(),
         requested_outputs,
-        post_object_fallback,
+        CallableFallbackPolicy::ExternalBoundary,
     )
     .await
     {
@@ -278,7 +278,6 @@ pub async fn call_method_or_member_index_with_outputs(
             .await
         }
         Value::ClassRef(cls) => {
-            let classref_fallback = fallback_policy.after_object_dispatch_probe();
             if let Some((m, _owner)) = lookup_method(&cls, &name) {
                 if !m.is_static {
                     return Err(format!("Method '{}' is not static", name).into());
@@ -288,7 +287,7 @@ pub async fn call_method_or_member_index_with_outputs(
                     Some(m.function_name),
                     args,
                     requested_outputs,
-                    classref_fallback,
+                    CallableFallbackPolicy::ExternalBoundary,
                 )
                 .await;
             }
@@ -300,11 +299,60 @@ pub async fn call_method_or_member_index_with_outputs(
                 Some(qualified_display_name),
                 args,
                 requested_outputs,
-                classref_fallback,
+                CallableFallbackPolicy::ExternalBoundary,
             )
             .await
         }
         other => call_getfield_with_indices(other, name, args, requested_outputs).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::call_method_or_member_index_with_outputs;
+    use futures::executor::block_on;
+    use runmat_builtins::Value;
+    use runmat_hir::{CallableFallbackPolicy, CallableIdentity, SymbolName};
+    use std::sync::Arc;
+
+    #[test]
+    fn classref_external_method_uses_external_boundary_semantic_resolution() {
+        let _resolver_guard =
+            runmat_runtime::user_functions::install_semantic_function_resolver(Some(Arc::new(
+                |name| (name == "Point.remote_inc").then_some(7331),
+            )));
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 7331);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(3.0)) })
+            })),
+        );
+        let value = block_on(call_method_or_member_index_with_outputs(
+            Value::ClassRef("Point".to_string()),
+            CallableIdentity::DynamicName(SymbolName("remote_inc".to_string())),
+            Some("remote_inc".to_string()),
+            vec![Value::Num(2.0)],
+            Some(1),
+            CallableFallbackPolicy::ObjectDispatch,
+        ))
+        .expect("classref external call should resolve through semantic resolver");
+        assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
+    fn classref_external_method_without_resolver_remains_unresolved() {
+        let err = block_on(call_method_or_member_index_with_outputs(
+            Value::ClassRef("Point".to_string()),
+            CallableIdentity::DynamicName(SymbolName("sqrt".to_string())),
+            Some("sqrt".to_string()),
+            vec![Value::Num(9.0)],
+            Some(1),
+            CallableFallbackPolicy::ObjectDispatch,
+        ))
+        .expect_err("classref external call should not fallback to builtin name resolution");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
     }
 }
 

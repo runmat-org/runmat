@@ -161,7 +161,7 @@ pub async fn try_call_semantic_descriptor(
         CallableIdentity::ExternalName(_) => {
             matches!(fallback_policy, CallableFallbackPolicy::ExternalBoundary)
         }
-        _ => fallback_policy.allows_runtime_name_resolution(),
+        _ => false,
     };
     if !allow_name_resolution {
         return None;
