@@ -1375,6 +1375,35 @@ fn cell_end_offset_assignment_uses_semantic_vm() {
 }
 
 #[test]
+fn cell_end_offset_range_paren_assignment_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "C = {1, 2, 3, 4}; C(1:end-1) = {9, 8, 7}; y = C{3};";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile cell end-offset range paren assignment");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "cell end-offset range paren assignment should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreSliceExpr { .. })),
+        "cell end-offset range paren assignment should lower to expression slice store bytecode"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "7");
+}
+
+#[test]
 fn feval_anonymous_handle_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "f = @(x) x + 1; y = feval(f, 2);";

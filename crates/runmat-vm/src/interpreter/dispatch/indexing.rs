@@ -1220,6 +1220,24 @@ pub async fn dispatch_indexing(
                         )
                         .await?
                     }
+                    Value::StringArray(sa) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, &sa.shape),
+                            end_numeric_exprs,
+                            vars,
+                        )
+                        .await?
+                    }
+                    Value::Cell(ca) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, &ca.shape),
+                            end_numeric_exprs,
+                            vars,
+                        )
+                        .await?
+                    }
                     _ => numeric,
                 };
             }
@@ -1318,10 +1336,90 @@ pub async fn dispatch_indexing(
                     )?;
                     stack.push(object_subsasgn_paren(Value::Object(obj), idx_values, rhs).await?);
                 }
+                Value::HandleObject(handle) => {
+                    let idx_values = build_object_paren_expr_selector_values(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                    )?;
+                    stack.push(
+                        object_subsasgn_paren(Value::HandleObject(handle), idx_values, rhs).await?,
+                    );
+                }
+                Value::StringArray(mut sa) => {
+                    let vm_plan = build_expr_index_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &sa.shape,
+                        },
+                        |dim_len, expr| {
+                            let expr = expr.clone();
+                            let vars_ref = &*vars;
+                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
+                        },
+                    )
+                    .await?;
+                    if !vm_plan.indices.is_empty() {
+                        let rhs_view = idx_write_slice::build_string_rhs_view(
+                            &rhs,
+                            &vm_plan.selection_lengths,
+                        )
+                        .map_err(|e| format!("slice assign: {e}"))?;
+                        idx_write_slice::scatter_string_with_plan(&mut sa, &vm_plan, &rhs_view)
+                            .map_err(|e| format!("slice assign: {e}"))?;
+                    }
+                    stack.push(Value::StringArray(sa));
+                }
+                Value::Cell(ca) => {
+                    let vm_plan = build_expr_index_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &ca.shape,
+                        },
+                        |dim_len, expr| {
+                            let expr = expr.clone();
+                            let vars_ref = &*vars;
+                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
+                        },
+                    )
+                    .await?;
+                    let selected: Vec<usize> = vm_plan
+                        .indices
+                        .iter()
+                        .map(|idx| (*idx as usize) + 1)
+                        .collect();
+                    stack.push(crate::ops::cells::assign_cell_paren_linear_indices(
+                        ca, &selected, &rhs,
+                    )?);
+                }
                 _ => {
-                    return Err("StoreSliceExpr only supports tensors currently"
-                        .to_string()
-                        .into())
+                    return Err(
+                        "StoreSliceExpr only supports tensors, cells, and string arrays currently"
+                            .to_string()
+                            .into(),
+                    )
                 }
             }
             Ok(true)
