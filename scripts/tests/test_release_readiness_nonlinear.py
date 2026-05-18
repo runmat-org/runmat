@@ -609,6 +609,21 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("NONLINEAR_TREND_SLOWDOWN", codes)
 
+    def test_nonlinear_trend_baseline_ignores_failed_rolling_reports(self):
+        latest = report(passed=True, publishable=True, gpu_ms=200.0)
+        rolling = [report(passed=False, publishable=True, gpu_ms=100.0)]
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertNotIn("NONLINEAR_TREND_SLOWDOWN", codes)
+
+    def test_nonlinear_trend_baseline_ignores_non_publishable_rolling_reports(self):
+        latest = report(passed=True, publishable=True, gpu_ms=200.0)
+        rolling = [report(passed=True, publishable=True, gpu_ms=100.0)]
+        rolling[0]["publishable"] = False
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertNotIn("NONLINEAR_TREND_SLOWDOWN", codes)
+
     def test_key_perf_speedup_low_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(

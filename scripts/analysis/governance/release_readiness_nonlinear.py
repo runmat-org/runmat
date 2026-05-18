@@ -1270,7 +1270,14 @@ def evaluate_release_readiness(
     else:
         hist = {fixture: [] for fixture in NONLINEAR_FIXTURES}
         for report in rolling:
+            if report.get("passed", True) is not True:
+                continue
+            report_publishable = report.get("publishable")
+            if report_publishable is not None and report_publishable is not True:
+                continue
             for fixture, rec in nonlinear_records(report).items():
+                if rec.get("publishable") is not True:
+                    continue
                 value = rec.get("gpu_run_ms")
                 if isinstance(value, (int, float)) and value > 0:
                     hist[fixture].append(float(value))
