@@ -433,6 +433,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS": "2500",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "5000",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "true",
         },
         "development": {
@@ -755,6 +756,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS": "4000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "8000",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.45",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "false",
         },
         "feature": {
@@ -1059,6 +1061,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO": "1.5",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS": "8000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "12000",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.8",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "false",
         },
     }
@@ -1304,6 +1307,12 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS", "4000"),
         )
     )
+    key_perf_max_solve_slowdown_ratio = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO", "1.45"),
+        )
+    )
     key_perf_max_run_ms = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS",
@@ -1394,11 +1403,15 @@ def evaluate_release_readiness(
                 )
     if rolling and key_perf_records:
         hist = {fixture: [] for fixture in key_perf_records}
+        solve_hist = {fixture: [] for fixture in key_perf_records}
         for report in rolling:
             for fixture, rec in records_for_fixtures(report, set(hist.keys())).items():
                 value = rec.get("gpu_run_ms")
                 if isinstance(value, (int, float)) and value > 0:
                     hist[fixture].append(float(value))
+                solve_value = rec.get("gpu_solver_solve_ms")
+                if isinstance(solve_value, (int, float)) and solve_value > 0:
+                    solve_hist[fixture].append(float(solve_value))
         for fixture, rec in key_perf_records.items():
             current = rec.get("gpu_run_ms")
             history = hist.get(fixture, [])
@@ -1419,6 +1432,27 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
+            current_solve = rec.get("gpu_solver_solve_ms")
+            solve_history = solve_hist.get(fixture, [])
+            if (
+                isinstance(current_solve, (int, float))
+                and current_solve > 0
+                and solve_history
+            ):
+                solve_baseline = statistics.median(solve_history)
+                if solve_baseline > 0:
+                    solve_ratio = float(current_solve) / solve_baseline
+                    if solve_ratio > key_perf_max_solve_slowdown_ratio:
+                        reasons.append(
+                            Reason(
+                                code="KEY_PERF_SOLVE_TREND_SLOWDOWN",
+                                severity="fail" if protected else "warn",
+                                detail=(
+                                    f"{fixture} gpu_solver_solve_ms slowdown ratio {solve_ratio:.3f} "
+                                    f"exceeds {key_perf_max_solve_slowdown_ratio:.3f}"
+                                ),
+                            )
+                        )
 
     replay_ok = is_true(os.getenv("RUNMAT_RELEASE_READINESS_ARTIFACT_REPLAY_OK", "false"))
     compat_ok = is_true(os.getenv("RUNMAT_RELEASE_READINESS_ARTIFACT_COMPAT_OK", "false"))
