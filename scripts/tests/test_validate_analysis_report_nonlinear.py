@@ -8,7 +8,7 @@ from scripts.analysis.governance.validate_analysis_report_nonlinear import main
 
 
 def _record(fixture_id: str, assertion_names: set[str]) -> dict:
-    return {
+    record = {
         "fixture_id": fixture_id,
         "threshold_assertions": [
             {"name": name, "observed": 1.0, "passed": True}
@@ -18,6 +18,10 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
         "gpu_solver_solve_ms": 1.5,
         "gpu_solver_backend": "runtime_tensor",
     }
+    if fixture_id.startswith("electromagnetic_reference_"):
+        record["electromagnetic_placeholder_quality"] = 1.0
+        record["electromagnetic_enabled"] = True
+    return record
 
 
 class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
@@ -791,6 +795,36 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             records = self._base_records()
             for record in records:
                 if record["fixture_id"] == "electromagnetic_reference_homogeneous_gpu_provider":
+                    record["electromagnetic_enabled"] = False
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_non_core_em_placeholder_quality_field_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if (
+                    record["fixture_id"]
+                    == "electromagnetic_reference_sparse_assignments_gpu_provider"
+                ):
+                    record.pop("electromagnetic_placeholder_quality", None)
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_non_core_em_enabled_flag_false(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if (
+                    record["fixture_id"]
+                    == "electromagnetic_reference_sparse_assignments_gpu_provider"
+                ):
                     record["electromagnetic_enabled"] = False
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

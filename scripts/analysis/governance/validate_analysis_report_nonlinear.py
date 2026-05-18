@@ -639,6 +639,23 @@ def main() -> int:
                     f"fixture {fixture_id} missing contact summary fields: {', '.join(missing_fields)}"
                 )
 
+        if fixture_id.startswith("electromagnetic_reference_"):
+            missing_fields = []
+            for field in sorted(EM_PLACEHOLDER_QUALITY_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM activation-quality fields: "
+                    + ", ".join(missing_fields)
+                )
+            if record.get("electromagnetic_enabled") is not True:
+                errors.append(
+                    f"fixture {fixture_id} missing true EM enabled flag: electromagnetic_enabled"
+                )
+
         if fixture_id in {
             "electromagnetic_reference_homogeneous_gpu_provider",
             "electromagnetic_reference_heterogeneous_gpu_provider",
@@ -785,21 +802,6 @@ def main() -> int:
                     "fixture "
                     f"{fixture_id} missing finite EM boundary/source fields: "
                     + ", ".join(missing_fields)
-                )
-            missing_fields = []
-            for field in sorted(EM_PLACEHOLDER_QUALITY_REQUIRED_FIELDS):
-                value = record.get(field)
-                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-                    missing_fields.append(field)
-            if missing_fields:
-                errors.append(
-                    "fixture "
-                    f"{fixture_id} missing finite EM placeholder-quality fields: "
-                    + ", ".join(missing_fields)
-                )
-            if record.get("electromagnetic_enabled") is not True:
-                errors.append(
-                    f"fixture {fixture_id} missing true EM enabled flag: electromagnetic_enabled"
                 )
             missing_fields = []
             for field in sorted(EM_RESIDUAL_REQUIRED_FIELDS):

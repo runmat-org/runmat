@@ -1173,6 +1173,14 @@
       "tolerance_rel": null
     },
     {
+      "name": "electromagnetic_placeholder_quality",
+      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+      "field": "electromagnetic_placeholder_quality",
+      "reference": 0.802,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.35
+    },
+    {
       "name": "em_phased_source_energy_consistency_ratio",
       "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -1211,6 +1219,14 @@
       "reference": 0.0,
       "tolerance_abs": 0.1,
       "tolerance_rel": null
+    },
+    {
+      "name": "electromagnetic_placeholder_quality",
+      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+      "field": "electromagnetic_placeholder_quality",
+      "reference": 0.8019999992684326,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.35
     },
     {
       "name": "em_sparse_fallback_coefficient_ratio",
@@ -1280,6 +1296,14 @@
       "assertion_name": "em_sparse_energy_imbalance_ratio",
       "reference": 0.427,
       "tolerance_abs": 0.18,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "electromagnetic_placeholder_quality",
+      "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+      "field": "electromagnetic_placeholder_quality",
+      "reference": 0.65,
+      "tolerance_abs": 0.2,
       "tolerance_rel": 0.35
     },
     {
@@ -1353,6 +1377,14 @@
       "tolerance_rel": 0.35
     },
     {
+      "name": "electromagnetic_placeholder_quality",
+      "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+      "field": "electromagnetic_placeholder_quality",
+      "reference": 0.65,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.35
+    },
+    {
       "name": "em_overlap_source_interference_index",
       "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -1393,6 +1425,14 @@
       "tolerance_rel": 0.05
     },
     {
+      "name": "electromagnetic_placeholder_quality",
+      "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
+      "field": "electromagnetic_placeholder_quality",
+      "reference": 0.7300444910122844,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.35
+    },
+    {
       "name": "em_boundary_kernel_boundary_localization_ratio",
       "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -1421,6 +1461,14 @@
       "reference": 1.0,
       "tolerance_abs": 0.2,
       "tolerance_rel": 0.25
+    },
+    {
+      "name": "electromagnetic_placeholder_quality",
+      "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+      "field": "electromagnetic_placeholder_quality",
+      "reference": 0.8019201300548723,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.35
     },
     {
       "name": "cfd_reference_density_kg_per_m3",

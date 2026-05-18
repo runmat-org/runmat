@@ -183,12 +183,14 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "em_boundary_penalty_conditioning_contribution",
         "em_boundary_penalty_real_residual_norm",
         "em_boundary_penalty_imag_residual_norm",
+        "electromagnetic_placeholder_quality",
     },
     "electromagnetic_reference_multi_region_phased_source_gpu_provider": {
         "em_phased_source_energy_consistency_ratio",
         "em_phased_source_region_coverage_ratio",
         "em_phased_source_overlap_ratio",
         "em_phased_source_interference_index",
+        "electromagnetic_placeholder_quality",
     },
     "electromagnetic_reference_sparse_assignments_gpu_provider": {
         "em_sparse_fallback_coefficient_ratio",
@@ -198,6 +200,7 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "em_sparse_source_material_alignment_ratio",
         "em_sparse_boundary_anchor_ratio",
         "em_sparse_energy_imbalance_ratio",
+        "electromagnetic_placeholder_quality",
     },
     "electromagnetic_reference_fallback_heavy_gpu_provider": {
         "em_fallback_heavy_fallback_coefficient_ratio",
@@ -207,17 +210,20 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "em_fallback_heavy_source_material_alignment_ratio",
         "em_fallback_heavy_boundary_anchor_ratio",
         "em_fallback_heavy_energy_imbalance_ratio",
+        "electromagnetic_placeholder_quality",
     },
     "electromagnetic_reference_overlap_interference_gpu_provider": {
         "em_overlap_source_interference_index",
         "em_overlap_source_overlap_ratio",
         "em_overlap_source_region_coverage_ratio",
         "em_overlap_source_material_alignment_ratio",
+        "electromagnetic_placeholder_quality",
     },
     "electromagnetic_reference_boundary_kernel_gpu_provider": {
         "em_boundary_kernel_boundary_localization_ratio",
         "em_boundary_kernel_ground_anchor_effectiveness_ratio",
         "em_boundary_kernel_insulation_leakage_proxy",
+        "electromagnetic_placeholder_quality",
     },
     "cfd_steady_gpu_provider": {
         "cfd_reference_density_kg_per_m3",

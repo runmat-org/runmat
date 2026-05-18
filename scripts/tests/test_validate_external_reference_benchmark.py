@@ -1099,6 +1099,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "electromagnetic_placeholder_quality",
+            "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+            "observed": 0.802,
+            "reference": 0.802,
+            "pass": True,
+        },
+        {
             "name": "em_phased_source_energy_consistency_ratio",
             "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
             "observed": 0.203,
@@ -1124,6 +1131,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
             "observed": 0.0,
             "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "electromagnetic_placeholder_quality",
+            "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+            "observed": 0.8019999992684326,
+            "reference": 0.8019999992684326,
             "pass": True,
         },
         {
@@ -1176,6 +1190,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "electromagnetic_placeholder_quality",
+            "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+            "observed": 0.65,
+            "reference": 0.65,
+            "pass": True,
+        },
+        {
             "name": "em_fallback_heavy_fallback_coefficient_ratio",
             "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
             "observed": 1.0,
@@ -1225,6 +1246,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "electromagnetic_placeholder_quality",
+            "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+            "observed": 0.65,
+            "reference": 0.65,
+            "pass": True,
+        },
+        {
             "name": "em_overlap_source_interference_index",
             "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
             "observed": 0.598,
@@ -1253,6 +1281,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "electromagnetic_placeholder_quality",
+            "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
+            "observed": 0.7300444910122844,
+            "reference": 0.7300444910122844,
+            "pass": True,
+        },
+        {
             "name": "em_boundary_kernel_boundary_localization_ratio",
             "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
             "observed": 0.2,
@@ -1271,6 +1306,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,
+            "pass": True,
+        },
+        {
+            "name": "electromagnetic_placeholder_quality",
+            "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+            "observed": 0.8019201300548723,
+            "reference": 0.8019201300548723,
             "pass": True,
         },
         {
