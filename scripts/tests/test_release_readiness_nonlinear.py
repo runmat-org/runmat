@@ -315,6 +315,19 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STEP_COUNT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_TIME_STEP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_CFD_PROFILE_POINT_COUNT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_INLET_VELOCITY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_TURBULENCE_INTENSITY_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_INLET_VELOCITY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_TURBULENCE_INTENSITY_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_INLET_VELOCITY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_RATIO",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO",
@@ -3360,6 +3373,22 @@ class ReleaseReadinessTests(unittest.TestCase):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
             {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cfd_reynolds_proxy", "observed": 200000.0},
+                    {"name": "cfd_reference_density_kg_per_m3", "observed": 1.0},
+                    {"name": "cfd_dynamic_viscosity_pa_s", "observed": 1.0e-4},
+                    {"name": "cfd_inlet_velocity_m_per_s", "observed": 5.0},
+                    {"name": "cfd_turbulence_intensity", "observed": 0.18},
+                    {"name": "cfd_profile_point_count", "observed": 2.0},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
                 "fixture_id": "cht_coupled_gpu_provider",
                 "publishable": True,
                 "gpu_run_ms": 100.0,
@@ -3367,6 +3396,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "threshold_assertions": [
                     {"name": "cht_reynolds_proxy", "observed": 250000.0},
                     {"name": "cht_applied_temperature_delta_k", "observed": 50.0},
+                    {"name": "cht_reference_density_kg_per_m3", "observed": 1.0},
+                    {"name": "cht_dynamic_viscosity_pa_s", "observed": 1.0e-4},
+                    {"name": "cht_inlet_velocity_m_per_s", "observed": 5.0},
+                    {"name": "cht_turbulence_intensity", "observed": 0.2},
                     {"name": "cht_profile_point_count", "observed": 2.0},
                     {"name": "cht_step_count", "observed": 8.0},
                     {"name": "cht_time_step_s", "observed": 0.003},
@@ -3382,6 +3415,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "threshold_assertions": [
                     {"name": "fsi_reynolds_proxy", "observed": 200000.0},
                     {"name": "fsi_structural_step_count", "observed": 2.0},
+                    {"name": "fsi_reference_density_kg_per_m3", "observed": 1.0},
+                    {"name": "fsi_dynamic_viscosity_pa_s", "observed": 1.0e-4},
+                    {"name": "fsi_inlet_velocity_m_per_s", "observed": 5.0},
+                    {"name": "fsi_turbulence_intensity", "observed": 0.19},
                     {"name": "fsi_profile_point_count", "observed": 2.0},
                     {"name": "fsi_step_count", "observed": 8.0},
                     {"name": "fsi_time_step_s", "observed": 0.003},
@@ -3392,6 +3429,22 @@ class ReleaseReadinessTests(unittest.TestCase):
         rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
         rolling[0]["records"].append(
             {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cfd_reynolds_proxy", "observed": 300000.0},
+                    {"name": "cfd_reference_density_kg_per_m3", "observed": 2.0},
+                    {"name": "cfd_dynamic_viscosity_pa_s", "observed": 2.0e-4},
+                    {"name": "cfd_inlet_velocity_m_per_s", "observed": 10.0},
+                    {"name": "cfd_turbulence_intensity", "observed": 0.12},
+                    {"name": "cfd_profile_point_count", "observed": 4.0},
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
                 "fixture_id": "cht_coupled_gpu_provider",
                 "publishable": True,
                 "gpu_run_ms": 90.0,
@@ -3399,6 +3452,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "threshold_assertions": [
                     {"name": "cht_reynolds_proxy", "observed": 300000.0},
                     {"name": "cht_applied_temperature_delta_k", "observed": 60.0},
+                    {"name": "cht_reference_density_kg_per_m3", "observed": 2.0},
+                    {"name": "cht_dynamic_viscosity_pa_s", "observed": 2.0e-4},
+                    {"name": "cht_inlet_velocity_m_per_s", "observed": 10.0},
+                    {"name": "cht_turbulence_intensity", "observed": 0.1},
                     {"name": "cht_profile_point_count", "observed": 4.0},
                     {"name": "cht_step_count", "observed": 16.0},
                     {"name": "cht_time_step_s", "observed": 0.001},
@@ -3414,6 +3471,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "threshold_assertions": [
                     {"name": "fsi_reynolds_proxy", "observed": 240000.0},
                     {"name": "fsi_structural_step_count", "observed": 2.0},
+                    {"name": "fsi_reference_density_kg_per_m3", "observed": 2.0},
+                    {"name": "fsi_dynamic_viscosity_pa_s", "observed": 2.0e-4},
+                    {"name": "fsi_inlet_velocity_m_per_s", "observed": 10.0},
+                    {"name": "fsi_turbulence_intensity", "observed": 0.11},
                     {"name": "fsi_profile_point_count", "observed": 4.0},
                     {"name": "fsi_step_count", "observed": 16.0},
                     {"name": "fsi_time_step_s", "observed": 0.001},
@@ -3422,10 +3483,49 @@ class ReleaseReadinessTests(unittest.TestCase):
             }
         )
         os.environ[
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_INLET_VELOCITY_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ["RUNMAT_RELEASE_READINESS_CFD_MAX_TURBULENCE_INTENSITY_TREND_RATIO"] = (
+            "1.2"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_INLET_VELOCITY_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ["RUNMAT_RELEASE_READINESS_CHT_MAX_TURBULENCE_INTENSITY_TREND_RATIO"] = (
+            "1.2"
+        )
+        os.environ[
             "RUNMAT_RELEASE_READINESS_CHT_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO"
         ] = "1.2"
         os.environ["RUNMAT_RELEASE_READINESS_CHT_MAX_STEP_COUNT_DROP_TREND_RATIO"] = "1.2"
         os.environ["RUNMAT_RELEASE_READINESS_CHT_MAX_TIME_STEP_TREND_RATIO"] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_INLET_VELOCITY_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ["RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY_TREND_RATIO"] = (
+            "1.2"
+        )
         os.environ[
             "RUNMAT_RELEASE_READINESS_FSI_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO"
         ] = "1.2"
@@ -3436,9 +3536,22 @@ class ReleaseReadinessTests(unittest.TestCase):
         ] = "1.2"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CFD_REFERENCE_DENSITY_KG_PER_M3_TREND_WORSENING", codes)
+        self.assertIn("CFD_DYNAMIC_VISCOSITY_PA_S_TREND_WORSENING", codes)
+        self.assertIn("CFD_INLET_VELOCITY_M_PER_S_TREND_WORSENING", codes)
+        self.assertIn("CFD_TURBULENCE_INTENSITY_TREND_WORSENING", codes)
+        self.assertIn("CFD_PROFILE_POINT_COUNT_TREND_WORSENING", codes)
+        self.assertIn("CHT_REFERENCE_DENSITY_KG_PER_M3_TREND_WORSENING", codes)
+        self.assertIn("CHT_DYNAMIC_VISCOSITY_PA_S_TREND_WORSENING", codes)
+        self.assertIn("CHT_INLET_VELOCITY_M_PER_S_TREND_WORSENING", codes)
+        self.assertIn("CHT_TURBULENCE_INTENSITY_TREND_WORSENING", codes)
         self.assertIn("CHT_PROFILE_POINT_COUNT_TREND_WORSENING", codes)
         self.assertIn("CHT_STEP_COUNT_TREND_WORSENING", codes)
         self.assertIn("CHT_TIME_STEP_S_TREND_WORSENING", codes)
+        self.assertIn("FSI_REFERENCE_DENSITY_KG_PER_M3_TREND_WORSENING", codes)
+        self.assertIn("FSI_DYNAMIC_VISCOSITY_PA_S_TREND_WORSENING", codes)
+        self.assertIn("FSI_INLET_VELOCITY_M_PER_S_TREND_WORSENING", codes)
+        self.assertIn("FSI_TURBULENCE_INTENSITY_TREND_WORSENING", codes)
         self.assertIn("FSI_PROFILE_POINT_COUNT_TREND_WORSENING", codes)
         self.assertIn("FSI_STEP_COUNT_TREND_WORSENING", codes)
         self.assertIn("FSI_TIME_STEP_S_TREND_WORSENING", codes)

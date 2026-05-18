@@ -215,6 +215,19 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STEP_COUNT_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_TIME_STEP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_CFD_PROFILE_POINT_COUNT_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_INLET_VELOCITY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_TURBULENCE_INTENSITY_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_INLET_VELOCITY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_TURBULENCE_INTENSITY_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_INLET_VELOCITY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM": "1e-06",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_RATIO": "1.02",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO": "0.9",
@@ -488,6 +501,19 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STEP_COUNT_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_TIME_STEP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_CFD_PROFILE_POINT_COUNT_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_INLET_VELOCITY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_TURBULENCE_INTENSITY_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_INLET_VELOCITY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_TURBULENCE_INTENSITY_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_INLET_VELOCITY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM": "5e-06",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_RATIO": "1.04",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO": "0.85",
@@ -761,6 +787,19 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STEP_COUNT_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_TIME_STEP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_CFD_PROFILE_POINT_COUNT_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_INLET_VELOCITY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_TURBULENCE_INTENSITY_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_INLET_VELOCITY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_TURBULENCE_INTENSITY_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_INLET_VELOCITY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM": "1e-05",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_RATIO": "1.08",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO": "0.75",
@@ -2298,6 +2337,123 @@ def evaluate_release_readiness(
             ),
         )
     )
+    cfd_max_reference_density_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CFD_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    cfd_max_dynamic_viscosity_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CFD_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    cfd_max_inlet_velocity_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_INLET_VELOCITY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CFD_MAX_INLET_VELOCITY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    cfd_max_turbulence_intensity_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_TURBULENCE_INTENSITY_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CFD_MAX_TURBULENCE_INTENSITY_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    cfd_max_profile_point_count_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CFD_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    cht_max_reference_density_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CHT_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    cht_max_dynamic_viscosity_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CHT_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    cht_max_inlet_velocity_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_INLET_VELOCITY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CHT_MAX_INLET_VELOCITY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    cht_max_turbulence_intensity_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_TURBULENCE_INTENSITY_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CHT_MAX_TURBULENCE_INTENSITY_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    fsi_max_reference_density_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_FSI_MAX_REFERENCE_DENSITY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    fsi_max_dynamic_viscosity_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_FSI_MAX_DYNAMIC_VISCOSITY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    fsi_max_inlet_velocity_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_INLET_VELOCITY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_FSI_MAX_INLET_VELOCITY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    fsi_max_turbulence_intensity_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
     coupled_flow_max_transient_residual_norm_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM",
@@ -3714,13 +3870,26 @@ def evaluate_release_readiness(
     fsi_max_time_step_s = None
     fsi_min_cfd_profile_point_count = None
     cfd_reynolds_proxy_drop_trend_ratio = None
+    cfd_reference_density_drop_trend_ratio = None
+    cfd_dynamic_viscosity_drop_trend_ratio = None
+    cfd_inlet_velocity_drop_trend_ratio = None
+    cfd_turbulence_intensity_trend_ratio = None
+    cfd_profile_point_count_drop_trend_ratio = None
     cht_reynolds_proxy_drop_trend_ratio = None
     cht_applied_temperature_delta_drop_trend_ratio = None
+    cht_reference_density_drop_trend_ratio = None
+    cht_dynamic_viscosity_drop_trend_ratio = None
+    cht_inlet_velocity_drop_trend_ratio = None
+    cht_turbulence_intensity_trend_ratio = None
     cht_profile_point_count_drop_trend_ratio = None
     cht_step_count_drop_trend_ratio = None
     cht_time_step_s_trend_ratio = None
     fsi_reynolds_proxy_drop_trend_ratio = None
     fsi_structural_step_count_drop_trend_ratio = None
+    fsi_reference_density_drop_trend_ratio = None
+    fsi_dynamic_viscosity_drop_trend_ratio = None
+    fsi_inlet_velocity_drop_trend_ratio = None
+    fsi_turbulence_intensity_trend_ratio = None
     fsi_profile_point_count_drop_trend_ratio = None
     fsi_step_count_drop_trend_ratio = None
     fsi_time_step_s_trend_ratio = None
@@ -7508,6 +7677,106 @@ def evaluate_release_readiness(
                 )
             )
 
+        cfd_reference_density_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "cfd_reference_density_kg_per_m3"
+        )
+        if (
+            cfd_reference_density_drop_trend_ratio is not None
+            and cfd_reference_density_drop_trend_ratio
+            > cfd_max_reference_density_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CFD_REFERENCE_DENSITY_KG_PER_M3_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "CFD reference-density drop trend ratio "
+                        f"{cfd_reference_density_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{cfd_max_reference_density_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        cfd_dynamic_viscosity_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "cfd_dynamic_viscosity_pa_s"
+        )
+        if (
+            cfd_dynamic_viscosity_drop_trend_ratio is not None
+            and cfd_dynamic_viscosity_drop_trend_ratio
+            > cfd_max_dynamic_viscosity_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CFD_DYNAMIC_VISCOSITY_PA_S_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "CFD dynamic-viscosity drop trend ratio "
+                        f"{cfd_dynamic_viscosity_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{cfd_max_dynamic_viscosity_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        cfd_inlet_velocity_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "cfd_inlet_velocity_m_per_s"
+        )
+        if (
+            cfd_inlet_velocity_drop_trend_ratio is not None
+            and cfd_inlet_velocity_drop_trend_ratio
+            > cfd_max_inlet_velocity_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CFD_INLET_VELOCITY_M_PER_S_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "CFD inlet-velocity drop trend ratio "
+                        f"{cfd_inlet_velocity_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{cfd_max_inlet_velocity_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        cfd_turbulence_intensity_trend_ratio = fixture_assertion_trend_ratio(
+            "cfd_turbulence_intensity", ratio_mode="increase"
+        )
+        if (
+            cfd_turbulence_intensity_trend_ratio is not None
+            and cfd_turbulence_intensity_trend_ratio
+            > cfd_max_turbulence_intensity_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CFD_TURBULENCE_INTENSITY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "CFD turbulence-intensity trend ratio "
+                        f"{cfd_turbulence_intensity_trend_ratio:.3f} exceeds threshold "
+                        f"{cfd_max_turbulence_intensity_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        cfd_profile_point_count_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "cfd_profile_point_count"
+        )
+        if (
+            cfd_profile_point_count_drop_trend_ratio is not None
+            and cfd_profile_point_count_drop_trend_ratio
+            > cfd_max_profile_point_count_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CFD_PROFILE_POINT_COUNT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "CFD profile-point-count drop trend ratio "
+                        f"{cfd_profile_point_count_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{cfd_max_profile_point_count_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         cht_reynolds_proxy_drop_trend_ratio = fixture_assertion_trend_ratio(
             "cht_reynolds_proxy"
         )
@@ -7524,6 +7793,86 @@ def evaluate_release_readiness(
                         "CHT Reynolds proxy drop trend ratio "
                         f"{cht_reynolds_proxy_drop_trend_ratio:.3f} exceeds threshold "
                         f"{cht_max_reynolds_proxy_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        cht_reference_density_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "cht_reference_density_kg_per_m3"
+        )
+        if (
+            cht_reference_density_drop_trend_ratio is not None
+            and cht_reference_density_drop_trend_ratio
+            > cht_max_reference_density_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CHT_REFERENCE_DENSITY_KG_PER_M3_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "CHT reference-density drop trend ratio "
+                        f"{cht_reference_density_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{cht_max_reference_density_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        cht_dynamic_viscosity_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "cht_dynamic_viscosity_pa_s"
+        )
+        if (
+            cht_dynamic_viscosity_drop_trend_ratio is not None
+            and cht_dynamic_viscosity_drop_trend_ratio
+            > cht_max_dynamic_viscosity_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CHT_DYNAMIC_VISCOSITY_PA_S_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "CHT dynamic-viscosity drop trend ratio "
+                        f"{cht_dynamic_viscosity_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{cht_max_dynamic_viscosity_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        cht_inlet_velocity_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "cht_inlet_velocity_m_per_s"
+        )
+        if (
+            cht_inlet_velocity_drop_trend_ratio is not None
+            and cht_inlet_velocity_drop_trend_ratio
+            > cht_max_inlet_velocity_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CHT_INLET_VELOCITY_M_PER_S_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "CHT inlet-velocity drop trend ratio "
+                        f"{cht_inlet_velocity_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{cht_max_inlet_velocity_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        cht_turbulence_intensity_trend_ratio = fixture_assertion_trend_ratio(
+            "cht_turbulence_intensity", ratio_mode="increase"
+        )
+        if (
+            cht_turbulence_intensity_trend_ratio is not None
+            and cht_turbulence_intensity_trend_ratio
+            > cht_max_turbulence_intensity_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CHT_TURBULENCE_INTENSITY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "CHT turbulence-intensity trend ratio "
+                        f"{cht_turbulence_intensity_trend_ratio:.3f} exceeds threshold "
+                        f"{cht_max_turbulence_intensity_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
@@ -7564,6 +7913,86 @@ def evaluate_release_readiness(
                         "FSI Reynolds proxy drop trend ratio "
                         f"{fsi_reynolds_proxy_drop_trend_ratio:.3f} exceeds threshold "
                         f"{fsi_max_reynolds_proxy_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        fsi_reference_density_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "fsi_reference_density_kg_per_m3"
+        )
+        if (
+            fsi_reference_density_drop_trend_ratio is not None
+            and fsi_reference_density_drop_trend_ratio
+            > fsi_max_reference_density_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="FSI_REFERENCE_DENSITY_KG_PER_M3_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "FSI reference-density drop trend ratio "
+                        f"{fsi_reference_density_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{fsi_max_reference_density_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        fsi_dynamic_viscosity_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "fsi_dynamic_viscosity_pa_s"
+        )
+        if (
+            fsi_dynamic_viscosity_drop_trend_ratio is not None
+            and fsi_dynamic_viscosity_drop_trend_ratio
+            > fsi_max_dynamic_viscosity_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="FSI_DYNAMIC_VISCOSITY_PA_S_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "FSI dynamic-viscosity drop trend ratio "
+                        f"{fsi_dynamic_viscosity_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{fsi_max_dynamic_viscosity_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        fsi_inlet_velocity_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "fsi_inlet_velocity_m_per_s"
+        )
+        if (
+            fsi_inlet_velocity_drop_trend_ratio is not None
+            and fsi_inlet_velocity_drop_trend_ratio
+            > fsi_max_inlet_velocity_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="FSI_INLET_VELOCITY_M_PER_S_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "FSI inlet-velocity drop trend ratio "
+                        f"{fsi_inlet_velocity_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{fsi_max_inlet_velocity_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        fsi_turbulence_intensity_trend_ratio = fixture_assertion_trend_ratio(
+            "fsi_turbulence_intensity", ratio_mode="increase"
+        )
+        if (
+            fsi_turbulence_intensity_trend_ratio is not None
+            and fsi_turbulence_intensity_trend_ratio
+            > fsi_max_turbulence_intensity_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="FSI_TURBULENCE_INTENSITY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "FSI turbulence-intensity trend ratio "
+                        f"{fsi_turbulence_intensity_trend_ratio:.3f} exceeds threshold "
+                        f"{fsi_max_turbulence_intensity_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
@@ -9734,10 +10163,28 @@ def evaluate_release_readiness(
         "fsi_min_cfd_profile_point_count_threshold": fsi_min_cfd_profile_point_count_threshold,
         "cfd_reynolds_proxy_drop_trend_ratio": cfd_reynolds_proxy_drop_trend_ratio,
         "cfd_max_reynolds_proxy_drop_trend_ratio_threshold": cfd_max_reynolds_proxy_drop_trend_ratio_threshold,
+        "cfd_reference_density_drop_trend_ratio": cfd_reference_density_drop_trend_ratio,
+        "cfd_max_reference_density_drop_trend_ratio_threshold": cfd_max_reference_density_drop_trend_ratio_threshold,
+        "cfd_dynamic_viscosity_drop_trend_ratio": cfd_dynamic_viscosity_drop_trend_ratio,
+        "cfd_max_dynamic_viscosity_drop_trend_ratio_threshold": cfd_max_dynamic_viscosity_drop_trend_ratio_threshold,
+        "cfd_inlet_velocity_drop_trend_ratio": cfd_inlet_velocity_drop_trend_ratio,
+        "cfd_max_inlet_velocity_drop_trend_ratio_threshold": cfd_max_inlet_velocity_drop_trend_ratio_threshold,
+        "cfd_turbulence_intensity_trend_ratio": cfd_turbulence_intensity_trend_ratio,
+        "cfd_max_turbulence_intensity_trend_ratio_threshold": cfd_max_turbulence_intensity_trend_ratio_threshold,
+        "cfd_profile_point_count_drop_trend_ratio": cfd_profile_point_count_drop_trend_ratio,
+        "cfd_max_profile_point_count_drop_trend_ratio_threshold": cfd_max_profile_point_count_drop_trend_ratio_threshold,
         "cht_reynolds_proxy_drop_trend_ratio": cht_reynolds_proxy_drop_trend_ratio,
         "cht_max_reynolds_proxy_drop_trend_ratio_threshold": cht_max_reynolds_proxy_drop_trend_ratio_threshold,
         "cht_applied_temperature_delta_drop_trend_ratio": cht_applied_temperature_delta_drop_trend_ratio,
         "cht_max_applied_temperature_delta_drop_trend_ratio_threshold": cht_max_applied_temperature_delta_drop_trend_ratio_threshold,
+        "cht_reference_density_drop_trend_ratio": cht_reference_density_drop_trend_ratio,
+        "cht_max_reference_density_drop_trend_ratio_threshold": cht_max_reference_density_drop_trend_ratio_threshold,
+        "cht_dynamic_viscosity_drop_trend_ratio": cht_dynamic_viscosity_drop_trend_ratio,
+        "cht_max_dynamic_viscosity_drop_trend_ratio_threshold": cht_max_dynamic_viscosity_drop_trend_ratio_threshold,
+        "cht_inlet_velocity_drop_trend_ratio": cht_inlet_velocity_drop_trend_ratio,
+        "cht_max_inlet_velocity_drop_trend_ratio_threshold": cht_max_inlet_velocity_drop_trend_ratio_threshold,
+        "cht_turbulence_intensity_trend_ratio": cht_turbulence_intensity_trend_ratio,
+        "cht_max_turbulence_intensity_trend_ratio_threshold": cht_max_turbulence_intensity_trend_ratio_threshold,
         "cht_profile_point_count_drop_trend_ratio": cht_profile_point_count_drop_trend_ratio,
         "cht_max_profile_point_count_drop_trend_ratio_threshold": cht_max_profile_point_count_drop_trend_ratio_threshold,
         "cht_step_count_drop_trend_ratio": cht_step_count_drop_trend_ratio,
@@ -9748,6 +10195,14 @@ def evaluate_release_readiness(
         "fsi_max_reynolds_proxy_drop_trend_ratio_threshold": fsi_max_reynolds_proxy_drop_trend_ratio_threshold,
         "fsi_structural_step_count_drop_trend_ratio": fsi_structural_step_count_drop_trend_ratio,
         "fsi_max_structural_step_count_drop_trend_ratio_threshold": fsi_max_structural_step_count_drop_trend_ratio_threshold,
+        "fsi_reference_density_drop_trend_ratio": fsi_reference_density_drop_trend_ratio,
+        "fsi_max_reference_density_drop_trend_ratio_threshold": fsi_max_reference_density_drop_trend_ratio_threshold,
+        "fsi_dynamic_viscosity_drop_trend_ratio": fsi_dynamic_viscosity_drop_trend_ratio,
+        "fsi_max_dynamic_viscosity_drop_trend_ratio_threshold": fsi_max_dynamic_viscosity_drop_trend_ratio_threshold,
+        "fsi_inlet_velocity_drop_trend_ratio": fsi_inlet_velocity_drop_trend_ratio,
+        "fsi_max_inlet_velocity_drop_trend_ratio_threshold": fsi_max_inlet_velocity_drop_trend_ratio_threshold,
+        "fsi_turbulence_intensity_trend_ratio": fsi_turbulence_intensity_trend_ratio,
+        "fsi_max_turbulence_intensity_trend_ratio_threshold": fsi_max_turbulence_intensity_trend_ratio_threshold,
         "fsi_profile_point_count_drop_trend_ratio": fsi_profile_point_count_drop_trend_ratio,
         "fsi_max_profile_point_count_drop_trend_ratio_threshold": fsi_max_profile_point_count_drop_trend_ratio_threshold,
         "fsi_step_count_drop_trend_ratio": fsi_step_count_drop_trend_ratio,
@@ -10483,6 +10938,10 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Coupled-flow trend ratios (CFD Reynolds, CHT Reynolds, CHT delta K, FSI Reynolds, FSI structural steps): "
         f"`{result.get('cfd_reynolds_proxy_drop_trend_ratio') if result.get('cfd_reynolds_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_reynolds_proxy_drop_trend_ratio') if result.get('cht_reynolds_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_applied_temperature_delta_drop_trend_ratio') if result.get('cht_applied_temperature_delta_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_reynolds_proxy_drop_trend_ratio') if result.get('fsi_reynolds_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_structural_step_count_drop_trend_ratio') if result.get('fsi_structural_step_count_drop_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Coupled-flow profile-property trend ratios (CFD density/viscosity/velocity/turbulence/profile, CHT density/viscosity/velocity/turbulence, FSI density/viscosity/velocity/turbulence): "
+        f"`{result.get('cfd_reference_density_drop_trend_ratio') if result.get('cfd_reference_density_drop_trend_ratio') is not None else '-'}`/`{result.get('cfd_dynamic_viscosity_drop_trend_ratio') if result.get('cfd_dynamic_viscosity_drop_trend_ratio') is not None else '-'}`/`{result.get('cfd_inlet_velocity_drop_trend_ratio') if result.get('cfd_inlet_velocity_drop_trend_ratio') is not None else '-'}`/`{result.get('cfd_turbulence_intensity_trend_ratio') if result.get('cfd_turbulence_intensity_trend_ratio') is not None else '-'}`/`{result.get('cfd_profile_point_count_drop_trend_ratio') if result.get('cfd_profile_point_count_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_reference_density_drop_trend_ratio') if result.get('cht_reference_density_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_dynamic_viscosity_drop_trend_ratio') if result.get('cht_dynamic_viscosity_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_inlet_velocity_drop_trend_ratio') if result.get('cht_inlet_velocity_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_turbulence_intensity_trend_ratio') if result.get('cht_turbulence_intensity_trend_ratio') is not None else '-'}`/`{result.get('fsi_reference_density_drop_trend_ratio') if result.get('fsi_reference_density_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_dynamic_viscosity_drop_trend_ratio') if result.get('fsi_dynamic_viscosity_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_inlet_velocity_drop_trend_ratio') if result.get('fsi_inlet_velocity_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_turbulence_intensity_trend_ratio') if result.get('fsi_turbulence_intensity_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- Coupled-flow profile/step trend ratios (CHT profile, CHT steps, CHT time-step, FSI profile, FSI steps, FSI time-step, FSI CFD profile): "
