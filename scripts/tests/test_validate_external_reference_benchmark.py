@@ -413,6 +413,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "electromagnetic_source_region_energy_consistency_ratio",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
             "name": "electromagnetic_solver_conditioning_proxy",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 1.83,
@@ -662,6 +669,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 250.0,
             "reference": 250.0,
+            "pass": True,
+        },
+        {
+            "name": "electromagnetic_source_region_energy_consistency_ratio",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 0.5165864589168179,
+            "reference": 0.5165864589168179,
             "pass": True,
         },
         {

@@ -327,6 +327,14 @@
       "tolerance_rel": 0.75
     },
     {
+      "name": "electromagnetic_source_region_energy_consistency_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_source_region_energy_consistency_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.25,
+      "tolerance_rel": 0.25
+    },
+    {
       "name": "electromagnetic_solver_conditioning_proxy",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "electromagnetic_solver_conditioning_proxy",
@@ -667,6 +675,14 @@
       "reference": 250.0,
       "tolerance_abs": 150.0,
       "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_source_region_energy_consistency_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_source_region_energy_consistency_ratio",
+      "reference": 0.5165864589168179,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.4
     },
     {
       "name": "electromagnetic_solver_conditioning_proxy",
