@@ -66,14 +66,25 @@ pub(super) fn import_gltf(
                 )));
             }
             let positions = parse_inline_positions(primitive)?;
+            let uses_implicit_indices = primitive.get("indices").is_none();
             let base_vertex = all_positions.len();
             all_positions.extend_from_slice(&positions);
 
-            let indices = parse_inline_indices(primitive).map_err(|reason| {
+            let indices = parse_inline_indices(primitive, positions.len()).map_err(|reason| {
                 GeometryImportError::ParseFailed(format!(
                     "GLTF inline indices parse failed: {reason}"
                 ))
             })?;
+            if uses_implicit_indices {
+                diagnostics.push(ImportDiagnostic {
+                    code: "GEOMETRY_GLTF_IMPLICIT_INDICES_USED".to_string(),
+                    severity: ImportDiagnosticSeverity::Info,
+                    message: format!(
+                        "GLTF primitive omitted indices; generated deterministic 0..{} index sequence",
+                        positions.len().saturating_sub(1)
+                    ),
+                });
+            }
             if indices.len() % 3 != 0 {
                 return Err(GeometryImportError::ParseFailed(
                     "GLTF inline indices must be a multiple of 3 for triangle primitives"
@@ -164,14 +175,8 @@ fn parse_inline_positions(primitive: &Value) -> Result<Vec<[f64; 3]>, GeometryIm
         .collect()
 }
 
-fn parse_inline_indices(primitive: &Value) -> Result<Vec<usize>, String> {
+fn parse_inline_indices(primitive: &Value, position_count: usize) -> Result<Vec<usize>, String> {
     let Some(indices) = primitive.get("indices") else {
-        let position_count = primitive
-            .get("attributes")
-            .and_then(|attributes| attributes.get("POSITION"))
-            .and_then(Value::as_array)
-            .map(Vec::len)
-            .unwrap_or(0);
         return Ok((0..position_count).collect());
     };
     let values = indices

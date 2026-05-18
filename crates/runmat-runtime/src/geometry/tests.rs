@@ -7,6 +7,8 @@ const SIMPLE_PLY: &str = "ply\nformat ascii 1.0\nelement vertex 4\nproperty floa
 const SIMPLE_GLTF: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0],[0,1,0]]\n          },\n          \"indices\": [0,1,2,0,2,3]\n        }\n      ]\n    }\n  ]\n}\n";
 const NON_TRIANGLE_GLTF: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"mode\": 1,\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0]]\n          },\n          \"indices\": [0,1,2]\n        }\n      ]\n    }\n  ]\n}\n";
 const SIMPLE_GLB_HEADER: &[u8] = b"glTF\x02\x00\x00\x00";
+const SIMPLE_GLTF_IMPLICIT_INDICES: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[0,1,0]]\n          }\n        }\n      ]\n    }\n  ]\n}\n";
+const BAD_GLTF_IMPLICIT_INDEX_COUNT: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0],[0,1,0]]\n          }\n        }\n      ]\n    }\n  ]\n}\n";
 
 fn binary_triangle_stl() -> Vec<u8> {
     let mut payload = vec![0u8; 84 + 50];
@@ -176,6 +178,31 @@ fn inspect_and_load_gltf_work() {
 }
 
 #[test]
+fn inspect_and_load_gltf_with_implicit_indices_work() {
+    let inspect = geometry_inspect(
+        "/part-implicit.gltf",
+        SIMPLE_GLTF_IMPLICIT_INDICES.as_bytes(),
+    )
+    .expect("inspect should work");
+    assert_eq!(inspect.format, "gltf");
+
+    let asset = geometry_load(
+        "/part-implicit.gltf",
+        SIMPLE_GLTF_IMPLICIT_INDICES.as_bytes(),
+    )
+    .expect("load should work");
+    assert_eq!(asset.source.importer_version, "gltf/v1");
+    assert_eq!(asset.meshes[0].element_count, 1);
+    assert_eq!(asset.meshes[0].vertex_count, 3);
+    let codes = asset
+        .diagnostics
+        .iter()
+        .map(|diag| diag.code.as_str())
+        .collect::<Vec<_>>();
+    assert!(codes.contains(&"GEOMETRY_GLTF_IMPLICIT_INDICES_USED"));
+}
+
+#[test]
 fn inspect_and_load_gltf_work_without_extension() {
     let inspect =
         geometry_inspect("/part.data", SIMPLE_GLTF.as_bytes()).expect("inspect should work");
@@ -222,6 +249,18 @@ fn load_op_maps_parse_error_for_non_triangle_gltf_mode() {
     .expect_err("non-triangle GLTF mode should fail parse");
     assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
     assert!(error.message.contains("mode 1 is not supported"));
+}
+
+#[test]
+fn load_op_maps_parse_error_for_bad_implicit_gltf_indices() {
+    let error = geometry_load_op(
+        "/mesh.gltf",
+        BAD_GLTF_IMPLICIT_INDEX_COUNT.as_bytes(),
+        OperationContext::new(None, None),
+    )
+    .expect_err("bad implicit GLTF indices should fail parse");
+    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert!(error.message.contains("multiple of 3"));
 }
 
 #[test]

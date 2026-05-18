@@ -269,3 +269,5 @@ Progress update (2026-05-17):
     STL/OBJ/PLY/GLTF importers now emit additive machine-readable count diagnostics (`GEOMETRY_IMPORT_VERTEX_COUNT`, `GEOMETRY_IMPORT_TRIANGLE_COUNT`) alongside existing normalization signals, and runtime geometry coverage asserts diagnostic propagation through versioned load contracts.
 101. [x] CAD GLTF primitive-mode validation hardened for inline mesh ingestion:
     GLTF inline importer now enforces triangle primitive mode (`mode=4`) with deterministic typed parse failures for unsupported primitive modes, preventing non-triangle primitive payloads from silently flowing through triangle-only ingestion logic.
+102. [x] CAD GLTF implicit-index handling hardened with explicit diagnostics:
+    GLTF inline importer now emits machine-readable diagnostics when indices are omitted (`GEOMETRY_GLTF_IMPLICIT_INDICES_USED`) and enforces triangle-cardinality constraints on generated deterministic index sequences, producing typed parse failures when implicit index counts are not multiples of 3.

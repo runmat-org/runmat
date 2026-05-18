@@ -28,6 +28,8 @@ mod tests {
     const SIMPLE_OBJ: &str = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\nf -4 -3 -2\n";
     const SIMPLE_PLY: &str = "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n1 1 0\n0 1 0\n4 0 1 2 3\n3 0 2 3\n";
     const SIMPLE_GLTF: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0],[0,1,0]]\n          },\n          \"indices\": [0,1,2,0,2,3]\n        }\n      ]\n    }\n  ]\n}\n";
+    const SIMPLE_GLTF_IMPLICIT_INDICES: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[0,1,0]]\n          }\n        }\n      ]\n    }\n  ]\n}\n";
+    const BAD_GLTF_IMPLICIT_INDEX_COUNT: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0],[0,1,0]]\n          }\n        }\n      ]\n    }\n  ]\n}\n";
     const NON_TRIANGLE_GLTF: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"mode\": 1,\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0]]\n          },\n          \"indices\": [0,1,2]\n        }\n      ]\n    }\n  ]\n}\n";
     const SIMPLE_GLB_HEADER: &[u8] = b"glTF\x02\x00\x00\x00";
 
@@ -300,6 +302,33 @@ mod tests {
             error
                 .to_string()
                 .contains("primitive mode 1 is not supported"),
+            "unexpected error message: {error}"
+        );
+    }
+
+    #[test]
+    fn gltf_import_supports_implicit_indices_and_emits_diagnostic() {
+        let result = import(
+            "/mesh-implicit.gltf",
+            SIMPLE_GLTF_IMPLICIT_INDICES.as_bytes(),
+            GeometryImportOptions::default(),
+        );
+        let mesh = single_mesh(&result.asset);
+        assert_eq!(mesh.element_count, 1);
+        assert_eq!(mesh.vertex_count, 3);
+        assert!(has_diag(&result, "GEOMETRY_GLTF_IMPLICIT_INDICES_USED"));
+    }
+
+    #[test]
+    fn gltf_implicit_indices_require_triangle_multiple() {
+        let error = import_geometry(
+            "/mesh-implicit-bad.gltf",
+            BAD_GLTF_IMPLICIT_INDEX_COUNT.as_bytes(),
+            GeometryImportOptions::default(),
+        )
+        .expect_err("implicit indices with non-triangle cardinality should fail");
+        assert!(
+            error.to_string().contains("multiple of 3"),
             "unexpected error message: {error}"
         );
     }
