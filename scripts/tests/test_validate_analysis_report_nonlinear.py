@@ -739,6 +739,14 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 {
                     "transient_max_residual_norm",
                     "transient_max_energy_growth_ratio",
+                    "transient_prepared_cache_hit_ratio",
+                    "transient_prepared_cache_misses",
+                    "transient_adapt_scale_min",
+                    "transient_adapt_scale_max",
+                    "transient_adapt_scale_mean",
+                    "transient_adapt_decrease_steps",
+                    "transient_physics_jump_ratio",
+                    "transient_physics_nonfinite_count",
                 },
             ),
             _record(
@@ -753,6 +761,10 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 {
                     "transient_max_residual_norm",
                     "transient_max_energy_growth_ratio",
+                    "transient_prepared_cache_hit_ratio",
+                    "transient_prepared_cache_misses",
+                    "transient_shock_physics_jump_ratio",
+                    "transient_shock_physics_nonfinite_count",
                 },
             ),
             _record(
@@ -1295,6 +1307,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "transient_max_residual_norm"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_transient_long_provider_adapt_mean_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "transient_long_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "transient_adapt_scale_mean"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

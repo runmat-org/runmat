@@ -707,6 +707,14 @@ REQUIRED_METRICS_BY_FIXTURE = {
     "transient_long_gpu_provider": {
         "transient_max_residual_norm",
         "transient_max_energy_growth_ratio",
+        "transient_prepared_cache_hit_ratio",
+        "transient_prepared_cache_misses",
+        "transient_adapt_scale_min",
+        "transient_adapt_scale_max",
+        "transient_adapt_scale_mean",
+        "transient_adapt_decrease_steps",
+        "transient_physics_jump_ratio",
+        "transient_physics_nonfinite_count",
     },
     "transient_shock_cpu": {
         "transient_max_residual_norm",
@@ -715,6 +723,10 @@ REQUIRED_METRICS_BY_FIXTURE = {
     "transient_shock_gpu_provider": {
         "transient_max_residual_norm",
         "transient_max_energy_growth_ratio",
+        "transient_prepared_cache_hit_ratio",
+        "transient_prepared_cache_misses",
+        "transient_shock_physics_jump_ratio",
+        "transient_shock_physics_nonfinite_count",
     },
 }
 

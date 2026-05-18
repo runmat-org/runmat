@@ -3777,6 +3777,126 @@
       "tolerance_rel": 0.03
     },
     {
+      "name": "transient_prepared_cache_hit_ratio",
+      "fixture_id": "transient_long_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_hit_ratio",
+      "reference": 0.9583333333333334,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.15
+    },
+    {
+      "name": "transient_prepared_cache_misses",
+      "fixture_id": "transient_long_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_misses",
+      "reference": 1.0,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 2.0
+    },
+    {
+      "name": "transient_adapt_scale_min",
+      "fixture_id": "transient_long_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_adapt_scale_min",
+      "reference": 1.0,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "transient_adapt_scale_max",
+      "fixture_id": "transient_long_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_adapt_scale_max",
+      "reference": 1.0,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "transient_adapt_scale_mean",
+      "fixture_id": "transient_long_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_adapt_scale_mean",
+      "reference": 1.0,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "transient_adapt_decrease_steps",
+      "fixture_id": "transient_long_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_adapt_decrease_steps",
+      "reference": 0.0,
+      "tolerance_abs": 4.0,
+      "tolerance_rel": 2.0
+    },
+    {
+      "name": "transient_physics_jump_ratio",
+      "fixture_id": "transient_long_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_physics_jump_ratio",
+      "reference": 2.969770410429431e-05,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 5.0
+    },
+    {
+      "name": "transient_physics_nonfinite_count",
+      "fixture_id": "transient_long_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_physics_nonfinite_count",
+      "reference": 0.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": 0.0
+    },
+    {
+      "name": "transient_prepared_cache_hit_ratio",
+      "fixture_id": "transient_shock_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_hit_ratio",
+      "reference": 0.9791666666666666,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.15
+    },
+    {
+      "name": "transient_prepared_cache_misses",
+      "fixture_id": "transient_shock_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_misses",
+      "reference": 1.0,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 2.0
+    },
+    {
+      "name": "transient_shock_physics_jump_ratio",
+      "fixture_id": "transient_shock_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_shock_physics_jump_ratio",
+      "reference": 4.7647028374636e-05,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 5.0
+    },
+    {
+      "name": "transient_shock_physics_nonfinite_count",
+      "fixture_id": "transient_shock_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_shock_physics_nonfinite_count",
+      "reference": 0.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": 0.0
+    },
+    {
       "name": "thermo_mech_thermal_strain_scale",
       "fixture_id": "thermo_mech_kickoff_gpu_provider",
       "field": "unused_for_threshold_source",
