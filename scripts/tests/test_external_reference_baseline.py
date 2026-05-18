@@ -601,6 +601,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
                 "electromagnetic_placeholder_quality",
             ),
             (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "electromagnetic_energy_imbalance_ratio",
+            ),
+            (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "electromagnetic_flux_divergence_proxy",
+            ),
+            (
                 "electromagnetic_reference_multi_region_phased_source_gpu_provider",
                 "em_phased_source_energy_consistency_ratio",
             ),
@@ -619,6 +627,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_multi_region_phased_source_gpu_provider",
                 "electromagnetic_placeholder_quality",
+            ),
+            (
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "electromagnetic_energy_imbalance_ratio",
+            ),
+            (
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "electromagnetic_flux_divergence_proxy",
             ),
             (
                 "electromagnetic_reference_sparse_assignments_gpu_provider",
@@ -653,6 +669,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
                 "electromagnetic_placeholder_quality",
             ),
             (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "electromagnetic_energy_imbalance_ratio",
+            ),
+            (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "electromagnetic_flux_divergence_proxy",
+            ),
+            (
                 "electromagnetic_reference_fallback_heavy_gpu_provider",
                 "em_fallback_heavy_fallback_coefficient_ratio",
             ),
@@ -685,6 +709,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
                 "electromagnetic_placeholder_quality",
             ),
             (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "electromagnetic_energy_imbalance_ratio",
+            ),
+            (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "electromagnetic_flux_divergence_proxy",
+            ),
+            (
                 "electromagnetic_reference_overlap_interference_gpu_provider",
                 "em_overlap_source_interference_index",
             ),
@@ -705,6 +737,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
                 "electromagnetic_placeholder_quality",
             ),
             (
+                "electromagnetic_reference_overlap_interference_gpu_provider",
+                "electromagnetic_energy_imbalance_ratio",
+            ),
+            (
+                "electromagnetic_reference_overlap_interference_gpu_provider",
+                "electromagnetic_flux_divergence_proxy",
+            ),
+            (
                 "electromagnetic_reference_boundary_kernel_gpu_provider",
                 "em_boundary_kernel_boundary_localization_ratio",
             ),
@@ -719,6 +759,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_boundary_kernel_gpu_provider",
                 "electromagnetic_placeholder_quality",
+            ),
+            (
+                "electromagnetic_reference_boundary_kernel_gpu_provider",
+                "electromagnetic_energy_imbalance_ratio",
+            ),
+            (
+                "electromagnetic_reference_boundary_kernel_gpu_provider",
+                "electromagnetic_flux_divergence_proxy",
             ),
             ("cfd_steady_gpu_provider", "cfd_reference_density_kg_per_m3"),
             ("cfd_steady_gpu_provider", "cfd_dynamic_viscosity_pa_s"),

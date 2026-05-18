@@ -1181,6 +1181,22 @@
       "tolerance_rel": 0.35
     },
     {
+      "name": "electromagnetic_energy_imbalance_ratio",
+      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+      "field": "electromagnetic_energy_imbalance_ratio",
+      "reference": 0.22,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "electromagnetic_flux_divergence_proxy",
+      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+      "field": "electromagnetic_flux_divergence_proxy",
+      "reference": 0.0,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.8
+    },
+    {
       "name": "em_phased_source_energy_consistency_ratio",
       "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -1227,6 +1243,22 @@
       "reference": 0.8019999992684326,
       "tolerance_abs": 0.2,
       "tolerance_rel": 0.35
+    },
+    {
+      "name": "electromagnetic_energy_imbalance_ratio",
+      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+      "field": "electromagnetic_energy_imbalance_ratio",
+      "reference": 0.22000000038503553,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "electromagnetic_flux_divergence_proxy",
+      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+      "field": "electromagnetic_flux_divergence_proxy",
+      "reference": 0.07852882168228406,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.8
     },
     {
       "name": "em_sparse_fallback_coefficient_ratio",
@@ -1307,6 +1339,22 @@
       "tolerance_rel": 0.35
     },
     {
+      "name": "electromagnetic_energy_imbalance_ratio",
+      "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+      "field": "electromagnetic_energy_imbalance_ratio",
+      "reference": 0.427,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "electromagnetic_flux_divergence_proxy",
+      "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+      "field": "electromagnetic_flux_divergence_proxy",
+      "reference": 0.0,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.8
+    },
+    {
       "name": "em_fallback_heavy_fallback_coefficient_ratio",
       "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -1385,6 +1433,22 @@
       "tolerance_rel": 0.35
     },
     {
+      "name": "electromagnetic_energy_imbalance_ratio",
+      "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+      "field": "electromagnetic_energy_imbalance_ratio",
+      "reference": 0.62,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "electromagnetic_flux_divergence_proxy",
+      "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+      "field": "electromagnetic_flux_divergence_proxy",
+      "reference": 0.0,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.8
+    },
+    {
       "name": "em_overlap_source_interference_index",
       "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -1433,6 +1497,22 @@
       "tolerance_rel": 0.35
     },
     {
+      "name": "electromagnetic_energy_imbalance_ratio",
+      "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
+      "field": "electromagnetic_energy_imbalance_ratio",
+      "reference": 0.29995056554190624,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "electromagnetic_flux_divergence_proxy",
+      "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
+      "field": "electromagnetic_flux_divergence_proxy",
+      "reference": 0.19999999999999998,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.8
+    },
+    {
       "name": "em_boundary_kernel_boundary_localization_ratio",
       "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -1469,6 +1549,22 @@
       "reference": 0.8019201300548723,
       "tolerance_abs": 0.2,
       "tolerance_rel": 0.35
+    },
+    {
+      "name": "electromagnetic_energy_imbalance_ratio",
+      "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+      "field": "electromagnetic_energy_imbalance_ratio",
+      "reference": 0.22008874438347528,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "electromagnetic_flux_divergence_proxy",
+      "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+      "field": "electromagnetic_flux_divergence_proxy",
+      "reference": 0.0,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.8
     },
     {
       "name": "cfd_reference_density_kg_per_m3",

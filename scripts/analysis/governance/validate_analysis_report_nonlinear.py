@@ -655,6 +655,17 @@ def main() -> int:
                 errors.append(
                     f"fixture {fixture_id} missing true EM enabled flag: electromagnetic_enabled"
                 )
+            missing_fields = []
+            for field in sorted(EM_BALANCE_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM balance fields: "
+                    + ", ".join(missing_fields)
+                )
 
         if fixture_id in {
             "electromagnetic_reference_homogeneous_gpu_provider",
@@ -814,18 +825,6 @@ def main() -> int:
                     f"{fixture_id} missing finite EM residual fields: "
                     + ", ".join(missing_fields)
                 )
-            missing_fields = []
-            for field in sorted(EM_BALANCE_REQUIRED_FIELDS):
-                value = record.get(field)
-                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-                    missing_fields.append(field)
-            if missing_fields:
-                errors.append(
-                    "fixture "
-                    f"{fixture_id} missing finite EM balance fields: "
-                    + ", ".join(missing_fields)
-                )
-
         if fixture_id in PERFORMANCE_REQUIRED_FIELDS:
             for field in sorted(PERFORMANCE_REQUIRED_FIELDS[fixture_id]):
                 value = record.get(field)
