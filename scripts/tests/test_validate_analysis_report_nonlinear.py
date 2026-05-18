@@ -375,6 +375,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electromagnetic_source_localization_ratio": 1.0,
                 "electromagnetic_boundary_condition_localization_ratio": 1.0,
                 "electromagnetic_ground_anchor_effectiveness_ratio": 1.0,
+                "electromagnetic_source_interference_index": 0.001,
                 "electromagnetic_solver_conditioning_proxy": 1.83,
                 "electromagnetic_reference_frequency_hz": 60.0,
                 "electromagnetic_sweep_count": 5.0,
@@ -422,6 +423,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electromagnetic_source_localization_ratio": 1.0,
                 "electromagnetic_boundary_condition_localization_ratio": 1.0,
                 "electromagnetic_ground_anchor_effectiveness_ratio": 1.0,
+                "electromagnetic_source_interference_index": 0.0,
                 "electromagnetic_solver_conditioning_proxy": 3.36,
                 "electromagnetic_reference_frequency_hz": 75.0,
                 "electromagnetic_sweep_count": 5.0,
@@ -664,6 +666,18 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             for record in records:
                 if record["fixture_id"] == "electromagnetic_reference_homogeneous_gpu_provider":
                     record.pop("electromagnetic_ground_anchor_effectiveness_ratio", None)
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_em_source_interference_field_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "electromagnetic_reference_homogeneous_gpu_provider":
+                    record.pop("electromagnetic_source_interference_index", None)
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))

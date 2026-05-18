@@ -3058,6 +3058,12 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_max_source_interference_index_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SOURCE_INTERFERENCE_INDEX",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SOURCE_INTERFERENCE_INDEX", "0.1"),
+        )
+    )
     em_max_solver_conditioning_proxy_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_PROXY",
@@ -3174,6 +3180,12 @@ def evaluate_release_readiness(
                 "RUNMAT_RELEASE_READINESS_EM_MAX_GROUND_ANCHOR_EFFECTIVENESS_DROP_TREND_RATIO",
                 "1.25",
             ),
+        )
+    )
+    em_max_source_interference_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SOURCE_INTERFERENCE_TREND_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SOURCE_INTERFERENCE_TREND_RATIO", "1.25"),
         )
     )
     em_max_reference_frequency_drop_trend_ratio_threshold = float(
@@ -4580,6 +4592,7 @@ def evaluate_release_readiness(
     em_min_source_localization_ratio = None
     em_min_boundary_condition_localization_ratio = None
     em_min_ground_anchor_effectiveness_ratio = None
+    em_max_source_interference_index = None
     em_max_solver_conditioning_proxy = None
     em_min_reference_frequency_hz = None
     em_min_sweep_count = None
@@ -4629,6 +4642,7 @@ def evaluate_release_readiness(
     em_source_localization_drop_trend_ratio = None
     em_boundary_condition_localization_drop_trend_ratio = None
     em_ground_anchor_effectiveness_drop_trend_ratio = None
+    em_source_interference_trend_ratio = None
     em_solver_conditioning_trend_ratio = None
     em_reference_frequency_drop_trend_ratio = None
     em_sigma_omega_scale_mean_drop_trend_ratio = None
@@ -7546,6 +7560,36 @@ def evaluate_release_readiness(
         else:
             missing_metric_fields.append("electromagnetic_ground_anchor_effectiveness_ratio")
 
+        source_interference_values = []
+        for rec in em_records:
+            if rec.get("fixture_id") not in core_em_fixture_ids:
+                continue
+            raw_value = rec.get("electromagnetic_source_interference_index")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    source_interference_values.append(value)
+        if source_interference_values:
+            em_max_source_interference_index = max(source_interference_values)
+            source_interference_breached = (
+                em_max_source_interference_index > em_max_source_interference_index_threshold
+            )
+            breaches.append(source_interference_breached)
+            if source_interference_breached:
+                reasons.append(
+                    Reason(
+                        code="EM_SOURCE_INTERFERENCE_INDEX_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "max EM source-interference index "
+                            f"{em_max_source_interference_index:.3f} exceeds threshold "
+                            f"{em_max_source_interference_index_threshold:.3f}"
+                        ),
+                    )
+                )
+        else:
+            missing_metric_fields.append("electromagnetic_source_interference_index")
+
         sweep_metric_specs = [
             (
                 "electromagnetic_applied_current_a",
@@ -10008,6 +10052,26 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
+
+        em_source_interference_trend_ratio = fixture_trend_ratio(
+            "electromagnetic_source_interference_index", ratio_mode="increase"
+        )
+        if (
+            em_source_interference_trend_ratio is not None
+            and em_source_interference_trend_ratio
+            > em_max_source_interference_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_SOURCE_INTERFERENCE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM source-interference trend ratio "
+                        f"{em_source_interference_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_source_interference_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
 
         em_sweep_count_drop_trend_ratio = fixture_trend_ratio(
             "electromagnetic_sweep_count", latest_reducer=min, ratio_mode="drop"
@@ -12506,6 +12570,8 @@ def evaluate_release_readiness(
         "em_min_boundary_condition_localization_ratio_threshold": em_min_boundary_condition_localization_ratio_threshold,
         "em_min_ground_anchor_effectiveness_ratio": em_min_ground_anchor_effectiveness_ratio,
         "em_min_ground_anchor_effectiveness_ratio_threshold": em_min_ground_anchor_effectiveness_ratio_threshold,
+        "em_max_source_interference_index": em_max_source_interference_index,
+        "em_max_source_interference_index_threshold": em_max_source_interference_index_threshold,
         "em_max_solver_conditioning_proxy": em_max_solver_conditioning_proxy,
         "em_max_solver_conditioning_proxy_threshold": em_max_solver_conditioning_proxy_threshold,
         "em_min_reference_frequency_hz": em_min_reference_frequency_hz,
@@ -12606,6 +12672,8 @@ def evaluate_release_readiness(
         "em_max_boundary_condition_localization_drop_trend_ratio_threshold": em_max_boundary_condition_localization_drop_trend_ratio_threshold,
         "em_ground_anchor_effectiveness_drop_trend_ratio": em_ground_anchor_effectiveness_drop_trend_ratio,
         "em_max_ground_anchor_effectiveness_drop_trend_ratio_threshold": em_max_ground_anchor_effectiveness_drop_trend_ratio_threshold,
+        "em_source_interference_trend_ratio": em_source_interference_trend_ratio,
+        "em_max_source_interference_trend_ratio_threshold": em_max_source_interference_trend_ratio_threshold,
         "em_reference_frequency_drop_trend_ratio": em_reference_frequency_drop_trend_ratio,
         "em_max_reference_frequency_drop_trend_ratio_threshold": em_max_reference_frequency_drop_trend_ratio_threshold,
         "em_sweep_count_drop_trend_ratio": em_sweep_count_drop_trend_ratio,
@@ -13499,6 +13567,10 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_min_ground_anchor_effectiveness_ratio') if result.get('em_min_ground_anchor_effectiveness_ratio') is not None else '-'}`/`{result.get('em_min_ground_anchor_effectiveness_ratio_threshold') if result.get('em_min_ground_anchor_effectiveness_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM source-interference max/threshold: "
+        f"`{result.get('em_max_source_interference_index') if result.get('em_max_source_interference_index') is not None else '-'}`/`{result.get('em_max_source_interference_index_threshold') if result.get('em_max_source_interference_index_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- EM reference/sweep/resonance minima (reference-freq, sweep, peak-freq, peak-flux, bandwidth, Q, flux-gain): "
         f"`{result.get('em_min_reference_frequency_hz') if result.get('em_min_reference_frequency_hz') is not None else '-'}`/`{result.get('em_min_sweep_count') if result.get('em_min_sweep_count') is not None else '-'}`/`{result.get('em_min_resonance_peak_frequency_hz') if result.get('em_min_resonance_peak_frequency_hz') is not None else '-'}`/`{result.get('em_min_resonance_peak_flux_density') if result.get('em_min_resonance_peak_flux_density') is not None else '-'}`/`{result.get('em_min_resonance_bandwidth_hz') if result.get('em_min_resonance_bandwidth_hz') is not None else '-'}`/`{result.get('em_min_resonance_q_proxy') if result.get('em_min_resonance_q_proxy') is not None else '-'}`/`{result.get('em_min_resonance_flux_gain') if result.get('em_min_resonance_flux_gain') is not None else '-'}`"
     )
@@ -13533,6 +13605,10 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- EM ground-anchor effectiveness drop trend ratio/threshold: "
         f"`{result.get('em_ground_anchor_effectiveness_drop_trend_ratio') if result.get('em_ground_anchor_effectiveness_drop_trend_ratio') is not None else '-'}`/`{result.get('em_max_ground_anchor_effectiveness_drop_trend_ratio_threshold') if result.get('em_max_ground_anchor_effectiveness_drop_trend_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM source-interference trend ratio/threshold: "
+        f"`{result.get('em_source_interference_trend_ratio') if result.get('em_source_interference_trend_ratio') is not None else '-'}`/`{result.get('em_max_source_interference_trend_ratio_threshold') if result.get('em_max_source_interference_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- EM reference/sweep/resonance trend ratios (reference-freq drop, sweep drop, peak-freq, peak-flux, bandwidth, Q drop, flux-gain drop): "
