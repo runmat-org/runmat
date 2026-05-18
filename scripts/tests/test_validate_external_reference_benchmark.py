@@ -434,6 +434,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "electromagnetic_ground_anchor_effectiveness_ratio",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
             "name": "electromagnetic_solver_conditioning_proxy",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 1.83,
@@ -701,6 +708,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
         },
         {
             "name": "electromagnetic_boundary_condition_localization_ratio",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
+            "name": "electromagnetic_ground_anchor_effectiveness_ratio",
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 1.0,
             "reference": 1.0,

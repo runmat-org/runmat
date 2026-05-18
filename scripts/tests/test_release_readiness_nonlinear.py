@@ -386,6 +386,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_ENERGY_CONSISTENCY_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_LOCALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_CONDITION_LOCALIZATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_GROUND_ANCHOR_EFFECTIVENESS_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_PROXY",
             "RUNMAT_RELEASE_READINESS_EM_MIN_REFERENCE_FREQUENCY_HZ",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SWEEP_COUNT",
@@ -401,6 +402,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOURCE_REGION_ENERGY_CONSISTENCY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOURCE_LOCALIZATION_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_CONDITION_LOCALIZATION_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_GROUND_ANCHOR_EFFECTIVENESS_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REFERENCE_FREQUENCY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SWEEP_COUNT_DROP_TREND_RATIO",
@@ -1450,6 +1452,24 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_BOUNDARY_CONDITION_LOCALIZATION_RATIO_LOW", codes)
 
+    def test_em_ground_anchor_effectiveness_posture_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_ground_anchor_effectiveness_ratio": 0.75,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_GROUND_ANCHOR_EFFECTIVENESS_RATIO"] = (
+            "0.9"
+        )
+        result = evaluate_release_readiness(latest, [], protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_GROUND_ANCHOR_EFFECTIVENESS_RATIO_LOW", codes)
+
     def test_em_solver_conditioning_trend_worsening_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
@@ -1585,6 +1605,34 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_BOUNDARY_CONDITION_LOCALIZATION_TREND_WORSENING", codes)
+
+    def test_em_ground_anchor_effectiveness_trend_worsening_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_ground_anchor_effectiveness_ratio": 0.7,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_ground_anchor_effectiveness_ratio": 1.0,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_GROUND_ANCHOR_EFFECTIVENESS_DROP_TREND_RATIO"] = (
+            "1.3"
+        )
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_GROUND_ANCHOR_EFFECTIVENESS_TREND_WORSENING", codes)
 
     def test_em_sweep_resonance_trend_worsening_reasons_are_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
