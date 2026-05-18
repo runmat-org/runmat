@@ -67,7 +67,10 @@ async fn call_member_index_on_object_like(
     requested_outputs: Option<usize>,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
-    let post_object_fallback = fallback_policy.after_object_dispatch_probe();
+    let post_object_fallback = match fallback_policy {
+        CallableFallbackPolicy::ObjectDispatch => CallableFallbackPolicy::RuntimeNameResolution,
+        other => other,
+    };
     if let Some((m, _owner)) = lookup_method(class_name, &name) {
         if m.is_static {
             return Err(format!(

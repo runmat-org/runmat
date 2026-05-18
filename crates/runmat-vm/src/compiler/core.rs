@@ -1869,7 +1869,6 @@ impl Compiler {
             fallback_policy,
             runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
                 | runmat_hir::CallableFallbackPolicy::ObjectDispatch
-                | runmat_hir::CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution
         ) {
             return Err(self.compile_error(format!(
                 "MIR method-call fallback policy {:?} is not supported for callee {:?}",

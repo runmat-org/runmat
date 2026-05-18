@@ -1837,7 +1837,7 @@ mod tests {
     }
 
     #[test]
-    fn object_dispatch_then_runtime_name_resolution_policy_uses_semantic_resolver() {
+    fn runtime_name_resolution_policy_uses_semantic_resolver_after_object_probe() {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(45)
@@ -1855,14 +1855,14 @@ mod tests {
             runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(
                 "resolved_target".to_string(),
             )),
-            runmat_hir::CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution,
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
             crate::user_functions::SemanticCallableKind::Other,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
-            .expect("combined object/name-resolution policy should attempt semantic resolver")
+            .expect("post-object-probe runtime-name policy should attempt semantic resolver")
             .expect("semantic invoker should succeed");
         assert_eq!(result, Value::Num(11.0));
     }
