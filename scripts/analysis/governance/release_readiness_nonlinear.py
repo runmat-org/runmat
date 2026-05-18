@@ -3034,6 +3034,12 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_min_source_localization_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_LOCALIZATION_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_LOCALIZATION_RATIO", "0.9"),
+        )
+    )
     em_max_solver_conditioning_proxy_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_PROXY",
@@ -3126,6 +3132,12 @@ def evaluate_release_readiness(
                 "RUNMAT_RELEASE_READINESS_EM_MAX_SOURCE_REGION_ENERGY_CONSISTENCY_DROP_TREND_RATIO",
                 "1.25",
             ),
+        )
+    )
+    em_max_source_localization_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SOURCE_LOCALIZATION_DROP_TREND_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SOURCE_LOCALIZATION_DROP_TREND_RATIO", "1.25"),
         )
     )
     em_max_reference_frequency_drop_trend_ratio_threshold = float(
@@ -4529,6 +4541,7 @@ def evaluate_release_readiness(
     em_min_boundary_anchor_ratio = None
     em_min_applied_current_a = None
     em_min_source_region_energy_consistency_ratio = None
+    em_min_source_localization_ratio = None
     em_max_solver_conditioning_proxy = None
     em_min_reference_frequency_hz = None
     em_min_sweep_count = None
@@ -4575,6 +4588,7 @@ def evaluate_release_readiness(
     em_flux_divergence_trend_ratio = None
     em_applied_current_drop_trend_ratio = None
     em_source_region_energy_consistency_drop_trend_ratio = None
+    em_source_localization_drop_trend_ratio = None
     em_solver_conditioning_trend_ratio = None
     em_reference_frequency_drop_trend_ratio = None
     em_sigma_omega_scale_mean_drop_trend_ratio = None
@@ -7396,6 +7410,36 @@ def evaluate_release_readiness(
         else:
             missing_metric_fields.append("electromagnetic_source_region_energy_consistency_ratio")
 
+        source_localization_values = []
+        for rec in em_records:
+            if rec.get("fixture_id") not in core_em_fixture_ids:
+                continue
+            raw_value = rec.get("electromagnetic_source_localization_ratio")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    source_localization_values.append(value)
+        if source_localization_values:
+            em_min_source_localization_ratio = min(source_localization_values)
+            source_localization_breached = (
+                em_min_source_localization_ratio < em_min_source_localization_ratio_threshold
+            )
+            breaches.append(source_localization_breached)
+            if source_localization_breached:
+                reasons.append(
+                    Reason(
+                        code="EM_SOURCE_LOCALIZATION_RATIO_LOW",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "min EM source-localization ratio "
+                            f"{em_min_source_localization_ratio:.3f} below threshold "
+                            f"{em_min_source_localization_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+        else:
+            missing_metric_fields.append("electromagnetic_source_localization_ratio")
+
         sweep_metric_specs = [
             (
                 "electromagnetic_applied_current_a",
@@ -9711,6 +9755,52 @@ def evaluate_release_readiness(
                             "EM source-region energy-consistency drop trend ratio "
                             f"{em_source_region_energy_consistency_drop_trend_ratio:.3f} exceeds threshold "
                             f"{em_max_source_region_energy_consistency_drop_trend_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        source_localization_drop_ratios = []
+        for fixture_id in (
+            "electromagnetic_reference_homogeneous_gpu_provider",
+            "electromagnetic_reference_heterogeneous_gpu_provider",
+        ):
+            latest_rec = latest_by_fixture.get(fixture_id)
+            baseline_records = rolling_by_fixture.get(fixture_id, [])
+            if latest_rec is None or not baseline_records:
+                continue
+            latest_raw = latest_rec.get("electromagnetic_source_localization_ratio")
+            if not isinstance(latest_raw, (int, float)):
+                continue
+            latest_value = float(latest_raw)
+            if not math.isfinite(latest_value) or latest_value <= 0:
+                continue
+            baseline_values = []
+            for rec in baseline_records:
+                raw = rec.get("electromagnetic_source_localization_ratio")
+                if isinstance(raw, (int, float)):
+                    value = float(raw)
+                    if math.isfinite(value):
+                        baseline_values.append(value)
+            if not baseline_values:
+                continue
+            baseline_value = statistics.median(baseline_values)
+            if baseline_value <= 0:
+                continue
+            source_localization_drop_ratios.append(baseline_value / latest_value)
+        if source_localization_drop_ratios:
+            em_source_localization_drop_trend_ratio = max(source_localization_drop_ratios)
+            if (
+                em_source_localization_drop_trend_ratio
+                > em_max_source_localization_drop_trend_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="EM_SOURCE_LOCALIZATION_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "EM source-localization drop trend ratio "
+                            f"{em_source_localization_drop_trend_ratio:.3f} exceeds threshold "
+                            f"{em_max_source_localization_drop_trend_ratio_threshold:.3f}"
                         ),
                     )
                 )
@@ -12206,6 +12296,8 @@ def evaluate_release_readiness(
         "em_min_applied_current_a_threshold": em_min_applied_current_a_threshold,
         "em_min_source_region_energy_consistency_ratio": em_min_source_region_energy_consistency_ratio,
         "em_min_source_region_energy_consistency_ratio_threshold": em_min_source_region_energy_consistency_ratio_threshold,
+        "em_min_source_localization_ratio": em_min_source_localization_ratio,
+        "em_min_source_localization_ratio_threshold": em_min_source_localization_ratio_threshold,
         "em_max_solver_conditioning_proxy": em_max_solver_conditioning_proxy,
         "em_max_solver_conditioning_proxy_threshold": em_max_solver_conditioning_proxy_threshold,
         "em_min_reference_frequency_hz": em_min_reference_frequency_hz,
@@ -12300,6 +12392,8 @@ def evaluate_release_readiness(
         "em_max_applied_current_drop_trend_ratio_threshold": em_max_applied_current_drop_trend_ratio_threshold,
         "em_source_region_energy_consistency_drop_trend_ratio": em_source_region_energy_consistency_drop_trend_ratio,
         "em_max_source_region_energy_consistency_drop_trend_ratio_threshold": em_max_source_region_energy_consistency_drop_trend_ratio_threshold,
+        "em_source_localization_drop_trend_ratio": em_source_localization_drop_trend_ratio,
+        "em_max_source_localization_drop_trend_ratio_threshold": em_max_source_localization_drop_trend_ratio_threshold,
         "em_reference_frequency_drop_trend_ratio": em_reference_frequency_drop_trend_ratio,
         "em_max_reference_frequency_drop_trend_ratio_threshold": em_max_reference_frequency_drop_trend_ratio_threshold,
         "em_sweep_count_drop_trend_ratio": em_sweep_count_drop_trend_ratio,
@@ -13181,6 +13275,10 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_min_source_region_energy_consistency_ratio') if result.get('em_min_source_region_energy_consistency_ratio') is not None else '-'}`/`{result.get('em_min_source_region_energy_consistency_ratio_threshold') if result.get('em_min_source_region_energy_consistency_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM source-localization min/threshold: "
+        f"`{result.get('em_min_source_localization_ratio') if result.get('em_min_source_localization_ratio') is not None else '-'}`/`{result.get('em_min_source_localization_ratio_threshold') if result.get('em_min_source_localization_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- EM reference/sweep/resonance minima (reference-freq, sweep, peak-freq, peak-flux, bandwidth, Q, flux-gain): "
         f"`{result.get('em_min_reference_frequency_hz') if result.get('em_min_reference_frequency_hz') is not None else '-'}`/`{result.get('em_min_sweep_count') if result.get('em_min_sweep_count') is not None else '-'}`/`{result.get('em_min_resonance_peak_frequency_hz') if result.get('em_min_resonance_peak_frequency_hz') is not None else '-'}`/`{result.get('em_min_resonance_peak_flux_density') if result.get('em_min_resonance_peak_flux_density') is not None else '-'}`/`{result.get('em_min_resonance_bandwidth_hz') if result.get('em_min_resonance_bandwidth_hz') is not None else '-'}`/`{result.get('em_min_resonance_q_proxy') if result.get('em_min_resonance_q_proxy') is not None else '-'}`/`{result.get('em_min_resonance_flux_gain') if result.get('em_min_resonance_flux_gain') is not None else '-'}`"
     )
@@ -13203,6 +13301,10 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- EM source-region energy-consistency drop trend ratio/threshold: "
         f"`{result.get('em_source_region_energy_consistency_drop_trend_ratio') if result.get('em_source_region_energy_consistency_drop_trend_ratio') is not None else '-'}`/`{result.get('em_max_source_region_energy_consistency_drop_trend_ratio_threshold') if result.get('em_max_source_region_energy_consistency_drop_trend_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM source-localization drop trend ratio/threshold: "
+        f"`{result.get('em_source_localization_drop_trend_ratio') if result.get('em_source_localization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_max_source_localization_drop_trend_ratio_threshold') if result.get('em_max_source_localization_drop_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- EM reference/sweep/resonance trend ratios (reference-freq drop, sweep drop, peak-freq, peak-flux, bandwidth, Q drop, flux-gain drop): "

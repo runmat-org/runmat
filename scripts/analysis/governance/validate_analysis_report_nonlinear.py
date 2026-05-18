@@ -330,6 +330,10 @@ EM_SOURCE_ENERGY_CONSISTENCY_REQUIRED_FIELDS = {
     "electromagnetic_source_region_energy_consistency_ratio",
 }
 
+EM_SOURCE_LOCALIZATION_REQUIRED_FIELDS = {
+    "electromagnetic_source_localization_ratio",
+}
+
 PERFORMANCE_REQUIRED_FIELDS = {
     "nonlinear_assembly_gpu_provider": {
         "gpu_speedup_ratio",
@@ -639,6 +643,17 @@ def main() -> int:
                 errors.append(
                     "fixture "
                     f"{fixture_id} missing finite EM source-energy-consistency fields: "
+                    + ", ".join(missing_fields)
+                )
+            missing_fields = []
+            for field in sorted(EM_SOURCE_LOCALIZATION_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM source-localization fields: "
                     + ", ".join(missing_fields)
                 )
 
