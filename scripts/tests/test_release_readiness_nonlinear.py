@@ -277,6 +277,15 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS",
@@ -3260,6 +3269,149 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("NONLINEAR_PATH_MIX_BACKTRACK_BURSTS_TREND_WORSENING", codes)
         self.assertIn("NONLINEAR_PATH_MIX_EFFECTIVE_MODULUS_SCALE_TREND_WORSENING", codes)
         self.assertIn("NONLINEAR_PATH_MIX_MATERIAL_SPREAD_RATIO_TREND_WORSENING", codes)
+
+    def test_nonlinear_core_assertion_trend_breaches_emit_reasons(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_assembly_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "nonlinear_total_increments", "observed": 40.0},
+                    {"name": "nonlinear_failed_increments", "observed": 2.0},
+                    {"name": "nonlinear_iteration_spike_count", "observed": 2.0},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_assembly_stress_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "nonlinear_stress_total_increments", "observed": 50.0},
+                    {"name": "nonlinear_stress_stall_count", "observed": 2.0},
+                    {"name": "nonlinear_stress_iteration_spike_count", "observed": 2.0},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "nonlinear_softening_total_increments", "observed": 70.0},
+                    {"name": "nonlinear_softening_spike_count", "observed": 2.0},
+                    {"name": "nonlinear_softening_backtrack_bursts", "observed": 2.0},
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "nonlinear_assembly_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 95.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "nonlinear_total_increments", "observed": 20.0},
+                    {"name": "nonlinear_failed_increments", "observed": 1.0},
+                    {"name": "nonlinear_iteration_spike_count", "observed": 1.0},
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "nonlinear_assembly_stress_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 95.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "nonlinear_stress_total_increments", "observed": 25.0},
+                    {"name": "nonlinear_stress_stall_count", "observed": 1.0},
+                    {"name": "nonlinear_stress_iteration_spike_count", "observed": 1.0},
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 95.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "nonlinear_softening_total_increments", "observed": 35.0},
+                    {"name": "nonlinear_softening_spike_count", "observed": 1.0},
+                    {"name": "nonlinear_softening_backtrack_bursts", "observed": 1.0},
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS_TREND_RATIO"
+        ] = "1.1"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS_TREND_RATIO"
+        ] = "1.1"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT_TREND_RATIO"
+        ] = "1.1"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS_TREND_RATIO"
+        ] = "1.1"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT_TREND_RATIO"
+        ] = "1.1"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT_TREND_RATIO"
+        ] = "1.1"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS_TREND_RATIO"
+        ] = "1.1"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT_TREND_RATIO"
+        ] = "1.1"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS_TREND_RATIO"
+        ] = "1.1"
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS"] = (
+            "100.0"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS"
+        ] = "10.0"
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT"] = (
+            "10.0"
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS"] = (
+            "100.0"
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT"] = "10.0"
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT"] = "10.0"
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS"] = (
+            "100.0"
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT"] = (
+            "10.0"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS"
+        ] = "10.0"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("NONLINEAR_ASSEMBLY_TOTAL_INCREMENTS_TREND_WORSENING", codes)
+        self.assertIn("NONLINEAR_ASSEMBLY_FAILED_INCREMENTS_TREND_WORSENING", codes)
+        self.assertIn("NONLINEAR_ASSEMBLY_SPIKE_COUNT_TREND_WORSENING", codes)
+        self.assertIn("NONLINEAR_STRESS_TOTAL_INCREMENTS_TREND_WORSENING", codes)
+        self.assertIn("NONLINEAR_STRESS_STALL_COUNT_TREND_WORSENING", codes)
+        self.assertIn("NONLINEAR_STRESS_SPIKE_COUNT_TREND_WORSENING", codes)
+        self.assertIn("NONLINEAR_SOFTENING_TOTAL_INCREMENTS_TREND_WORSENING", codes)
+        self.assertIn("NONLINEAR_SOFTENING_SPIKE_COUNT_TREND_WORSENING", codes)
+        self.assertIn("NONLINEAR_SOFTENING_BACKTRACK_BURSTS_TREND_WORSENING", codes)
 
     def test_pathological_thermo_electro_assertion_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

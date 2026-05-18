@@ -177,6 +177,15 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS": "56.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT": "1.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS": "1.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS": "48.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT": "12.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS": "4.0",
@@ -481,6 +490,15 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS": "84.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT": "2.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS": "2.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS_TREND_RATIO": "1.3",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS": "64.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT": "14.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS": "5.0",
@@ -785,6 +803,15 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS": "120.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT": "3.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS": "3.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS_TREND_RATIO": "1.5",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS": "96.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT": "18.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS": "6.0",
@@ -2118,6 +2145,87 @@ def evaluate_release_readiness(
             profile_default(
                 "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS",
                 "2.0",
+            ),
+        )
+    )
+    nonlinear_max_assembly_total_increments_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS_TREND_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_assembly_failed_increments_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS_TREND_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_assembly_spike_count_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT_TREND_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_stress_total_increments_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS_TREND_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_stress_stall_count_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT_TREND_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_stress_spike_count_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT_TREND_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_softening_total_increments_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS_TREND_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_softening_spike_count_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT_TREND_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_softening_backtrack_bursts_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS_TREND_RATIO",
+                "1.3",
             ),
         )
     )
@@ -4166,6 +4274,15 @@ def evaluate_release_readiness(
     nonlinear_max_softening_total_increments = None
     nonlinear_max_softening_spike_count = None
     nonlinear_max_softening_backtrack_bursts = None
+    nonlinear_assembly_total_increments_trend_ratio = None
+    nonlinear_assembly_failed_increments_trend_ratio = None
+    nonlinear_assembly_spike_count_trend_ratio = None
+    nonlinear_stress_total_increments_trend_ratio = None
+    nonlinear_stress_stall_count_trend_ratio = None
+    nonlinear_stress_spike_count_trend_ratio = None
+    nonlinear_softening_total_increments_trend_ratio = None
+    nonlinear_softening_spike_count_trend_ratio = None
+    nonlinear_softening_backtrack_bursts_trend_ratio = None
     nonlinear_max_path_mix_total_increments = None
     nonlinear_max_path_mix_max_backtracks_per_increment = None
     nonlinear_max_path_mix_backtrack_bursts = None
@@ -8265,6 +8382,195 @@ def evaluate_release_readiness(
                 )
             )
 
+        nonlinear_assembly_total_increments_trend_ratio = fixture_assertion_trend_ratio(
+            "nonlinear_total_increments",
+            ratio_mode="increase",
+        )
+        if (
+            nonlinear_assembly_total_increments_trend_ratio is not None
+            and nonlinear_assembly_total_increments_trend_ratio
+            > nonlinear_max_assembly_total_increments_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_ASSEMBLY_TOTAL_INCREMENTS_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear assembly total increments trend ratio "
+                        f"{nonlinear_assembly_total_increments_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_assembly_total_increments_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        nonlinear_assembly_failed_increments_trend_ratio = fixture_assertion_trend_ratio(
+            "nonlinear_failed_increments",
+            ratio_mode="increase",
+        )
+        if (
+            nonlinear_assembly_failed_increments_trend_ratio is not None
+            and nonlinear_assembly_failed_increments_trend_ratio
+            > nonlinear_max_assembly_failed_increments_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_ASSEMBLY_FAILED_INCREMENTS_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear assembly failed increments trend ratio "
+                        f"{nonlinear_assembly_failed_increments_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_assembly_failed_increments_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        nonlinear_assembly_spike_count_trend_ratio = fixture_assertion_trend_ratio(
+            "nonlinear_iteration_spike_count",
+            ratio_mode="increase",
+        )
+        if (
+            nonlinear_assembly_spike_count_trend_ratio is not None
+            and nonlinear_assembly_spike_count_trend_ratio
+            > nonlinear_max_assembly_spike_count_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_ASSEMBLY_SPIKE_COUNT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear assembly spike-count trend ratio "
+                        f"{nonlinear_assembly_spike_count_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_assembly_spike_count_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        nonlinear_stress_total_increments_trend_ratio = fixture_assertion_trend_ratio(
+            "nonlinear_stress_total_increments",
+            ratio_mode="increase",
+        )
+        if (
+            nonlinear_stress_total_increments_trend_ratio is not None
+            and nonlinear_stress_total_increments_trend_ratio
+            > nonlinear_max_stress_total_increments_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_STRESS_TOTAL_INCREMENTS_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear stress total increments trend ratio "
+                        f"{nonlinear_stress_total_increments_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_stress_total_increments_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        nonlinear_stress_stall_count_trend_ratio = fixture_assertion_trend_ratio(
+            "nonlinear_stress_stall_count",
+            ratio_mode="increase",
+        )
+        if (
+            nonlinear_stress_stall_count_trend_ratio is not None
+            and nonlinear_stress_stall_count_trend_ratio
+            > nonlinear_max_stress_stall_count_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_STRESS_STALL_COUNT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear stress stall-count trend ratio "
+                        f"{nonlinear_stress_stall_count_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_stress_stall_count_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        nonlinear_stress_spike_count_trend_ratio = fixture_assertion_trend_ratio(
+            "nonlinear_stress_iteration_spike_count",
+            ratio_mode="increase",
+        )
+        if (
+            nonlinear_stress_spike_count_trend_ratio is not None
+            and nonlinear_stress_spike_count_trend_ratio
+            > nonlinear_max_stress_spike_count_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_STRESS_SPIKE_COUNT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear stress spike-count trend ratio "
+                        f"{nonlinear_stress_spike_count_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_stress_spike_count_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        nonlinear_softening_total_increments_trend_ratio = fixture_assertion_trend_ratio(
+            "nonlinear_softening_total_increments",
+            ratio_mode="increase",
+        )
+        if (
+            nonlinear_softening_total_increments_trend_ratio is not None
+            and nonlinear_softening_total_increments_trend_ratio
+            > nonlinear_max_softening_total_increments_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_SOFTENING_TOTAL_INCREMENTS_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear softening total increments trend ratio "
+                        f"{nonlinear_softening_total_increments_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_softening_total_increments_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        nonlinear_softening_spike_count_trend_ratio = fixture_assertion_trend_ratio(
+            "nonlinear_softening_spike_count",
+            ratio_mode="increase",
+        )
+        if (
+            nonlinear_softening_spike_count_trend_ratio is not None
+            and nonlinear_softening_spike_count_trend_ratio
+            > nonlinear_max_softening_spike_count_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_SOFTENING_SPIKE_COUNT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear softening spike-count trend ratio "
+                        f"{nonlinear_softening_spike_count_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_softening_spike_count_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        nonlinear_softening_backtrack_bursts_trend_ratio = fixture_assertion_trend_ratio(
+            "nonlinear_softening_backtrack_bursts",
+            ratio_mode="increase",
+        )
+        if (
+            nonlinear_softening_backtrack_bursts_trend_ratio is not None
+            and nonlinear_softening_backtrack_bursts_trend_ratio
+            > nonlinear_max_softening_backtrack_bursts_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_SOFTENING_BACKTRACK_BURSTS_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear softening backtrack-bursts trend ratio "
+                        f"{nonlinear_softening_backtrack_bursts_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_softening_backtrack_bursts_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         nonlinear_path_mix_total_increments_trend_ratio = fixture_assertion_trend_ratio(
             "nonlinear_path_mix_total_increments",
             ratio_mode="increase",
@@ -11121,6 +11427,24 @@ def evaluate_release_readiness(
         "nonlinear_max_softening_spike_count_threshold": nonlinear_max_softening_spike_count_threshold,
         "nonlinear_max_softening_backtrack_bursts": nonlinear_max_softening_backtrack_bursts,
         "nonlinear_max_softening_backtrack_bursts_threshold": nonlinear_max_softening_backtrack_bursts_threshold,
+        "nonlinear_assembly_total_increments_trend_ratio": nonlinear_assembly_total_increments_trend_ratio,
+        "nonlinear_max_assembly_total_increments_trend_ratio_threshold": nonlinear_max_assembly_total_increments_trend_ratio_threshold,
+        "nonlinear_assembly_failed_increments_trend_ratio": nonlinear_assembly_failed_increments_trend_ratio,
+        "nonlinear_max_assembly_failed_increments_trend_ratio_threshold": nonlinear_max_assembly_failed_increments_trend_ratio_threshold,
+        "nonlinear_assembly_spike_count_trend_ratio": nonlinear_assembly_spike_count_trend_ratio,
+        "nonlinear_max_assembly_spike_count_trend_ratio_threshold": nonlinear_max_assembly_spike_count_trend_ratio_threshold,
+        "nonlinear_stress_total_increments_trend_ratio": nonlinear_stress_total_increments_trend_ratio,
+        "nonlinear_max_stress_total_increments_trend_ratio_threshold": nonlinear_max_stress_total_increments_trend_ratio_threshold,
+        "nonlinear_stress_stall_count_trend_ratio": nonlinear_stress_stall_count_trend_ratio,
+        "nonlinear_max_stress_stall_count_trend_ratio_threshold": nonlinear_max_stress_stall_count_trend_ratio_threshold,
+        "nonlinear_stress_spike_count_trend_ratio": nonlinear_stress_spike_count_trend_ratio,
+        "nonlinear_max_stress_spike_count_trend_ratio_threshold": nonlinear_max_stress_spike_count_trend_ratio_threshold,
+        "nonlinear_softening_total_increments_trend_ratio": nonlinear_softening_total_increments_trend_ratio,
+        "nonlinear_max_softening_total_increments_trend_ratio_threshold": nonlinear_max_softening_total_increments_trend_ratio_threshold,
+        "nonlinear_softening_spike_count_trend_ratio": nonlinear_softening_spike_count_trend_ratio,
+        "nonlinear_max_softening_spike_count_trend_ratio_threshold": nonlinear_max_softening_spike_count_trend_ratio_threshold,
+        "nonlinear_softening_backtrack_bursts_trend_ratio": nonlinear_softening_backtrack_bursts_trend_ratio,
+        "nonlinear_max_softening_backtrack_bursts_trend_ratio_threshold": nonlinear_max_softening_backtrack_bursts_trend_ratio_threshold,
         "nonlinear_max_path_mix_total_increments": nonlinear_max_path_mix_total_increments,
         "nonlinear_max_path_mix_total_increments_threshold": nonlinear_max_path_mix_total_increments_threshold,
         "nonlinear_max_path_mix_max_backtracks_per_increment": nonlinear_max_path_mix_max_backtracks_per_increment,
@@ -11859,6 +12183,18 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('nonlinear_max_softening_total_increments') if result.get('nonlinear_max_softening_total_increments') is not None else '-'}`/`{result.get('nonlinear_max_softening_total_increments_threshold') if result.get('nonlinear_max_softening_total_increments_threshold') is not None else '-'}`; "
         f"`{result.get('nonlinear_max_softening_spike_count') if result.get('nonlinear_max_softening_spike_count') is not None else '-'}`/`{result.get('nonlinear_max_softening_spike_count_threshold') if result.get('nonlinear_max_softening_spike_count_threshold') is not None else '-'}`; "
         f"`{result.get('nonlinear_max_softening_backtrack_bursts') if result.get('nonlinear_max_softening_backtrack_bursts') is not None else '-'}`/`{result.get('nonlinear_max_softening_backtrack_bursts_threshold') if result.get('nonlinear_max_softening_backtrack_bursts_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Nonlinear assembly/stress/softening trend ratios and thresholds: "
+        f"`{result.get('nonlinear_assembly_total_increments_trend_ratio') if result.get('nonlinear_assembly_total_increments_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_assembly_total_increments_trend_ratio_threshold') if result.get('nonlinear_max_assembly_total_increments_trend_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_assembly_failed_increments_trend_ratio') if result.get('nonlinear_assembly_failed_increments_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_assembly_failed_increments_trend_ratio_threshold') if result.get('nonlinear_max_assembly_failed_increments_trend_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_assembly_spike_count_trend_ratio') if result.get('nonlinear_assembly_spike_count_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_assembly_spike_count_trend_ratio_threshold') if result.get('nonlinear_max_assembly_spike_count_trend_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_stress_total_increments_trend_ratio') if result.get('nonlinear_stress_total_increments_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_stress_total_increments_trend_ratio_threshold') if result.get('nonlinear_max_stress_total_increments_trend_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_stress_stall_count_trend_ratio') if result.get('nonlinear_stress_stall_count_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_stress_stall_count_trend_ratio_threshold') if result.get('nonlinear_max_stress_stall_count_trend_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_stress_spike_count_trend_ratio') if result.get('nonlinear_stress_spike_count_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_stress_spike_count_trend_ratio_threshold') if result.get('nonlinear_max_stress_spike_count_trend_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_softening_total_increments_trend_ratio') if result.get('nonlinear_softening_total_increments_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_softening_total_increments_trend_ratio_threshold') if result.get('nonlinear_max_softening_total_increments_trend_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_softening_spike_count_trend_ratio') if result.get('nonlinear_softening_spike_count_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_softening_spike_count_trend_ratio_threshold') if result.get('nonlinear_max_softening_spike_count_trend_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_softening_backtrack_bursts_trend_ratio') if result.get('nonlinear_softening_backtrack_bursts_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_softening_backtrack_bursts_trend_ratio_threshold') if result.get('nonlinear_max_softening_backtrack_bursts_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- Nonlinear path-mix total/max-backtracks/bursts thresholds: "
