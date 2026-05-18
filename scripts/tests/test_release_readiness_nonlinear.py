@@ -2160,6 +2160,44 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIsNotNone(core_missing)
         self.assertEqual(core_missing["severity"], "fail")
 
+    def test_em_assertion_contract_fields_missing_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(latest, [], protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_ASSERTION_CONTRACT_FIELDS_MISSING", codes)
+
+    def test_em_assertion_contract_fields_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "EM_ASSERTION_CONTRACT_FIELDS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
     def test_em_core_missing_reason_covers_core_raw_comparator_contract(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(

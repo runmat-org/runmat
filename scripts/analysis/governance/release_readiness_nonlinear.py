@@ -8214,6 +8214,7 @@ def evaluate_release_readiness(
             ),
         ]
         missing_metric_fields = []
+        missing_em_contract_assertion_fields = []
         breaches = []
         field_assertion_fallback_specs = {
             "electromagnetic_energy_imbalance_ratio": [
@@ -8420,6 +8421,9 @@ def evaluate_release_readiness(
                 if fallback_field is not None:
                     missing_metric_fields.append(fallback_field)
                 missing_metric_fields.append(f"{fixture_id}.{assertion_name}")
+                missing_em_contract_assertion_fields.append(
+                    f"{fixture_id}.{assertion_name}"
+                )
                 continue
 
             observed = max(values) if mode == "max" else min(values)
@@ -8806,6 +8810,18 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
+
+        if missing_em_contract_assertion_fields and (protected or em_require_metrics):
+            reasons.append(
+                Reason(
+                    code="EM_ASSERTION_CONTRACT_FIELDS_MISSING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM threshold assertion contract missing required fields: "
+                        + ", ".join(sorted(set(missing_em_contract_assertion_fields)))
+                    ),
+                )
+            )
 
         conditioning_values = []
         for rec in em_records:
