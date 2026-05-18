@@ -290,6 +290,10 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_placeholder_quality",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
                 "electromagnetic_energy_imbalance_ratio",
             ),
             (
@@ -523,6 +527,10 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "electromagnetic_insulation_leakage_proxy",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_placeholder_quality",
             ),
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",

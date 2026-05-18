@@ -553,6 +553,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "electromagnetic_placeholder_quality",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 0.9999625066570741,
+            "reference": 0.9999625066570741,
+            "pass": True,
+        },
+        {
             "name": "electromagnetic_energy_imbalance_ratio",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 4.1658594610710645e-05,
@@ -970,6 +977,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 0.5148602374120815,
             "reference": 0.5148602374120815,
+            "pass": True,
+        },
+        {
+            "name": "electromagnetic_placeholder_quality",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 0.7719999999999999,
+            "reference": 0.7719999999999999,
             "pass": True,
         },
         {

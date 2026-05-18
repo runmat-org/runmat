@@ -487,6 +487,14 @@
       "tolerance_rel": 1.0
     },
     {
+      "name": "electromagnetic_placeholder_quality",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_placeholder_quality",
+      "reference": 0.9999625066570741,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 0.1
+    },
+    {
       "name": "electromagnetic_energy_imbalance_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "electromagnetic_energy_imbalance_ratio",
@@ -1019,6 +1027,14 @@
       "reference": 0.5148602374120815,
       "tolerance_abs": 0.25,
       "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_placeholder_quality",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_placeholder_quality",
+      "reference": 0.7719999999999999,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.25
     },
     {
       "name": "electromagnetic_energy_imbalance_ratio",

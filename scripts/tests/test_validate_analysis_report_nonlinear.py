@@ -391,6 +391,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electromagnetic_boundary_penalty_conditioning_contribution": 0.414,
                 "electromagnetic_source_overlap_ratio": 0.0,
                 "electromagnetic_insulation_leakage_proxy": 0.0,
+                "electromagnetic_placeholder_quality": 0.99996,
+                "electromagnetic_enabled": True,
                 "electromagnetic_energy_imbalance_ratio": 4.2e-5,
                 "electromagnetic_flux_divergence_proxy": 0.23,
                 "electromagnetic_real_residual_norm": 1.0e-10,
@@ -458,6 +460,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electromagnetic_boundary_penalty_conditioning_contribution": 0.443,
                 "electromagnetic_source_overlap_ratio": 0.0,
                 "electromagnetic_insulation_leakage_proxy": 0.515,
+                "electromagnetic_placeholder_quality": 0.772,
+                "electromagnetic_enabled": True,
                 "electromagnetic_energy_imbalance_ratio": 0.253,
                 "electromagnetic_flux_divergence_proxy": 0.143,
                 "electromagnetic_real_residual_norm": 1.0e-18,
@@ -764,6 +768,30 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             for record in records:
                 if record["fixture_id"] == "electromagnetic_reference_homogeneous_gpu_provider":
                     record.pop("electromagnetic_boundary_energy_ratio", None)
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_em_placeholder_quality_field_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "electromagnetic_reference_homogeneous_gpu_provider":
+                    record.pop("electromagnetic_placeholder_quality", None)
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_em_enabled_flag_false(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "electromagnetic_reference_homogeneous_gpu_provider":
+                    record["electromagnetic_enabled"] = False
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))
