@@ -3,9 +3,7 @@ use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
-use crate::call::shared::{
-    build_expanded_args_from_specs, expand_brace_values, expand_cell_indices,
-};
+use crate::call::shared::{build_expanded_args_from_specs, expand_brace_values};
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
@@ -107,12 +105,7 @@ pub async fn build_user_function_expand_multi_args(
         "CallFunctionExpandMultiOutput requires cell or object for expand_all",
         "CallFunctionExpandMultiOutput requires cell or object cell access",
         |base| async move { expand_brace_values(base, &[], None).await },
-        |base, indices| async move {
-            match (base, indices.len()) {
-                (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices),
-                (base, _) => expand_brace_values(base, &indices, None).await,
-            }
-        },
+        |base, indices| async move { expand_brace_values(base, &indices, None).await },
     )
     .await
 }

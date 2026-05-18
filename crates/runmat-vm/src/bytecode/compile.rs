@@ -258,11 +258,11 @@ mod tests {
         assert!(bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, Instr::IndexSlice(2, 2, 0, 0))));
+            .any(|instr| matches!(instr, Instr::Index(2))));
         assert!(!bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, Instr::Index(2))));
+            .any(|instr| matches!(instr, Instr::IndexSlice(2, 2, 0, 0))));
 
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert_eq!(vars[y_export.slot.0], Value::Num(3.0));

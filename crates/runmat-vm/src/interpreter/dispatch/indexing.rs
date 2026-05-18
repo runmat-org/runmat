@@ -445,12 +445,6 @@ pub async fn dispatch_indexing(
                         crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),
                     }
                 }
-                Value::Tensor(t)
-                    if raw_indices.len() == 1
-                        && index_scalar_from_value(&raw_indices[0]).await?.is_none() =>
-                {
-                    stack.push(idx_read_slice::read_tensor_slice_1d(t, 0, 0, &raw_indices).await?);
-                }
                 _ => {
                     let numeric = linear_index_values_to_f64(&raw_indices).await?;
                     stack.push(idx_read_linear::generic_index(&base, &numeric).await?);
