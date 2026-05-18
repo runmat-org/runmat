@@ -4891,6 +4891,10 @@ def evaluate_release_readiness(
     )
     promotion_calibration_applied = False
     promotion_calibration_age_days = None
+    promotion_calibration_source_report_count = None
+    promotion_calibration_source_trusted_report_count = None
+    promotion_calibration_profile_report_count = None
+    promotion_calibration_profile_trusted_report_count = None
     promotion_history_trusted_count = sum(
         1
         for report in rolling
@@ -4905,6 +4909,16 @@ def evaluate_release_readiness(
 
     profile = governance_profile_name()
     if isinstance(promotion_calibration, dict):
+        source_report_count_raw = promotion_calibration.get("source_report_count")
+        if isinstance(source_report_count_raw, int):
+            promotion_calibration_source_report_count = source_report_count_raw
+        source_trusted_report_count_raw = promotion_calibration.get(
+            "source_trusted_report_count"
+        )
+        if isinstance(source_trusted_report_count_raw, int):
+            promotion_calibration_source_trusted_report_count = (
+                source_trusted_report_count_raw
+            )
         generated_raw = promotion_calibration.get("generated_at")
         if isinstance(generated_raw, str):
             generated_at = parse_iso8601_utc(generated_raw)
@@ -4934,6 +4948,16 @@ def evaluate_release_readiness(
                 plastic_override = profile_entry.get("plastic_promotion_max_blockers")
                 contact_override = profile_entry.get("contact_promotion_max_blockers")
                 regression_override = profile_entry.get("promotion_max_blocker_regression")
+                profile_report_count_raw = profile_entry.get("rolling_report_count")
+                if isinstance(profile_report_count_raw, int):
+                    promotion_calibration_profile_report_count = profile_report_count_raw
+                profile_trusted_report_count_raw = profile_entry.get(
+                    "rolling_trusted_report_count"
+                )
+                if isinstance(profile_trusted_report_count_raw, int):
+                    promotion_calibration_profile_trusted_report_count = (
+                        profile_trusted_report_count_raw
+                    )
                 if isinstance(plastic_override, (int, float)):
                     plastic_promotion_max_blockers = int(plastic_override)
                     promotion_calibration_applied = True
@@ -14434,6 +14458,10 @@ def evaluate_release_readiness(
         "require_promotion_calibration": require_promotion_calibration,
         "promotion_calibration_age_days": promotion_calibration_age_days,
         "promotion_calibration_max_age_days": promotion_calibration_max_age_days,
+        "promotion_calibration_source_report_count": promotion_calibration_source_report_count,
+        "promotion_calibration_source_trusted_report_count": promotion_calibration_source_trusted_report_count,
+        "promotion_calibration_profile_report_count": promotion_calibration_profile_report_count,
+        "promotion_calibration_profile_trusted_report_count": promotion_calibration_profile_trusted_report_count,
         "promotion_min_rolling_reports": promotion_min_rolling_reports,
         "promotion_history_sufficient": promotion_history_sufficient,
         "reference_trend_ratcheted": True,
@@ -14462,6 +14490,14 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "Promotion calibration age/max days: "
         f"`{result.get('promotion_calibration_age_days') if result.get('promotion_calibration_age_days') is not None else '-'}`/`{result.get('promotion_calibration_max_age_days') if result.get('promotion_calibration_max_age_days') is not None else '-'}`"
+    )
+    lines.append(
+        "Promotion calibration source counts (raw/trusted): "
+        f"`{result.get('promotion_calibration_source_report_count') if result.get('promotion_calibration_source_report_count') is not None else '-'}`/`{result.get('promotion_calibration_source_trusted_report_count') if result.get('promotion_calibration_source_trusted_report_count') is not None else '-'}`"
+    )
+    lines.append(
+        "Promotion calibration profile counts (raw/trusted): "
+        f"`{result.get('promotion_calibration_profile_report_count') if result.get('promotion_calibration_profile_report_count') is not None else '-'}`/`{result.get('promotion_calibration_profile_trusted_report_count') if result.get('promotion_calibration_profile_trusted_report_count') is not None else '-'}`"
     )
     lines.append(
         "Promotion history sufficient: "
@@ -15424,6 +15460,14 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Promotion calibration age/max days: "
         f"`{result.get('promotion_calibration_age_days') if result.get('promotion_calibration_age_days') is not None else '-'}`/`{result.get('promotion_calibration_max_age_days') if result.get('promotion_calibration_max_age_days') is not None else '-'}`"
+    )
+    lines.append(
+        "- Promotion calibration source counts (raw/trusted): "
+        f"`{result.get('promotion_calibration_source_report_count') if result.get('promotion_calibration_source_report_count') is not None else '-'}`/`{result.get('promotion_calibration_source_trusted_report_count') if result.get('promotion_calibration_source_trusted_report_count') is not None else '-'}`"
+    )
+    lines.append(
+        "- Promotion calibration profile counts (raw/trusted): "
+        f"`{result.get('promotion_calibration_profile_report_count') if result.get('promotion_calibration_profile_report_count') is not None else '-'}`/`{result.get('promotion_calibration_profile_trusted_report_count') if result.get('promotion_calibration_profile_trusted_report_count') is not None else '-'}`"
     )
     lines.append(
         "- Promotion history sufficient (trusted rolling/min): "

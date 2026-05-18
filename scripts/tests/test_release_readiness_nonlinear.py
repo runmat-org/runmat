@@ -6540,11 +6540,15 @@ class ReleaseReadinessTests(unittest.TestCase):
             )
         ]
         calibration = {
+            "source_report_count": 5,
+            "source_trusted_report_count": 3,
             "by_profile": {
                 "feature": {
                     "plastic_promotion_max_blockers": 0,
                     "contact_promotion_max_blockers": 0,
                     "promotion_max_blocker_regression": 0,
+                    "rolling_report_count": 5,
+                    "rolling_trusted_report_count": 3,
                 }
             }
         }
@@ -6557,6 +6561,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertTrue(result["promotion_calibration_applied"])
         self.assertEqual(result["plastic_promotion_max_blockers"], 0)
         self.assertEqual(result["contact_promotion_max_blockers"], 0)
+        self.assertEqual(result["promotion_calibration_source_report_count"], 5)
+        self.assertEqual(result["promotion_calibration_source_trusted_report_count"], 3)
+        self.assertEqual(result["promotion_calibration_profile_report_count"], 5)
+        self.assertEqual(result["promotion_calibration_profile_trusted_report_count"], 3)
 
     def test_missing_promotion_calibration_reason_when_required(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
@@ -7096,6 +7104,8 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("### Promotion Evidence Quality", summary)
         self.assertIn("Promotion calibration applied/required", summary)
         self.assertIn("Promotion calibration age/max days", summary)
+        self.assertIn("Promotion calibration source counts (raw/trusted)", summary)
+        self.assertIn("Promotion calibration profile counts (raw/trusted)", summary)
         self.assertIn("Promotion history sufficient (trusted rolling/min)", summary)
 
 
