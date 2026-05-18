@@ -5,6 +5,15 @@ use runmat_hir::{CallableIdentity, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
+const OBJECT_PROTOCOL_SUBSREF: &str = "subsref";
+const OBJECT_PROTOCOL_SUBSASGN: &str = "subsasgn";
+const OBJECT_PROTOCOL_KIND_PAREN: &str = "()";
+const OBJECT_PROTOCOL_KIND_BRACE: &str = "{}";
+const OBJECT_PROTOCOL_KIND_MEMBER: &str = ".";
+const OBJECT_SELECTOR_COLON: &str = ":";
+const OBJECT_SELECTOR_END: &str = "end";
+const OBJECT_END_RANGE_TAG: &str = "end_expr";
+
 pub fn expand_cell_indices(
     cell: &runmat_builtins::CellArray,
     indices: &[Value],
@@ -100,8 +109,8 @@ pub(crate) enum ObjectIndexOp {
 impl ObjectIndexOp {
     pub(crate) fn protocol_name(self) -> &'static str {
         match self {
-            Self::Subsref => "subsref",
-            Self::Subsasgn => "subsasgn",
+            Self::Subsref => OBJECT_PROTOCOL_SUBSREF,
+            Self::Subsasgn => OBJECT_PROTOCOL_SUBSASGN,
         }
     }
 }
@@ -116,9 +125,9 @@ pub(crate) enum ObjectIndexKind {
 impl ObjectIndexKind {
     pub(crate) fn protocol_name(self) -> &'static str {
         match self {
-            Self::Paren => "()",
-            Self::Brace => "{}",
-            Self::Member => ".",
+            Self::Paren => OBJECT_PROTOCOL_KIND_PAREN,
+            Self::Brace => OBJECT_PROTOCOL_KIND_BRACE,
+            Self::Member => OBJECT_PROTOCOL_KIND_MEMBER,
         }
     }
 }
@@ -460,7 +469,7 @@ fn build_end_range_descriptor(
         vec![
             start,
             step,
-            Value::String("end_expr".to_string()),
+            Value::String(OBJECT_END_RANGE_TAG.to_string()),
             encoded_end,
         ],
         1,
@@ -529,11 +538,11 @@ pub(crate) fn build_object_paren_selector_values(
         let is_colon = (colon_mask & (1u32 << d)) != 0;
         let is_end = (end_mask & (1u32 << d)) != 0;
         if is_colon {
-            values.push(Value::String(":".to_string()));
+            values.push(Value::String(OBJECT_SELECTOR_COLON.to_string()));
             continue;
         }
         if is_end {
-            values.push(Value::String("end".to_string()));
+            values.push(Value::String(OBJECT_SELECTOR_END.to_string()));
             continue;
         }
         let selector = numeric
@@ -579,11 +588,11 @@ pub(crate) fn build_object_paren_expr_selector_values(
         let is_colon = (colon_mask & (1u32 << d)) != 0;
         let is_end = (end_mask & (1u32 << d)) != 0;
         if is_colon {
-            values.push(Value::String(":".to_string()));
+            values.push(Value::String(OBJECT_SELECTOR_COLON.to_string()));
             continue;
         }
         if is_end {
-            values.push(Value::String("end".to_string()));
+            values.push(Value::String(OBJECT_SELECTOR_END.to_string()));
             continue;
         }
         if let Some(pos) = range_pos_by_dim[d] {
@@ -690,6 +699,9 @@ mod tests {
     use super::{
         build_object_paren_expr_selector_values, build_object_paren_selector_values,
         normalize_method_outputs, ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector,
+        OBJECT_END_RANGE_TAG, OBJECT_PROTOCOL_KIND_BRACE, OBJECT_PROTOCOL_KIND_MEMBER,
+        OBJECT_PROTOCOL_SUBSASGN, OBJECT_PROTOCOL_SUBSREF, OBJECT_SELECTOR_COLON,
+        OBJECT_SELECTOR_END,
     };
     use crate::bytecode::EndExpr;
     use runmat_builtins::Value;
@@ -706,8 +718,11 @@ mod tests {
         let args = descriptor
             .into_runtime_method_args()
             .expect("descriptor args");
-        assert_eq!(args[1], Value::String("subsref".to_string()));
-        assert_eq!(args[2], Value::String("{}".to_string()));
+        assert_eq!(args[1], Value::String(OBJECT_PROTOCOL_SUBSREF.to_string()));
+        assert_eq!(
+            args[2],
+            Value::String(OBJECT_PROTOCOL_KIND_BRACE.to_string())
+        );
         match &args[3] {
             Value::Cell(cell) => assert_eq!((*cell.data[0]).clone(), Value::Num(2.0)),
             other => panic!("expected selector cell, got {other:?}"),
@@ -726,8 +741,11 @@ mod tests {
         let args = descriptor
             .into_runtime_method_args()
             .expect("descriptor args");
-        assert_eq!(args[1], Value::String("subsasgn".to_string()));
-        assert_eq!(args[2], Value::String(".".to_string()));
+        assert_eq!(args[1], Value::String(OBJECT_PROTOCOL_SUBSASGN.to_string()));
+        assert_eq!(
+            args[2],
+            Value::String(OBJECT_PROTOCOL_KIND_MEMBER.to_string())
+        );
         assert_eq!(args[3], Value::String("field".to_string()));
         assert_eq!(args[4], Value::Num(9.0));
     }
@@ -737,8 +755,11 @@ mod tests {
         let selectors = build_object_paren_selector_values(3, 0b001, 0b010, &[Value::Num(9.0)])
             .expect("selector values");
         assert_eq!(selectors.len(), 3);
-        assert_eq!(selectors[0], Value::String(":".to_string()));
-        assert_eq!(selectors[1], Value::String("end".to_string()));
+        assert_eq!(
+            selectors[0],
+            Value::String(OBJECT_SELECTOR_COLON.to_string())
+        );
+        assert_eq!(selectors[1], Value::String(OBJECT_SELECTOR_END.to_string()));
         assert_eq!(selectors[2], Value::Num(9.0));
     }
 
@@ -777,10 +798,13 @@ mod tests {
             Value::Cell(cell) => {
                 assert_eq!(
                     (*cell.data[2]).clone(),
-                    Value::String("end_expr".to_string())
+                    Value::String(OBJECT_END_RANGE_TAG.to_string())
                 );
                 assert_eq!((*cell.data[1]).clone(), Value::Num(2.0));
-                assert_eq!((*cell.data[3]).clone(), Value::String("end".to_string()));
+                assert_eq!(
+                    (*cell.data[3]).clone(),
+                    Value::String(OBJECT_SELECTOR_END.to_string())
+                );
             }
             other => panic!("expected range descriptor cell, got {other:?}"),
         }
