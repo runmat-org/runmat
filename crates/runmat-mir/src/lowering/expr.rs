@@ -87,7 +87,6 @@ pub(crate) fn lower_expr_with_replacements(
                 };
                 dynamic_call_rvalue(call, callee, args)?
             } else if let HirCallableRef::Function(function) = call.callee {
-                validate_supported_requested_outputs(&call.requested_outputs)?;
                 if ctx.is_async_function(function) {
                     MirRvalue::Future {
                         function,
@@ -145,7 +144,7 @@ fn lower_call_arg(
     await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<MirCallArg, SemanticError> {
     if let HirExprKind::Call(call) = &arg.kind {
-        let requested_count = requested_output_count_for_arg_expansion(&call.requested_outputs)?;
+        let requested_count = requested_output_count_for_arg_expansion(&call.requested_outputs);
         if requested_count > 1 {
             let operand = lower_operand_with_replacements(ctx, arg, temps, await_replacements)?;
             return Ok(MirCallArg::Expansion {
@@ -321,7 +320,6 @@ fn call_rvalue(
     call: &runmat_hir::HirCall,
     args: Vec<MirCallArg>,
 ) -> Result<MirRvalue, SemanticError> {
-    validate_supported_requested_outputs(&call.requested_outputs)?;
     let Some(identity) = call.callee.identity() else {
         return Err(SemanticError::new(
             "call requires either a static callable identity or a dynamic callee expression",
@@ -350,7 +348,6 @@ fn dynamic_call_rvalue(
     callee: MirOperand,
     args: Vec<MirCallArg>,
 ) -> Result<MirRvalue, SemanticError> {
-    validate_supported_requested_outputs(&call.requested_outputs)?;
     let callee = MirCallee::Dynamic(callee);
     let semantics = call_semantics(&callee);
     let fallback_policy = call_fallback_policy(&callee, &call.syntax);
@@ -369,21 +366,12 @@ fn dynamic_call_rvalue(
     }))
 }
 
-fn requested_output_count_for_arg_expansion(
-    requested: &RequestedOutputCount,
-) -> Result<usize, SemanticError> {
-    Ok(match requested {
+fn requested_output_count_for_arg_expansion(requested: &RequestedOutputCount) -> usize {
+    match requested {
         RequestedOutputCount::Zero => 0,
         RequestedOutputCount::One => 1,
         RequestedOutputCount::Exactly(count) => *count,
-    })
-}
-
-fn validate_supported_requested_outputs(
-    requested: &RequestedOutputCount,
-) -> Result<(), SemanticError> {
-    let _ = requested_output_count_for_arg_expansion(requested)?;
-    Ok(())
+    }
 }
 
 fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {

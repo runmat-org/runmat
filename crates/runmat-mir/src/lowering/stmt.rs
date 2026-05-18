@@ -44,7 +44,7 @@ pub(crate) fn lower_stmt_with_replacements(
             let requested_outputs = fixed_requested_output_count(
                 &targets.requested_outputs,
                 "MIR multi-assign targets requested output count",
-            )?;
+            );
             if requested_outputs != lowered_targets.len() {
                 return Err(SemanticError::new(format!(
                     "MIR multi-assign output target count mismatch: requested {requested_outputs}, targets {}",
@@ -55,7 +55,7 @@ pub(crate) fn lower_stmt_with_replacements(
                 let call_outputs = fixed_requested_output_count(
                     &call.requested_outputs,
                     "MIR call requested output count",
-                )?;
+                );
                 if call_outputs != requested_outputs {
                     return Err(SemanticError::new(format!(
                         "MIR call requested outputs ({call_outputs}) must match multi-assign targets ({requested_outputs})"
@@ -238,13 +238,10 @@ fn lower_output_target(
     })
 }
 
-fn fixed_requested_output_count(
-    requested_outputs: &RequestedOutputCount,
-    _context: &str,
-) -> Result<usize, SemanticError> {
+fn fixed_requested_output_count(requested_outputs: &RequestedOutputCount, _context: &str) -> usize {
     match requested_outputs {
-        RequestedOutputCount::Zero => Ok(0),
-        RequestedOutputCount::One => Ok(1),
-        RequestedOutputCount::Exactly(count) => Ok(*count),
+        RequestedOutputCount::Zero => 0,
+        RequestedOutputCount::One => 1,
+        RequestedOutputCount::Exactly(count) => *count,
     }
 }
