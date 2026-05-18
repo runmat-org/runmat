@@ -565,6 +565,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_REQUIRE_KEY_PERF_FIXTURES",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
@@ -699,6 +700,22 @@ class ReleaseReadinessTests(unittest.TestCase):
             and "thermal_standalone_ramp_gpu_provider" in reason["detail"]
         ]
         self.assertTrue(matches)
+
+    def test_key_perf_solve_ms_high_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 120.0,
+                "gpu_speedup_ratio": 1.1,
+                "gpu_solver_solve_ms": 700.0,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS"] = "500.0"
+        result = evaluate_release_readiness(latest, [], protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("KEY_PERF_SOLVE_MS_HIGH", codes)
 
     def test_key_perf_speedup_low_reason_is_emitted_for_em_non_core_fixture(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
