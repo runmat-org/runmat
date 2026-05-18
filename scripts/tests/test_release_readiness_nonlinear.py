@@ -2,8 +2,12 @@ import unittest
 import os
 
 from scripts.analysis.governance.release_readiness_nonlinear import (
+    KEY_PERFORMANCE_FIXTURES,
     evaluate_release_readiness,
     markdown_summary,
+)
+from scripts.analysis.governance.validate_analysis_report_nonlinear import (
+    PERFORMANCE_REQUIRED_FIELDS,
 )
 
 
@@ -1098,6 +1102,22 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertNotIn(
             "nonlinear_contact_frictionless_reference_complex_gpu_provider", detail
         )
+
+    def test_key_perf_fixtures_are_schema_performance_enforced(self):
+        performance_required = set(PERFORMANCE_REQUIRED_FIELDS.keys())
+        missing_from_schema = sorted(KEY_PERFORMANCE_FIXTURES - performance_required)
+        self.assertEqual(
+            missing_from_schema,
+            [],
+            (
+                "key-performance fixtures missing schema performance enforcement: "
+                + ", ".join(missing_from_schema)
+            ),
+        )
+        for fixture_id in sorted(KEY_PERFORMANCE_FIXTURES):
+            required_fields = PERFORMANCE_REQUIRED_FIELDS[fixture_id]
+            self.assertIn("gpu_speedup_ratio", required_fields)
+            self.assertIn("gpu_solver_solve_ms", required_fields)
 
     def test_em_metric_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
