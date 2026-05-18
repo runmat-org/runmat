@@ -1,5 +1,5 @@
 use runmat_hir::{
-    lower, CallSyntax, CallableFallbackPolicy, CallableIdentity, EnvironmentEffect, IndexKind,
+    lower, CallSyntax, CallableFallbackPolicy, CallableIdentity, EnvironmentEffect,
     LoweringContext, RequestedOutputCount,
 };
 use runmat_mir::{
@@ -133,41 +133,6 @@ fn patch_entrypoint_multi_assign_requested_outputs(
     hir
 }
 
-fn patch_entrypoint_first_index_kind(
-    source: &str,
-    index_kind: IndexKind,
-) -> runmat_hir::LoweringResult {
-    let ast = runmat_parser::parse(source).expect("parse");
-    let mut hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
-    let entry_target = hir.assembly.entrypoints[0].target;
-    let function = hir
-        .assembly
-        .functions
-        .iter_mut()
-        .find(|function| function.id == entry_target)
-        .expect("entrypoint target function");
-    let mut patched = false;
-    for stmt in &mut function.body.statements {
-        match &mut stmt.kind {
-            runmat_hir::HirStmtKind::Assign(_, expr, _)
-            | runmat_hir::HirStmtKind::ExprStmt(expr, _)
-            | runmat_hir::HirStmtKind::MultiAssign(_, expr, _) => {
-                if let runmat_hir::HirExprKind::Index(_, indexing) = &mut expr.kind {
-                    indexing.kind = index_kind.clone();
-                    patched = true;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-    assert!(
-        patched,
-        "expected entrypoint to contain an index expression"
-    );
-    hir
-}
-
 #[test]
 fn simple_function_lowers_to_single_block_with_binding_locals() {
     let mir = lower_mir("function y = f(x); y = x + 1; end");
@@ -261,13 +226,6 @@ fn lower_assembly_rejects_multi_assign_call_target_policy_mismatch() {
     );
     let err = lower_assembly(&hir.assembly).expect_err("lower should fail");
     assert!(err.message.contains("must match multi-assign targets"));
-}
-
-#[test]
-fn lower_assembly_rejects_dot_index_kind_in_indexing() {
-    let hir = patch_entrypoint_first_index_kind("x=[1,2,3]; y = x(2);", IndexKind::Dot);
-    let err = lower_assembly(&hir.assembly).expect_err("lower should fail");
-    assert!(err.message.contains("IndexKind::Dot"));
 }
 
 #[test]

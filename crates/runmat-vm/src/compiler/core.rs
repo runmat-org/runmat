@@ -1344,9 +1344,6 @@ impl Compiler {
                     }
                 });
             }
-            IndexKind::Dot => return Err(self.compile_error(
-                "MIR dot-index assignment should lower through member places, not IndexKind::Dot",
-            )),
         };
         Ok(())
     }
@@ -1418,9 +1415,6 @@ impl Compiler {
                     end_offsets,
                 });
             }
-            IndexKind::Dot => return Err(self.compile_error(
-                "MIR dot-index read should lower through member expressions, not IndexKind::Dot",
-            )),
         }
         Ok(())
     }
@@ -1521,9 +1515,6 @@ impl Compiler {
                 });
                 Ok(())
             }
-            IndexKind::Dot => Err(self.compile_error(
-                "MIR dot-index assignment should lower through member places, not IndexKind::Dot",
-            )),
         }
     }
 
@@ -2044,9 +2035,6 @@ impl Compiler {
                     end_offsets,
                 });
             }
-            IndexKind::Dot => return Err(self.compile_error(
-                "MIR dot-index read should lower through member expressions, not IndexKind::Dot",
-            )),
         };
         Ok(())
     }

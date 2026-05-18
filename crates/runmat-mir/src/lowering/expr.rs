@@ -253,11 +253,6 @@ pub(crate) fn lower_indexing_with_replacements(
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<MirIndexing, SemanticError> {
-    if indexing.kind == IndexKind::Dot {
-        return Err(SemanticError::new(
-            "MIR indexing lowering expects member access to lower through member expressions/places, not IndexKind::Dot",
-        ));
-    }
     Ok(MirIndexing {
         kind: indexing.kind.clone(),
         plan: classify_mir_index_plan(indexing),
@@ -298,9 +293,6 @@ fn classify_mir_index_plan(indexing: &IndexingSemantics) -> MirIndexPlan {
                 MirIndexPlan::Slice
             }
         }
-        IndexKind::Dot => unreachable!(
-            "dot indexing should be lowered through member expressions/places before MIR index planning"
-        ),
     }
 }
 

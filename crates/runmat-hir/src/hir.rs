@@ -570,7 +570,6 @@ impl RequestedOutputCount {
 pub enum IndexKind {
     Paren,
     Brace,
-    Dot,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
