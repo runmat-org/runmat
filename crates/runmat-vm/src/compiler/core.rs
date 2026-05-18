@@ -1148,7 +1148,9 @@ impl Compiler {
                     )));
                 }
                 let display_name = self.mir_runtime_name_callee(identity)?;
-                if fallback_policy.allows_vm_name_fallback_for(identity) && display_name.is_none() {
+                if fallback_policy.allows_vm_name_fallback_for(identity)
+                    && fallback_policy.vm_fallback_name_for(identity).is_none()
+                {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this call callee is not implemented yet",
                     ));
@@ -1758,7 +1760,9 @@ impl Compiler {
                     )));
                 }
                 let display_name = self.mir_runtime_name_callee(identity)?;
-                if fallback_policy.allows_vm_name_fallback_for(identity) && display_name.is_none() {
+                if fallback_policy.allows_vm_name_fallback_for(identity)
+                    && fallback_policy.vm_fallback_name_for(identity).is_none()
+                {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this call callee is not implemented yet",
                     ));
