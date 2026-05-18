@@ -40,7 +40,7 @@
     "`impulse(sys, t)` respects an explicit real, finite, non-negative, strictly increasing time vector.",
     "`[y, t] = impulse(...)` returns `y` and `t` as `N x 1` column vectors for supported SISO systems.",
     "Continuous-time responses are evaluated from a controllable canonical state-space realization.",
-    "Discrete-time responses respect the stored positive sample time `Ts` and require time vectors to use integer multiples of `Ts`.",
+    "Discrete-time responses respect MATLAB's unit-area impulse convention: the input pulse has height `1/Ts`, and time vectors must use integer multiples of `Ts`.",
     "Unsupported model classes, delays, complex coefficients, static gains, and non-strictly-proper transfer functions raise clear diagnostics."
   ],
   "examples": [

@@ -458,8 +458,9 @@ fn discrete_response(
 
     let mut state = vec![0.0; order];
     state[order - 1] = 1.0;
+    let impulse_scale = 1.0 / system.sample_time;
     for k in 1..=max_index {
-        values[k] = dot(&realization.c, &state);
+        values[k] = dot(&realization.c, &state) * impulse_scale;
         state = mat_vec_mul(&realization.a, &state);
     }
     Ok(sample_indices.into_iter().map(|idx| values[idx]).collect())
@@ -637,9 +638,9 @@ mod tests {
         let y = tensor_data(run_impulse(sys, vec![t]).expect("impulse"));
         assert_eq!(y.len(), 4);
         assert!((y[0] - 0.0).abs() < 1.0e-12);
-        assert!((y[1] - 1.0).abs() < 1.0e-12);
-        assert!((y[2] - 0.5).abs() < 1.0e-12);
-        assert!((y[3] - 0.25).abs() < 1.0e-12);
+        assert!((y[1] - 10.0).abs() < 1.0e-12);
+        assert!((y[2] - 5.0).abs() < 1.0e-12);
+        assert!((y[3] - 2.5).abs() < 1.0e-12);
     }
 
     #[test]
