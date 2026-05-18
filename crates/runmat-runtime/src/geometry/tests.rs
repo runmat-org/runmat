@@ -46,6 +46,13 @@ fn inspect_and_load_step_work() {
     assert_eq!(asset.source.importer_version, "step/v1");
     assert_eq!(asset.regions.len(), 1);
     assert!(asset.source_geometry.assembly.is_some());
+    let codes = asset
+        .diagnostics
+        .iter()
+        .map(|diag| diag.code.as_str())
+        .collect::<Vec<_>>();
+    assert!(codes.contains(&"CAD_METADATA_PRODUCT_COUNT"));
+    assert!(codes.contains(&"CAD_METADATA_MATERIAL_EVIDENCE_COUNT"));
 }
 
 #[test]

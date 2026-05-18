@@ -259,3 +259,5 @@ Progress update (2026-05-17):
     geometry format sniffing now identifies OBJ and ASCII PLY payloads from header/content signatures even when file extensions are non-canonical, allowing `geometry.inspect/v1` and `geometry.load/v1` to route supported importers instead of producing unsupported-format errors for extension-less CAD mesh inputs.
 96. [x] CAD interop ingestion depth expanded with GLTF static-inline mesh baseline:
     `runmat-geometry-io` now supports additive deterministic GLTF ingestion (`gltf/v1`) for static inline mesh payloads (`asset.version` 2.x with inline `POSITION` + triangle indices), including degenerate-triangle pruning diagnostics and runtime geometry contract coverage for canonical and extension-less GLTF inputs.
+97. [x] CAD metadata fidelity signals expanded for STEP ingestion:
+    STEP parsing now emits structured metadata diagnostics for product/material extraction counts plus FILE_NAME fallback usage (`CAD_METADATA_PRODUCT_COUNT`, `CAD_METADATA_MATERIAL_EVIDENCE_COUNT`, `CAD_METADATA_FILE_NAME_FALLBACK`), improving machine-readable import provenance posture without contract-version churn.

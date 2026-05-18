@@ -19,10 +19,34 @@ pub(crate) fn parse_step_summary(path: &str, text: &str) -> Result<StepImportSum
     }
 
     let model_label = parse_model_label(path, text);
+    let used_fallback_label = model_label == fallback_model_label(path);
     let product_labels = parse_product_labels(text);
     let materials = parse_material_evidence(text);
 
     let mut diagnostics = Vec::new();
+    diagnostics.push(ImportDiagnostic {
+        code: "CAD_METADATA_PRODUCT_COUNT".to_string(),
+        severity: ImportDiagnosticSeverity::Info,
+        message: format!(
+            "STEP metadata resolved {} PRODUCT records",
+            product_labels.len()
+        ),
+    });
+    diagnostics.push(ImportDiagnostic {
+        code: "CAD_METADATA_MATERIAL_EVIDENCE_COUNT".to_string(),
+        severity: ImportDiagnosticSeverity::Info,
+        message: format!(
+            "STEP metadata resolved {} material evidence tokens",
+            materials.len()
+        ),
+    });
+    if used_fallback_label {
+        diagnostics.push(ImportDiagnostic {
+            code: "CAD_METADATA_FILE_NAME_FALLBACK".to_string(),
+            severity: ImportDiagnosticSeverity::Info,
+            message: "STEP FILE_NAME label missing; using path-derived assembly label".to_string(),
+        });
+    }
     if product_labels.is_empty() {
         diagnostics.push(ImportDiagnostic {
             code: "CAD_METADATA_PRODUCT_COUNT_FALLBACK".to_string(),
@@ -91,6 +115,10 @@ fn parse_model_label(path: &str, text: &str) -> String {
         }
     }
 
+    fallback_model_label(path)
+}
+
+fn fallback_model_label(path: &str) -> String {
     path.rsplit('/')
         .next()
         .unwrap_or(path)
@@ -163,6 +191,13 @@ mod tests {
         assert_eq!(summary.material_evidence.len(), 1);
         assert_eq!(summary.material_evidence[0].value, "Aluminum 6061");
         assert_eq!(summary.regions.len(), 2);
+        let codes = summary
+            .diagnostics
+            .iter()
+            .map(|item| item.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(codes.contains(&"CAD_METADATA_PRODUCT_COUNT"));
+        assert!(codes.contains(&"CAD_METADATA_MATERIAL_EVIDENCE_COUNT"));
     }
 
     #[test]
@@ -170,5 +205,17 @@ mod tests {
         let err = parse_step_summary("/fixtures/bad.step", "DATA;\n#1=PRODUCT('X','',(#1));")
             .expect_err("parse should fail");
         assert!(err.contains("ISO-10303-21"));
+    }
+
+    #[test]
+    fn parse_step_summary_emits_file_name_fallback_diagnostic() {
+        let payload = "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n#10=PRODUCT('Part_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
+        let summary = parse_step_summary("/fixtures/fallback.step", payload).expect("parse");
+        let codes = summary
+            .diagnostics
+            .iter()
+            .map(|item| item.code.as_str())
+            .collect::<Vec<_>>();
+        assert!(codes.contains(&"CAD_METADATA_FILE_NAME_FALLBACK"));
     }
 }
