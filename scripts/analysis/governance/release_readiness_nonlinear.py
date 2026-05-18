@@ -137,6 +137,16 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_CORE_REQUIRE_METRICS": "true",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS": "40.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS": "0.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT": "1.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS": "48.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT": "0.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT": "1.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS": "56.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT": "1.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS": "1.0",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "250000.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "250000.0",
@@ -337,6 +347,16 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_CORE_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS": "64.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS": "1.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT": "2.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS": "72.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT": "1.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT": "2.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS": "84.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT": "2.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS": "2.0",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "200000.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "200000.0",
@@ -537,6 +557,16 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_CORE_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS": "96.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS": "2.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT": "3.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS": "108.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT": "2.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT": "3.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS": "120.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT": "3.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS": "3.0",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "150000.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "150000.0",
@@ -1637,6 +1667,85 @@ def evaluate_release_readiness(
             profile_default(
                 "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO",
                 "1.2",
+            ),
+        )
+    )
+    nonlinear_core_require_metrics = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_CORE_REQUIRE_METRICS",
+            profile_default("RUNMAT_RELEASE_READINESS_NONLINEAR_CORE_REQUIRE_METRICS", "false"),
+        )
+    )
+    nonlinear_max_assembly_total_increments_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS", "64.0"
+            ),
+        )
+    )
+    nonlinear_max_assembly_failed_increments_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS", "1.0"
+            ),
+        )
+    )
+    nonlinear_max_assembly_spike_count_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT", "2.0"
+            ),
+        )
+    )
+    nonlinear_max_stress_total_increments_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS", "72.0"
+            ),
+        )
+    )
+    nonlinear_max_stress_stall_count_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT", "1.0"
+            ),
+        )
+    )
+    nonlinear_max_stress_spike_count_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT", "2.0"
+            ),
+        )
+    )
+    nonlinear_max_softening_total_increments_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS", "84.0"
+            ),
+        )
+    )
+    nonlinear_max_softening_spike_count_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT", "2.0"
+            ),
+        )
+    )
+    nonlinear_max_softening_backtrack_bursts_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS",
+                "2.0",
             ),
         )
     )
@@ -2837,6 +2946,15 @@ def evaluate_release_readiness(
     acoustic_relative_frequency_separation_drop_trend_ratio = None
     acoustic_mode_count_drop_trend_ratio = None
     acoustic_residual_warn_threshold_trend_ratio = None
+    nonlinear_max_assembly_total_increments = None
+    nonlinear_max_assembly_failed_increments = None
+    nonlinear_max_assembly_spike_count = None
+    nonlinear_max_stress_total_increments = None
+    nonlinear_max_stress_stall_count = None
+    nonlinear_max_stress_spike_count = None
+    nonlinear_max_softening_total_increments = None
+    nonlinear_max_softening_spike_count = None
+    nonlinear_max_softening_backtrack_bursts = None
     cfd_min_reynolds_proxy = None
     cht_min_reynolds_proxy = None
     cht_min_applied_temperature_delta_k = None
@@ -3719,6 +3837,142 @@ def evaluate_release_readiness(
                     detail=(
                         "acoustic threshold assertions missing required fields: "
                         + ", ".join(sorted(set(missing_acoustic_fields)))
+                    ),
+                )
+            )
+
+    nonlinear_core_records = [
+        rec
+        for rec in report_records(latest)
+        if rec.get("fixture_id")
+        in {
+            "nonlinear_assembly_gpu_provider",
+            "nonlinear_assembly_stress_gpu_provider",
+            "nonlinear_softening_proxy_gpu_provider",
+        }
+    ]
+    if not nonlinear_core_records:
+        if protected or nonlinear_core_require_metrics:
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_CORE_METRICS_MISSING",
+                    severity="warn",
+                    detail="nonlinear core posture metrics missing from report records",
+                )
+            )
+    else:
+        nonlinear_core_assertion_specs = [
+            (
+                "nonlinear_assembly_gpu_provider",
+                "nonlinear_total_increments",
+                nonlinear_max_assembly_total_increments_threshold,
+                "NONLINEAR_ASSEMBLY_TOTAL_INCREMENTS_HIGH",
+                "nonlinear assembly total increments",
+            ),
+            (
+                "nonlinear_assembly_gpu_provider",
+                "nonlinear_failed_increments",
+                nonlinear_max_assembly_failed_increments_threshold,
+                "NONLINEAR_ASSEMBLY_FAILED_INCREMENTS_HIGH",
+                "nonlinear assembly failed increments",
+            ),
+            (
+                "nonlinear_assembly_gpu_provider",
+                "nonlinear_iteration_spike_count",
+                nonlinear_max_assembly_spike_count_threshold,
+                "NONLINEAR_ASSEMBLY_SPIKE_COUNT_HIGH",
+                "nonlinear assembly iteration spike count",
+            ),
+            (
+                "nonlinear_assembly_stress_gpu_provider",
+                "nonlinear_stress_total_increments",
+                nonlinear_max_stress_total_increments_threshold,
+                "NONLINEAR_STRESS_TOTAL_INCREMENTS_HIGH",
+                "nonlinear stress total increments",
+            ),
+            (
+                "nonlinear_assembly_stress_gpu_provider",
+                "nonlinear_stress_stall_count",
+                nonlinear_max_stress_stall_count_threshold,
+                "NONLINEAR_STRESS_STALL_COUNT_HIGH",
+                "nonlinear stress stall count",
+            ),
+            (
+                "nonlinear_assembly_stress_gpu_provider",
+                "nonlinear_stress_iteration_spike_count",
+                nonlinear_max_stress_spike_count_threshold,
+                "NONLINEAR_STRESS_SPIKE_COUNT_HIGH",
+                "nonlinear stress iteration spike count",
+            ),
+            (
+                "nonlinear_softening_proxy_gpu_provider",
+                "nonlinear_softening_total_increments",
+                nonlinear_max_softening_total_increments_threshold,
+                "NONLINEAR_SOFTENING_TOTAL_INCREMENTS_HIGH",
+                "nonlinear softening total increments",
+            ),
+            (
+                "nonlinear_softening_proxy_gpu_provider",
+                "nonlinear_softening_spike_count",
+                nonlinear_max_softening_spike_count_threshold,
+                "NONLINEAR_SOFTENING_SPIKE_COUNT_HIGH",
+                "nonlinear softening spike count",
+            ),
+            (
+                "nonlinear_softening_proxy_gpu_provider",
+                "nonlinear_softening_backtrack_bursts",
+                nonlinear_max_softening_backtrack_bursts_threshold,
+                "NONLINEAR_SOFTENING_BACKTRACK_BURSTS_HIGH",
+                "nonlinear softening backtrack bursts",
+            ),
+        ]
+        missing_nonlinear_core_fields = []
+        for fixture_id, assertion_name, threshold, code, label in nonlinear_core_assertion_specs:
+            values = []
+            for rec in nonlinear_core_records:
+                if rec.get("fixture_id") != fixture_id:
+                    continue
+                observed = threshold_assertion_observed(rec, assertion_name)
+                if observed is not None:
+                    values.append(observed)
+            if not values:
+                missing_nonlinear_core_fields.append(f"{fixture_id}.{assertion_name}")
+                continue
+            observed = max(values)
+            if assertion_name == "nonlinear_total_increments":
+                nonlinear_max_assembly_total_increments = observed
+            elif assertion_name == "nonlinear_failed_increments":
+                nonlinear_max_assembly_failed_increments = observed
+            elif assertion_name == "nonlinear_iteration_spike_count":
+                nonlinear_max_assembly_spike_count = observed
+            elif assertion_name == "nonlinear_stress_total_increments":
+                nonlinear_max_stress_total_increments = observed
+            elif assertion_name == "nonlinear_stress_stall_count":
+                nonlinear_max_stress_stall_count = observed
+            elif assertion_name == "nonlinear_stress_iteration_spike_count":
+                nonlinear_max_stress_spike_count = observed
+            elif assertion_name == "nonlinear_softening_total_increments":
+                nonlinear_max_softening_total_increments = observed
+            elif assertion_name == "nonlinear_softening_spike_count":
+                nonlinear_max_softening_spike_count = observed
+            elif assertion_name == "nonlinear_softening_backtrack_bursts":
+                nonlinear_max_softening_backtrack_bursts = observed
+            if observed > threshold:
+                reasons.append(
+                    Reason(
+                        code=code,
+                        severity="fail" if protected else "warn",
+                        detail=f"{label} {observed:.3f} exceeds threshold {threshold:.3f}",
+                    )
+                )
+        if missing_nonlinear_core_fields and (protected or nonlinear_core_require_metrics):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_CORE_ASSERTIONS_MISSING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear core threshold assertions missing required fields: "
+                        + ", ".join(sorted(set(missing_nonlinear_core_fields)))
                     ),
                 )
             )
@@ -7168,6 +7422,24 @@ def evaluate_release_readiness(
         "acoustic_max_mode_count_drop_trend_ratio_threshold": acoustic_max_mode_count_drop_trend_ratio_threshold,
         "acoustic_residual_warn_threshold_trend_ratio": acoustic_residual_warn_threshold_trend_ratio,
         "acoustic_max_residual_warn_threshold_trend_ratio_threshold": acoustic_max_residual_warn_threshold_trend_ratio_threshold,
+        "nonlinear_max_assembly_total_increments": nonlinear_max_assembly_total_increments,
+        "nonlinear_max_assembly_total_increments_threshold": nonlinear_max_assembly_total_increments_threshold,
+        "nonlinear_max_assembly_failed_increments": nonlinear_max_assembly_failed_increments,
+        "nonlinear_max_assembly_failed_increments_threshold": nonlinear_max_assembly_failed_increments_threshold,
+        "nonlinear_max_assembly_spike_count": nonlinear_max_assembly_spike_count,
+        "nonlinear_max_assembly_spike_count_threshold": nonlinear_max_assembly_spike_count_threshold,
+        "nonlinear_max_stress_total_increments": nonlinear_max_stress_total_increments,
+        "nonlinear_max_stress_total_increments_threshold": nonlinear_max_stress_total_increments_threshold,
+        "nonlinear_max_stress_stall_count": nonlinear_max_stress_stall_count,
+        "nonlinear_max_stress_stall_count_threshold": nonlinear_max_stress_stall_count_threshold,
+        "nonlinear_max_stress_spike_count": nonlinear_max_stress_spike_count,
+        "nonlinear_max_stress_spike_count_threshold": nonlinear_max_stress_spike_count_threshold,
+        "nonlinear_max_softening_total_increments": nonlinear_max_softening_total_increments,
+        "nonlinear_max_softening_total_increments_threshold": nonlinear_max_softening_total_increments_threshold,
+        "nonlinear_max_softening_spike_count": nonlinear_max_softening_spike_count,
+        "nonlinear_max_softening_spike_count_threshold": nonlinear_max_softening_spike_count_threshold,
+        "nonlinear_max_softening_backtrack_bursts": nonlinear_max_softening_backtrack_bursts,
+        "nonlinear_max_softening_backtrack_bursts_threshold": nonlinear_max_softening_backtrack_bursts_threshold,
         "cfd_min_reynolds_proxy": cfd_min_reynolds_proxy,
         "cfd_min_reynolds_proxy_threshold": cfd_min_reynolds_proxy_threshold,
         "cht_min_reynolds_proxy": cht_min_reynolds_proxy,
@@ -7666,6 +7938,26 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Thermal spread trend threshold: "
         f"`{result.get('thermal_max_spread_trend_ratio_threshold') if result.get('thermal_max_spread_trend_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append("")
+    lines.append("### Nonlinear Core Posture")
+    lines.append(
+        "- Nonlinear assembly increments/failed/spikes thresholds: "
+        f"`{result.get('nonlinear_max_assembly_total_increments') if result.get('nonlinear_max_assembly_total_increments') is not None else '-'}`/`{result.get('nonlinear_max_assembly_total_increments_threshold') if result.get('nonlinear_max_assembly_total_increments_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_max_assembly_failed_increments') if result.get('nonlinear_max_assembly_failed_increments') is not None else '-'}`/`{result.get('nonlinear_max_assembly_failed_increments_threshold') if result.get('nonlinear_max_assembly_failed_increments_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_max_assembly_spike_count') if result.get('nonlinear_max_assembly_spike_count') is not None else '-'}`/`{result.get('nonlinear_max_assembly_spike_count_threshold') if result.get('nonlinear_max_assembly_spike_count_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Nonlinear stress increments/stalls/spikes thresholds: "
+        f"`{result.get('nonlinear_max_stress_total_increments') if result.get('nonlinear_max_stress_total_increments') is not None else '-'}`/`{result.get('nonlinear_max_stress_total_increments_threshold') if result.get('nonlinear_max_stress_total_increments_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_max_stress_stall_count') if result.get('nonlinear_max_stress_stall_count') is not None else '-'}`/`{result.get('nonlinear_max_stress_stall_count_threshold') if result.get('nonlinear_max_stress_stall_count_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_max_stress_spike_count') if result.get('nonlinear_max_stress_spike_count') is not None else '-'}`/`{result.get('nonlinear_max_stress_spike_count_threshold') if result.get('nonlinear_max_stress_spike_count_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Nonlinear softening increments/spikes/backtracks thresholds: "
+        f"`{result.get('nonlinear_max_softening_total_increments') if result.get('nonlinear_max_softening_total_increments') is not None else '-'}`/`{result.get('nonlinear_max_softening_total_increments_threshold') if result.get('nonlinear_max_softening_total_increments_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_max_softening_spike_count') if result.get('nonlinear_max_softening_spike_count') is not None else '-'}`/`{result.get('nonlinear_max_softening_spike_count_threshold') if result.get('nonlinear_max_softening_spike_count_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_max_softening_backtrack_bursts') if result.get('nonlinear_max_softening_backtrack_bursts') is not None else '-'}`/`{result.get('nonlinear_max_softening_backtrack_bursts_threshold') if result.get('nonlinear_max_softening_backtrack_bursts_threshold') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Electro-Thermal Posture")

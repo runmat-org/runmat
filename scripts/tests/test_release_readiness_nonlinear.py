@@ -257,6 +257,16 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_CORE_REQUIRE_METRICS",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY",
@@ -2256,6 +2266,89 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("ELECTRO_SPREAD_TREND_WORSENING", codes)
 
+    def test_nonlinear_core_assertion_breaches_emit_reasons(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_assembly_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "nonlinear_total_increments", "observed": 90.0},
+                    {"name": "nonlinear_failed_increments", "observed": 3.0},
+                    {"name": "nonlinear_iteration_spike_count", "observed": 4.0},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_assembly_stress_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "nonlinear_stress_total_increments", "observed": 100.0},
+                    {"name": "nonlinear_stress_stall_count", "observed": 3.0},
+                    {
+                        "name": "nonlinear_stress_iteration_spike_count",
+                        "observed": 4.0,
+                    },
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "nonlinear_softening_total_increments", "observed": 110.0},
+                    {"name": "nonlinear_softening_spike_count", "observed": 5.0},
+                    {"name": "nonlinear_softening_backtrack_bursts", "observed": 5.0},
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS"] = (
+            "60.0"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_FAILED_INCREMENTS"
+        ] = "1.0"
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_SPIKE_COUNT"] = (
+            "2.0"
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_TOTAL_INCREMENTS"] = (
+            "70.0"
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_STALL_COUNT"] = "1.0"
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_STRESS_SPIKE_COUNT"] = "2.0"
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS"] = (
+            "80.0"
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT"] = (
+            "2.0"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS"
+        ] = "2.0"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("NONLINEAR_ASSEMBLY_TOTAL_INCREMENTS_HIGH", codes)
+        self.assertIn("NONLINEAR_ASSEMBLY_FAILED_INCREMENTS_HIGH", codes)
+        self.assertIn("NONLINEAR_ASSEMBLY_SPIKE_COUNT_HIGH", codes)
+        self.assertIn("NONLINEAR_STRESS_TOTAL_INCREMENTS_HIGH", codes)
+        self.assertIn("NONLINEAR_STRESS_STALL_COUNT_HIGH", codes)
+        self.assertIn("NONLINEAR_STRESS_SPIKE_COUNT_HIGH", codes)
+        self.assertIn("NONLINEAR_SOFTENING_TOTAL_INCREMENTS_HIGH", codes)
+        self.assertIn("NONLINEAR_SOFTENING_SPIKE_COUNT_HIGH", codes)
+        self.assertIn("NONLINEAR_SOFTENING_BACKTRACK_BURSTS_HIGH", codes)
+
     def test_acoustic_metric_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
@@ -3373,6 +3466,8 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Max thermal spatial gradient index", summary)
         self.assertIn("Min thermal monotonic response fraction", summary)
         self.assertIn("Thermal spread trend ratio", summary)
+        self.assertIn("### Nonlinear Core Posture", summary)
+        self.assertIn("Nonlinear assembly increments/failed/spikes thresholds", summary)
         self.assertIn("Electro-thermal time-scale min/max", summary)
         self.assertIn("Electro-thermal time-scale thresholds (min/max)", summary)
         self.assertIn("Electro-thermal time-scale breach rate", summary)
