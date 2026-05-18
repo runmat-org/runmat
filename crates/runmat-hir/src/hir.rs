@@ -380,6 +380,14 @@ impl CallableFallbackPolicy {
             other => other,
         }
     }
+
+    pub fn allows_runtime_name_resolution(self) -> bool {
+        matches!(
+            self,
+            CallableFallbackPolicy::RuntimeNameResolution
+                | CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution
+        )
+    }
 }
 
 pub const FEVAL_BUILTIN_NAME: &str = "feval";

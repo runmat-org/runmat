@@ -376,15 +376,10 @@ async fn forward_named_fallback(
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
-    match fallback_policy {
-        CallableFallbackPolicy::RuntimeNameResolution
-        | CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution => {
-            forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
-        }
-        CallableFallbackPolicy::None
-        | CallableFallbackPolicy::ObjectDispatch
-        | CallableFallbackPolicy::ExternalBoundary => unreachable!(),
+    if !fallback_policy.allows_runtime_name_resolution() {
+        unreachable!();
     }
+    forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
 }
 
 async fn execute_resolved_callable(
@@ -410,38 +405,33 @@ async fn execute_resolved_callable(
             }
             Err(semantic_unavailable_error(function.0, &metadata))
         }
-        other => match fallback_policy {
-            CallableFallbackPolicy::RuntimeNameResolution
-            | CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution => {
-                let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
-                    other.clone(),
-                    fallback_policy,
-                    args.clone(),
-                    requested_outputs,
-                    runmat_runtime::user_functions::SemanticCallableKind::Other,
-                );
-                if let Some(result) =
-                    runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
-                {
-                    return result;
-                }
-                let Some(name) = other.display_name() else {
-                    return Err(undefined_name_error("<unnamed callable>", &metadata));
-                };
-                if matches!(other, CallableIdentity::ExternalName(_)) {
-                    return Err(undefined_name_error(&name, &metadata));
-                }
-                forward_named_fallback(name, args, requested_outputs, fallback_policy).await
+        other if fallback_policy.allows_runtime_name_resolution() => {
+            let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
+                other.clone(),
+                fallback_policy,
+                args.clone(),
+                requested_outputs,
+                runmat_runtime::user_functions::SemanticCallableKind::Other,
+            );
+            if let Some(result) =
+                runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
+            {
+                return result;
             }
-            CallableFallbackPolicy::None
-            | CallableFallbackPolicy::ObjectDispatch
-            | CallableFallbackPolicy::ExternalBoundary => {
-                let name = other
-                    .display_name()
-                    .unwrap_or_else(|| "<unnamed callable>".into());
-                Err(undefined_name_error(&name, &metadata))
+            let Some(name) = other.display_name() else {
+                return Err(undefined_name_error("<unnamed callable>", &metadata));
+            };
+            if matches!(other, CallableIdentity::ExternalName(_)) {
+                return Err(undefined_name_error(&name, &metadata));
             }
-        },
+            forward_named_fallback(name, args, requested_outputs, fallback_policy).await
+        }
+        other => {
+            let name = other
+                .display_name()
+                .unwrap_or_else(|| "<unnamed callable>".into());
+            Err(undefined_name_error(&name, &metadata))
+        }
     }
 }
 
@@ -470,35 +460,30 @@ async fn try_execute_resolved_callable(
             }
             Ok(None)
         }
-        other => match fallback_policy {
-            CallableFallbackPolicy::RuntimeNameResolution
-            | CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution => {
-                let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
-                    other.clone(),
-                    fallback_policy,
-                    args.clone(),
-                    requested_outputs,
-                    runmat_runtime::user_functions::SemanticCallableKind::Other,
-                );
-                if let Some(result) =
-                    runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
-                {
-                    return result.map(Some);
-                }
-                if matches!(other, CallableIdentity::ExternalName(_)) {
-                    return Ok(None);
-                }
-                let Some(name) = other.display_name() else {
-                    return Ok(None);
-                };
-                forward_named_fallback(name, args, requested_outputs, fallback_policy)
-                    .await
-                    .map(Some)
+        other if fallback_policy.allows_runtime_name_resolution() => {
+            let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
+                other.clone(),
+                fallback_policy,
+                args.clone(),
+                requested_outputs,
+                runmat_runtime::user_functions::SemanticCallableKind::Other,
+            );
+            if let Some(result) =
+                runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
+            {
+                return result.map(Some);
             }
-            CallableFallbackPolicy::None
-            | CallableFallbackPolicy::ObjectDispatch
-            | CallableFallbackPolicy::ExternalBoundary => Ok(None),
-        },
+            if matches!(other, CallableIdentity::ExternalName(_)) {
+                return Ok(None);
+            }
+            let Some(name) = other.display_name() else {
+                return Ok(None);
+            };
+            forward_named_fallback(name, args, requested_outputs, fallback_policy)
+                .await
+                .map(Some)
+        }
+        _ => Ok(None),
     }
 }
 

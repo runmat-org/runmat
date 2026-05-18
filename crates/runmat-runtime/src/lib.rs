@@ -1777,6 +1777,35 @@ mod tests {
     }
 
     #[test]
+    fn external_boundary_policy_does_not_use_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_target").then_some(45)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 45);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(11.0)) })
+            }),
+        ));
+
+        let request = crate::user_functions::SemanticCallableRequest::resolved(
+            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
+                runmat_hir::SymbolName("resolved_target".to_string()),
+            ])),
+            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+            vec![Value::Num(4.0)],
+            1,
+            crate::user_functions::SemanticCallableKind::Other,
+        );
+
+        let result = block_on(crate::user_functions::try_call_semantic_descriptor(request));
+        assert!(result.is_none());
+    }
+
+    #[test]
     fn object_dispatch_then_runtime_name_resolution_policy_uses_semantic_resolver() {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {

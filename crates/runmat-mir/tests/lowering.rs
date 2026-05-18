@@ -208,6 +208,21 @@ fn method_syntax_lowers_with_object_dispatch_fallback_policy() {
 }
 
 #[test]
+fn unresolved_plain_call_lowers_with_external_boundary_fallback_policy() {
+    let mir = lower_mir("y = unresolved_fn(1);");
+    let body = mir.bodies.values().next().expect("body");
+    let call = first_call(body);
+    assert!(matches!(
+        call.callee,
+        MirCallee::Static(CallableIdentity::ExternalName(_))
+    ));
+    assert_eq!(
+        call.fallback_policy,
+        CallableFallbackPolicy::ExternalBoundary
+    );
+}
+
+#[test]
 fn lower_assembly_accepts_zero_requested_outputs() {
     let hir = patch_entrypoint_call_requested_outputs("y = sqrt(9);", RequestedOutputCount::Zero);
     let mir = lower_assembly(&hir.assembly).expect("lower should succeed");
@@ -1073,7 +1088,7 @@ fn analyze_assembly_collects_semantic_marker_diagnostics() {
         }],
         syntax: runmat_hir::CallSyntax::Plain,
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
-        fallback_policy: runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+        fallback_policy: runmat_hir::CallableFallbackPolicy::ExternalBoundary,
         async_behavior: runmat_mir::AsyncBehaviorFact::MaySuspend,
         effects: runmat_builtins::BuiltinEffects::unknown(),
         workspace_effect: None,

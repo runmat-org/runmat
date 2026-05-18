@@ -516,9 +516,11 @@ fn call_fallback_policy(
         | MirCallee::Static(runmat_hir::CallableIdentity::ClassConstructor(_)) => {
             runmat_hir::CallableFallbackPolicy::None
         }
+        MirCallee::Static(runmat_hir::CallableIdentity::ExternalName(_)) => {
+            runmat_hir::CallableFallbackPolicy::ExternalBoundary
+        }
         MirCallee::Static(
-            runmat_hir::CallableIdentity::ExternalName(_)
-            | runmat_hir::CallableIdentity::DynamicName(_)
+            runmat_hir::CallableIdentity::DynamicName(_)
             | runmat_hir::CallableIdentity::Imported(_)
             | runmat_hir::CallableIdentity::Method(_)
             | runmat_hir::CallableIdentity::AnonymousFunction(_),
