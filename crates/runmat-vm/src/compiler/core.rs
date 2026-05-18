@@ -1118,21 +1118,23 @@ impl Compiler {
                 }
             }
             MirCallee::Static(identity) => {
+                let fallback_policy = call.fallback_policy;
                 if !matches!(
-                    call.fallback_policy,
+                    fallback_policy,
                     runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+                        | runmat_hir::CallableFallbackPolicy::ExternalBoundary
                 ) {
                     return Err(self.compile_error(format!(
                         "MIR call fallback policy {:?} is not supported for static callee {:?}",
-                        call.fallback_policy, identity
+                        fallback_policy, identity
                     )));
                 }
                 let display_name = self.mir_runtime_name_callee(identity)?;
-                let Some(_) = display_name else {
+                if fallback_policy.allows_runtime_name_resolution() && display_name.is_none() {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this call callee is not implemented yet",
                     ));
-                };
+                }
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -1140,7 +1142,7 @@ impl Compiler {
                     self.emit(Instr::CallFunctionExpandMultiOutput {
                         identity: identity.clone(),
                         display_name,
-                        fallback_policy: call.fallback_policy,
+                        fallback_policy,
                         specs,
                         out_count: output_count,
                     });
@@ -1148,7 +1150,7 @@ impl Compiler {
                     self.emit(Instr::CallFunctionMulti {
                         identity: identity.clone(),
                         display_name,
-                        fallback_policy: call.fallback_policy,
+                        fallback_policy,
                         arg_count: call.args.len(),
                         out_count: output_count,
                     });
@@ -1726,21 +1728,23 @@ impl Compiler {
                 }
             }
             MirCallee::Static(identity) => {
+                let fallback_policy = call.fallback_policy;
                 if !matches!(
-                    call.fallback_policy,
+                    fallback_policy,
                     runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+                        | runmat_hir::CallableFallbackPolicy::ExternalBoundary
                 ) {
                     return Err(self.compile_error(format!(
                         "MIR call fallback policy {:?} is not supported for static callee {:?}",
-                        call.fallback_policy, identity
+                        fallback_policy, identity
                     )));
                 }
                 let display_name = self.mir_runtime_name_callee(identity)?;
-                let Some(_) = display_name else {
+                if fallback_policy.allows_runtime_name_resolution() && display_name.is_none() {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this call callee is not implemented yet",
                     ));
-                };
+                }
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
@@ -1748,7 +1752,7 @@ impl Compiler {
                     self.emit(Instr::CallFunctionExpandMultiOutput {
                         identity: identity.clone(),
                         display_name: display_name.clone(),
-                        fallback_policy: call.fallback_policy,
+                        fallback_policy,
                         specs,
                         out_count: requested_outputs,
                     });
@@ -1756,7 +1760,7 @@ impl Compiler {
                     self.emit(Instr::CallFunctionMulti {
                         identity: identity.clone(),
                         display_name: display_name.clone(),
-                        fallback_policy: call.fallback_policy,
+                        fallback_policy,
                         arg_count: call.args.len(),
                         out_count: requested_outputs,
                     });

@@ -31,6 +31,18 @@ fn unresolved_external_function_handle_fails_without_legacy_fallback() {
 }
 
 #[test]
+fn unresolved_external_direct_call_fails_without_runtime_name_fallback() {
+    let err = execute_semantic_source_result("y = definitely_missing_callback(1);")
+        .expect_err("unresolved external direct call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn unresolved_external_cellfun_callback_fails_without_legacy_fallback() {
     let err = execute_semantic_source_result(
         "xs = {1, 2}; ys = cellfun(@definitely_missing_callback, xs);",
@@ -1253,8 +1265,16 @@ fn unresolved_function_single_output_uses_typed_instruction() {
     let bytecode = compile_semantic_source(source).expect("compile unresolved call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CallFunctionMulti { display_name, arg_count, out_count, .. }
-            if display_name.as_deref() == Some("definitely_missing_callback") && *arg_count == 1 && *out_count == 1
+        runmat_vm::Instr::CallFunctionMulti {
+            display_name,
+            fallback_policy,
+            arg_count,
+            out_count,
+            ..
+        } if display_name.as_deref() == Some("definitely_missing_callback")
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
+            && *arg_count == 1
+            && *out_count == 1
     )));
 }
 
@@ -1264,8 +1284,18 @@ fn unresolved_function_expand_single_output_uses_typed_instruction() {
     let bytecode = compile_semantic_source(source).expect("compile unresolved expanded call");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CallFunctionExpandMultiOutput { display_name, specs, out_count, .. }
-            if display_name.as_deref() == Some("definitely_missing_callback") && *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+        runmat_vm::Instr::CallFunctionExpandMultiOutput {
+            display_name,
+            fallback_policy,
+            specs,
+            out_count,
+            ..
+        } if display_name.as_deref() == Some("definitely_missing_callback")
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
+            && *out_count == 1
+            && specs.len() == 1
+            && specs[0].is_expand
+            && specs[0].expand_all
     )));
 }
 
