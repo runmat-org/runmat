@@ -99,6 +99,16 @@ REQUIRED_FIXTURES = {
         "thermo_shock_oscillatory_spatial_coverage_ratio",
         "thermo_shock_oscillatory_field_extrapolation_ratio",
     },
+    "thermal_standalone_ramp_gpu_provider": {
+        "thermal_standalone_max_residual_norm",
+        "thermal_standalone_min_temperature_k",
+        "thermal_standalone_max_temperature_k",
+        "thermal_standalone_conductivity_spread_ratio",
+        "thermal_standalone_heat_capacity_spread_ratio",
+        "thermal_standalone_spatial_gradient_index",
+        "thermal_standalone_monotonic_response_fraction",
+        "thermal_standalone_response_realization_ratio",
+    },
     "electro_thermal_joule_benign_gpu_provider": {
         "electro_thermal_benign_joule_heating_scale",
         "electro_thermal_benign_conductivity_spread_ratio",
