@@ -285,3 +285,5 @@ Progress update (2026-05-17):
     accessor-backed `gltf/v1` decoding now enforces declared `buffer.byteLength`/`bufferView.byteLength` range containment (including accessor `byteOffset` checks) and returns typed parse failures for out-of-window accessor payloads, preventing implicit reads beyond declared GLTF buffer-view windows.
 109. [x] CAD GLTF accessor buffer declaration validation hardened:
     accessor-backed `gltf/v1` decoding now requires explicit `buffer.byteLength` declarations for data-URI-backed buffers and emits typed parse failures when declarations are missing, reducing ambiguous CAD payload acceptance and tightening deterministic GLTF ingest validation.
+110. [x] CAD GLTF accessor semantic guardrails hardened for unsupported features:
+    accessor-backed `gltf/v1` decoding now rejects unsupported GLTF accessor semantics (`normalized=true` and `sparse` accessors) with typed parse failures, preventing silent acceptance of payloads whose decode semantics are outside the current deterministic import baseline.

@@ -138,6 +138,46 @@ mod tests {
         .into_bytes()
     }
 
+    fn gltf_accessor_data_uri_normalized_payload() -> Vec<u8> {
+        let positions = [
+            [0.0f32, 0.0f32, 0.0f32],
+            [1.0f32, 0.0f32, 0.0f32],
+            [1.0f32, 1.0f32, 0.0f32],
+            [0.0f32, 1.0f32, 0.0f32],
+        ];
+        let mut buffer = Vec::<u8>::new();
+        for vertex in positions {
+            buffer.extend_from_slice(&vertex[0].to_le_bytes());
+            buffer.extend_from_slice(&vertex[1].to_le_bytes());
+            buffer.extend_from_slice(&vertex[2].to_le_bytes());
+        }
+        let encoded = BASE64_ENGINE.encode(&buffer);
+        format!(
+            "{{\"asset\":{{\"version\":\"2.0\"}},\"buffers\":[{{\"uri\":\"data:application/octet-stream;base64,{encoded}\",\"byteLength\":48}}],\"bufferViews\":[{{\"buffer\":0,\"byteOffset\":0,\"byteLength\":48}}],\"accessors\":[{{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\",\"normalized\":true}}],\"meshes\":[{{\"primitives\":[{{\"attributes\":{{\"POSITION\":0}}}}]}}]}}",
+        )
+        .into_bytes()
+    }
+
+    fn gltf_accessor_data_uri_sparse_payload() -> Vec<u8> {
+        let positions = [
+            [0.0f32, 0.0f32, 0.0f32],
+            [1.0f32, 0.0f32, 0.0f32],
+            [1.0f32, 1.0f32, 0.0f32],
+            [0.0f32, 1.0f32, 0.0f32],
+        ];
+        let mut buffer = Vec::<u8>::new();
+        for vertex in positions {
+            buffer.extend_from_slice(&vertex[0].to_le_bytes());
+            buffer.extend_from_slice(&vertex[1].to_le_bytes());
+            buffer.extend_from_slice(&vertex[2].to_le_bytes());
+        }
+        let encoded = BASE64_ENGINE.encode(&buffer);
+        format!(
+            "{{\"asset\":{{\"version\":\"2.0\"}},\"buffers\":[{{\"uri\":\"data:application/octet-stream;base64,{encoded}\",\"byteLength\":48}}],\"bufferViews\":[{{\"buffer\":0,\"byteOffset\":0,\"byteLength\":48}}],\"accessors\":[{{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\",\"sparse\":{{\"count\":1,\"indices\":{{\"bufferView\":0,\"componentType\":5123}},\"values\":{{\"bufferView\":0}}}}}}],\"meshes\":[{{\"primitives\":[{{\"attributes\":{{\"POSITION\":0}}}}]}}]}}",
+        )
+        .into_bytes()
+    }
+
     fn binary_ply_payload() -> Vec<u8> {
         let header = b"ply\nformat binary_little_endian 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n";
         let vertices = [
@@ -519,6 +559,32 @@ mod tests {
             .expect_err("missing buffer.byteLength should fail with typed parse error");
         assert!(
             error.to_string().contains("requires buffer.byteLength"),
+            "unexpected error message: {error}"
+        );
+    }
+
+    #[test]
+    fn gltf_accessor_normalized_reports_typed_parse_error() {
+        let payload = gltf_accessor_data_uri_normalized_payload();
+        let error = import_geometry("/mesh.gltf", &payload, GeometryImportOptions::default())
+            .expect_err("normalized accessor should fail with typed parse error");
+        assert!(
+            error
+                .to_string()
+                .contains("normalized accessors are not supported"),
+            "unexpected error message: {error}"
+        );
+    }
+
+    #[test]
+    fn gltf_accessor_sparse_reports_typed_parse_error() {
+        let payload = gltf_accessor_data_uri_sparse_payload();
+        let error = import_geometry("/mesh.gltf", &payload, GeometryImportOptions::default())
+            .expect_err("sparse accessor should fail with typed parse error");
+        assert!(
+            error
+                .to_string()
+                .contains("sparse accessors are not supported"),
             "unexpected error message: {error}"
         );
     }

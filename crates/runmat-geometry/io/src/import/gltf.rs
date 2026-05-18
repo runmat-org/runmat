@@ -378,6 +378,20 @@ fn resolve_accessor_decode(
                 accessor_index
             ))
         })?;
+    if accessor
+        .get("normalized")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err(GeometryImportError::ParseFailed(
+            "GLTF normalized accessors are not supported yet".to_string(),
+        ));
+    }
+    if accessor.get("sparse").is_some() {
+        return Err(GeometryImportError::ParseFailed(
+            "GLTF sparse accessors are not supported yet".to_string(),
+        ));
+    }
     let buffer_view_index = accessor
         .get("bufferView")
         .and_then(Value::as_u64)
