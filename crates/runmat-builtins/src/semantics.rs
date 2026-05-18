@@ -29,7 +29,6 @@ impl BuiltinSemantics {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BuiltinCompatibility {
     Matlab,
-    RunMatExtended,
     InteractiveOnly,
 }
 
