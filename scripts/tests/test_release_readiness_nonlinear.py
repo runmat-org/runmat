@@ -6661,6 +6661,55 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_HETEROGENEITY_TREND_WORSENING", codes)
 
+    def test_thermo_heterogeneity_trend_ignores_failed_rolling_reports(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_assignment_heterogeneity_index=0.34,
+        )
+        rolling = [
+            report(
+                passed=False,
+                publishable=True,
+                gpu_ms=95.0,
+                thermo_coupling_enabled=True,
+                thermo_assignment_heterogeneity_index=0.18,
+            )
+        ]
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO"
+        ] = "1.3"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertNotIn("THERMO_HETEROGENEITY_TREND_WORSENING", codes)
+
+    def test_thermo_heterogeneity_trend_ignores_non_publishable_rolling_reports(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_assignment_heterogeneity_index=0.34,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                thermo_coupling_enabled=True,
+                thermo_assignment_heterogeneity_index=0.18,
+            )
+        ]
+        rolling[0]["publishable"] = False
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO"
+        ] = "1.3"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertNotIn("THERMO_HETEROGENEITY_TREND_WORSENING", codes)
+
     def test_thermo_field_coverage_low_reason_is_emitted(self):
         latest = report(
             passed=True,

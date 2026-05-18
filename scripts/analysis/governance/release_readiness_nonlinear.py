@@ -9408,14 +9408,24 @@ def evaluate_release_readiness(
             )
 
     if rolling:
+        trusted_rolling = []
+        for report in rolling:
+            if report.get("passed", True) is not True:
+                continue
+            report_publishable = report.get("publishable")
+            if report_publishable is not None and report_publishable is not True:
+                continue
+            trusted_rolling.append(report)
         latest_by_fixture = {}
         for rec in report_records(latest):
             fixture_id = rec.get("fixture_id")
             if isinstance(fixture_id, str):
                 latest_by_fixture[fixture_id] = rec
         rolling_by_fixture = {}
-        for report in rolling:
+        for report in trusted_rolling:
             for rec in report_records(report):
+                if rec.get("publishable") is not True:
+                    continue
                 fixture_id = rec.get("fixture_id")
                 if isinstance(fixture_id, str):
                     rolling_by_fixture.setdefault(fixture_id, []).append(rec)
@@ -9588,8 +9598,10 @@ def evaluate_release_readiness(
             if spread_candidates:
                 latest_thermal_spread_values.append(max(spread_candidates))
         rolling_thermal_spread_values = []
-        for report in rolling:
+        for report in trusted_rolling:
             for rec in report_records(report):
+                if rec.get("publishable") is not True:
+                    continue
                 spread_candidates = []
                 raw_cond = rec.get("thermal_conductivity_spread_ratio")
                 raw_cp = rec.get("thermal_heat_capacity_spread_ratio")
@@ -13226,8 +13238,10 @@ def evaluate_release_readiness(
             if isinstance(raw_value, (int, float)):
                 latest_plastic_reference_values.append(float(raw_value))
         rolling_plastic_reference_values = []
-        for report in rolling:
+        for report in trusted_rolling:
             for rec in report_records(report):
+                if rec.get("publishable") is not True:
+                    continue
                 if rec.get("fixture_id") not in plastic_reference_fixture_ids:
                     continue
                 raw_value = rec.get("plastic_nonlinear_severity")
@@ -13369,8 +13383,10 @@ def evaluate_release_readiness(
             if isinstance(raw_value, (int, float)):
                 latest_contact_reference_values.append(float(raw_value))
         rolling_contact_reference_values = []
-        for report in rolling:
+        for report in trusted_rolling:
             for rec in report_records(report):
+                if rec.get("publishable") is not True:
+                    continue
                 if rec.get("fixture_id") not in contact_reference_fixture_ids:
                     continue
                 raw_value = rec.get("contact_nonlinear_severity")
@@ -13539,7 +13555,7 @@ def evaluate_release_readiness(
                 plastic_promotion_min_samples,
                 plastic_max_nonlinear_severity_threshold,
             )
-            for report in rolling
+            for report in trusted_rolling
         ]
         if rolling_plastic_blockers:
             plastic_promotion_blocker_regression = (
@@ -13566,7 +13582,7 @@ def evaluate_release_readiness(
                 contact_promotion_min_samples,
                 contact_max_nonlinear_severity_threshold,
             )
-            for report in rolling
+            for report in trusted_rolling
         ]
         if rolling_contact_blockers:
             contact_promotion_blocker_regression = (
