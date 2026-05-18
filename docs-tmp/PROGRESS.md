@@ -17,6 +17,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 semantic-candidate snapshot emission when bytecode groups are empty
+  - Fusion snapshot generation now emits a semantic candidate summary snapshot when bytecode fusion groups are empty but MIR semantic fusion signals/candidate groups are present.
+  - This prevents semantic planning evidence from being hidden behind bytecode-group presence and keeps planner telemetry visible in transitional no-group cases.
+  - Added `runmat-core` regression coverage for a scalar semantic-op chain that produces semantic candidate metadata even when no bytecode fusion group is detected.
+  - Validation: `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core source_input_path_`, `cargo test -p runmat-config`, `cargo test -p runmat --lib`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 MIR fusion candidate-group metadata bridge
   - Extended fusion planner metadata with `mir_fusion_candidate_group_count`.
   - Added MIR-side fusion candidate-group estimator in core fusion snapshot plumbing:

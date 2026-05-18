@@ -14,8 +14,26 @@ pub(crate) fn build_fusion_snapshot(
     planner: Option<FusionPlannerMetadata>,
 ) -> Option<FusionPlanSnapshot> {
     graph?;
+    let planner = planner.unwrap_or_default();
     if groups.is_empty() {
-        return None;
+        if planner.mir_fusion_signal_count == 0 && planner.mir_fusion_candidate_group_count == 0 {
+            return None;
+        }
+        return Some(FusionPlanSnapshot {
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            shaders: Vec::new(),
+            decisions: vec![FusionPlanDecision {
+                node_id: "semantic-candidate-summary".to_string(),
+                fused: false,
+                reason: Some(format!(
+                    "mir-signals={} mir-candidate-groups={} bytecode-groups=0",
+                    planner.mir_fusion_signal_count, planner.mir_fusion_candidate_group_count
+                )),
+                thresholds: None,
+            }],
+            planner,
+        });
     }
     let mut nodes = Vec::with_capacity(groups.len());
     let mut edges = Vec::new();
@@ -66,7 +84,7 @@ pub(crate) fn build_fusion_snapshot(
         edges,
         shaders,
         decisions,
-        planner: planner.unwrap_or_default(),
+        planner,
     })
 }
 

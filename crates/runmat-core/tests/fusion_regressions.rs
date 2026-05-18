@@ -228,3 +228,37 @@ fn runtime_fusion_snapshot_exposes_semantic_planner_metadata() {
         "expected non-zero runtime MIR fusion candidate group count"
     );
 }
+
+#[test]
+fn compile_fusion_plan_exposes_semantic_candidates_without_bytecode_groups() {
+    ensure_fusion_regression_env();
+
+    let mut engine = gc_test_context(RunMatSession::new).expect("session init");
+    let script = r#"
+        x = 1 + 2;
+        y = x * 3;
+    "#;
+
+    let snapshot = engine
+        .compile_fusion_plan(script)
+        .expect("compile fusion plan should succeed")
+        .expect("semantic fusion candidate metadata should produce a fusion snapshot");
+
+    assert!(
+        snapshot.planner.mir_fusion_signal_count > 0,
+        "expected non-zero MIR fusion signal count"
+    );
+    assert!(
+        snapshot.planner.mir_fusion_candidate_group_count > 0,
+        "expected non-zero MIR fusion candidate group count"
+    );
+    if snapshot.nodes.is_empty() {
+        assert!(
+            snapshot
+                .decisions
+                .iter()
+                .any(|decision| decision.node_id == "semantic-candidate-summary"),
+            "expected semantic candidate summary decision when bytecode groups are absent"
+        );
+    }
+}
