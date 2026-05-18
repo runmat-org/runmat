@@ -192,6 +192,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electromagnetic_source_region_coverage_ratio",
         "electromagnetic_source_material_alignment_ratio",
         "electromagnetic_source_region_energy_consistency_ratio",
+        "electromagnetic_assignment_coverage_ratio",
+        "electromagnetic_fallback_coefficient_ratio",
+        "electromagnetic_boundary_anchor_ratio",
     },
     "electromagnetic_reference_multi_region_phased_source_gpu_provider": {
         "em_phased_source_energy_consistency_ratio",
@@ -207,6 +210,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electromagnetic_source_region_coverage_ratio",
         "electromagnetic_source_material_alignment_ratio",
         "electromagnetic_source_region_energy_consistency_ratio",
+        "electromagnetic_assignment_coverage_ratio",
+        "electromagnetic_fallback_coefficient_ratio",
+        "electromagnetic_boundary_anchor_ratio",
     },
     "electromagnetic_reference_sparse_assignments_gpu_provider": {
         "em_sparse_fallback_coefficient_ratio",
@@ -225,6 +231,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electromagnetic_source_region_coverage_ratio",
         "electromagnetic_source_material_alignment_ratio",
         "electromagnetic_source_region_energy_consistency_ratio",
+        "electromagnetic_assignment_coverage_ratio",
+        "electromagnetic_fallback_coefficient_ratio",
+        "electromagnetic_boundary_anchor_ratio",
     },
     "electromagnetic_reference_fallback_heavy_gpu_provider": {
         "em_fallback_heavy_fallback_coefficient_ratio",
@@ -243,6 +252,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electromagnetic_source_region_coverage_ratio",
         "electromagnetic_source_material_alignment_ratio",
         "electromagnetic_source_region_energy_consistency_ratio",
+        "electromagnetic_assignment_coverage_ratio",
+        "electromagnetic_fallback_coefficient_ratio",
+        "electromagnetic_boundary_anchor_ratio",
     },
     "electromagnetic_reference_overlap_interference_gpu_provider": {
         "em_overlap_source_interference_index",
@@ -258,6 +270,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electromagnetic_source_region_coverage_ratio",
         "electromagnetic_source_material_alignment_ratio",
         "electromagnetic_source_region_energy_consistency_ratio",
+        "electromagnetic_assignment_coverage_ratio",
+        "electromagnetic_fallback_coefficient_ratio",
+        "electromagnetic_boundary_anchor_ratio",
     },
     "electromagnetic_reference_boundary_kernel_gpu_provider": {
         "em_boundary_kernel_boundary_localization_ratio",
@@ -272,6 +287,9 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "electromagnetic_source_region_coverage_ratio",
         "electromagnetic_source_material_alignment_ratio",
         "electromagnetic_source_region_energy_consistency_ratio",
+        "electromagnetic_assignment_coverage_ratio",
+        "electromagnetic_fallback_coefficient_ratio",
+        "electromagnetic_boundary_anchor_ratio",
     },
     "cfd_steady_gpu_provider": {
         "cfd_reference_density_kg_per_m3",
