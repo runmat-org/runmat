@@ -3839,6 +3839,28 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PREP_SLO_COUNT_EXCEEDED", codes)
 
+    def test_prep_health_count_warn_threshold_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_PREP_WARN_ARTIFACT_COUNT"] = "2"
+        os.environ["RUNMAT_RELEASE_READINESS_PREP_FAIL_ARTIFACT_COUNT"] = "5"
+        result = evaluate_release_readiness(
+            latest,
+            rolling,
+            protected=True,
+            prep_health={"artifact_count": 3, "p95_age_seconds": 10.0},
+        )
+        warned = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "PREP_SLO_COUNT_EXCEEDED"
+            ),
+            None,
+        )
+        self.assertIsNotNone(warned)
+        self.assertEqual(warned["severity"], "fail")
+
     def test_prep_health_age_fails_protected(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
@@ -3853,6 +3875,28 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "fail")
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PREP_SLO_AGE_EXCEEDED", codes)
+
+    def test_prep_health_age_warn_threshold_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_PREP_WARN_P95_AGE_SECONDS"] = "10"
+        os.environ["RUNMAT_RELEASE_READINESS_PREP_FAIL_P95_AGE_SECONDS"] = "20"
+        result = evaluate_release_readiness(
+            latest,
+            rolling,
+            protected=True,
+            prep_health={"artifact_count": 1, "p95_age_seconds": 15.0},
+        )
+        warned = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "PREP_SLO_AGE_EXCEEDED"
+            ),
+            None,
+        )
+        self.assertIsNotNone(warned)
+        self.assertEqual(warned["severity"], "fail")
 
     def test_prep_reject_rate_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

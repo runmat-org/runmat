@@ -1756,7 +1756,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="PREP_SLO_COUNT_EXCEEDED",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail=(
                         f"prep artifact count {artifact_count} exceeds "
                         f"warn threshold {prep_warn_count}"
@@ -1779,7 +1779,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="PREP_SLO_AGE_EXCEEDED",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail=(
                         f"prep artifact p95 age {p95_age:.1f}s exceeds "
                         f"warn threshold {prep_warn_p95_age:.1f}s"
