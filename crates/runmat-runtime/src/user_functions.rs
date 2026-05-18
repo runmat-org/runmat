@@ -147,12 +147,10 @@ pub async fn try_call_semantic_descriptor(
     request: SemanticCallableRequest,
 ) -> Option<Result<Value, RuntimeError>> {
     let _kind = request.kind;
+    let _fallback_policy = request.fallback_policy;
     if let CallableIdentity::SemanticFunction(function) = request.identity {
         return try_call_semantic_function(function.0, &request.args, request.requested_outputs)
             .await;
-    }
-    if !request.fallback_policy.allows_runtime_name_resolution() {
-        return None;
     }
     let name = request.identity.display_name()?;
     try_call_semantic_function_by_name(&name, &request.args, request.requested_outputs).await

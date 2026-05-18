@@ -397,7 +397,7 @@ async fn execute_resolved_callable(
             }
             Err(semantic_unavailable_error(function.0, &metadata))
         }
-        other if fallback_policy.allows_runtime_name_resolution() => {
+        other => {
             let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
                 other.clone(),
                 fallback_policy,
@@ -410,6 +410,12 @@ async fn execute_resolved_callable(
             {
                 return result;
             }
+            if !fallback_policy.allows_runtime_name_resolution() {
+                let name = other
+                    .display_name()
+                    .unwrap_or_else(|| "<unnamed callable>".into());
+                return Err(undefined_name_error(&name, &metadata));
+            }
             let Some(name) = other.display_name() else {
                 return Err(undefined_name_error("<unnamed callable>", &metadata));
             };
@@ -417,12 +423,6 @@ async fn execute_resolved_callable(
                 return Err(undefined_name_error(&name, &metadata));
             }
             forward_named_fallback(name, args, requested_outputs, fallback_policy).await
-        }
-        other => {
-            let name = other
-                .display_name()
-                .unwrap_or_else(|| "<unnamed callable>".into());
-            Err(undefined_name_error(&name, &metadata))
         }
     }
 }
@@ -452,7 +452,7 @@ async fn try_execute_resolved_callable(
             }
             Ok(None)
         }
-        other if fallback_policy.allows_runtime_name_resolution() => {
+        other => {
             let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
                 other.clone(),
                 fallback_policy,
@@ -465,6 +465,9 @@ async fn try_execute_resolved_callable(
             {
                 return result.map(Some);
             }
+            if !fallback_policy.allows_runtime_name_resolution() {
+                return Ok(None);
+            }
             if matches!(other, CallableIdentity::ExternalName(_)) {
                 return Ok(None);
             }
@@ -475,7 +478,6 @@ async fn try_execute_resolved_callable(
                 .await
                 .map(Some)
         }
-        _ => Ok(None),
     }
 }
 
@@ -593,6 +595,51 @@ mod tests {
         );
         let err = block_on(execute_callable_descriptor(descriptor))
             .expect_err("external names should remain unresolved without semantic resolution");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
+    fn external_name_descriptor_external_boundary_can_use_semantic_resolver() {
+        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
+            Some(Arc::new(|name| (name == "remote_inc").then_some(7777))),
+        );
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 7777);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(3.0)) })
+            })),
+        );
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::ExternalName(QualifiedName(vec![SymbolName(
+                "remote_inc".to_string(),
+            )])),
+            Some("remote_inc".to_string()),
+            vec![Value::Num(2.0)],
+            1,
+            CallableFallbackPolicy::ExternalBoundary,
+            CallableCallKind::Direct,
+        );
+        let value = block_on(execute_callable_descriptor(descriptor))
+            .expect("external boundary call should resolve through semantic registry");
+        assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
+    fn external_name_descriptor_external_boundary_without_resolver_errors() {
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::ExternalName(QualifiedName(vec![SymbolName(
+                "definitely_missing".to_string(),
+            )])),
+            Some("definitely_missing".to_string()),
+            vec![Value::Num(2.0)],
+            1,
+            CallableFallbackPolicy::ExternalBoundary,
+            CallableCallKind::Direct,
+        );
+        let err = block_on(execute_callable_descriptor(descriptor))
+            .expect_err("missing external boundary call should remain unresolved");
         assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
     }
 
