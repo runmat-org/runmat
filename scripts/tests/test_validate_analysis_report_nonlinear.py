@@ -225,7 +225,15 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             },
             _record(
                 "thermo_gradient_benign_gpu_provider",
-                {"thermo_gradient_benign_spread_ratio", "thermo_gradient_benign_heterogeneity"},
+                {
+                    "thermo_gradient_benign_spread_ratio",
+                    "thermo_gradient_benign_heterogeneity",
+                    "thermo_gradient_benign_temporal_variation",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                    "transient_prepared_cache_hit_ratio",
+                    "transient_prepared_cache_misses",
+                },
             )
             | {
                 "thermo_coupling_enabled": True,
@@ -246,6 +254,10 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "thermo_gradient_pathological_spread_ratio",
                     "thermo_gradient_pathological_heterogeneity",
                     "thermo_gradient_pathological_temporal_variation",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                    "transient_prepared_cache_hit_ratio",
+                    "transient_prepared_cache_misses",
                 },
             )
             | {
@@ -769,6 +781,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "nonlinear_path_mix_spike_count"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_thermo_gradient_benign_temporal_variation_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "thermo_gradient_benign_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "thermo_gradient_benign_temporal_variation"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

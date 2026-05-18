@@ -75,6 +75,11 @@ REQUIRED_METRICS_BY_FIXTURE = {
     "thermo_gradient_benign_gpu_provider": {
         "thermo_gradient_benign_spread_ratio",
         "thermo_gradient_benign_heterogeneity",
+        "thermo_gradient_benign_temporal_variation",
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+        "transient_prepared_cache_hit_ratio",
+        "transient_prepared_cache_misses",
     },
     "electromagnetic_reference_homogeneous_gpu_provider": {
         "em_homogeneous_boundary_energy_ratio",
@@ -486,6 +491,10 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "thermo_gradient_pathological_spread_ratio",
         "thermo_gradient_pathological_heterogeneity",
         "thermo_gradient_pathological_temporal_variation",
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+        "transient_prepared_cache_hit_ratio",
+        "transient_prepared_cache_misses",
     },
     "thermo_shock_oscillatory_gpu_provider": {
         "thermo_shock_oscillatory_temporal_variation",
