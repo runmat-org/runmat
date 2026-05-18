@@ -523,6 +523,27 @@ class ReleaseReadinessTests(unittest.TestCase):
         ]
         self.assertTrue(matches)
 
+    def test_key_perf_speedup_low_reason_is_emitted_for_standalone_thermal_fixture(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "thermal_standalone_ramp_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 0.88,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO"] = "1.0"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        matches = [
+            reason
+            for reason in result["reasons"]
+            if reason["code"] == "KEY_PERF_SPEEDUP_LOW"
+            and "thermal_standalone_ramp_gpu_provider" in reason["detail"]
+        ]
+        self.assertTrue(matches)
+
     def test_key_perf_trend_slowdown_reason_is_emitted_for_contact_fixture(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
@@ -567,6 +588,8 @@ class ReleaseReadinessTests(unittest.TestCase):
         detail = matches[0]["detail"]
         self.assertIn("thermo_gradient_pathological_gpu_provider", detail)
         self.assertIn("electro_thermal_joule_pathological_gpu_provider", detail)
+        self.assertIn("thermo_mech_kickoff_gpu_provider", detail)
+        self.assertIn("thermal_standalone_ramp_gpu_provider", detail)
         self.assertNotIn(
             "nonlinear_plastic_hardening_reference_complex_gpu_provider", detail
         )
