@@ -3077,16 +3077,22 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
                 frequency_hz: 40.0,
                 conductivity_scale: 1.06,
                 dispersive_loss_scale: Some(0.02),
+                relative_permittivity_scale: Some(1.04),
+                relative_permeability_scale: Some(1.02),
             },
             ConductivityFrequencyPoint {
                 frequency_hz: 60.0,
                 conductivity_scale: 1.0,
                 dispersive_loss_scale: Some(0.03),
+                relative_permittivity_scale: Some(1.0),
+                relative_permeability_scale: Some(1.0),
             },
             ConductivityFrequencyPoint {
                 frequency_hz: 240.0,
                 conductivity_scale: 0.91,
                 dispersive_loss_scale: Some(0.04),
+                relative_permittivity_scale: Some(0.96),
+                relative_permeability_scale: Some(0.98),
             },
         ],
     });
@@ -3151,6 +3157,18 @@ fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
     assert!(em_diag
         .message
         .contains("conductivity_frequency_response_coverage_ratio="));
+    assert!(em_diag
+        .message
+        .contains("relative_permittivity_frequency_scale_mean="));
+    assert!(em_diag
+        .message
+        .contains("relative_permittivity_frequency_response_coverage_ratio="));
+    assert!(em_diag
+        .message
+        .contains("relative_permeability_frequency_scale_mean="));
+    assert!(em_diag
+        .message
+        .contains("relative_permeability_frequency_response_coverage_ratio="));
     assert!(em_diag.message.contains("dispersive_loss_scale_mean="));
     assert!(em_diag
         .message
@@ -3175,16 +3193,22 @@ fn analysis_run_electromagnetic_sweep_emits_resonance_metrics() {
                 frequency_hz: 40.0,
                 conductivity_scale: 1.06,
                 dispersive_loss_scale: Some(0.02),
+                relative_permittivity_scale: Some(1.04),
+                relative_permeability_scale: Some(1.02),
             },
             ConductivityFrequencyPoint {
                 frequency_hz: 60.0,
                 conductivity_scale: 1.0,
                 dispersive_loss_scale: Some(0.03),
+                relative_permittivity_scale: Some(1.0),
+                relative_permeability_scale: Some(1.0),
             },
             ConductivityFrequencyPoint {
                 frequency_hz: 240.0,
                 conductivity_scale: 0.91,
                 dispersive_loss_scale: Some(0.04),
+                relative_permittivity_scale: Some(0.96),
+                relative_permeability_scale: Some(0.98),
             },
         ],
     });

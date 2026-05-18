@@ -42,6 +42,10 @@ pub struct ConductivityFrequencyPoint {
     pub conductivity_scale: f64,
     #[serde(default)]
     pub dispersive_loss_scale: Option<f64>,
+    #[serde(default)]
+    pub relative_permittivity_scale: Option<f64>,
+    #[serde(default)]
+    pub relative_permeability_scale: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
