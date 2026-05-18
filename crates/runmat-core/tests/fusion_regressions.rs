@@ -184,6 +184,10 @@ fn compile_fusion_plan_exposes_semantic_planner_metadata() {
         snapshot.planner.mir_fusion_signal_count > 0,
         "expected non-zero MIR fusion signal count"
     );
+    assert!(
+        snapshot.planner.mir_fusion_candidate_group_count > 0,
+        "expected non-zero MIR fusion candidate group count"
+    );
 }
 
 #[test]
@@ -218,5 +222,9 @@ fn runtime_fusion_snapshot_exposes_semantic_planner_metadata() {
     assert!(
         snapshot.planner.mir_fusion_signal_count > 0,
         "expected non-zero runtime MIR fusion signal count"
+    );
+    assert!(
+        snapshot.planner.mir_fusion_candidate_group_count > 0,
+        "expected non-zero runtime MIR fusion candidate group count"
     );
 }

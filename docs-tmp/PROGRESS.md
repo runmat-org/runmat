@@ -17,6 +17,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 MIR fusion candidate-group metadata bridge
+  - Extended fusion planner metadata with `mir_fusion_candidate_group_count`.
+  - Added MIR-side fusion candidate-group estimator in core fusion snapshot plumbing:
+    - counts contiguous MIR statement runs with fusion-relevant semantic operations
+    - uses a minimum run length of 2 operations as candidate-group threshold
+  - Preview and runtime fusion snapshots now emit both:
+    - `mir_fusion_signal_count`
+    - `mir_fusion_candidate_group_count`
+  - Updated fusion regression tests to assert non-zero candidate-group counts for representative fusible scripts.
+  - Validation: `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core source_input_path_`, `cargo test -p runmat-config`, `cargo test -p runmat --lib`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic fusion-signal metadata bridge
   - `FusionPlannerMetadata` now carries `mir_fusion_signal_count` in addition to MIR local fact/diagnostic counts.
   - Added `semantic_fusion_signal_count(&MirAssembly)` bridge in core fusion snapshot plumbing that counts MIR-level fusion-relevant semantic operations (unary/binary ops and builtin calls with elementwise/reduction/linear-algebra/shape-transform semantic kinds).

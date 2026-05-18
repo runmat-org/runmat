@@ -100,6 +100,37 @@ pub(crate) fn semantic_fusion_signal_count(mir: &MirAssembly) -> usize {
     count
 }
 
+pub(crate) fn semantic_fusion_candidate_group_count(mir: &MirAssembly) -> usize {
+    let mut groups = 0usize;
+    for body in mir.bodies.values() {
+        for block in &body.blocks {
+            let mut run_len = 0usize;
+            for stmt in &block.statements {
+                let has_signal = match &stmt.kind {
+                    MirStmtKind::Assign { value, .. }
+                    | MirStmtKind::MultiAssign { value, .. }
+                    | MirStmtKind::Expr(value) => rvalue_has_fusion_signal(value),
+                    MirStmtKind::PlaceMutation(_)
+                    | MirStmtKind::WorkspaceEffect { .. }
+                    | MirStmtKind::EnvironmentEffect(_) => false,
+                };
+                if has_signal {
+                    run_len += 1;
+                    continue;
+                }
+                if run_len >= 2 {
+                    groups += 1;
+                }
+                run_len = 0;
+            }
+            if run_len >= 2 {
+                groups += 1;
+            }
+        }
+    }
+    groups
+}
+
 fn rvalue_has_fusion_signal(value: &MirRvalue) -> bool {
     match value {
         MirRvalue::Unary(_, _) | MirRvalue::Binary(_, _, _) => true,
