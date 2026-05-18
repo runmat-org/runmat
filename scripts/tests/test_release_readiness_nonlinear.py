@@ -272,6 +272,11 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REGION_CONTRAST_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_BOUNDARY_ANCHOR_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_DISPERSIVE_COUPLING_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REALIZATION_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO",
@@ -986,6 +991,16 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 0.60,
                     },
                     {"name": "em_homogeneous_boundary_energy_ratio", "observed": 0.20},
+                    {"name": "em_homogeneous_boundary_anchor_ratio", "observed": 0.2},
+                    {"name": "em_homogeneous_dispersive_coupling_ratio", "observed": 1.0e-6},
+                    {
+                        "name": "em_homogeneous_source_region_coverage_ratio",
+                        "observed": 0.3,
+                    },
+                    {
+                        "name": "em_homogeneous_source_material_alignment_ratio",
+                        "observed": 0.3,
+                    },
                     {
                         "name": "em_homogeneous_dispersive_phase_attenuation_mean",
                         "observed": 0.30,
@@ -1017,6 +1032,23 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 0.70,
                     },
                     {"name": "em_heterogeneous_region_contrast_index", "observed": 1.8},
+                    {"name": "em_heterogeneous_boundary_anchor_ratio", "observed": 0.25},
+                    {
+                        "name": "em_heterogeneous_dispersive_coupling_ratio",
+                        "observed": 2.0e-6,
+                    },
+                    {
+                        "name": "em_heterogeneous_source_realization_ratio",
+                        "observed": 0.3,
+                    },
+                    {
+                        "name": "em_heterogeneous_source_region_coverage_ratio",
+                        "observed": 0.3,
+                    },
+                    {
+                        "name": "em_heterogeneous_source_material_alignment_ratio",
+                        "observed": 0.3,
+                    },
                 ],
             }
         )
@@ -1059,6 +1091,22 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 0.90,
                     },
                     {
+                        "name": "em_homogeneous_boundary_anchor_ratio",
+                        "observed": 0.90,
+                    },
+                    {
+                        "name": "em_homogeneous_dispersive_coupling_ratio",
+                        "observed": 1.0e-9,
+                    },
+                    {
+                        "name": "em_homogeneous_source_region_coverage_ratio",
+                        "observed": 0.90,
+                    },
+                    {
+                        "name": "em_homogeneous_source_material_alignment_ratio",
+                        "observed": 0.90,
+                    },
+                    {
                         "name": "em_homogeneous_dispersive_phase_attenuation_mean",
                         "observed": 0.90,
                     },
@@ -1089,6 +1137,23 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 0.20,
                     },
                     {"name": "em_heterogeneous_region_contrast_index", "observed": 6.0},
+                    {"name": "em_heterogeneous_boundary_anchor_ratio", "observed": 0.90},
+                    {
+                        "name": "em_heterogeneous_dispersive_coupling_ratio",
+                        "observed": 1.0e-9,
+                    },
+                    {
+                        "name": "em_heterogeneous_source_realization_ratio",
+                        "observed": 0.90,
+                    },
+                    {
+                        "name": "em_heterogeneous_source_region_coverage_ratio",
+                        "observed": 0.90,
+                    },
+                    {
+                        "name": "em_heterogeneous_source_material_alignment_ratio",
+                        "observed": 0.90,
+                    },
                 ],
             }
         )
@@ -1125,6 +1190,21 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_REGION_CONTRAST_DROP_TREND_RATIO"
         ] = "1.5"
         os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_BOUNDARY_ANCHOR_DROP_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_DISPERSIVE_COUPLING_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REALIZATION_DROP_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO"
         ] = "1.5"
         os.environ[
@@ -1141,6 +1221,11 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_DISPERSIVE_LOSS_SCALE_TREND_WORSENING", codes)
         self.assertIn("EM_BOUNDARY_ENERGY_TREND_WORSENING", codes)
         self.assertIn("EM_REGION_CONTRAST_TREND_WORSENING", codes)
+        self.assertIn("EM_CORE_BOUNDARY_ANCHOR_TREND_WORSENING", codes)
+        self.assertIn("EM_CORE_DISPERSIVE_COUPLING_TREND_WORSENING", codes)
+        self.assertIn("EM_CORE_SOURCE_REALIZATION_TREND_WORSENING", codes)
+        self.assertIn("EM_CORE_SOURCE_REGION_COVERAGE_TREND_WORSENING", codes)
+        self.assertIn("EM_CORE_SOURCE_MATERIAL_ALIGNMENT_TREND_WORSENING", codes)
         self.assertIn("EM_DISPERSIVE_PHASE_ATTENUATION_TREND_WORSENING", codes)
         self.assertIn(
             "EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_WORSENING", codes
