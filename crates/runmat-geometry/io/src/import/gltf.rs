@@ -469,19 +469,21 @@ fn resolve_accessor_decode(
         )
     })?;
     let bytes = decode_data_uri(uri)?;
-    let declared_buffer_length = parse_usize(buffer.get("byteLength").and_then(Value::as_u64), 0)?;
-    let buffer_limit = if declared_buffer_length == 0 {
-        bytes.len()
-    } else {
-        if declared_buffer_length > bytes.len() {
-            return Err(GeometryImportError::ParseFailed(format!(
-                "GLTF buffer byteLength {} exceeds decoded data URI payload size {}",
-                declared_buffer_length,
-                bytes.len()
-            )));
-        }
-        declared_buffer_length
-    };
+    let declared_buffer_length =
+        parse_usize(buffer.get("byteLength").and_then(Value::as_u64), usize::MAX)?;
+    if declared_buffer_length == usize::MAX {
+        return Err(GeometryImportError::ParseFailed(
+            "GLTF accessor-backed payload requires buffer.byteLength".to_string(),
+        ));
+    }
+    if declared_buffer_length > bytes.len() {
+        return Err(GeometryImportError::ParseFailed(format!(
+            "GLTF buffer byteLength {} exceeds decoded data URI payload size {}",
+            declared_buffer_length,
+            bytes.len()
+        )));
+    }
+    let buffer_limit = declared_buffer_length;
 
     let buffer_view_end = buffer_view_offset.saturating_add(buffer_view_byte_length);
     if buffer_view_offset > buffer_limit || buffer_view_end > buffer_limit {

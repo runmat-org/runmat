@@ -283,3 +283,5 @@ Progress update (2026-05-17):
     `ply/v1` binary parsing now enforces exact supported property declarations for deterministic record decoding (vertex `property float x/y/z`; face `property list uchar int|uint vertex_indices`) and returns typed parse failures for extra/unsupported binary properties, preventing silent interpretation drift on non-supported binary layouts.
 108. [x] CAD GLTF accessor window-boundary guardrails hardened:
     accessor-backed `gltf/v1` decoding now enforces declared `buffer.byteLength`/`bufferView.byteLength` range containment (including accessor `byteOffset` checks) and returns typed parse failures for out-of-window accessor payloads, preventing implicit reads beyond declared GLTF buffer-view windows.
+109. [x] CAD GLTF accessor buffer declaration validation hardened:
+    accessor-backed `gltf/v1` decoding now requires explicit `buffer.byteLength` declarations for data-URI-backed buffers and emits typed parse failures when declarations are missing, reducing ambiguous CAD payload acceptance and tightening deterministic GLTF ingest validation.
