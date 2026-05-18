@@ -249,6 +249,8 @@ async fn call_runtime_method(
 }
 
 fn normalize_method_outputs(value: Value, requested_outputs: usize) -> Value {
+    // Preserve values for non-singleton requests (including zero). Higher layers
+    // decide whether statement-context calls become public/displayed results.
     if requested_outputs != 1 {
         return value;
     }
@@ -861,6 +863,12 @@ mod tests {
     fn normalize_method_outputs_preserves_output_list_for_multi_request() {
         let value = normalize_method_outputs(Value::OutputList(vec![Value::Num(7.0)]), 2);
         assert_eq!(value, Value::OutputList(vec![Value::Num(7.0)]));
+    }
+
+    #[test]
+    fn normalize_method_outputs_preserves_scalar_for_zero_request() {
+        let value = normalize_method_outputs(Value::Num(7.0), 0);
+        assert_eq!(value, Value::Num(7.0));
     }
 
     #[test]

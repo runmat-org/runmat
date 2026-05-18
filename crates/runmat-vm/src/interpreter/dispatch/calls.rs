@@ -29,6 +29,8 @@ pub enum UserCallHandling {
 }
 
 pub(crate) fn normalize_requested_outputs(value: Value, requested_outputs: usize) -> Value {
+    // Preserve values for non-singleton requests (including zero). Statement-level
+    // display/public-result policy is decided later by core/session plumbing.
     if requested_outputs != 1 {
         return value;
     }
@@ -386,6 +388,24 @@ pub fn handle_create_semantic_closure(
 ) -> Result<MethodHandling, RuntimeError> {
     call_closures::create_semantic_closure(stack, function, display_name, capture_count)?;
     Ok(MethodHandling::Completed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_requested_outputs;
+    use runmat_builtins::Value;
+
+    #[test]
+    fn normalize_requested_outputs_collapses_singleton_for_single_request() {
+        let value = normalize_requested_outputs(Value::OutputList(vec![Value::Num(7.0)]), 1);
+        assert_eq!(value, Value::Num(7.0));
+    }
+
+    #[test]
+    fn normalize_requested_outputs_preserves_value_for_zero_request() {
+        let value = normalize_requested_outputs(Value::Num(7.0), 0);
+        assert_eq!(value, Value::Num(7.0));
+    }
 }
 
 pub fn handle_load_static_property(
