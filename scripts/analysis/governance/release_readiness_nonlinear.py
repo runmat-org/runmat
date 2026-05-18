@@ -1517,6 +1517,8 @@ def evaluate_release_readiness(
         speedup_hist = {fixture: [] for fixture in key_perf_records}
         for report in rolling:
             for fixture, rec in records_for_fixtures(report, set(hist.keys())).items():
+                if rec.get("publishable") is not True:
+                    continue
                 value = rec.get("gpu_run_ms")
                 if isinstance(value, (int, float)) and value > 0:
                     hist[fixture].append(float(value))
