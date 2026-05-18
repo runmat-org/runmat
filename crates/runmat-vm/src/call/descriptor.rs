@@ -78,21 +78,6 @@ impl CallableDescriptor {
         }
     }
 
-    pub(crate) fn semantic(
-        function: FunctionId,
-        args: Vec<Value>,
-        requested_outputs: usize,
-    ) -> Self {
-        Self::semantic_inner(
-            function.0,
-            None,
-            CallableFallbackPolicy::None,
-            args,
-            requested_outputs,
-            CallableMetadata::default(),
-        )
-    }
-
     fn semantic_inner(
         function: usize,
         name: Option<String>,

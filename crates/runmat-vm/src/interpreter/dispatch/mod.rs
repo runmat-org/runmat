@@ -8,7 +8,6 @@ mod object;
 mod stack;
 
 use crate::bytecode::Instr;
-use crate::call::descriptor::{execute_callable_descriptor, CallableDescriptor};
 use crate::interpreter::debug;
 use crate::runtime::workspace::refresh_workspace_state;
 use runmat_builtins::Value;
@@ -481,19 +480,65 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::CallSemanticFunction(function, arg_count) => {
-            let args = crate::interpreter::stack::pop_args(stack, *arg_count)?;
-            let descriptor = CallableDescriptor::semantic(*function, args, 1);
-            let result = execute_callable_descriptor(descriptor).await?;
-            stack.push(calls::normalize_requested_outputs(result, 1));
+            match handle_user_function_call(
+                calls::UserCallContext {
+                    stack,
+                    identity: runmat_hir::CallableIdentity::SemanticFunction(*function),
+                    display_name: None,
+                    fallback_policy: runmat_hir::CallableFallbackPolicy::None,
+                    out_count: 1,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                *arg_count,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => {
-            let args = crate::interpreter::stack::pop_args(stack, *arg_count)?;
-            let descriptor = CallableDescriptor::semantic(*function, args, *out_count);
-            let result = execute_callable_descriptor(descriptor).await?;
-            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            match handle_user_function_call(
+                calls::UserCallContext {
+                    stack,
+                    identity: runmat_hir::CallableIdentity::SemanticFunction(*function),
+                    display_name: None,
+                    fallback_policy: runmat_hir::CallableFallbackPolicy::None,
+                    out_count: *out_count,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                *arg_count,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -587,9 +632,33 @@ pub async fn dispatch_instruction(
         }
         Instr::CallSemanticFunctionExpandMultiOutput(function, specs, out_count) => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
-            let descriptor = CallableDescriptor::semantic(*function, args, *out_count);
-            let result = execute_callable_descriptor(descriptor).await?;
-            stack.push(calls::normalize_requested_outputs(result, *out_count));
+            match handle_prepared_user_function_call(
+                calls::UserCallContext {
+                    stack,
+                    identity: runmat_hir::CallableIdentity::SemanticFunction(*function),
+                    display_name: None,
+                    fallback_policy: runmat_hir::CallableFallbackPolicy::None,
+                    out_count: *out_count,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
+                args,
+                refresh_workspace_state,
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::ContinueLoop,
+                    )))
+                }
+                UserCallHandling::Uncaught(err) => return Err(*err),
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

@@ -105,6 +105,27 @@ fn try_catch_catches_error_and_binds_identifier() {
 }
 
 #[test]
+fn try_catch_catches_error_from_semantic_function_call() {
+    let vars = execute_semantic_source(
+        r#"
+            x = 0;
+            try;
+                y = local_fail();
+                x = 99;
+            catch e;
+                x = 2;
+            end
+            function y = local_fail()
+                nosuchbuiltin(1);
+                y = 1;
+            end
+        "#,
+    )
+    .unwrap();
+    assert!(has_num(&vars, 2.0));
+}
+
+#[test]
 fn nested_break_and_continue_scopes() {
     let vars = execute_semantic_source(
         r#"
