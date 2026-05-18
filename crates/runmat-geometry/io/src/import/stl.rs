@@ -10,10 +10,19 @@ pub(super) fn import_stl(
     bytes: &[u8],
     options: GeometryImportOptions,
 ) -> Result<crate::report::ImportResult, GeometryImportError> {
-    let text = std::str::from_utf8(bytes).map_err(|_| {
-        GeometryImportError::ParseFailed("binary STL not supported yet".to_string())
-    })?;
+    if looks_like_binary_stl(bytes) {
+        return import_binary_stl(path, bytes, options);
+    }
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| GeometryImportError::ParseFailed("invalid ASCII STL payload".to_string()))?;
+    import_ascii_stl(path, text, options)
+}
 
+fn import_ascii_stl(
+    path: &str,
+    text: &str,
+    options: GeometryImportOptions,
+) -> Result<crate::report::ImportResult, GeometryImportError> {
     let mut diagnostics = Vec::<ImportDiagnostic>::new();
     let mut vertices: Vec<[f64; 3]> = Vec::new();
     let mut triangle_count = 0u64;
@@ -63,4 +72,97 @@ pub(super) fn import_stl(
         diagnostics.clone(),
     );
     Ok(build_result(asset, diagnostics))
+}
+
+fn import_binary_stl(
+    path: &str,
+    bytes: &[u8],
+    options: GeometryImportOptions,
+) -> Result<crate::report::ImportResult, GeometryImportError> {
+    if bytes.len() < 84 {
+        return Err(GeometryImportError::ParseFailed(
+            "binary STL payload is too small".to_string(),
+        ));
+    }
+    let triangle_count = u32::from_le_bytes([bytes[80], bytes[81], bytes[82], bytes[83]]) as usize;
+    let expected_size = 84usize + triangle_count.saturating_mul(50);
+    if bytes.len() != expected_size {
+        return Err(GeometryImportError::ParseFailed(format!(
+            "binary STL size mismatch: expected {} bytes from header triangle count {}, got {}",
+            expected_size,
+            triangle_count,
+            bytes.len()
+        )));
+    }
+
+    let mut diagnostics = Vec::<ImportDiagnostic>::new();
+    let mut vertices: Vec<[f64; 3]> = Vec::new();
+    let mut accepted_triangles = 0u64;
+
+    for index in 0..triangle_count {
+        let tri_offset = 84 + index * 50;
+        let v0 = read_binary_vertex(bytes, tri_offset + 12)?;
+        let v1 = read_binary_vertex(bytes, tri_offset + 24)?;
+        let v2 = read_binary_vertex(bytes, tri_offset + 36)?;
+        let tri = [v0, v1, v2];
+
+        capacity_guard((index + 1) as u64, &options)?;
+        if is_degenerate_triangle(&tri) {
+            diagnostics.push(ImportDiagnostic {
+                code: "GEOMETRY_NORMALIZE_DEGENERATE_REMOVED".to_string(),
+                severity: ImportDiagnosticSeverity::Warning,
+                message: "Removed degenerate binary STL triangle during import".to_string(),
+            });
+            continue;
+        }
+
+        vertices.extend_from_slice(&tri);
+        accepted_triangles += 1;
+    }
+
+    let asset = build_asset(
+        path,
+        "stl/v1",
+        options.units,
+        vertices.len() as u64,
+        accepted_triangles,
+        diagnostics.clone(),
+    );
+    Ok(build_result(asset, diagnostics))
+}
+
+fn looks_like_binary_stl(bytes: &[u8]) -> bool {
+    if bytes.len() < 84 {
+        return false;
+    }
+    let triangle_count = u32::from_le_bytes([bytes[80], bytes[81], bytes[82], bytes[83]]) as usize;
+    84usize + triangle_count.saturating_mul(50) == bytes.len()
+}
+
+fn read_binary_vertex(bytes: &[u8], offset: usize) -> Result<[f64; 3], GeometryImportError> {
+    let end = offset + 12;
+    if end > bytes.len() {
+        return Err(GeometryImportError::ParseFailed(
+            "binary STL vertex data out of bounds".to_string(),
+        ));
+    }
+    let x = f32::from_le_bytes([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+    ]) as f64;
+    let y = f32::from_le_bytes([
+        bytes[offset + 4],
+        bytes[offset + 5],
+        bytes[offset + 6],
+        bytes[offset + 7],
+    ]) as f64;
+    let z = f32::from_le_bytes([
+        bytes[offset + 8],
+        bytes[offset + 9],
+        bytes[offset + 10],
+        bytes[offset + 11],
+    ]) as f64;
+    Ok([x, y, z])
 }

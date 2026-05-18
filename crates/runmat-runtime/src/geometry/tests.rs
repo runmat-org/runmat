@@ -7,6 +7,22 @@ const SIMPLE_PLY: &str = "ply\nformat ascii 1.0\nelement vertex 4\nproperty floa
 const SIMPLE_GLTF: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0],[0,1,0]]\n          },\n          \"indices\": [0,1,2,0,2,3]\n        }\n      ]\n    }\n  ]\n}\n";
 const SIMPLE_GLB_HEADER: &[u8] = b"glTF\x02\x00\x00\x00";
 
+fn binary_triangle_stl() -> Vec<u8> {
+    let mut payload = vec![0u8; 84 + 50];
+    payload[80..84].copy_from_slice(&1u32.to_le_bytes());
+    let tri = 84usize;
+    payload[tri + 12..tri + 16].copy_from_slice(&(0.0f32).to_le_bytes());
+    payload[tri + 16..tri + 20].copy_from_slice(&(0.0f32).to_le_bytes());
+    payload[tri + 20..tri + 24].copy_from_slice(&(0.0f32).to_le_bytes());
+    payload[tri + 24..tri + 28].copy_from_slice(&(1.0f32).to_le_bytes());
+    payload[tri + 28..tri + 32].copy_from_slice(&(0.0f32).to_le_bytes());
+    payload[tri + 32..tri + 36].copy_from_slice(&(0.0f32).to_le_bytes());
+    payload[tri + 36..tri + 40].copy_from_slice(&(0.0f32).to_le_bytes());
+    payload[tri + 40..tri + 44].copy_from_slice(&(1.0f32).to_le_bytes());
+    payload[tri + 44..tri + 48].copy_from_slice(&(0.0f32).to_le_bytes());
+    payload
+}
+
 #[test]
 fn inspect_detects_stl() {
     let result =
@@ -54,6 +70,19 @@ fn inspect_and_load_step_work() {
         .collect::<Vec<_>>();
     assert!(codes.contains(&"CAD_METADATA_PRODUCT_COUNT"));
     assert!(codes.contains(&"CAD_METADATA_MATERIAL_EVIDENCE_COUNT"));
+}
+
+#[test]
+fn inspect_and_load_binary_stl_work_without_extension() {
+    let payload = binary_triangle_stl();
+    let inspect = geometry_inspect("/part.mesh", &payload).expect("inspect should work");
+    assert_eq!(inspect.format, "stl");
+
+    let asset = geometry_load("/part.mesh", &payload).expect("load should work");
+    assert_eq!(asset.source.importer_version, "stl/v1");
+    assert_eq!(asset.meshes.len(), 1);
+    assert_eq!(asset.meshes[0].element_count, 1);
+    assert_eq!(asset.meshes[0].vertex_count, 3);
 }
 
 #[test]

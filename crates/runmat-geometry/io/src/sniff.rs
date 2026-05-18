@@ -30,6 +30,9 @@ pub fn detect_geometry_format(path: &str, bytes: &[u8]) -> GeometryFormat {
     if header.starts_with("solid") {
         return GeometryFormat::Stl;
     }
+    if looks_like_binary_stl(bytes) {
+        return GeometryFormat::Stl;
+    }
     if header.contains("iso-10303-21") {
         return GeometryFormat::Step;
     }
@@ -63,6 +66,14 @@ fn looks_like_obj(header: &str) -> bool {
         }
     }
     vertex_lines >= 3 && face_lines >= 1
+}
+
+fn looks_like_binary_stl(bytes: &[u8]) -> bool {
+    if bytes.len() < 84 {
+        return false;
+    }
+    let triangle_count = u32::from_le_bytes([bytes[80], bytes[81], bytes[82], bytes[83]]) as usize;
+    84usize + triangle_count.saturating_mul(50) == bytes.len()
 }
 
 #[cfg(test)]
@@ -112,5 +123,13 @@ mod tests {
     fn gltf_detected_from_glb_magic_without_extension() {
         let format = detect_geometry_format("/model.dat", b"glTF\x02\x00\x00\x00");
         assert_eq!(format, GeometryFormat::Gltf);
+    }
+
+    #[test]
+    fn stl_detected_from_binary_layout_without_extension() {
+        let mut payload = vec![0u8; 84 + 50];
+        payload[80..84].copy_from_slice(&1u32.to_le_bytes());
+        let format = detect_geometry_format("/model.dat", &payload);
+        assert_eq!(format, GeometryFormat::Stl);
     }
 }

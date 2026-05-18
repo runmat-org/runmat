@@ -38,6 +38,22 @@ mod tests {
         asset.meshes.first().expect("mesh descriptor must exist")
     }
 
+    fn binary_triangle_stl() -> Vec<u8> {
+        let mut payload = vec![0u8; 84 + 50];
+        payload[80..84].copy_from_slice(&1u32.to_le_bytes());
+        let tri = 84usize;
+        payload[tri + 12..tri + 16].copy_from_slice(&(0.0f32).to_le_bytes());
+        payload[tri + 16..tri + 20].copy_from_slice(&(0.0f32).to_le_bytes());
+        payload[tri + 20..tri + 24].copy_from_slice(&(0.0f32).to_le_bytes());
+        payload[tri + 24..tri + 28].copy_from_slice(&(1.0f32).to_le_bytes());
+        payload[tri + 28..tri + 32].copy_from_slice(&(0.0f32).to_le_bytes());
+        payload[tri + 32..tri + 36].copy_from_slice(&(0.0f32).to_le_bytes());
+        payload[tri + 36..tri + 40].copy_from_slice(&(0.0f32).to_le_bytes());
+        payload[tri + 40..tri + 44].copy_from_slice(&(1.0f32).to_le_bytes());
+        payload[tri + 44..tri + 48].copy_from_slice(&(0.0f32).to_le_bytes());
+        payload
+    }
+
     #[test]
     fn stl_import_happy_path() {
         let result = import(
@@ -45,6 +61,16 @@ mod tests {
             TRIANGLE_STL.as_bytes(),
             GeometryImportOptions::default(),
         );
+        let mesh = single_mesh(&result.asset);
+        assert_eq!(mesh.kind, MeshKind::Surface);
+        assert_eq!(mesh.element_count, 1);
+        assert_eq!(mesh.vertex_count, 3);
+    }
+
+    #[test]
+    fn binary_stl_import_happy_path() {
+        let payload = binary_triangle_stl();
+        let result = import("/model.stl", &payload, GeometryImportOptions::default());
         let mesh = single_mesh(&result.asset);
         assert_eq!(mesh.kind, MeshKind::Surface);
         assert_eq!(mesh.element_count, 1);
