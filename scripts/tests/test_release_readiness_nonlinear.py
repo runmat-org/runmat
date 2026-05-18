@@ -326,6 +326,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM_TREND_RATIO",
@@ -359,6 +360,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_ATTENUATION_MEAN",
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_SPREAD_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_IMAG_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_PENALTY_ANCHOR_RATIO",
@@ -628,6 +630,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 0.6,
                     },
                     {
+                        "name": "em_homogeneous_dispersive_phase_attenuation_spread_ratio",
+                        "observed": 1.8,
+                    },
+                    {
                         "name": "em_homogeneous_boundary_anchor_ratio",
                         "observed": 0.45,
                     },
@@ -668,6 +674,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                     {
                         "name": "em_heterogeneous_dispersive_loss_scale_mean",
                         "observed": 1.0,
+                    },
+                    {
+                        "name": "em_heterogeneous_dispersive_phase_attenuation_spread_ratio",
+                        "observed": 2.4,
                     },
                     {"name": "em_heterogeneous_region_contrast_index", "observed": 1.0},
                     {
@@ -843,6 +853,9 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MIN_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO"
         ] = "0.9"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_SPREAD_RATIO"] = (
+            "1.2"
+        )
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_COUPLING_RATIO"] = "1e-7"
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM"
@@ -934,6 +947,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_BOUNDARY_ENERGY_RATIO_LOW", codes)
         self.assertIn("EM_REGION_CONTRAST_INDEX_LOW", codes)
         self.assertIn("EM_DISPERSIVE_PHASE_ATTENUATION_MEAN_LOW", codes)
+        self.assertIn("EM_DISPERSIVE_PHASE_ATTENUATION_SPREAD_RATIO_HIGH", codes)
         self.assertIn("EM_BOUNDARY_ANCHOR_RATIO_LOW", codes)
         self.assertIn("EM_DISPERSIVE_COUPLING_RATIO_HIGH", codes)
         self.assertIn("EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO_LOW", codes)
@@ -1130,6 +1144,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 0.30,
                     },
                     {
+                        "name": "em_homogeneous_dispersive_phase_attenuation_spread_ratio",
+                        "observed": 2.0,
+                    },
+                    {
                         "name": "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
                         "observed": 0.25,
                     },
@@ -1154,6 +1172,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                     {
                         "name": "em_heterogeneous_dispersive_loss_scale_mean",
                         "observed": 0.70,
+                    },
+                    {
+                        "name": "em_heterogeneous_dispersive_phase_attenuation_spread_ratio",
+                        "observed": 2.2,
                     },
                     {"name": "em_heterogeneous_region_contrast_index", "observed": 1.8},
                     {"name": "em_heterogeneous_boundary_anchor_ratio", "observed": 0.25},
@@ -1235,6 +1257,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 0.90,
                     },
                     {
+                        "name": "em_homogeneous_dispersive_phase_attenuation_spread_ratio",
+                        "observed": 1.0,
+                    },
+                    {
                         "name": "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
                         "observed": 0.80,
                     },
@@ -1259,6 +1285,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                     {
                         "name": "em_heterogeneous_dispersive_loss_scale_mean",
                         "observed": 0.20,
+                    },
+                    {
+                        "name": "em_heterogeneous_dispersive_phase_attenuation_spread_ratio",
+                        "observed": 1.1,
                     },
                     {"name": "em_heterogeneous_region_contrast_index", "observed": 6.0},
                     {"name": "em_heterogeneous_boundary_anchor_ratio", "observed": 0.90},
@@ -1332,6 +1362,9 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO"
         ] = "1.5"
         os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_SPREAD_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO"
         ] = "1.5"
         os.environ[
@@ -1351,6 +1384,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_CORE_SOURCE_REGION_COVERAGE_TREND_WORSENING", codes)
         self.assertIn("EM_CORE_SOURCE_MATERIAL_ALIGNMENT_TREND_WORSENING", codes)
         self.assertIn("EM_DISPERSIVE_PHASE_ATTENUATION_TREND_WORSENING", codes)
+        self.assertIn("EM_DISPERSIVE_PHASE_ATTENUATION_SPREAD_TREND_WORSENING", codes)
         self.assertIn(
             "EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_WORSENING", codes
         )
