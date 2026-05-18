@@ -8,6 +8,8 @@ pub struct MirIndexing {
     pub plan: MirIndexPlan,
     pub components: Vec<MirIndexComponent>,
     pub result_context: IndexResultContext,
+    #[serde(default)]
+    pub cell_expand_all: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

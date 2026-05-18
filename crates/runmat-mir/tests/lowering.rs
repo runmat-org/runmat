@@ -1827,6 +1827,16 @@ fn brace_index_plan_is_cell() {
     let mir = lower_mir("function y = f(c); y = c{1}; end");
     let body = mir.bodies.values().next().expect("body");
     assert_eq!(first_indexing(body).plan, MirIndexPlan::Cell);
+    assert!(!first_indexing(body).cell_expand_all);
+}
+
+#[test]
+fn brace_all_colon_sets_cell_expand_all_intent() {
+    let mir = lower_mir("function y = f(c); y = c{:}; end");
+    let body = mir.bodies.values().next().expect("body");
+    let indexing = first_indexing(body);
+    assert_eq!(indexing.plan, MirIndexPlan::Cell);
+    assert!(indexing.cell_expand_all);
 }
 
 #[test]

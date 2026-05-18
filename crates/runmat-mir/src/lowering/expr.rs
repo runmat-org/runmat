@@ -270,6 +270,11 @@ pub(crate) fn lower_indexing_with_replacements(
             })
             .collect::<Result<_, _>>()?,
         result_context: indexing.result_context.clone(),
+        cell_expand_all: indexing.kind == IndexKind::Brace
+            && indexing
+                .components
+                .iter()
+                .all(|component| matches!(component, IndexComponent::Colon)),
     })
 }
 

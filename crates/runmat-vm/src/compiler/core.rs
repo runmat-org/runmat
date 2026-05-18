@@ -1032,37 +1032,38 @@ impl Compiler {
         &mut self,
         indexing: &MirIndexing,
     ) -> Result<(usize, bool, Vec<(usize, isize)>), CompileError> {
-        let expand_all = indexing
-            .components
-            .iter()
-            .all(|component| matches!(component, MirIndexComponent::Colon));
+        let expand_all = indexing.cell_expand_all;
         let mut index_count = 0usize;
-        let mut saw_colon = false;
-        let mut saw_non_colon = false;
         let mut end_offsets = Vec::new();
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Colon => {
-                    saw_colon = true;
                     if !expand_all {
                         self.emit(Instr::LoadString(":".to_string()));
                         index_count += 1;
                     }
                 }
                 MirIndexComponent::Expr(operand) => {
-                    saw_non_colon = true;
                     self.compile_mir_operand(operand)?;
                     index_count += 1;
                 }
                 MirIndexComponent::End { offset, .. } => {
-                    saw_non_colon = true;
                     self.emit(Instr::LoadConst(encode_cell_end_offset(*offset)));
                     end_offsets.push((index_count, *offset));
                     index_count += 1;
                 }
             }
         }
-        let expand_all = expand_all && saw_colon && !saw_non_colon;
+        if expand_all
+            && indexing
+                .components
+                .iter()
+                .any(|component| !matches!(component, MirIndexComponent::Colon))
+        {
+            return Err(self.compile_error(
+                "MIR cell expansion invariant violated: expand_all requires all-colon selectors",
+            ));
+        }
         Ok((index_count, expand_all, end_offsets))
     }
 
