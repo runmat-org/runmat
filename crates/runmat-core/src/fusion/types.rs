@@ -12,6 +12,7 @@ pub struct FusionPlannerMetadata {
     pub source: String,
     pub mir_local_fact_count: usize,
     pub mir_diagnostic_count: usize,
+    pub mir_fusion_signal_count: usize,
 }
 
 impl Default for FusionPlannerMetadata {
@@ -20,6 +21,7 @@ impl Default for FusionPlannerMetadata {
             source: "bytecode-accel-graph".to_string(),
             mir_local_fact_count: 0,
             mir_diagnostic_count: 0,
+            mir_fusion_signal_count: 0,
         }
     }
 }

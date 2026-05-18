@@ -377,6 +377,7 @@ impl RunMatSession {
                     source: "semantic-mir-analysis+bytecode-accel-graph-runtime".to_string(),
                     mir_local_fact_count: analysis.mir_locals.len(),
                     mir_diagnostic_count: analysis.diagnostics.len(),
+                    mir_fusion_signal_count: crate::fusion::semantic_fusion_signal_count(&mir),
                 }),
             )
         } else {
