@@ -475,7 +475,8 @@ fn end_expression_user_function_call_uses_semantic_identity() {
             runmat_vm::Instr::IndexSliceExpr { end_numeric_exprs, .. }
                 if end_numeric_exprs.iter().any(|(_, expr)| matches!(
                     expr,
-                    runmat_vm::EndExpr::SemanticCall(_, name, _) if name == "pick"
+                    runmat_vm::EndExpr::ResolvedCall { display_name, .. }
+                        if display_name.as_deref() == Some("pick")
                 ))
         )),
         "end-expression user calls should carry semantic function identity"
@@ -502,7 +503,8 @@ fn end_expression_session_function_call_uses_semantic_identity() {
             runmat_vm::Instr::IndexSliceExpr { end_numeric_exprs, .. }
                 if end_numeric_exprs.iter().any(|(_, expr)| matches!(
                     expr,
-                    runmat_vm::EndExpr::SemanticCall(_, name, _) if name == "pick"
+                    runmat_vm::EndExpr::ResolvedCall { display_name, .. }
+                        if display_name.as_deref() == Some("pick")
                 ))
         )),
         "session end-expression user calls should carry semantic function identity"
@@ -1023,7 +1025,8 @@ fn elementwise_logical_ops_use_semantic_vm() {
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CallBuiltin(name, _) if matches!(name.as_str(), "and" | "or" | "not")
+            runmat_vm::Instr::CallBuiltinMulti(name, _, _)
+                if matches!(name.as_str(), "and" | "or" | "not")
         )),
         "semantic logical ops should not lower through string-keyed builtin calls"
     );
@@ -1385,13 +1388,13 @@ fn feval_anonymous_handle_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::CallFeval(1))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(1, 1))),
         "feval should lower from dynamic MIR callee to the VM feval ABI instruction"
     );
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CallBuiltin(name, _) if name == "feval"
+            runmat_vm::Instr::CallBuiltinMulti(name, _, _) if name == "feval"
         )),
         "feval should not lower as a string-keyed builtin call"
     );
@@ -1445,7 +1448,7 @@ fn dynamic_function_handle_call_uses_semantic_vm() {
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CallBuiltin(name, 1) if name == "make_handle"
+            runmat_vm::Instr::CallBuiltinMulti(name, 1, _) if name == "make_handle"
         )),
         "function handle literals should not lower through the internal make_handle builtin"
     );
@@ -1687,7 +1690,12 @@ fn dotted_member_index_call_uses_semantic_vm() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CallMethodOrMemberIndex(name, 1) if name == "a"
+            runmat_vm::Instr::CallMethodOrMemberIndexMulti {
+                display_name,
+                arg_count: 1,
+                out_count: 1,
+                ..
+            } if display_name.as_deref() == Some("a")
         )),
         "dotted member index call should lower to typed method/member-index bytecode"
     );
@@ -1713,7 +1721,8 @@ fn dotted_member_index_expansion_uses_semantic_vm() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CallMethodOrMemberIndexExpandMulti(name, _) if name == "a"
+            runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { display_name, out_count: 1, .. }
+                if display_name.as_deref() == Some("a")
         )),
         "expanded dotted member index call should lower to typed expansion bytecode"
     );
@@ -1741,13 +1750,13 @@ fn feval_with_cell_expansion_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMulti(_))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMultiOutput(_, 1))),
         "expanded feval should use the VM feval ABI instruction"
     );
     assert!(
         !prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CallBuiltin(name, _) if name == "feval"
+            runmat_vm::Instr::CallBuiltinMulti(name, _, _) if name == "feval"
         )),
         "expanded feval should not lower as a string-keyed builtin call"
     );
@@ -1775,7 +1784,7 @@ fn feval_with_2d_cell_expansion_is_column_major_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMulti(_))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMultiOutput(_, 1))),
         "2d expanded feval should use the VM feval ABI instruction"
     );
 
@@ -2047,7 +2056,7 @@ fn direct_session_function_cell_expansion_uses_semantic_registry() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CallSemanticFunctionExpandMulti(_, _)
+            runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, _, 1)
         )),
         "direct expansion call should lower to semantic function bytecode"
     );
@@ -2108,10 +2117,11 @@ fn session_function_handle_uses_semantic_registry() {
         "function handle target should be present in semantic registry"
     );
     assert!(
-        prepared.bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::CreateSemanticFunctionHandle(_, name) if name == "inc"
-        )),
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::CreateSemanticFunctionHandle(_, _))),
         "session function handles should carry semantic identity"
     );
     assert!(
@@ -2214,7 +2224,7 @@ fn session_function_handle_feval_expansion_uses_semantic_registry() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMulti(_))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMultiOutput(_, 1))),
         "function handle feval expansion call should use typed feval expansion bytecode"
     );
     let outcome = block_on(session.execute_outcome("f = @add2; C = {2, 3}; y = feval(f, C{:});"))
@@ -2246,7 +2256,7 @@ fn session_feval_string_expansion_uses_semantic_registry() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMulti(_))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMultiOutput(_, 1))),
         "session feval string expansion call should use typed feval expansion bytecode"
     );
     let outcome = block_on(session.execute_outcome("C = {2, 3}; y = feval('add2', C{:});"))

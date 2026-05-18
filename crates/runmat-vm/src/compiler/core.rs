@@ -1209,7 +1209,11 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         match indexing.kind {
             IndexKind::Paren => {
-                if self.indexing_needs_slice_expr(indexing) {
+                if self.indexing_uses_scalar_index_opcode(indexing) {
+                    self.compile_mir_scalar_index_components(indexing)?;
+                    self.compile_mir_rvalue(value)?;
+                    self.emit(Instr::StoreIndex(indexing.components.len()));
+                } else if self.indexing_needs_slice_expr(indexing) {
                     let components = self.compile_mir_slice_expr_components(
                         indexing,
                         MirRangeParamOrder::AfterNumeric,
@@ -1332,7 +1336,11 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         match indexing.kind {
             IndexKind::Paren => {
-                if self.indexing_needs_slice_expr(indexing) {
+                if self.indexing_uses_scalar_index_opcode(indexing) {
+                    self.compile_mir_scalar_index_components(indexing)?;
+                    self.emit(Instr::LoadVar(tmp));
+                    self.emit(Instr::StoreIndex(indexing.components.len()));
+                } else if self.indexing_needs_slice_expr(indexing) {
                     let components = self.compile_mir_slice_expr_components(
                         indexing,
                         MirRangeParamOrder::AfterNumeric,
@@ -1962,6 +1970,11 @@ impl Compiler {
     }
 
     fn compile_mir_slice_index(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {
+        if self.indexing_uses_scalar_index_opcode(indexing) {
+            self.compile_mir_scalar_index_components(indexing)?;
+            self.emit(Instr::Index(indexing.components.len()));
+            return Ok(());
+        }
         if self.indexing_needs_slice_expr(indexing) {
             let components = self
                 .compile_mir_slice_expr_components(indexing, MirRangeParamOrder::BeforeNumeric)?;
@@ -1988,6 +2001,52 @@ impl Compiler {
             end_mask,
         ));
         Ok(())
+    }
+
+    fn compile_mir_scalar_index_components(
+        &mut self,
+        indexing: &MirIndexing,
+    ) -> Result<(), CompileError> {
+        for component in &indexing.components {
+            let MirIndexComponent::Expr(operand) = component else {
+                return Err(
+                    self.compile_error("scalar index lowering expects expression selectors only")
+                );
+            };
+            self.compile_mir_operand(operand)?;
+        }
+        Ok(())
+    }
+
+    fn indexing_uses_scalar_index_opcode(&self, indexing: &MirIndexing) -> bool {
+        indexing.components.iter().all(|component| {
+            matches!(
+                component,
+                MirIndexComponent::Expr(operand)
+                    if self.mir_operand_is_definitely_scalar_index(operand)
+            )
+        })
+    }
+
+    fn mir_operand_is_definitely_scalar_index(&self, operand: &MirOperand) -> bool {
+        match operand {
+            MirOperand::Constant(MirConstant::Number(_))
+            | MirOperand::Constant(MirConstant::Bool(_)) => true,
+            MirOperand::Local(local) => self
+                .mir_local_rvalue(*local)
+                .is_some_and(|rvalue| self.mir_rvalue_is_definitely_scalar_index(&rvalue)),
+            _ => false,
+        }
+    }
+
+    fn mir_rvalue_is_definitely_scalar_index(&self, rvalue: &MirRvalue) -> bool {
+        match rvalue {
+            MirRvalue::Use(operand) => self.mir_operand_is_definitely_scalar_index(operand),
+            MirRvalue::Unary(OperatorKind::UnaryPlus | OperatorKind::UnaryMinus, operand) => {
+                self.mir_operand_is_definitely_scalar_index(operand)
+            }
+            _ => false,
+        }
     }
 
     fn indexing_needs_slice_expr(&self, indexing: &MirIndexing) -> bool {
