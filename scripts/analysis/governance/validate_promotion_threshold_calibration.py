@@ -72,6 +72,19 @@ def main() -> int:
             value = entry.get(key)
             if not isinstance(value, int) or value < 0:
                 errors.append(f"{profile}.{key} must be non-negative int")
+        rolling_count = entry.get("rolling_report_count")
+        trusted_rolling_count = entry.get("rolling_trusted_report_count")
+        if not isinstance(rolling_count, int) or rolling_count < 0:
+            errors.append(f"{profile}.rolling_report_count must be non-negative int")
+        if not isinstance(trusted_rolling_count, int) or trusted_rolling_count < 0:
+            errors.append(
+                f"{profile}.rolling_trusted_report_count must be non-negative int"
+            )
+        elif isinstance(rolling_count, int) and trusted_rolling_count > rolling_count:
+            errors.append(
+                f"{profile}.rolling_trusted_report_count must be less than or equal to "
+                f"{profile}.rolling_report_count"
+            )
 
     source_count = payload.get("source_report_count")
     if not isinstance(source_count, int) or source_count < 0:
@@ -79,6 +92,13 @@ def main() -> int:
     elif source_count < min_source_reports:
         errors.append(
             f"source_report_count {source_count} below minimum {min_source_reports}"
+        )
+    source_trusted_count = payload.get("source_trusted_report_count")
+    if not isinstance(source_trusted_count, int) or source_trusted_count < 0:
+        errors.append("source_trusted_report_count must be non-negative int")
+    elif isinstance(source_count, int) and source_trusted_count > source_count:
+        errors.append(
+            "source_trusted_report_count must be less than or equal to source_report_count"
         )
 
     generated_at_raw = payload.get("generated_at")

@@ -30,10 +30,18 @@ def report_records(report: dict):
     return out
 
 
+def report_is_trusted(report: dict) -> bool:
+    if report.get("passed", True) is not True:
+        return False
+    return report.get("publishable") is None or report.get("publishable") is True
+
+
 def blocker_count(report: dict, fixture_ids: set[str], field: str) -> int:
     values = []
     for rec in report_records(report):
         if rec.get("fixture_id") not in fixture_ids:
+            continue
+        if rec.get("publishable") is False:
             continue
         raw = rec.get(field)
         if isinstance(raw, (int, float)):
@@ -65,7 +73,12 @@ def p90_positive_int(values: list[int]) -> int:
     return int(ordered[idx])
 
 
-def calibrate_profile(rolling_reports: list[dict], static_budget: int, static_regression: int):
+def calibrate_profile(
+    rolling_reports: list[dict],
+    static_budget: int,
+    static_regression: int,
+    rolling_report_count: int,
+):
     plastic = [
         blocker_count(report, PLASTIC_REFERENCE_FIXTURES, "plastic_nonlinear_severity")
         for report in rolling_reports
@@ -87,7 +100,8 @@ def calibrate_profile(rolling_reports: list[dict], static_budget: int, static_re
         "plastic_promotion_max_blockers": int(plastic_budget),
         "contact_promotion_max_blockers": int(contact_budget),
         "promotion_max_blocker_regression": int(regression),
-        "rolling_report_count": len(rolling_reports),
+        "rolling_report_count": int(rolling_report_count),
+        "rolling_trusted_report_count": len(rolling_reports),
     }
 
 
@@ -109,10 +123,26 @@ def main() -> int:
             if isinstance(parsed, dict):
                 reports.append(parsed)
 
+    trusted_reports = [report for report in reports if report_is_trusted(report)]
     by_profile = {
-        "release": calibrate_profile(reports, static_budget=0, static_regression=0),
-        "development": calibrate_profile(reports, static_budget=1, static_regression=0),
-        "feature": calibrate_profile(reports, static_budget=2, static_regression=1),
+        "release": calibrate_profile(
+            trusted_reports,
+            static_budget=0,
+            static_regression=0,
+            rolling_report_count=len(reports),
+        ),
+        "development": calibrate_profile(
+            trusted_reports,
+            static_budget=1,
+            static_regression=0,
+            rolling_report_count=len(reports),
+        ),
+        "feature": calibrate_profile(
+            trusted_reports,
+            static_budget=2,
+            static_regression=1,
+            rolling_report_count=len(reports),
+        ),
     }
 
     payload = {
@@ -120,6 +150,7 @@ def main() -> int:
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "rationale": "rolling_median_reference_fixtures",
         "source_report_count": len(reports),
+        "source_trusted_report_count": len(trusted_reports),
         "cadence_days": {"release": 7, "development": 14, "feature": 30},
         "max_missed_cycles_allowed": 1,
         "by_profile": by_profile,
