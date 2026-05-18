@@ -188,8 +188,25 @@ where
 }
 
 pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Value>, RuntimeError> {
+    fn is_colon_selector(value: &Value) -> bool {
+        matches!(value, Value::String(text) if text == ":")
+            || matches!(value, Value::CharArray(chars) if chars.to_string() == ":")
+    }
+
+    fn scalar_index(value: &Value) -> Result<usize, RuntimeError> {
+        match value {
+            Value::Num(n) => Ok(*n as usize),
+            Value::Int(i) => Ok(i.to_i64() as usize),
+            _ => {
+                let n: f64 = value.try_into()?;
+                Ok(n as usize)
+            }
+        }
+    }
+
     match indices.len() {
         1 => match &indices[0] {
+            value if is_colon_selector(value) => expand_all_cell_values(ca),
             Value::Num(n) => {
                 if let Some(idx) = resolve_cell_end_relative_index(*n, ca.data.len())? {
                     return Ok(vec![index_cell_value(ca, &[idx])?]);
@@ -205,9 +222,30 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
             _ => Err(mex("CellIndexType", "Unsupported cell index type")),
         },
         2 => {
-            let r: f64 = (&indices[0]).try_into()?;
-            let c: f64 = (&indices[1]).try_into()?;
-            Ok(vec![index_cell_value(ca, &[r as usize, c as usize])?])
+            let row_colon = is_colon_selector(&indices[0]);
+            let col_colon = is_colon_selector(&indices[1]);
+            if row_colon && col_colon {
+                return expand_all_cell_values(ca);
+            }
+            if row_colon {
+                let c = scalar_index(&indices[1])?;
+                let mut values = Vec::with_capacity(ca.rows);
+                for r in 1..=ca.rows {
+                    values.push(index_cell_value(ca, &[r, c])?);
+                }
+                return Ok(values);
+            }
+            if col_colon {
+                let r = scalar_index(&indices[0])?;
+                let mut values = Vec::with_capacity(ca.cols);
+                for c in 1..=ca.cols {
+                    values.push(index_cell_value(ca, &[r, c])?);
+                }
+                return Ok(values);
+            }
+            let r = scalar_index(&indices[0])?;
+            let c = scalar_index(&indices[1])?;
+            Ok(vec![index_cell_value(ca, &[r, c])?])
         }
         _ => Err(mex("CellIndexType", "Unsupported cell index type")),
     }

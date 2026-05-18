@@ -600,6 +600,34 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_supports_mixed_cell_colon_expansion() {
+        let ast = runmat_parser::parse("c = {1,2;3,4}; [a,b] = c{:,2}; z = a + b;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let z_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "z")
+            .expect("z export");
+
+        assert!(bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            Instr::IndexCellExpand {
+                num_indices,
+                out_count,
+                ..
+            } if *num_indices == 2 && *out_count == 2
+        )));
+
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[z_export.slot.0], Value::Num(6.0));
+    }
+
+    #[test]
     fn primary_compile_3d_slice_roundtrip_uses_slice_expr_paths() {
         let ast = runmat_parser::parse(
             r#"

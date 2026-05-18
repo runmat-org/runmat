@@ -1032,13 +1032,23 @@ impl Compiler {
         &mut self,
         indexing: &MirIndexing,
     ) -> Result<(usize, bool, Vec<(usize, isize)>), CompileError> {
+        let expand_all = indexing
+            .components
+            .iter()
+            .all(|component| matches!(component, MirIndexComponent::Colon));
         let mut index_count = 0usize;
         let mut saw_colon = false;
         let mut saw_non_colon = false;
         let mut end_offsets = Vec::new();
         for component in &indexing.components {
             match component {
-                MirIndexComponent::Colon => saw_colon = true,
+                MirIndexComponent::Colon => {
+                    saw_colon = true;
+                    if !expand_all {
+                        self.emit(Instr::LoadString(":".to_string()));
+                        index_count += 1;
+                    }
+                }
                 MirIndexComponent::Expr(operand) => {
                     saw_non_colon = true;
                     self.compile_mir_operand(operand)?;
@@ -1052,12 +1062,7 @@ impl Compiler {
                 }
             }
         }
-        if saw_colon && saw_non_colon {
-            return Err(self.compile_error(
-                "MIR cell expansion lowering does not yet support mixing colon selectors with explicit cell indices",
-            ));
-        }
-        let expand_all = saw_colon;
+        let expand_all = expand_all && saw_colon && !saw_non_colon;
         Ok((index_count, expand_all, end_offsets))
     }
 
