@@ -6322,6 +6322,39 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PLASTIC_METRICS_MISSING", codes)
 
+    def test_plastic_metrics_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "PLASTIC_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
+    def test_plastic_load_path_metrics_missing_is_fail_on_protected_branches(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.2,
+        )
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "PLASTIC_LOAD_PATH_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
     def test_plastic_breach_rate_high_reason_is_emitted(self):
         latest = report(
             passed=True,
@@ -6504,6 +6537,39 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("CONTACT_METRICS_MISSING", codes)
 
+    def test_contact_metrics_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "CONTACT_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
+    def test_contact_load_path_metrics_missing_is_fail_on_protected_branches(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            contact_nonlinear_severity=0.2,
+        )
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "CONTACT_LOAD_PATH_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
     def test_contact_breach_rate_high_reason_is_emitted(self):
         latest = report(
             passed=True,
@@ -6570,6 +6636,40 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("CONTACT_REFERENCE_TREND_WORSENING", codes)
+
+    def test_reference_severity_assertion_missing_is_fail_on_protected_branches(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.2,
+            plastic_load_realization_ratio=0.9,
+            plastic_load_amplification_ratio=1.0,
+            contact_nonlinear_severity=0.2,
+            contact_load_realization_ratio=0.9,
+            contact_load_amplification_ratio=1.0,
+        )
+        result = evaluate_release_readiness(latest, [], protected=True)
+        plastic_missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "PLASTIC_REFERENCE_SEVERITY_ASSERTION_MISSING"
+            ),
+            None,
+        )
+        contact_missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "CONTACT_REFERENCE_SEVERITY_ASSERTION_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(plastic_missing)
+        self.assertEqual(plastic_missing["severity"], "fail")
+        self.assertIsNotNone(contact_missing)
+        self.assertEqual(contact_missing["severity"], "fail")
 
     def test_reference_severity_assertion_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

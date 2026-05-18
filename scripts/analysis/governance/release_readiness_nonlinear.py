@@ -9141,7 +9141,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="PLASTIC_METRICS_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="plastic nonlinear posture metrics missing from report records",
                 )
             )
@@ -9185,7 +9185,7 @@ def evaluate_release_readiness(
                 reasons.append(
                     Reason(
                         code="PLASTIC_LOAD_PATH_METRICS_MISSING",
-                        severity="warn",
+                        severity="fail" if protected else "warn",
                         detail="plastic load-path constitutive metrics missing from report records",
                     )
                 )
@@ -9239,7 +9239,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="CONTACT_METRICS_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="contact nonlinear posture metrics missing from report records",
                 )
             )
@@ -9283,7 +9283,7 @@ def evaluate_release_readiness(
                 reasons.append(
                     Reason(
                         code="CONTACT_LOAD_PATH_METRICS_MISSING",
-                        severity="warn",
+                        severity="fail" if protected else "warn",
                         detail="contact load-path constitutive metrics missing from report records",
                     )
                 )
@@ -9374,7 +9374,7 @@ def evaluate_release_readiness(
         reasons.append(
             Reason(
                 code="PLASTIC_REFERENCE_SEVERITY_ASSERTION_MISSING",
-                severity="warn",
+                severity="fail" if protected else "warn",
                 detail="plastic reference severity assertions missing from report records",
             )
         )
@@ -9405,7 +9405,7 @@ def evaluate_release_readiness(
         reasons.append(
             Reason(
                 code="CONTACT_REFERENCE_SEVERITY_ASSERTION_MISSING",
-                severity="warn",
+                severity="fail" if protected else "warn",
                 detail="contact reference severity assertions missing from report records",
             )
         )
