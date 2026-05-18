@@ -58,6 +58,27 @@ fn gltf_accessor_data_uri_payload() -> Vec<u8> {
     .into_bytes()
 }
 
+fn gltf_accessor_data_uri_buffer_view_too_small_payload() -> Vec<u8> {
+    let positions = [
+        [0.0f32, 0.0f32, 0.0f32],
+        [1.0f32, 0.0f32, 0.0f32],
+        [1.0f32, 1.0f32, 0.0f32],
+        [0.0f32, 1.0f32, 0.0f32],
+    ];
+    let mut buffer = Vec::<u8>::new();
+    for vertex in positions {
+        buffer.extend_from_slice(&vertex[0].to_le_bytes());
+        buffer.extend_from_slice(&vertex[1].to_le_bytes());
+        buffer.extend_from_slice(&vertex[2].to_le_bytes());
+    }
+    let encoded = BASE64_ENGINE.encode(&buffer);
+    format!(
+        "{{\"asset\":{{\"version\":\"2.0\"}},\"buffers\":[{{\"uri\":\"data:application/octet-stream;base64,{encoded}\",\"byteLength\":{byte_len}}}],\"bufferViews\":[{{\"buffer\":0,\"byteOffset\":0,\"byteLength\":8}}],\"accessors\":[{{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\"}}],\"meshes\":[{{\"primitives\":[{{\"attributes\":{{\"POSITION\":0}}}}]}}]}}",
+        byte_len = buffer.len()
+    )
+    .into_bytes()
+}
+
 fn binary_ply_payload() -> Vec<u8> {
     let header = b"ply\nformat binary_little_endian 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n";
     let vertices = [
@@ -452,6 +473,15 @@ fn load_op_maps_parse_error_for_unsupported_binary_ply_layout() {
         .expect_err("unsupported binary PLY layout should fail parse");
     assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
     assert!(error.message.contains("requires vertex properties exactly"));
+}
+
+#[test]
+fn load_op_maps_parse_error_for_gltf_accessor_buffer_view_bounds_violation() {
+    let payload = gltf_accessor_data_uri_buffer_view_too_small_payload();
+    let error = geometry_load_op("/mesh.gltf", &payload, OperationContext::new(None, None))
+        .expect_err("gltf accessor bufferView bounds violation should fail parse");
+    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert!(error.message.contains("out of bounds"));
 }
 
 #[test]

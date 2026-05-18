@@ -265,9 +265,9 @@ fn parse_accessor_positions(
     let mut positions = Vec::<[f64; 3]>::with_capacity(decoded.count);
     for i in 0..decoded.count {
         let offset = decoded.base_offset + i.saturating_mul(decoded.stride);
-        let x = read_f32_le_as_f64(&decoded.bytes, offset, "POSITION x")?;
-        let y = read_f32_le_as_f64(&decoded.bytes, offset + 4, "POSITION y")?;
-        let z = read_f32_le_as_f64(&decoded.bytes, offset + 8, "POSITION z")?;
+        let x = read_f32_le_as_f64(&decoded.bytes, decoded.view_end, offset, "POSITION x")?;
+        let y = read_f32_le_as_f64(&decoded.bytes, decoded.view_end, offset + 4, "POSITION y")?;
+        let z = read_f32_le_as_f64(&decoded.bytes, decoded.view_end, offset + 8, "POSITION z")?;
         positions.push([x, y, z]);
     }
     Ok(positions)
@@ -307,17 +307,32 @@ fn parse_accessor_indices(
     for i in 0..decoded.count {
         let offset = decoded.base_offset + i.saturating_mul(decoded.stride);
         let index = match decoded.component_type {
-            5121 => decoded.bytes.get(offset).copied().ok_or_else(|| {
-                GeometryImportError::ParseFailed(
-                    "GLTF index accessor byte offset is out of bounds".to_string(),
-                )
-            })? as u64,
+            5121 => {
+                if offset >= decoded.view_end || offset >= decoded.bytes.len() {
+                    return Err(GeometryImportError::ParseFailed(
+                        "GLTF index accessor byte offset is out of bounds".to_string(),
+                    ));
+                }
+                decoded.bytes[offset] as u64
+            }
             5123 => {
-                let bytes = get_slice(&decoded.bytes, offset, 2, "index accessor u16")?;
+                let bytes = get_slice(
+                    &decoded.bytes,
+                    decoded.view_end,
+                    offset,
+                    2,
+                    "index accessor u16",
+                )?;
                 u16::from_le_bytes([bytes[0], bytes[1]]) as u64
             }
             5125 => {
-                let bytes = get_slice(&decoded.bytes, offset, 4, "index accessor u32")?;
+                let bytes = get_slice(
+                    &decoded.bytes,
+                    decoded.view_end,
+                    offset,
+                    4,
+                    "index accessor u32",
+                )?;
                 u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64
             }
             _ => unreachable!(),
@@ -334,6 +349,7 @@ fn parse_accessor_indices(
 struct AccessorDecode {
     bytes: Vec<u8>,
     base_offset: usize,
+    view_end: usize,
     count: usize,
     stride: usize,
     component_type: u64,
@@ -417,6 +433,15 @@ fn resolve_accessor_decode(
             )
         })?;
     let buffer_view_offset = parse_usize(buffer_view.get("byteOffset").and_then(Value::as_u64), 0)?;
+    let buffer_view_byte_length = parse_usize(
+        buffer_view.get("byteLength").and_then(Value::as_u64),
+        usize::MAX,
+    )?;
+    if buffer_view_byte_length == usize::MAX {
+        return Err(GeometryImportError::ParseFailed(
+            "GLTF accessor-backed payload requires bufferView.byteLength".to_string(),
+        ));
+    }
     let byte_stride = parse_usize(buffer_view.get("byteStride").and_then(Value::as_u64), 0)?;
 
     let buffers = root
@@ -444,9 +469,35 @@ fn resolve_accessor_decode(
         )
     })?;
     let bytes = decode_data_uri(uri)?;
+    let declared_buffer_length = parse_usize(buffer.get("byteLength").and_then(Value::as_u64), 0)?;
+    let buffer_limit = if declared_buffer_length == 0 {
+        bytes.len()
+    } else {
+        if declared_buffer_length > bytes.len() {
+            return Err(GeometryImportError::ParseFailed(format!(
+                "GLTF buffer byteLength {} exceeds decoded data URI payload size {}",
+                declared_buffer_length,
+                bytes.len()
+            )));
+        }
+        declared_buffer_length
+    };
+
+    let buffer_view_end = buffer_view_offset.saturating_add(buffer_view_byte_length);
+    if buffer_view_offset > buffer_limit || buffer_view_end > buffer_limit {
+        return Err(GeometryImportError::ParseFailed(
+            "GLTF accessor-backed bufferView byte range is out of bounds for declared buffer length"
+                .to_string(),
+        ));
+    }
+    if accessor_byte_offset > buffer_view_byte_length {
+        return Err(GeometryImportError::ParseFailed(
+            "GLTF accessor byteOffset exceeds bufferView byteLength".to_string(),
+        ));
+    }
 
     let base_offset = buffer_view_offset.saturating_add(accessor_byte_offset);
-    if base_offset > bytes.len() {
+    if base_offset > bytes.len() || base_offset > buffer_view_end {
         return Err(GeometryImportError::ParseFailed(
             "GLTF accessor-backed payload offset is out of bounds".to_string(),
         ));
@@ -469,6 +520,7 @@ fn resolve_accessor_decode(
     Ok(AccessorDecode {
         bytes,
         base_offset,
+        view_end: buffer_view_end,
         count,
         stride,
         component_type,
@@ -511,21 +563,23 @@ fn parse_usize(value: Option<u64>, default: usize) -> Result<usize, GeometryImpo
 
 fn read_f32_le_as_f64(
     bytes: &[u8],
+    view_end: usize,
     offset: usize,
     label: &str,
 ) -> Result<f64, GeometryImportError> {
-    let value = get_slice(bytes, offset, 4, label)?;
+    let value = get_slice(bytes, view_end, offset, 4, label)?;
     Ok(f32::from_le_bytes([value[0], value[1], value[2], value[3]]) as f64)
 }
 
 fn get_slice<'a>(
     bytes: &'a [u8],
+    view_end: usize,
     offset: usize,
     len: usize,
     label: &str,
 ) -> Result<&'a [u8], GeometryImportError> {
     let end = offset.saturating_add(len);
-    if end > bytes.len() {
+    if end > view_end || end > bytes.len() {
         return Err(GeometryImportError::ParseFailed(format!(
             "GLTF accessor-backed {} payload is out of bounds",
             label

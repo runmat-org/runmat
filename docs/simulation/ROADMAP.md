@@ -281,3 +281,5 @@ Progress update (2026-05-17):
     `ply/v1` binary parsing now additively supports both `property list uchar int vertex_indices` and `property list uchar uint vertex_indices` face-index encodings under the standard `float x/y/z` vertex layout, reducing unsupported exporter-variant failures while preserving deterministic triangulation and typed parse behavior.
 107. [x] CAD binary little-endian PLY layout guardrails hardened:
     `ply/v1` binary parsing now enforces exact supported property declarations for deterministic record decoding (vertex `property float x/y/z`; face `property list uchar int|uint vertex_indices`) and returns typed parse failures for extra/unsupported binary properties, preventing silent interpretation drift on non-supported binary layouts.
+108. [x] CAD GLTF accessor window-boundary guardrails hardened:
+    accessor-backed `gltf/v1` decoding now enforces declared `buffer.byteLength`/`bufferView.byteLength` range containment (including accessor `byteOffset` checks) and returns typed parse failures for out-of-window accessor payloads, preventing implicit reads beyond declared GLTF buffer-view windows.
