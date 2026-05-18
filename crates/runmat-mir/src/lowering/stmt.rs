@@ -21,12 +21,10 @@ pub(crate) fn lower_stmt_with_replacements(
             let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
             let place = lower_place(ctx, place, &mut stmts)?;
-            if !matches!(place, crate::MirPlace::Local(_)) || is_empty_array_expr(expr) {
+            let deletion = is_empty_array_deletion_place(&place, expr);
+            if !matches!(place, crate::MirPlace::Local(_)) || deletion {
                 stmts.push(MirStmt {
-                    kind: MirStmtKind::PlaceMutation(place_mutation(
-                        place.clone(),
-                        is_empty_array_expr(expr),
-                    )),
+                    kind: MirStmtKind::PlaceMutation(place_mutation(place.clone(), deletion)),
                     span: stmt.span,
                 });
             }
@@ -209,6 +207,22 @@ fn creation_policy_for_place(place: &crate::MirPlace, deletion: bool) -> Assignm
 
 fn is_empty_array_expr(expr: &HirExpr) -> bool {
     matches!(&expr.kind, HirExprKind::Tensor(rows) if rows.is_empty() || rows.iter().all(Vec::is_empty))
+}
+
+fn is_empty_array_deletion_place(place: &crate::MirPlace, expr: &HirExpr) -> bool {
+    if !is_empty_array_expr(expr) {
+        return false;
+    }
+    matches!(
+        place,
+        crate::MirPlace::Index(
+            _,
+            crate::MirIndexing {
+                kind: runmat_hir::IndexKind::Paren,
+                ..
+            }
+        )
+    )
 }
 
 fn lower_output_targets(

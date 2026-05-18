@@ -452,11 +452,11 @@ mod tests {
         assert!(bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, Instr::StoreSlice(2, 2, 0, 0))));
+            .any(|instr| matches!(instr, Instr::StoreIndex(2))));
         assert!(!bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, Instr::StoreIndex(2))));
+            .any(|instr| matches!(instr, Instr::StoreSlice(2, 2, 0, 0))));
 
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         let Value::Tensor(tensor) = &vars[x_export.slot.0] else {

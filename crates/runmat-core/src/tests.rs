@@ -178,6 +178,14 @@ fn indexed_deletion_uses_semantic_vm() {
         prepared.bytecode.layout.is_some(),
         "indexed deletion should compile through semantic HIR/MIR/VM"
     );
+    assert!(
+        prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreIndexDelete(1))),
+        "indexed deletion should lower to explicit delete store bytecode"
+    );
 
     block_on(session.execute_outcome(source)).expect("exec succeeds");
     let outcome = block_on(session.execute_outcome("y")).expect("read y");
@@ -186,6 +194,35 @@ fn indexed_deletion_uses_semantic_vm() {
         .durable_workspace_value()
         .expect("y should be readable from workspace");
     assert_eq!(value.to_string(), "3");
+}
+
+#[test]
+fn cell_brace_empty_assignment_is_not_deletion_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "C = {1, 2}; C{1} = []; y = C{2};";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile cell brace empty assignment");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "cell brace empty assignment should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        !prepared
+            .bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreIndexCellDelete(_))),
+        "cell brace assignment should not lower to deletion bytecode"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "2");
 }
 
 #[test]

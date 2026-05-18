@@ -528,7 +528,15 @@ pub async fn dispatch_indexing(
             }
             Ok(true)
         }
-        crate::bytecode::Instr::StoreIndexCell(num_indices) => {
+        crate::bytecode::Instr::StoreIndexCell(num_indices)
+        | crate::bytecode::Instr::StoreIndexCellDelete(num_indices) => {
+            let delete = matches!(instr, crate::bytecode::Instr::StoreIndexCellDelete(_));
+            if delete {
+                return Err(crate::interpreter::errors::mex(
+                    "UnsupportedCellBraceDeletion",
+                    "Cell brace assignment does not support deletion",
+                ));
+            }
             let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
@@ -549,7 +557,9 @@ pub async fn dispatch_indexing(
             }
             Ok(true)
         }
-        crate::bytecode::Instr::StoreIndex(num_indices) => {
+        crate::bytecode::Instr::StoreIndex(num_indices)
+        | crate::bytecode::Instr::StoreIndexDelete(num_indices) => {
+            let delete = matches!(instr, crate::bytecode::Instr::StoreIndexDelete(_));
             let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
@@ -586,19 +596,17 @@ pub async fn dispatch_indexing(
                             .await?,
                     );
                 }
-                Value::Tensor(t) => {
-                    stack.push(idx_write_linear::assign_tensor_scalar(t, &indices, &rhs).await?)
-                }
-                Value::ComplexTensor(t) => {
-                    stack.push(idx_write_linear::assign_complex_scalar(t, &indices, &rhs).await?)
-                }
-                Value::Cell(ca) => {
-                    stack.push(crate::ops::cells::assign_cell_paren(ca, &indices, &rhs)?)
-                }
+                Value::Tensor(t) => stack
+                    .push(idx_write_linear::assign_tensor_scalar(t, &indices, &rhs, delete).await?),
+                Value::ComplexTensor(t) => stack.push(
+                    idx_write_linear::assign_complex_scalar(t, &indices, &rhs, delete).await?,
+                ),
+                Value::Cell(ca) => stack.push(crate::ops::cells::assign_cell_paren_with_policy(
+                    ca, &indices, &rhs, delete,
+                )?),
                 Value::Struct(st) => stack.push(assign_scalar_struct_index(st, &indices, rhs)?),
-                Value::GpuTensor(h) => {
-                    stack.push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs).await?)
-                }
+                Value::GpuTensor(h) => stack
+                    .push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs, delete).await?),
                 _ => {
                     if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                         let kind = |v: &Value| match v {

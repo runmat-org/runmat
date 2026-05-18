@@ -137,6 +137,8 @@ pub enum Instr {
     // Indexed assignment updates the base value and pushes the updated base.
     StoreIndex(usize),
     StoreIndexCell(usize),
+    StoreIndexDelete(usize),
+    StoreIndexCellDelete(usize),
 
     // Slice assignment with compiler-encoded colon and plain `end` masks.
     StoreSlice(usize, usize, u32, u32),
@@ -324,7 +326,10 @@ impl Instr {
             Instr::Unpack(n) => effect(1, *n),
             Instr::Index(n) | Instr::IndexCell(n) | Instr::IndexCellList(n) => effect(n + 1, 1),
             Instr::IndexCellExpand(n, out_count) => effect(n + 1, *out_count),
-            Instr::StoreIndex(n) | Instr::StoreIndexCell(n) => effect(n + 2, 1),
+            Instr::StoreIndex(n)
+            | Instr::StoreIndexCell(n)
+            | Instr::StoreIndexDelete(n)
+            | Instr::StoreIndexCellDelete(n) => effect(n + 2, 1),
             Instr::IndexSlice(dims, numeric_count, _, _)
             | Instr::StoreSlice(dims, numeric_count, _, _) => {
                 let pops = 1 + numeric_count;

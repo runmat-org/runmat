@@ -803,6 +803,8 @@ impl BytecodeCompiler {
                     | Instr::IndexCellList(_)
                     | Instr::StoreIndex(_)
                     | Instr::StoreIndexCell(_)
+                    | Instr::StoreIndexDelete(_)
+                    | Instr::StoreIndexCellDelete(_)
                     | Instr::LoadMethod(_)
                     | Instr::RegisterClass { .. }
                     | Instr::Swap

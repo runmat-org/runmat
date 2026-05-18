@@ -10,7 +10,7 @@ use runmat_hir::{
 use runmat_mir::{
     BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirCallee,
     MirConstant, MirIndexComponent, MirIndexPlan, MirIndexing, MirOperand, MirOutputTarget,
-    MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
+    MirPlace, MirPlaceMutation, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -34,6 +34,7 @@ pub struct Compiler {
     pub class_registrations: Vec<ClassRegistration>,
     pub class_names: HashMap<runmat_hir::ClassId, String>,
     current_span: Option<runmat_hir::Span>,
+    pending_place_mutation: Option<MirPlaceMutation>,
 }
 
 struct SpanGuard {
@@ -414,6 +415,7 @@ impl Compiler {
             class_registrations: hir_class_registrations(hir),
             class_names: hir_class_names(hir),
             current_span: None,
+            pending_place_mutation: None,
         })
     }
 
@@ -456,6 +458,7 @@ impl Compiler {
             class_registrations: hir_class_registrations(hir),
             class_names: hir_class_names(hir),
             current_span: None,
+            pending_place_mutation: None,
         })
     }
 
@@ -511,6 +514,7 @@ impl Compiler {
             .collect();
 
         for (block_index, block) in blocks.iter().enumerate() {
+            self.pending_place_mutation = None;
             block_starts.insert(block.id, self.instructions.len());
             for stmt in &block.statements {
                 self.compile_mir_stmt(stmt)?;
@@ -791,21 +795,40 @@ impl Compiler {
         Ok(())
     }
 
+    fn take_assign_delete_flag(&mut self, place: &MirPlace) -> bool {
+        let Some(mutation) = self.pending_place_mutation.take() else {
+            return false;
+        };
+        mutation.place == *place && matches!(mutation.kind, runmat_hir::PlaceMutationKind::Delete)
+    }
+
     fn compile_mir_stmt(&mut self, stmt: &MirStmt) -> Result<(), CompileError> {
         let _span_guard = SpanGuard::new(self, stmt.span);
         match &stmt.kind {
-            MirStmtKind::Assign { place, value } => self.compile_mir_assign(place, value),
+            MirStmtKind::Assign { place, value } => {
+                let delete = self.take_assign_delete_flag(place);
+                self.compile_mir_assign(place, value, delete)
+            }
             MirStmtKind::Expr(value) => {
+                self.pending_place_mutation = None;
                 self.compile_mir_rvalue(value)?;
                 self.emit(Instr::Pop);
                 Ok(())
             }
             MirStmtKind::WorkspaceEffect { effect, bindings } => {
+                self.pending_place_mutation = None;
                 self.compile_mir_workspace_effect(effect, bindings)
             }
-            MirStmtKind::EnvironmentEffect(_) => Ok(()),
-            MirStmtKind::PlaceMutation(_) => Ok(()),
+            MirStmtKind::EnvironmentEffect(_) => {
+                self.pending_place_mutation = None;
+                Ok(())
+            }
+            MirStmtKind::PlaceMutation(mutation) => {
+                self.pending_place_mutation = Some(mutation.clone());
+                Ok(())
+            }
             MirStmtKind::MultiAssign { targets, value } => {
+                self.pending_place_mutation = None;
                 self.compile_mir_multi_assign(targets, value)
             }
         }
@@ -941,12 +964,12 @@ impl Compiler {
             MirPlace::Index(base, indexing) => {
                 if let Ok(base_slot) = self.mir_place_slot(base) {
                     self.emit(Instr::LoadVar(base_slot));
-                    self.compile_mir_store_indexed_value_from_temp(indexing, value_slot)?;
+                    self.compile_mir_store_indexed_value_from_temp(indexing, value_slot, false)?;
                     self.emit(Instr::StoreVar(base_slot));
                     return Ok(());
                 }
                 self.compile_mir_place_read(base)?;
-                self.compile_mir_store_indexed_value_from_temp(indexing, value_slot)?;
+                self.compile_mir_store_indexed_value_from_temp(indexing, value_slot, false)?;
                 self.emit_store_back_mir_member_chain(base)
             }
             MirPlace::Member(base, member) => {
@@ -1139,6 +1162,7 @@ impl Compiler {
         &mut self,
         place: &MirPlace,
         value: &MirRvalue,
+        delete: bool,
     ) -> Result<(), CompileError> {
         match place {
             MirPlace::Local(_) | MirPlace::Binding(_) => {
@@ -1150,12 +1174,12 @@ impl Compiler {
             MirPlace::Index(base, indexing) => {
                 if let Ok(base_slot) = self.mir_place_slot(base) {
                     self.emit(Instr::LoadVar(base_slot));
-                    self.compile_mir_index_assignment_after_base(indexing, value)?;
+                    self.compile_mir_index_assignment_after_base(indexing, value, delete)?;
                     self.emit(Instr::StoreVar(base_slot));
                     return Ok(());
                 }
                 self.compile_mir_place_read(base)?;
-                self.compile_mir_index_assignment_after_base(indexing, value)?;
+                self.compile_mir_index_assignment_after_base(indexing, value, delete)?;
                 self.emit_store_back_mir_member_chain(base)
             }
             MirPlace::Member(base, member) => {
@@ -1206,13 +1230,18 @@ impl Compiler {
         &mut self,
         indexing: &MirIndexing,
         value: &MirRvalue,
+        delete: bool,
     ) -> Result<(), CompileError> {
         match indexing.kind {
             IndexKind::Paren => match indexing.plan {
                 MirIndexPlan::Scalar => {
                     self.compile_mir_scalar_index_components(indexing)?;
                     self.compile_mir_rvalue(value)?;
-                    self.emit(Instr::StoreIndex(indexing.components.len()));
+                    self.emit(if delete {
+                        Instr::StoreIndexDelete(indexing.components.len())
+                    } else {
+                        Instr::StoreIndex(indexing.components.len())
+                    });
                 }
                 MirIndexPlan::SliceExpr => {
                     let components = self.compile_mir_slice_expr_components(
@@ -1255,7 +1284,11 @@ impl Compiler {
                     IndexResultContext::AssignmentTarget,
                 )?;
                 self.compile_mir_rvalue(value)?;
-                self.emit(Instr::StoreIndexCell(indexing.components.len()));
+                self.emit(if delete {
+                    Instr::StoreIndexCellDelete(indexing.components.len())
+                } else {
+                    Instr::StoreIndexCell(indexing.components.len())
+                });
             }
             IndexKind::Dot => return Err(self.compile_error(
                 "MIR dot-index assignment should lower through member places, not IndexKind::Dot",
@@ -1290,7 +1323,7 @@ impl Compiler {
                 let tmp = self.alloc_temp();
                 self.emit(Instr::StoreVar(tmp));
                 self.compile_mir_place_read(parent)?;
-                self.compile_mir_store_indexed_value_from_temp(indexing, tmp)?;
+                self.compile_mir_store_indexed_value_from_temp(indexing, tmp, false)?;
                 self.emit_store_back_mir_member_chain(parent)
             }
         }
@@ -1339,6 +1372,7 @@ impl Compiler {
         &mut self,
         indexing: &MirIndexing,
         tmp: usize,
+        delete: bool,
     ) -> Result<(), CompileError> {
         match indexing.kind {
             IndexKind::Paren => {
@@ -1346,7 +1380,11 @@ impl Compiler {
                     MirIndexPlan::Scalar => {
                         self.compile_mir_scalar_index_components(indexing)?;
                         self.emit(Instr::LoadVar(tmp));
-                        self.emit(Instr::StoreIndex(indexing.components.len()));
+                        self.emit(if delete {
+                            Instr::StoreIndexDelete(indexing.components.len())
+                        } else {
+                            Instr::StoreIndex(indexing.components.len())
+                        });
                     }
                     MirIndexPlan::SliceExpr => {
                         let components = self.compile_mir_slice_expr_components(
@@ -1389,7 +1427,11 @@ impl Compiler {
             IndexKind::Brace => {
                 self.compile_mir_cell_index_components_any_context(indexing)?;
                 self.emit(Instr::LoadVar(tmp));
-                self.emit(Instr::StoreIndexCell(indexing.components.len()));
+                self.emit(if delete {
+                    Instr::StoreIndexCellDelete(indexing.components.len())
+                } else {
+                    Instr::StoreIndexCell(indexing.components.len())
+                });
                 Ok(())
             }
             IndexKind::Dot => Err(self.compile_error(

@@ -260,12 +260,25 @@ pub fn delete_cell_linear(mut ca: CellArray, idx: usize) -> Result<Value, Runtim
     ))
 }
 
-pub fn assign_cell_paren(
+pub fn assign_cell_paren_with_policy(
     ca: CellArray,
     indices: &[usize],
     rhs: &Value,
+    delete: bool,
 ) -> Result<Value, RuntimeError> {
-    if indices.len() == 1 && is_empty_tensor(rhs) {
+    if delete {
+        if indices.len() != 1 {
+            return Err(mex(
+                "UnsupportedCellDeletion",
+                "Linear cell deletion is only supported for vector indices",
+            ));
+        }
+        if !is_empty_tensor(rhs) {
+            return Err(mex(
+                "DeletionRequiresEmptyRhs",
+                "Cell deletion requires empty RHS",
+            ));
+        }
         return delete_cell_linear(ca, indices[0]);
     }
     if let Value::Cell(rhs_cell) = rhs {
@@ -273,16 +286,31 @@ pub fn assign_cell_paren(
     }
     Err(mex(
         "UnsupportedCellParenAssignment",
-        "Only vector cell deletion is supported for cell paren assignment",
+        "Cell paren assignment requires a cell RHS",
     ))
 }
 
 pub fn assign_cell_paren_linear_indices(
-    mut ca: CellArray,
+    ca: CellArray,
     indices: &[usize],
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
-    if is_empty_tensor(rhs) {
+    assign_cell_paren_linear_indices_with_policy(ca, indices, rhs, is_empty_tensor(rhs))
+}
+
+pub fn assign_cell_paren_linear_indices_with_policy(
+    mut ca: CellArray,
+    indices: &[usize],
+    rhs: &Value,
+    delete: bool,
+) -> Result<Value, RuntimeError> {
+    if delete {
+        if !is_empty_tensor(rhs) {
+            return Err(mex(
+                "DeletionRequiresEmptyRhs",
+                "Cell deletion requires empty RHS",
+            ));
+        }
         if !(ca.rows == 1 || ca.cols == 1) {
             return Err(mex(
                 "UnsupportedCellDeletion",

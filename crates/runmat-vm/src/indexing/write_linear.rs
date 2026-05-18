@@ -134,6 +134,7 @@ pub async fn assign_tensor_scalar(
     mut t: Tensor,
     indices: &[usize],
     rhs: &Value,
+    delete: bool,
 ) -> Result<Value, RuntimeError> {
     if indices.len() == 1 {
         let total = t.rows * t.cols;
@@ -141,11 +142,17 @@ pub async fn assign_tensor_scalar(
         if idx == 0 || idx > total {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
-        if is_empty_tensor(rhs) {
+        if delete {
+            if !is_empty_tensor(rhs) {
+                return Err(mex(
+                    "DeletionRequiresEmptyRhs",
+                    "Indexed deletion requires empty RHS",
+                ));
+            }
             return delete_tensor_linear(t, idx);
         }
         if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
-            return assign_complex_scalar(tensor_to_complex(t), indices, rhs).await;
+            return assign_complex_scalar(tensor_to_complex(t), indices, rhs, false).await;
         }
         let val = rhs_to_real_scalar(rhs).await?;
         t.data[idx - 1] = val;
@@ -164,8 +171,14 @@ pub async fn assign_tensor_scalar(
         if i == 0 || i > rows {
             return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
         }
+        if delete {
+            return Err(mex(
+                "UnsupportedDeletion",
+                "Indexed deletion is only supported for linear vector indices",
+            ));
+        }
         if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
-            return assign_complex_scalar(tensor_to_complex(t), indices, rhs).await;
+            return assign_complex_scalar(tensor_to_complex(t), indices, rhs, false).await;
         }
         let val = rhs_to_real_scalar(rhs).await?;
         let idx = (i - 1) + (j - 1) * rows;
@@ -183,6 +196,7 @@ pub async fn assign_complex_scalar(
     mut t: ComplexTensor,
     indices: &[usize],
     rhs: &Value,
+    delete: bool,
 ) -> Result<Value, RuntimeError> {
     if indices.len() == 1 {
         let total = t.rows * t.cols;
@@ -190,7 +204,13 @@ pub async fn assign_complex_scalar(
         if idx == 0 || idx > total {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
-        if is_empty_tensor(rhs) {
+        if delete {
+            if !is_empty_tensor(rhs) {
+                return Err(mex(
+                    "DeletionRequiresEmptyRhs",
+                    "Indexed deletion requires empty RHS",
+                ));
+            }
             return delete_complex_linear(t, idx);
         }
         let val = rhs_to_complex_scalar(rhs).await?;
@@ -210,6 +230,12 @@ pub async fn assign_complex_scalar(
         if i == 0 || i > rows {
             return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
         }
+        if delete {
+            return Err(mex(
+                "UnsupportedDeletion",
+                "Indexed deletion is only supported for linear vector indices",
+            ));
+        }
         let val = rhs_to_complex_scalar(rhs).await?;
         let idx = (i - 1) + (j - 1) * rows;
         t.data[idx] = val;
@@ -226,6 +252,7 @@ pub async fn assign_gpu_scalar(
     h: &runmat_accelerate_api::GpuTensorHandle,
     indices: &[usize],
     rhs: &Value,
+    delete: bool,
 ) -> Result<Value, RuntimeError> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
         mex(
@@ -238,7 +265,7 @@ pub async fn assign_gpu_scalar(
         .await
         .map_err(|e| format!("gather for assignment: {e}"))?;
     let t = Tensor::new(host.data, host.shape).map_err(|e| format!("assignment: {e}"))?;
-    let Value::Tensor(updated) = assign_tensor_scalar(t, indices, rhs).await? else {
+    let Value::Tensor(updated) = assign_tensor_scalar(t, indices, rhs, delete).await? else {
         unreachable!()
     };
     let view = runmat_accelerate_api::HostTensorView {
