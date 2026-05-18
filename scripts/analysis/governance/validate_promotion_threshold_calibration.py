@@ -39,6 +39,12 @@ def main() -> int:
     min_source_reports = int(
         os.getenv("RUNMAT_VALIDATE_PROMOTION_CALIBRATION_MIN_SOURCE_REPORTS", "0")
     )
+    min_trusted_source_reports = int(
+        os.getenv(
+            "RUNMAT_VALIDATE_PROMOTION_CALIBRATION_MIN_TRUSTED_SOURCE_REPORTS",
+            str(min_source_reports),
+        )
+    )
     max_age_override = os.getenv("RUNMAT_VALIDATE_PROMOTION_CALIBRATION_MAX_AGE_DAYS")
     require_cadence = is_true(
         os.getenv("RUNMAT_VALIDATE_PROMOTION_CALIBRATION_REQUIRE_CADENCE", "false")
@@ -99,6 +105,11 @@ def main() -> int:
     elif isinstance(source_count, int) and source_trusted_count > source_count:
         errors.append(
             "source_trusted_report_count must be less than or equal to source_report_count"
+        )
+    elif source_trusted_count < min_trusted_source_reports:
+        errors.append(
+            "source_trusted_report_count "
+            f"{source_trusted_count} below minimum {min_trusted_source_reports}"
         )
 
     generated_at_raw = payload.get("generated_at")
