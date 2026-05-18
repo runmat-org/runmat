@@ -432,6 +432,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO": "1.02",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS": "2500",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "5000",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -752,6 +753,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO": "1.0",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS": "4000",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "8000",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -1054,6 +1056,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO": "1.5",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS": "8000",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "12000",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -1298,6 +1301,12 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS", "4000"),
         )
     )
+    key_perf_max_run_ms = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS",
+            profile_default("RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS", "8000"),
+        )
+    )
     key_perf_records = records_for_fixtures(latest, KEY_PERFORMANCE_FIXTURES)
     if key_perf_require_fixtures:
         missing_key_perf = sorted(KEY_PERFORMANCE_FIXTURES.difference(key_perf_records.keys()))
@@ -1313,6 +1322,19 @@ def evaluate_release_readiness(
                 )
             )
     for fixture, rec in key_perf_records.items():
+        run_ms = rec.get("gpu_run_ms")
+        if isinstance(run_ms, (int, float)) and math.isfinite(float(run_ms)):
+            if float(run_ms) > key_perf_max_run_ms:
+                reasons.append(
+                    Reason(
+                        code="KEY_PERF_RUN_MS_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"{fixture} gpu_run_ms {float(run_ms):.3f} exceeds "
+                            f"maximum {key_perf_max_run_ms:.3f}"
+                        ),
+                    )
+                )
         speedup = rec.get("gpu_speedup_ratio")
         if isinstance(speedup, (int, float)) and math.isfinite(float(speedup)):
             if float(speedup) < key_perf_min_speedup_ratio:
