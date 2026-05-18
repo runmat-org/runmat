@@ -29,6 +29,7 @@ NONLINEAR_FIXTURES = {
 }
 
 KEY_PERFORMANCE_FIXTURES = {
+    "nonlinear_assembly_gpu_provider",
     "nonlinear_assembly_stress_gpu_provider",
     "nonlinear_softening_proxy_gpu_provider",
     "nonlinear_load_path_mix_gpu_provider",

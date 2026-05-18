@@ -496,6 +496,27 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("KEY_PERF_SPEEDUP_LOW", codes)
 
+    def test_key_perf_speedup_low_reason_is_emitted_for_nonlinear_assembly(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_assembly_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 0.8,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_SPEEDUP_RATIO"] = "1.0"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        matches = [
+            reason
+            for reason in result["reasons"]
+            if reason["code"] == "KEY_PERF_SPEEDUP_LOW"
+            and "nonlinear_assembly_gpu_provider" in reason["detail"]
+        ]
+        self.assertTrue(matches)
+
     def test_key_perf_trend_slowdown_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
