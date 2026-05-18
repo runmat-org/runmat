@@ -1814,14 +1814,9 @@ impl Compiler {
         &self,
         targets: &runmat_mir::MirOutputTargetList,
     ) -> Result<usize, CompileError> {
-        let expected = targets.targets.len();
-        let count = targets.requested_outputs.fixed_count();
-        if count != expected {
-            return Err(self.compile_error(format!(
-                "MIR multi-assign output target count mismatch: requested {count}, targets {expected}"
-            )));
-        }
-        Ok(count)
+        targets
+            .validate_fixed_arity("MIR multi-assign")
+            .map_err(|message| self.compile_error(message))
     }
 
     fn mir_runtime_name_callee(

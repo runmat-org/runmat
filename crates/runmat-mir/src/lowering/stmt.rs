@@ -39,16 +39,13 @@ pub(crate) fn lower_stmt_with_replacements(
             let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
             let lowered_targets = lower_output_targets(ctx, &targets.targets, &mut stmts)?;
-            let requested_outputs = fixed_requested_output_count(
-                &targets.requested_outputs,
-                "MIR multi-assign targets requested output count",
-            );
-            if requested_outputs != lowered_targets.len() {
-                return Err(SemanticError::new(format!(
-                    "MIR multi-assign output target count mismatch: requested {requested_outputs}, targets {}",
-                    lowered_targets.len()
-                )));
-            }
+            let lowered_target_list = MirOutputTargetList {
+                requested_outputs: targets.requested_outputs.clone(),
+                targets: lowered_targets,
+            };
+            let requested_outputs = lowered_target_list
+                .validate_fixed_arity("MIR multi-assign")
+                .map_err(SemanticError::new)?;
             if let MirRvalue::Call(call) = &value {
                 let call_outputs = fixed_requested_output_count(
                     &call.requested_outputs,
@@ -62,10 +59,7 @@ pub(crate) fn lower_stmt_with_replacements(
             }
             stmts.push(MirStmt {
                 kind: MirStmtKind::MultiAssign {
-                    targets: MirOutputTargetList {
-                        requested_outputs: targets.requested_outputs.clone(),
-                        targets: lowered_targets,
-                    },
+                    targets: lowered_target_list,
                     value,
                 },
                 span: stmt.span,

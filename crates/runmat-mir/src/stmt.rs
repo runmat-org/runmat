@@ -44,6 +44,19 @@ pub struct MirOutputTargetList {
     pub requested_outputs: RequestedOutputCount,
 }
 
+impl MirOutputTargetList {
+    pub fn validate_fixed_arity(&self, context: &str) -> Result<usize, String> {
+        let expected = self.targets.len();
+        let count = self.requested_outputs.fixed_count();
+        if count != expected {
+            return Err(format!(
+                "{context} output target count mismatch: requested {count}, targets {expected}"
+            ));
+        }
+        Ok(count)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MirOutputTarget {
     Place(MirPlace),
