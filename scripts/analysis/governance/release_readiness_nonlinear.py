@@ -293,6 +293,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.55",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.55",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.55",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FLUX_PHASOR_COHERENCE_RATIO": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO": "0.05",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO": "0.9",
@@ -321,6 +322,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_PHASOR_COHERENCE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.1",
@@ -608,6 +610,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.45",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FLUX_PHASOR_COHERENCE_RATIO": "0.4",
             "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO": "0.1",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO": "0.8",
@@ -636,6 +639,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_PHASOR_COHERENCE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.2",
@@ -3166,6 +3170,15 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_min_flux_phasor_coherence_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FLUX_PHASOR_COHERENCE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_FLUX_PHASOR_COHERENCE_RATIO",
+                "0.4",
+            ),
+        )
+    )
     em_min_core_assignment_coverage_ratio_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO",
@@ -3676,6 +3689,15 @@ def evaluate_release_readiness(
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_flux_phasor_coherence_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_PHASOR_COHERENCE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_PHASOR_COHERENCE_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -4800,6 +4822,7 @@ def evaluate_release_readiness(
     em_min_source_realization_ratio = None
     em_min_source_region_coverage_ratio = None
     em_min_source_material_alignment_ratio = None
+    em_min_flux_phasor_coherence_ratio = None
     em_min_core_assignment_coverage_ratio = None
     em_max_core_fallback_coefficient_ratio = None
     em_min_boundary_anchor_ratio = None
@@ -4898,6 +4921,7 @@ def evaluate_release_readiness(
     em_core_source_realization_drop_trend_ratio = None
     em_core_source_region_coverage_drop_trend_ratio = None
     em_core_source_material_alignment_drop_trend_ratio = None
+    em_flux_phasor_coherence_drop_trend_ratio = None
     em_core_assignment_coverage_drop_trend_ratio = None
     em_core_fallback_coefficient_trend_ratio = None
     em_dispersive_phase_attenuation_trend_ratio = None
@@ -7090,6 +7114,22 @@ def evaluate_release_readiness(
             ),
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_flux_phasor_coherence_ratio",
+                "min",
+                "EM_FLUX_PHASOR_COHERENCE_RATIO_LOW",
+                "EM homogeneous flux phasor coherence ratio",
+                em_min_flux_phasor_coherence_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_flux_phasor_coherence_ratio",
+                "min",
+                "EM_FLUX_PHASOR_COHERENCE_RATIO_LOW",
+                "EM heterogeneous flux phasor coherence ratio",
+                em_min_flux_phasor_coherence_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
                 "em_homogeneous_dispersive_phase_attenuation_mean",
                 "min",
                 "EM_DISPERSIVE_PHASE_ATTENUATION_MEAN_LOW",
@@ -7681,6 +7721,12 @@ def evaluate_release_readiness(
                     or observed < em_min_dispersive_phase_attenuation_mean
                 ):
                     em_min_dispersive_phase_attenuation_mean = observed
+            elif assertion_name.endswith("flux_phasor_coherence_ratio"):
+                if (
+                    em_min_flux_phasor_coherence_ratio is None
+                    or observed < em_min_flux_phasor_coherence_ratio
+                ):
+                    em_min_flux_phasor_coherence_ratio = observed
             elif assertion_name.endswith("dispersive_phase_conductivity_attenuation_ratio") and (
                 em_min_dispersive_phase_conductivity_attenuation_ratio is None
                 or observed < em_min_dispersive_phase_conductivity_attenuation_ratio
@@ -11801,6 +11847,33 @@ def evaluate_release_readiness(
                     )
                 )
 
+        flux_phasor_coherence_trend_candidates = [
+            fixture_assertion_trend_ratio("em_homogeneous_flux_phasor_coherence_ratio"),
+            fixture_assertion_trend_ratio("em_heterogeneous_flux_phasor_coherence_ratio"),
+        ]
+        flux_phasor_coherence_trend_candidates = [
+            value for value in flux_phasor_coherence_trend_candidates if value is not None
+        ]
+        if flux_phasor_coherence_trend_candidates:
+            em_flux_phasor_coherence_drop_trend_ratio = max(
+                flux_phasor_coherence_trend_candidates
+            )
+            if (
+                em_flux_phasor_coherence_drop_trend_ratio
+                > em_max_flux_phasor_coherence_drop_trend_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="EM_FLUX_PHASOR_COHERENCE_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "EM flux-phasor coherence drop trend ratio "
+                            f"{em_flux_phasor_coherence_drop_trend_ratio:.3f} exceeds threshold "
+                            f"{em_max_flux_phasor_coherence_drop_trend_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+
         core_source_region_coverage_trend_candidates = [
             fixture_assertion_trend_ratio("em_homogeneous_source_region_coverage_ratio"),
             fixture_assertion_trend_ratio("em_heterogeneous_source_region_coverage_ratio"),
@@ -13509,6 +13582,8 @@ def evaluate_release_readiness(
         "em_min_source_region_coverage_ratio_threshold": em_min_source_region_coverage_ratio_threshold,
         "em_min_source_material_alignment_ratio": em_min_source_material_alignment_ratio,
         "em_min_source_material_alignment_ratio_threshold": em_min_source_material_alignment_ratio_threshold,
+        "em_min_flux_phasor_coherence_ratio": em_min_flux_phasor_coherence_ratio,
+        "em_min_flux_phasor_coherence_ratio_threshold": em_min_flux_phasor_coherence_ratio_threshold,
         "em_min_core_assignment_coverage_ratio": em_min_core_assignment_coverage_ratio,
         "em_min_core_assignment_coverage_ratio_threshold": em_min_core_assignment_coverage_ratio_threshold,
         "em_max_core_fallback_coefficient_ratio": em_max_core_fallback_coefficient_ratio,
@@ -13701,6 +13776,8 @@ def evaluate_release_readiness(
         "em_max_core_dispersive_coupling_trend_ratio_threshold": em_max_core_dispersive_coupling_trend_ratio_threshold,
         "em_core_source_realization_drop_trend_ratio": em_core_source_realization_drop_trend_ratio,
         "em_max_core_source_realization_drop_trend_ratio_threshold": em_max_core_source_realization_drop_trend_ratio_threshold,
+        "em_flux_phasor_coherence_drop_trend_ratio": em_flux_phasor_coherence_drop_trend_ratio,
+        "em_max_flux_phasor_coherence_drop_trend_ratio_threshold": em_max_flux_phasor_coherence_drop_trend_ratio_threshold,
         "em_core_source_region_coverage_drop_trend_ratio": em_core_source_region_coverage_drop_trend_ratio,
         "em_max_core_source_region_coverage_drop_trend_ratio_threshold": em_max_core_source_region_coverage_drop_trend_ratio_threshold,
         "em_core_source_material_alignment_drop_trend_ratio": em_core_source_material_alignment_drop_trend_ratio,
@@ -14475,6 +14552,10 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_max_phased_source_energy_consistency_ratio') if result.get('em_max_phased_source_energy_consistency_ratio') is not None else '-'}`/`{result.get('em_max_phased_source_energy_consistency_ratio_threshold') if result.get('em_max_phased_source_energy_consistency_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM flux-phasor coherence min/threshold: "
+        f"`{result.get('em_min_flux_phasor_coherence_ratio') if result.get('em_min_flux_phasor_coherence_ratio') is not None else '-'}`/`{result.get('em_min_flux_phasor_coherence_ratio_threshold') if result.get('em_min_flux_phasor_coherence_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- EM sparse assignment/fallback: "
         f"`{result.get('em_min_sparse_assignment_coverage_ratio') if result.get('em_min_sparse_assignment_coverage_ratio') is not None else '-'}`/`{result.get('em_max_sparse_fallback_coefficient_ratio') if result.get('em_max_sparse_fallback_coefficient_ratio') is not None else '-'}`"
     )
@@ -14609,6 +14690,10 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- EM source-interference trend ratio/threshold: "
         f"`{result.get('em_source_interference_trend_ratio') if result.get('em_source_interference_trend_ratio') is not None else '-'}`/`{result.get('em_max_source_interference_trend_ratio_threshold') if result.get('em_max_source_interference_trend_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM flux-phasor coherence drop trend ratio/threshold: "
+        f"`{result.get('em_flux_phasor_coherence_drop_trend_ratio') if result.get('em_flux_phasor_coherence_drop_trend_ratio') is not None else '-'}`/`{result.get('em_max_flux_phasor_coherence_drop_trend_ratio_threshold') if result.get('em_max_flux_phasor_coherence_drop_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- EM real/imag residual trend ratios and thresholds: "

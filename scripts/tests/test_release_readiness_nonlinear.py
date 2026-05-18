@@ -395,6 +395,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_FLUX_PHASOR_COHERENCE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO",
@@ -452,6 +453,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REALIZATION_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_PHASOR_COHERENCE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO",
@@ -827,6 +829,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 0.55,
                     },
                     {
+                        "name": "em_homogeneous_flux_phasor_coherence_ratio",
+                        "observed": 0.25,
+                    },
+                    {
                         "name": "em_homogeneous_conductivity_spread_ratio",
                         "observed": 1.35,
                     },
@@ -916,6 +922,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                     {
                         "name": "em_heterogeneous_source_realization_ratio",
                         "observed": 0.1,
+                    },
+                    {
+                        "name": "em_heterogeneous_flux_phasor_coherence_ratio",
+                        "observed": 0.35,
                     },
                     {
                         "name": "em_heterogeneous_source_material_alignment_ratio",
@@ -1171,6 +1181,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO"] = "0.8"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_FLUX_PHASOR_COHERENCE_RATIO"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO"] = "0.9"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO"] = "0.1"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO"] = "0.8"
@@ -1292,6 +1303,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_BOUNDARY_ANCHOR_RATIO_LOW", codes)
         self.assertIn("EM_DISPERSIVE_COUPLING_RATIO_HIGH", codes)
         self.assertIn("EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_RATIO_LOW", codes)
+        self.assertIn("EM_FLUX_PHASOR_COHERENCE_RATIO_LOW", codes)
         self.assertIn("EM_CORE_ASSIGNMENT_COVERAGE_RATIO_LOW", codes)
         self.assertIn("EM_CORE_FALLBACK_COEFFICIENT_RATIO_HIGH", codes)
         self.assertIn("EM_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_HIGH", codes)
@@ -1926,6 +1938,38 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_ENERGY_IMBALANCE_TREND_WORSENING", codes)
+
+    def test_em_flux_phasor_coherence_trend_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {"name": "em_homogeneous_flux_phasor_coherence_ratio", "observed": 0.4}
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {"name": "em_homogeneous_flux_phasor_coherence_ratio", "observed": 0.9}
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_PHASOR_COHERENCE_DROP_TREND_RATIO"] = (
+            "1.5"
+        )
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_FLUX_PHASOR_COHERENCE_TREND_WORSENING", codes)
 
     def test_em_core_source_realization_trend_uses_homogeneous_assertion(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
