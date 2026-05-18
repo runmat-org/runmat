@@ -248,6 +248,15 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_MODE_COUNT",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY",
@@ -2236,6 +2245,102 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("ELECTRO_SPREAD_TREND_WORSENING", codes)
 
+    def test_acoustic_metric_breaches_emit_reasons(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "acoustic_harmonic_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "acoustic_max_m_orthogonality_offdiag", "observed": 0.2},
+                    {
+                        "name": "acoustic_min_relative_frequency_separation",
+                        "observed": 0.002,
+                    },
+                    {"name": "acoustic_mode_count", "observed": 1.0},
+                    {"name": "acoustic_residual_warn_threshold", "observed": 0.003},
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG"] = "0.05"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION"
+        ] = "0.01"
+        os.environ["RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_MODE_COUNT"] = "3.0"
+        os.environ["RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD"] = (
+            "0.0015"
+        )
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_HIGH", codes)
+        self.assertIn("ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION_LOW", codes)
+        self.assertIn("ACOUSTIC_MODE_COUNT_LOW", codes)
+        self.assertIn("ACOUSTIC_RESIDUAL_WARN_THRESHOLD_HIGH", codes)
+
+    def test_acoustic_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "acoustic_harmonic_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "acoustic_max_m_orthogonality_offdiag", "observed": 0.20},
+                    {
+                        "name": "acoustic_min_relative_frequency_separation",
+                        "observed": 0.01,
+                    },
+                    {"name": "acoustic_mode_count", "observed": 2.0},
+                    {"name": "acoustic_residual_warn_threshold", "observed": 0.003},
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "acoustic_harmonic_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "acoustic_max_m_orthogonality_offdiag", "observed": 0.05},
+                    {
+                        "name": "acoustic_min_relative_frequency_separation",
+                        "observed": 0.04,
+                    },
+                    {"name": "acoustic_mode_count", "observed": 4.0},
+                    {"name": "acoustic_residual_warn_threshold", "observed": 0.001},
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO"
+        ] = "1.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_WORSENING", codes)
+        self.assertIn(
+            "ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION_TREND_WORSENING", codes
+        )
+        self.assertIn("ACOUSTIC_MODE_COUNT_TREND_WORSENING", codes)
+        self.assertIn("ACOUSTIC_RESIDUAL_WARN_THRESHOLD_TREND_WORSENING", codes)
+
     def test_plastic_nonlinear_severity_high_reason_is_emitted(self):
         latest = report(
             passed=True,
@@ -3111,6 +3216,9 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Electro-thermal time-scale thresholds (min/max)", summary)
         self.assertIn("Electro-thermal time-scale breach rate", summary)
         self.assertIn("Electro-thermal time-scale trend ratio", summary)
+        self.assertIn("### Acoustic Posture", summary)
+        self.assertIn("Acoustic mode count/threshold", summary)
+        self.assertIn("Acoustic trend ratios (orthogonality, frequency separation, mode count, residual threshold)", summary)
         self.assertIn("### EM Posture", summary)
         self.assertIn("Max EM energy imbalance ratio", summary)
         self.assertIn("Max EM boundary-penalty residual norms (real/imag)", summary)

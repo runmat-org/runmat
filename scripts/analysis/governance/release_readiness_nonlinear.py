@@ -128,6 +128,15 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN": "1.25",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO": "1.15",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS": "true",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG": "0.02",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION": "0.01",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_MODE_COUNT": "3.0",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD": "0.001",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.35",
@@ -308,6 +317,15 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN": "1.3",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG": "0.03",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION": "0.008",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_MODE_COUNT": "3.0",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD": "0.0015",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.45",
@@ -488,6 +506,15 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN": "1.5",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG": "0.05",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION": "0.005",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_MODE_COUNT": "2.0",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD": "0.002",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.6",
@@ -1506,6 +1533,78 @@ def evaluate_release_readiness(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO",
             profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO", "1.2"),
+        )
+    )
+    acoustic_require_metrics = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS",
+            profile_default("RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS", "false"),
+        )
+    )
+    acoustic_max_m_orthogonality_offdiag_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG",
+            profile_default("RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG", "0.03"),
+        )
+    )
+    acoustic_min_relative_frequency_separation_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION",
+                "0.008",
+            ),
+        )
+    )
+    acoustic_min_mode_count_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_MODE_COUNT",
+            profile_default("RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_MODE_COUNT", "3.0"),
+        )
+    )
+    acoustic_max_residual_warn_threshold_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD",
+                "0.0015",
+            ),
+        )
+    )
+    acoustic_max_m_orthogonality_offdiag_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    acoustic_max_relative_frequency_separation_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RELATIVE_FREQUENCY_SEPARATION_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    acoustic_max_mode_count_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_MODE_COUNT_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    acoustic_max_residual_warn_threshold_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_RESIDUAL_WARN_THRESHOLD_TREND_RATIO",
+                "1.2",
+            ),
         )
     )
     em_require_metrics = is_true(
@@ -2613,6 +2712,14 @@ def evaluate_release_readiness(
     electro_joule_trend_ratio = None
     electro_spread_trend_ratio = None
     electro_time_scale_trend_ratio = None
+    acoustic_max_m_orthogonality_offdiag = None
+    acoustic_min_relative_frequency_separation = None
+    acoustic_min_mode_count = None
+    acoustic_max_residual_warn_threshold = None
+    acoustic_m_orthogonality_offdiag_trend_ratio = None
+    acoustic_relative_frequency_separation_drop_trend_ratio = None
+    acoustic_mode_count_drop_trend_ratio = None
+    acoustic_residual_warn_threshold_trend_ratio = None
     em_max_energy_imbalance_ratio = None
     em_max_flux_divergence_proxy = None
     em_max_real_residual_norm = None
@@ -3400,6 +3507,94 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
+
+    acoustic_records = [
+        rec
+        for rec in report_records(latest)
+        if rec.get("fixture_id") == "acoustic_harmonic_gpu_provider"
+    ]
+    if not acoustic_records:
+        if protected or acoustic_require_metrics:
+            reasons.append(
+                Reason(
+                    code="ACOUSTIC_METRICS_MISSING",
+                    severity="warn",
+                    detail="acoustic posture metrics missing from report records",
+                )
+            )
+    else:
+        acoustic_metric_specs = [
+            (
+                "acoustic_max_m_orthogonality_offdiag",
+                "max",
+                acoustic_max_m_orthogonality_offdiag_threshold,
+                "ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_HIGH",
+                "acoustic max m-orthogonality offdiag",
+            ),
+            (
+                "acoustic_min_relative_frequency_separation",
+                "min",
+                acoustic_min_relative_frequency_separation_threshold,
+                "ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION_LOW",
+                "acoustic min relative frequency separation",
+            ),
+            (
+                "acoustic_mode_count",
+                "min",
+                acoustic_min_mode_count_threshold,
+                "ACOUSTIC_MODE_COUNT_LOW",
+                "acoustic mode count",
+            ),
+            (
+                "acoustic_residual_warn_threshold",
+                "max",
+                acoustic_max_residual_warn_threshold_threshold,
+                "ACOUSTIC_RESIDUAL_WARN_THRESHOLD_HIGH",
+                "acoustic residual warn threshold",
+            ),
+        ]
+        missing_acoustic_fields = []
+        for assertion_name, mode, threshold, code, label in acoustic_metric_specs:
+            values = []
+            for rec in acoustic_records:
+                observed = threshold_assertion_observed(rec, assertion_name)
+                if observed is not None:
+                    values.append(observed)
+            if not values:
+                missing_acoustic_fields.append(assertion_name)
+                continue
+            observed = max(values) if mode == "max" else min(values)
+            if assertion_name == "acoustic_max_m_orthogonality_offdiag":
+                acoustic_max_m_orthogonality_offdiag = observed
+            elif assertion_name == "acoustic_min_relative_frequency_separation":
+                acoustic_min_relative_frequency_separation = observed
+            elif assertion_name == "acoustic_mode_count":
+                acoustic_min_mode_count = observed
+            elif assertion_name == "acoustic_residual_warn_threshold":
+                acoustic_max_residual_warn_threshold = observed
+            breached = observed > threshold if mode == "max" else observed < threshold
+            if breached:
+                comparator = "exceeds" if mode == "max" else "below"
+                reasons.append(
+                    Reason(
+                        code=code,
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"{label} {observed:.3f} {comparator} threshold {threshold:.3f}"
+                        ),
+                    )
+                )
+        if missing_acoustic_fields and (protected or acoustic_require_metrics):
+            reasons.append(
+                Reason(
+                    code="ACOUSTIC_METRIC_FIELDS_MISSING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "acoustic threshold assertions missing required fields: "
+                        + ", ".join(sorted(set(missing_acoustic_fields)))
+                    ),
+                )
+            )
 
     em_records = [
         rec
@@ -5047,6 +5242,88 @@ def evaluate_release_readiness(
                     )
                 )
 
+        acoustic_m_orthogonality_offdiag_trend_ratio = fixture_assertion_trend_ratio(
+            "acoustic_max_m_orthogonality_offdiag",
+            ratio_mode="increase",
+        )
+        if (
+            acoustic_m_orthogonality_offdiag_trend_ratio is not None
+            and acoustic_m_orthogonality_offdiag_trend_ratio
+            > acoustic_max_m_orthogonality_offdiag_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "acoustic max m-orthogonality offdiag trend ratio "
+                        f"{acoustic_m_orthogonality_offdiag_trend_ratio:.3f} exceeds threshold "
+                        f"{acoustic_max_m_orthogonality_offdiag_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        acoustic_relative_frequency_separation_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "acoustic_min_relative_frequency_separation"
+        )
+        if (
+            acoustic_relative_frequency_separation_drop_trend_ratio is not None
+            and acoustic_relative_frequency_separation_drop_trend_ratio
+            > acoustic_max_relative_frequency_separation_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "acoustic min relative-frequency separation drop trend ratio "
+                        f"{acoustic_relative_frequency_separation_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{acoustic_max_relative_frequency_separation_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        acoustic_mode_count_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "acoustic_mode_count"
+        )
+        if (
+            acoustic_mode_count_drop_trend_ratio is not None
+            and acoustic_mode_count_drop_trend_ratio
+            > acoustic_max_mode_count_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="ACOUSTIC_MODE_COUNT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "acoustic mode-count drop trend ratio "
+                        f"{acoustic_mode_count_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{acoustic_max_mode_count_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        acoustic_residual_warn_threshold_trend_ratio = fixture_assertion_trend_ratio(
+            "acoustic_residual_warn_threshold",
+            ratio_mode="increase",
+        )
+        if (
+            acoustic_residual_warn_threshold_trend_ratio is not None
+            and acoustic_residual_warn_threshold_trend_ratio
+            > acoustic_max_residual_warn_threshold_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="ACOUSTIC_RESIDUAL_WARN_THRESHOLD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "acoustic residual-warn-threshold trend ratio "
+                        f"{acoustic_residual_warn_threshold_trend_ratio:.3f} exceeds threshold "
+                        f"{acoustic_max_residual_warn_threshold_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         em_energy_imbalance_trend_ratio = fixture_trend_ratio(
             "electromagnetic_energy_imbalance_ratio"
         )
@@ -6548,6 +6825,22 @@ def evaluate_release_readiness(
         "electro_max_joule_trend_ratio_threshold": electro_max_joule_trend_ratio_threshold,
         "electro_max_spread_trend_ratio_threshold": electro_max_spread_trend_ratio_threshold,
         "electro_max_time_scale_trend_ratio_threshold": electro_max_time_scale_trend_ratio_threshold,
+        "acoustic_max_m_orthogonality_offdiag": acoustic_max_m_orthogonality_offdiag,
+        "acoustic_max_m_orthogonality_offdiag_threshold": acoustic_max_m_orthogonality_offdiag_threshold,
+        "acoustic_min_relative_frequency_separation": acoustic_min_relative_frequency_separation,
+        "acoustic_min_relative_frequency_separation_threshold": acoustic_min_relative_frequency_separation_threshold,
+        "acoustic_min_mode_count": acoustic_min_mode_count,
+        "acoustic_min_mode_count_threshold": acoustic_min_mode_count_threshold,
+        "acoustic_max_residual_warn_threshold": acoustic_max_residual_warn_threshold,
+        "acoustic_max_residual_warn_threshold_threshold": acoustic_max_residual_warn_threshold_threshold,
+        "acoustic_m_orthogonality_offdiag_trend_ratio": acoustic_m_orthogonality_offdiag_trend_ratio,
+        "acoustic_max_m_orthogonality_offdiag_trend_ratio_threshold": acoustic_max_m_orthogonality_offdiag_trend_ratio_threshold,
+        "acoustic_relative_frequency_separation_drop_trend_ratio": acoustic_relative_frequency_separation_drop_trend_ratio,
+        "acoustic_max_relative_frequency_separation_drop_trend_ratio_threshold": acoustic_max_relative_frequency_separation_drop_trend_ratio_threshold,
+        "acoustic_mode_count_drop_trend_ratio": acoustic_mode_count_drop_trend_ratio,
+        "acoustic_max_mode_count_drop_trend_ratio_threshold": acoustic_max_mode_count_drop_trend_ratio_threshold,
+        "acoustic_residual_warn_threshold_trend_ratio": acoustic_residual_warn_threshold_trend_ratio,
+        "acoustic_max_residual_warn_threshold_trend_ratio_threshold": acoustic_max_residual_warn_threshold_trend_ratio_threshold,
         "em_max_energy_imbalance_ratio": em_max_energy_imbalance_ratio,
         "em_max_energy_imbalance_ratio_threshold": em_max_energy_imbalance_ratio_threshold,
         "em_max_flux_divergence_proxy": em_max_flux_divergence_proxy,
@@ -7088,6 +7381,28 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Electro-thermal time-scale trend ratio: "
         f"`{result.get('electro_time_scale_trend_ratio') if result.get('electro_time_scale_trend_ratio') is not None else '-'}`"
+    )
+    lines.append("")
+    lines.append("### Acoustic Posture")
+    lines.append(
+        "- Acoustic max m-orthogonality offdiag/threshold: "
+        f"`{result.get('acoustic_max_m_orthogonality_offdiag') if result.get('acoustic_max_m_orthogonality_offdiag') is not None else '-'}`/`{result.get('acoustic_max_m_orthogonality_offdiag_threshold') if result.get('acoustic_max_m_orthogonality_offdiag_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Acoustic min relative frequency separation/threshold: "
+        f"`{result.get('acoustic_min_relative_frequency_separation') if result.get('acoustic_min_relative_frequency_separation') is not None else '-'}`/`{result.get('acoustic_min_relative_frequency_separation_threshold') if result.get('acoustic_min_relative_frequency_separation_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Acoustic mode count/threshold: "
+        f"`{result.get('acoustic_min_mode_count') if result.get('acoustic_min_mode_count') is not None else '-'}`/`{result.get('acoustic_min_mode_count_threshold') if result.get('acoustic_min_mode_count_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Acoustic residual warn threshold/limit: "
+        f"`{result.get('acoustic_max_residual_warn_threshold') if result.get('acoustic_max_residual_warn_threshold') is not None else '-'}`/`{result.get('acoustic_max_residual_warn_threshold_threshold') if result.get('acoustic_max_residual_warn_threshold_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Acoustic trend ratios (orthogonality, frequency separation, mode count, residual threshold): "
+        f"`{result.get('acoustic_m_orthogonality_offdiag_trend_ratio') if result.get('acoustic_m_orthogonality_offdiag_trend_ratio') is not None else '-'}`/`{result.get('acoustic_relative_frequency_separation_drop_trend_ratio') if result.get('acoustic_relative_frequency_separation_drop_trend_ratio') is not None else '-'}`/`{result.get('acoustic_mode_count_drop_trend_ratio') if result.get('acoustic_mode_count_drop_trend_ratio') is not None else '-'}`/`{result.get('acoustic_residual_warn_threshold_trend_ratio') if result.get('acoustic_residual_warn_threshold_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### EM Posture")
