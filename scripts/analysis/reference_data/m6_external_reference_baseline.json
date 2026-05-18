@@ -4215,6 +4215,26 @@
       "reference": 0.8293750000000001,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.2
+    },
+    {
+      "name": "nonlinear_softening_failed_increments",
+      "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_softening_failed_increments",
+      "reference": 0.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": 0.0
+    },
+    {
+      "name": "nonlinear_softening_stall_count",
+      "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_softening_stall_count",
+      "reference": 0.0,
+      "tolerance_abs": 0.0,
+      "tolerance_rel": 0.0
     }
   ]
 }

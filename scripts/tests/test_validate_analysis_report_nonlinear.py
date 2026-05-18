@@ -76,6 +76,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "nonlinear_softening_total_increments",
                     "nonlinear_softening_spike_count",
                     "nonlinear_softening_backtrack_bursts",
+                    "nonlinear_softening_failed_increments",
+                    "nonlinear_softening_stall_count",
                 },
             ),
             _record(
@@ -688,6 +690,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "fsi_structural_step_count"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_softening_failed_increments_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "nonlinear_softening_proxy_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "nonlinear_softening_failed_increments"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

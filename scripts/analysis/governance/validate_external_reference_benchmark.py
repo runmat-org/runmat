@@ -19,6 +19,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "nonlinear_softening_total_increments",
         "nonlinear_softening_spike_count",
         "nonlinear_softening_backtrack_bursts",
+        "nonlinear_softening_failed_increments",
+        "nonlinear_softening_stall_count",
     },
     "nonlinear_load_path_mix_gpu_provider": {
         "nonlinear_path_mix_total_increments",

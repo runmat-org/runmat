@@ -95,6 +95,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "nonlinear_softening_failed_increments",
+            "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "nonlinear_softening_stall_count",
+            "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
             "name": "nonlinear_path_mix_total_increments",
             "fixture_id": "nonlinear_load_path_mix_gpu_provider",
             "observed": 36.0,
