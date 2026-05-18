@@ -44,17 +44,17 @@ pub mod workspace;
 /// Standard result type for runtime builtins.
 pub type BuiltinResult<T> = Result<T, RuntimeError>;
 
-pub(crate) const OBJECT_INDEX_PAREN: &str = "()";
-pub(crate) const OBJECT_INDEX_BRACE: &str = "{}";
-pub(crate) const OBJECT_INDEX_MEMBER: &str = ".";
-pub(crate) const OBJECT_SUBSREF_METHOD: &str = "subsref";
-pub(crate) const OBJECT_SUBSASGN_METHOD: &str = "subsasgn";
+pub const OBJECT_INDEX_PAREN: &str = "()";
+pub const OBJECT_INDEX_BRACE: &str = "{}";
+pub const OBJECT_INDEX_MEMBER: &str = ".";
+pub const OBJECT_SUBSREF_METHOD: &str = "subsref";
+pub const OBJECT_SUBSASGN_METHOD: &str = "subsasgn";
 
-pub(crate) fn object_property_getter_name(field: &str) -> String {
+pub fn object_property_getter_name(field: &str) -> String {
     format!("get.{field}")
 }
 
-pub(crate) fn object_property_setter_name(field: &str) -> String {
+pub fn object_property_setter_name(field: &str) -> String {
     format!("set.{field}")
 }
 

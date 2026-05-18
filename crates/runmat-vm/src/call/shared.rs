@@ -5,11 +5,11 @@ use runmat_hir::{CallableFallbackPolicy, CallableIdentity, QualifiedName, Symbol
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
-const OBJECT_PROTOCOL_SUBSREF: &str = "subsref";
-const OBJECT_PROTOCOL_SUBSASGN: &str = "subsasgn";
-const OBJECT_PROTOCOL_KIND_PAREN: &str = "()";
-const OBJECT_PROTOCOL_KIND_BRACE: &str = "{}";
-const OBJECT_PROTOCOL_KIND_MEMBER: &str = ".";
+const OBJECT_PROTOCOL_SUBSREF: &str = runmat_runtime::OBJECT_SUBSREF_METHOD;
+const OBJECT_PROTOCOL_SUBSASGN: &str = runmat_runtime::OBJECT_SUBSASGN_METHOD;
+const OBJECT_PROTOCOL_KIND_PAREN: &str = runmat_runtime::OBJECT_INDEX_PAREN;
+const OBJECT_PROTOCOL_KIND_BRACE: &str = runmat_runtime::OBJECT_INDEX_BRACE;
+const OBJECT_PROTOCOL_KIND_MEMBER: &str = runmat_runtime::OBJECT_INDEX_MEMBER;
 const OBJECT_SELECTOR_COLON: &str = ":";
 const OBJECT_SELECTOR_END: &str = "end";
 const OBJECT_END_RANGE_TAG: &str = "end_expr";
@@ -42,11 +42,11 @@ pub(crate) fn external_qualified_display_name(base: &str, member: &str) -> Strin
 }
 
 pub(crate) fn object_property_getter_name(field: &str) -> String {
-    format!("get.{field}")
+    runmat_runtime::object_property_getter_name(field)
 }
 
 pub(crate) fn object_property_setter_name(field: &str) -> String {
-    format!("set.{field}")
+    runmat_runtime::object_property_setter_name(field)
 }
 
 pub(crate) async fn expand_brace_values(
