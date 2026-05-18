@@ -6320,6 +6320,58 @@ def evaluate_release_readiness(
             "electro-thermal pathological temporal variation",
         ),
     ]
+    electro_required_assertion_specs = [
+        (
+            "electro_thermal_joule_benign_gpu_provider",
+            "electro_thermal_benign_joule_heating_scale",
+            "electro_joule_heating_scale",
+        ),
+        (
+            "electro_thermal_joule_benign_gpu_provider",
+            "electro_thermal_benign_conductivity_spread_ratio",
+            "electro_conductivity_spread_ratio",
+        ),
+        (
+            "electro_thermal_joule_benign_gpu_provider",
+            "electro_thermal_benign_transient_severity_peak",
+            "electro_transient_severity",
+        ),
+        (
+            "electro_thermal_joule_benign_gpu_provider",
+            "electro_thermal_benign_temporal_variation",
+            None,
+        ),
+        (
+            "electro_thermal_joule_benign_gpu_provider",
+            "electro_thermal_benign_time_scale_mean",
+            "electro_transient_time_scale_mean",
+        ),
+        (
+            "electro_thermal_joule_pathological_gpu_provider",
+            "electro_thermal_pathological_joule_heating_scale",
+            "electro_joule_heating_scale",
+        ),
+        (
+            "electro_thermal_joule_pathological_gpu_provider",
+            "electro_thermal_pathological_conductivity_spread_ratio",
+            "electro_conductivity_spread_ratio",
+        ),
+        (
+            "electro_thermal_joule_pathological_gpu_provider",
+            "electro_thermal_pathological_transient_severity_peak",
+            "electro_nonlinear_severity",
+        ),
+        (
+            "electro_thermal_joule_pathological_gpu_provider",
+            "electro_thermal_pathological_temporal_variation",
+            None,
+        ),
+        (
+            "electro_thermal_joule_pathological_gpu_provider",
+            "electro_thermal_pathological_time_scale_mean",
+            "electro_nonlinear_time_scale_mean",
+        ),
+    ]
     missing_electro_assertion_fields = []
     for fixture_id, assertion_name, threshold, code, label in electro_assertion_specs:
         values = []
@@ -6353,6 +6405,39 @@ def evaluate_release_readiness(
                 detail=(
                     "electro threshold assertions missing required fields: "
                     + ", ".join(sorted(set(missing_electro_assertion_fields)))
+                ),
+            )
+        )
+    missing_electro_contract_assertion_fields = []
+    for fixture_id, assertion_name, fallback_field in electro_required_assertion_specs:
+        observed_values = []
+        for rec in report_records(latest):
+            if rec.get("fixture_id") != fixture_id:
+                continue
+            observed = threshold_assertion_observed(rec, assertion_name)
+            if observed is not None:
+                observed_values.append(observed)
+                continue
+            if fallback_field is not None:
+                fallback_raw = rec.get(fallback_field)
+                if isinstance(fallback_raw, (int, float)):
+                    fallback_value = float(fallback_raw)
+                    if math.isfinite(fallback_value):
+                        observed_values.append(fallback_value)
+        if not observed_values:
+            missing_electro_contract_assertion_fields.append(
+                f"{fixture_id}.{assertion_name}"
+            )
+    if missing_electro_contract_assertion_fields and (
+        protected or electro_require_metrics
+    ):
+        reasons.append(
+            Reason(
+                code="ELECTRO_ASSERTION_CONTRACT_FIELDS_MISSING",
+                severity="fail" if protected else "warn",
+                detail=(
+                    "electro threshold assertion contract missing required fields: "
+                    + ", ".join(sorted(set(missing_electro_contract_assertion_fields)))
                 ),
             )
         )

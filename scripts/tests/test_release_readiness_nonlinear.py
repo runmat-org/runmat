@@ -4420,6 +4420,31 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("ELECTRO_COUPLING_METRICS_MISSING", codes)
 
+    def test_electro_assertion_contract_missing_reason_is_emitted_when_required(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            electro_transient_severity=0.2,
+            electro_joule_heating_scale=1.1,
+            electro_conductivity_spread_ratio=1.1,
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "electro_thermal_joule_benign_gpu_provider",
+                "publishable": True,
+                "threshold_assertions": [],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("ELECTRO_ASSERTION_CONTRACT_FIELDS_MISSING", codes)
+
     def test_electro_joule_heating_scale_high_reason_is_emitted(self):
         latest = report(
             passed=True,
