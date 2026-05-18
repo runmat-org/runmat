@@ -77,6 +77,7 @@ def main() -> int:
     profile = readiness.get("governance_profile", "unknown")
     rationale = readiness.get("reference_trend_rationale", "unknown")
     rolling_count = readiness.get("rolling_report_count", 0)
+    trusted_rolling_count = readiness.get("rolling_trusted_report_count", rolling_count)
 
     entries = []
     for key, profile_values in RATCHET_HISTORY.items():
@@ -104,6 +105,7 @@ def main() -> int:
         "governance_profile": profile,
         "rationale": rationale,
         "rolling_report_count": rolling_count,
+        "rolling_trusted_report_count": trusted_rolling_count,
         "entries": entries,
     }
     out_json.parent.mkdir(parents=True, exist_ok=True)
@@ -114,7 +116,7 @@ def main() -> int:
         "",
         f"- Governance profile: `{profile}`",
         f"- Rationale: `{rationale}`",
-        f"- Rolling reports: `{rolling_count}`",
+        f"- Rolling reports (raw/trusted): `{rolling_count}`/`{trusted_rolling_count}`",
         "",
         "| Threshold Key | Old | New | Delta | Observed | Status |",
         "| --- | ---: | ---: | ---: | ---: | --- |",
