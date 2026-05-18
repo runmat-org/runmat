@@ -1382,12 +1382,12 @@ pub type TypeResolverWithContext = fn(args: &[Type], ctx: &ResolveContext) -> Ty
 
 #[derive(Clone, Copy, Debug)]
 pub enum TypeResolverKind {
-    Legacy(TypeResolver),
+    Simple(TypeResolver),
     WithContext(TypeResolverWithContext),
 }
 
 pub fn type_resolver_kind(resolver: TypeResolver) -> TypeResolverKind {
-    TypeResolverKind::Legacy(resolver)
+    TypeResolverKind::Simple(resolver)
 }
 
 pub fn type_resolver_kind_ctx(resolver: TypeResolverWithContext) -> TypeResolverKind {
@@ -1450,7 +1450,7 @@ impl BuiltinFunction {
     pub fn infer_return_type_with_context(&self, args: &[Type], ctx: &ResolveContext) -> Type {
         if let Some(resolver) = self.type_resolver {
             return match resolver {
-                TypeResolverKind::Legacy(resolver) => resolver(args),
+                TypeResolverKind::Simple(resolver) => resolver(args),
                 TypeResolverKind::WithContext(resolver) => resolver(args, ctx),
             };
         }
