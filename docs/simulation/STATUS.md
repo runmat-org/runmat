@@ -40,6 +40,7 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - Structural baseline is stable.
 - EM is advanced but not final industrial Maxwell parity.
 - Governance artifact validation contracts continue to tighten: threshold-ratchet artifacts now require explicit schema/profile identity checks (`schema_version == "threshold-ratchet-report/v1"` and `governance_profile` in `release|development|feature`) before enforce-mode acceptance.
+- Threshold-ratchet governance now also enforces exact threshold-key contract coverage (required set present, no unexpected keys, no duplicates), so partial ratchet artifacts cannot silently pass enforce-mode validation.
 - EM now includes additive material frequency-response support (`sigma(omega)` baseline) with fixture-level governance thresholds.
 - EM diagnostics/governance now include dispersive-loss scale and dispersive conductivity coupling ratios for frequency-dependent runs.
 - EM fidelity/governance now includes dispersive-loss-derived phase attenuation signals for conductivity coupling (`dispersive_phase_attenuation_mean`, `dispersive_phase_conductivity_attenuation_ratio`) with enforced benchmark/external-reference metric coverage on key EM provider fixtures.

@@ -3,6 +3,14 @@ import json
 import os
 from pathlib import Path
 
+REQUIRED_THRESHOLD_KEYS = {
+    "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO",
+    "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO",
+    "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO",
+    "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO",
+    "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO",
+}
+
 
 def _is_true(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
@@ -40,6 +48,7 @@ def main() -> int:
         )
     if not isinstance(entries, list) or not entries:
         errors.append("ratchet report has no entries")
+        entries = []
     if not isinstance(rolling_count, int) or rolling_count < 0:
         errors.append("rolling_report_count must be non-negative int")
     if not isinstance(trusted_rolling_count, int) or trusted_rolling_count < 0:
@@ -49,12 +58,45 @@ def main() -> int:
             "rolling_trusted_report_count must be less than or equal to rolling_report_count"
         )
 
+    threshold_key_counts = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            errors.append("entries must contain only objects")
+            continue
+        key = entry.get("threshold_key")
+        if not isinstance(key, str) or not key:
+            errors.append("entries[].threshold_key must be non-empty string")
+            continue
+        threshold_key_counts[key] = threshold_key_counts.get(key, 0) + 1
+
+    present_threshold_keys = set(threshold_key_counts.keys())
+    missing_threshold_keys = sorted(REQUIRED_THRESHOLD_KEYS - present_threshold_keys)
+    unexpected_threshold_keys = sorted(present_threshold_keys - REQUIRED_THRESHOLD_KEYS)
+    duplicate_threshold_keys = sorted(
+        key for key, count in threshold_key_counts.items() if count > 1
+    )
+
+    if missing_threshold_keys:
+        errors.append(
+            "missing required threshold keys: " + ", ".join(missing_threshold_keys)
+        )
+    if unexpected_threshold_keys:
+        errors.append(
+            "unexpected threshold keys: " + ", ".join(unexpected_threshold_keys)
+        )
+    if duplicate_threshold_keys:
+        errors.append(
+            "duplicate threshold keys: " + ", ".join(duplicate_threshold_keys)
+        )
+
     if profile in {"development", "feature"}:
         if rationale != "rolling_median_reference_fixtures":
             errors.append(
                 "non-release profile ratchet rationale must be rolling_median_reference_fixtures"
             )
         for entry in entries:
+            if not isinstance(entry, dict):
+                continue
             status = entry.get("status")
             old = entry.get("old")
             new = entry.get("new")
@@ -67,6 +109,8 @@ def main() -> int:
                 errors.append(f"{key}: expected new < old for non-release ratchet")
     elif profile == "release":
         for entry in entries:
+            if not isinstance(entry, dict):
+                continue
             old = entry.get("old")
             new = entry.get("new")
             key = entry.get("threshold_key", "<unknown>")
@@ -79,6 +123,8 @@ def main() -> int:
 
     if require_observed:
         for entry in entries:
+            if not isinstance(entry, dict):
+                continue
             key = entry.get("threshold_key", "<unknown>")
             observed = entry.get("observed")
             if not isinstance(observed, (int, float)):

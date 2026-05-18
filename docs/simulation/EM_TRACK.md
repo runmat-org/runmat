@@ -8,6 +8,7 @@ Last updated: 2026-05-18
 - Phase 5-15: complete.
 - Phase 16: complete (frequency sweep + resonance governance).
 - Governance hardening is continuing in parallel: threshold-ratchet artifacts now enforce explicit schema/profile identity validation before ratchet-policy acceptance.
+- Governance hardening is continuing in parallel: threshold-ratchet artifacts now also enforce exact expected threshold-key coverage (missing/unexpected/duplicate key sets fail validation).
 
 ## Achieved Baseline
 
