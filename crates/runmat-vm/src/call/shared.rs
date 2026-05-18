@@ -1,7 +1,7 @@
 use crate::bytecode::ArgSpec;
 use crate::bytecode::EndExpr;
 use runmat_builtins::Value;
-use runmat_hir::{CallableIdentity, QualifiedName, SymbolName};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
@@ -350,8 +350,15 @@ pub(crate) async fn call_object_operator_method(
     method: &str,
     arg: Value,
 ) -> Result<Value, RuntimeError> {
-    let args = [base, Value::String(method.to_string()), arg];
-    call_runtime_method(&args, None).await
+    crate::call::closures::call_method_or_member_index_with_outputs(
+        base,
+        CallableIdentity::DynamicName(SymbolName(method.to_string())),
+        Some(method.to_string()),
+        vec![arg],
+        None,
+        CallableFallbackPolicy::ObjectDispatch,
+    )
+    .await
 }
 
 pub(crate) async fn call_object_named_method_with_outputs(
@@ -360,11 +367,15 @@ pub(crate) async fn call_object_named_method_with_outputs(
     args: Vec<Value>,
     requested_outputs: Option<usize>,
 ) -> Result<Value, RuntimeError> {
-    let mut method_args = Vec::with_capacity(2 + args.len());
-    method_args.push(base);
-    method_args.push(Value::String(method));
-    method_args.extend(args);
-    call_runtime_method(&method_args, requested_outputs).await
+    crate::call::closures::call_method_or_member_index_with_outputs(
+        base,
+        CallableIdentity::DynamicName(SymbolName(method.clone())),
+        Some(method),
+        args,
+        requested_outputs,
+        CallableFallbackPolicy::ObjectDispatch,
+    )
+    .await
 }
 
 pub(crate) async fn call_object_property_getter_with_outputs(

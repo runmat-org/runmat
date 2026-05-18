@@ -383,8 +383,13 @@ impl CallableFallbackPolicy {
     }
 
     pub fn allows_vm_name_fallback_for(self, identity: &CallableIdentity) -> bool {
-        matches!(identity, CallableIdentity::DynamicName(_))
-            && self.allows_runtime_name_resolution()
+        match identity {
+            CallableIdentity::DynamicName(_) => self.allows_runtime_name_resolution(),
+            CallableIdentity::ExternalName(name) => {
+                matches!(self, CallableFallbackPolicy::ExternalBoundary) && name.0.len() > 1
+            }
+            _ => false,
+        }
     }
 
     pub fn supports_vm_static_call(self) -> bool {
@@ -1300,5 +1305,24 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn vm_name_fallback_policy_only_allows_dynamic_or_qualified_external_names() {
+        let dynamic = CallableIdentity::DynamicName(SymbolName("sqrt".into()));
+        let single_external =
+            CallableIdentity::ExternalName(QualifiedName(vec![SymbolName("sqrt".into())]));
+        let qualified_external = CallableIdentity::ExternalName(QualifiedName(vec![
+            SymbolName("OverIdx".into()),
+            SymbolName("plus".into()),
+        ]));
+
+        assert!(CallableFallbackPolicy::RuntimeNameResolution
+            .allows_vm_name_fallback_for(&dynamic));
+        assert!(!CallableFallbackPolicy::ExternalBoundary.allows_vm_name_fallback_for(&dynamic));
+        assert!(!CallableFallbackPolicy::ExternalBoundary
+            .allows_vm_name_fallback_for(&single_external));
+        assert!(CallableFallbackPolicy::ExternalBoundary
+            .allows_vm_name_fallback_for(&qualified_external));
     }
 }
