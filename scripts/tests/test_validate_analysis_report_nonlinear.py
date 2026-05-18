@@ -721,6 +721,38 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 },
             ),
             _record(
+                "cht_coupled_cpu",
+                {
+                    "cht_reference_density_kg_per_m3",
+                    "cht_dynamic_viscosity_pa_s",
+                    "cht_inlet_velocity_m_per_s",
+                    "cht_turbulence_intensity",
+                    "cht_reynolds_proxy",
+                    "cht_profile_point_count",
+                    "cht_applied_temperature_delta_k",
+                    "cht_step_count",
+                    "cht_time_step_s",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                },
+            ),
+            _record(
+                "cht_coupled_gpu_fallback",
+                {
+                    "cht_reference_density_kg_per_m3",
+                    "cht_dynamic_viscosity_pa_s",
+                    "cht_inlet_velocity_m_per_s",
+                    "cht_turbulence_intensity",
+                    "cht_reynolds_proxy",
+                    "cht_profile_point_count",
+                    "cht_applied_temperature_delta_k",
+                    "cht_step_count",
+                    "cht_time_step_s",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                },
+            ),
+            _record(
                 "fsi_coupled_gpu_provider",
                 {
                     "fsi_reference_density_kg_per_m3",
@@ -1055,6 +1087,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "transient_max_residual_norm"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_cht_cpu_step_count_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "cht_coupled_cpu":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "cht_step_count"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
