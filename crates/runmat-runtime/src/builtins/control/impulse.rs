@@ -16,6 +16,7 @@ const BUILTIN_NAME: &str = "impulse";
 const TF_CLASS: &str = "tf";
 const EPS: f64 = 1.0e-12;
 const DEFAULT_POINTS: usize = 100;
+const MAX_DISCRETE_SAMPLES: usize = 1_000_000;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::impulse")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -110,6 +111,21 @@ impl TfSystem {
         let sample_time = scalar_property(property(&object, "Ts")?, "Ts")?;
         let input_delay = scalar_property(property(&object, "InputDelay")?, "InputDelay")?;
         let output_delay = scalar_property(property(&object, "OutputDelay")?, "OutputDelay")?;
+        if !sample_time.is_finite() || sample_time < 0.0 {
+            return Err(impulse_error(format!(
+                "impulse: Ts must be a finite non-negative scalar, got {sample_time}"
+            )));
+        }
+        if !input_delay.is_finite() || input_delay < 0.0 {
+            return Err(impulse_error(format!(
+                "impulse: InputDelay must be a finite non-negative scalar, got {input_delay}"
+            )));
+        }
+        if !output_delay.is_finite() || output_delay < 0.0 {
+            return Err(impulse_error(format!(
+                "impulse: OutputDelay must be a finite non-negative scalar, got {output_delay}"
+            )));
+        }
         if input_delay.abs() > EPS || output_delay.abs() > EPS {
             return Err(impulse_error(
                 "impulse: transfer functions with input or output delays are not supported yet",
@@ -290,8 +306,7 @@ fn time_vector_from_final_time(system: &TfSystem, final_time: f64) -> BuiltinRes
         ));
     }
     if system.is_discrete() {
-        let count = (final_time / system.sample_time).floor() as usize + 1;
-        let count = count.max(1);
+        let count = checked_discrete_sample_count(system, final_time)?;
         Ok((0..count)
             .map(|idx| idx as f64 * system.sample_time)
             .collect())
@@ -300,6 +315,39 @@ fn time_vector_from_final_time(system: &TfSystem, final_time: f64) -> BuiltinRes
     } else {
         Ok(linspace(0.0, final_time, DEFAULT_POINTS))
     }
+}
+
+fn checked_discrete_sample_count(system: &TfSystem, final_time: f64) -> BuiltinResult<usize> {
+    let samples = final_time / system.sample_time;
+    if !samples.is_finite() {
+        return Err(impulse_error(
+            "impulse: discrete sample count exceeds platform limits",
+        ));
+    }
+
+    let count = samples.floor() + 1.0;
+    if count > usize::MAX as f64 || count > MAX_DISCRETE_SAMPLES as f64 {
+        return Err(impulse_error(format!(
+            "impulse: discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"
+        )));
+    }
+    Ok(count as usize)
+}
+
+fn checked_discrete_sample_index(system: &TfSystem, time: f64) -> BuiltinResult<usize> {
+    let samples = time / system.sample_time;
+    let index = samples.round();
+    if !index.is_finite() || index > usize::MAX as f64 {
+        return Err(impulse_error(
+            "impulse: discrete sample index exceeds platform limits",
+        ));
+    }
+    if index >= MAX_DISCRETE_SAMPLES as f64 {
+        return Err(impulse_error(format!(
+            "impulse: discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"
+        )));
+    }
+    Ok(index as usize)
 }
 
 fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
@@ -445,13 +493,21 @@ fn discrete_response(
     realization: &Realization,
     t: &[f64],
 ) -> BuiltinResult<Vec<f64>> {
+    if t.len() > MAX_DISCRETE_SAMPLES {
+        return Err(impulse_error(format!(
+            "impulse: discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"
+        )));
+    }
     let sample_indices: Vec<usize> = t
         .iter()
-        .map(|value| (*value / system.sample_time).round() as usize)
-        .collect();
+        .map(|value| checked_discrete_sample_index(system, *value))
+        .collect::<BuiltinResult<_>>()?;
     let max_index = sample_indices.iter().copied().max().unwrap_or(0);
     let order = realization.c.len();
-    let mut values = vec![0.0; max_index + 1];
+    let value_count = max_index
+        .checked_add(1)
+        .ok_or_else(|| impulse_error("impulse: discrete sample index exceeds platform limits"))?;
+    let mut values = vec![0.0; value_count];
     if order == 0 {
         return Ok(sample_indices.into_iter().map(|idx| values[idx]).collect());
     }
@@ -552,6 +608,16 @@ mod tests {
     use runmat_builtins::{CharArray, ObjectInstance};
 
     fn tf_object(num: Vec<f64>, den: Vec<f64>, ts: f64) -> Value {
+        tf_object_with_delays(num, den, ts, 0.0, 0.0)
+    }
+
+    fn tf_object_with_delays(
+        num: Vec<f64>,
+        den: Vec<f64>,
+        ts: f64,
+        input_delay: f64,
+        output_delay: f64,
+    ) -> Value {
         let mut object = ObjectInstance::new("tf".to_string());
         object.properties.insert(
             "Numerator".to_string(),
@@ -568,10 +634,10 @@ mod tests {
         object.properties.insert("Ts".to_string(), Value::Num(ts));
         object
             .properties
-            .insert("InputDelay".to_string(), Value::Num(0.0));
+            .insert("InputDelay".to_string(), Value::Num(input_delay));
         object
             .properties
-            .insert("OutputDelay".to_string(), Value::Num(0.0));
+            .insert("OutputDelay".to_string(), Value::Num(output_delay));
         Value::Object(object)
     }
 
@@ -644,6 +710,22 @@ mod tests {
     }
 
     #[test]
+    fn impulse_discrete_final_time_rejects_excessive_sample_count() {
+        let sys = tf_object(vec![1.0], vec![1.0, -0.5], 1.0e-6);
+        let err = run_impulse(sys, vec![Value::Num(2.0)]).expect_err("should fail");
+        assert!(err.message().contains("more than 1000000 samples"));
+    }
+
+    #[test]
+    fn impulse_discrete_time_vector_rejects_excessive_sample_index() {
+        let sys = tf_object(vec![1.0], vec![1.0, -0.5], 1.0);
+        let t =
+            Value::Tensor(Tensor::new(vec![0.0, MAX_DISCRETE_SAMPLES as f64], vec![1, 2]).unwrap());
+        let err = run_impulse(sys, vec![t]).expect_err("should fail");
+        assert!(err.message().contains("more than 1000000 samples"));
+    }
+
+    #[test]
     fn impulse_rejects_unsupported_model_type() {
         let object = ObjectInstance::new("ss".to_string());
         let err = run_impulse(Value::Object(object), Vec::new()).expect_err("should fail");
@@ -655,5 +737,26 @@ mod tests {
         let sys = tf_object(vec![1.0, 1.0], vec![1.0, 2.0], 0.0);
         let err = run_impulse(sys, Vec::new()).expect_err("should fail");
         assert!(err.message().contains("strictly proper"));
+    }
+
+    #[test]
+    fn impulse_rejects_invalid_time_metadata() {
+        let err = run_impulse(tf_object(vec![1.0], vec![1.0, -0.5], -0.1), Vec::new())
+            .expect_err("negative sample time should fail");
+        assert!(err.message().contains("Ts must be"));
+
+        let err = run_impulse(
+            tf_object_with_delays(vec![1.0], vec![1.0, 5.0], 0.0, f64::NAN, 0.0),
+            Vec::new(),
+        )
+        .expect_err("NaN input delay should fail");
+        assert!(err.message().contains("InputDelay must be"));
+
+        let err = run_impulse(
+            tf_object_with_delays(vec![1.0], vec![1.0, 5.0], 0.0, 0.0, -1.0),
+            Vec::new(),
+        )
+        .expect_err("negative output delay should fail");
+        assert!(err.message().contains("OutputDelay must be"));
     }
 }
