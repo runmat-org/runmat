@@ -711,6 +711,28 @@ def main() -> int:
                     + ", ".join(missing_fields)
                 )
             missing_fields = []
+            for field in sorted(EM_BOUNDARY_CONDITION_LOCALIZATION_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM boundary-condition-localization fields: "
+                    + ", ".join(missing_fields)
+                )
+            missing_fields = []
+            for field in sorted(EM_GROUND_ANCHOR_EFFECTIVENESS_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM ground-anchor-effectiveness fields: "
+                    + ", ".join(missing_fields)
+                )
+            missing_fields = []
             for field in sorted(EM_SOURCE_FIDELITY_REQUIRED_FIELDS):
                 value = record.get(field)
                 if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
@@ -801,28 +823,6 @@ def main() -> int:
                 errors.append(
                     "fixture "
                     f"{fixture_id} missing finite EM applied-current fields: "
-                    + ", ".join(missing_fields)
-                )
-            missing_fields = []
-            for field in sorted(EM_BOUNDARY_CONDITION_LOCALIZATION_REQUIRED_FIELDS):
-                value = record.get(field)
-                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-                    missing_fields.append(field)
-            if missing_fields:
-                errors.append(
-                    "fixture "
-                    f"{fixture_id} missing finite EM boundary-condition-localization fields: "
-                    + ", ".join(missing_fields)
-                )
-            missing_fields = []
-            for field in sorted(EM_GROUND_ANCHOR_EFFECTIVENESS_REQUIRED_FIELDS):
-                value = record.get(field)
-                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-                    missing_fields.append(field)
-            if missing_fields:
-                errors.append(
-                    "fixture "
-                    f"{fixture_id} missing finite EM ground-anchor-effectiveness fields: "
                     + ", ".join(missing_fields)
                 )
         if fixture_id in PERFORMANCE_REQUIRED_FIELDS:
