@@ -1469,23 +1469,21 @@ def evaluate_release_readiness(
         for fixture, rec in key_perf_records.items():
             current = rec.get("gpu_run_ms")
             history = hist.get(fixture, [])
-            if not isinstance(current, (int, float)) or current <= 0 or not history:
-                continue
-            baseline = statistics.median(history)
-            if baseline <= 0:
-                continue
-            ratio = float(current) / baseline
-            if ratio > key_perf_max_slowdown_ratio:
-                reasons.append(
-                    Reason(
-                        code="KEY_PERF_TREND_SLOWDOWN",
-                        severity="fail" if protected else "warn",
-                        detail=(
-                            f"{fixture} gpu_run_ms slowdown ratio {ratio:.3f} exceeds "
-                            f"{key_perf_max_slowdown_ratio:.3f}"
-                        ),
-                    )
-                )
+            if isinstance(current, (int, float)) and current > 0 and history:
+                baseline = statistics.median(history)
+                if baseline > 0:
+                    ratio = float(current) / baseline
+                    if ratio > key_perf_max_slowdown_ratio:
+                        reasons.append(
+                            Reason(
+                                code="KEY_PERF_TREND_SLOWDOWN",
+                                severity="fail" if protected else "warn",
+                                detail=(
+                                    f"{fixture} gpu_run_ms slowdown ratio {ratio:.3f} exceeds "
+                                    f"{key_perf_max_slowdown_ratio:.3f}"
+                                ),
+                            )
+                        )
             current_solve = rec.get("gpu_solver_solve_ms")
             solve_history = solve_hist.get(fixture, [])
             if (

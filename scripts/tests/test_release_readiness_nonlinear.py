@@ -716,6 +716,30 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("KEY_PERF_SPEEDUP_TREND_WORSENING", codes)
 
+    def test_key_perf_speedup_trend_worsening_is_independent_of_run_ms(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_speedup_ratio": 1.0,
+                "gpu_solver_solve_ms": 120.0,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_speedup_ratio": 1.5,
+                "gpu_solver_solve_ms": 100.0,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO"] = "1.2"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("KEY_PERF_SPEEDUP_TREND_WORSENING", codes)
+
     def test_key_perf_speedup_low_reason_is_emitted_for_thermo_fixture(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
