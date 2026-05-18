@@ -253,6 +253,12 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_REGION_CONTRAST_INDEX",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO",
@@ -260,6 +266,12 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REGION_CONTRAST_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO",
@@ -283,6 +295,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REALIZATION_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO",
@@ -314,6 +327,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO",
@@ -519,6 +533,16 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "electromagnetic_source_region_coverage_ratio": 0.1,
                 "electromagnetic_source_material_alignment_ratio": 0.1,
                 "threshold_assertions": [
+                    {"name": "em_homogeneous_sigma_omega_scale_mean", "observed": 0.6},
+                    {
+                        "name": "em_homogeneous_sigma_omega_response_coverage_ratio",
+                        "observed": 0.6,
+                    },
+                    {
+                        "name": "em_homogeneous_dispersive_loss_scale_mean",
+                        "observed": 0.8,
+                    },
+                    {"name": "em_homogeneous_boundary_energy_ratio", "observed": 0.1},
                     {
                         "name": "em_homogeneous_dispersive_phase_attenuation_mean",
                         "observed": 0.6,
@@ -534,6 +558,49 @@ class ReleaseReadinessTests(unittest.TestCase):
                     {
                         "name": "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
                         "observed": 0.55,
+                    },
+                    {
+                        "name": "em_homogeneous_source_material_alignment_ratio",
+                        "observed": 0.1,
+                    },
+                    {
+                        "name": "em_homogeneous_source_region_coverage_ratio",
+                        "observed": 0.1,
+                    },
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {
+                        "name": "em_heterogeneous_sigma_omega_scale_spread_ratio",
+                        "observed": 3.5,
+                    },
+                    {
+                        "name": "em_heterogeneous_sigma_omega_response_coverage_ratio",
+                        "observed": 0.6,
+                    },
+                    {
+                        "name": "em_heterogeneous_dispersive_loss_scale_mean",
+                        "observed": 1.0,
+                    },
+                    {"name": "em_heterogeneous_region_contrast_index", "observed": 1.0},
+                    {
+                        "name": "em_heterogeneous_source_realization_ratio",
+                        "observed": 0.1,
+                    },
+                    {
+                        "name": "em_heterogeneous_source_material_alignment_ratio",
+                        "observed": 0.1,
+                    },
+                    {
+                        "name": "em_heterogeneous_source_region_coverage_ratio",
+                        "observed": 0.1,
                     },
                 ],
             }
@@ -634,6 +701,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_fallback_heavy_energy_imbalance_ratio",
                         "observed": 0.95,
                     },
+                    {
+                        "name": "em_fallback_heavy_source_material_alignment_ratio",
+                        "observed": 0.9,
+                    },
                     {"name": "em_fallback_heavy_boundary_anchor_ratio", "observed": 0.08},
                 ],
             }
@@ -676,6 +747,14 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY"] = "0.2"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM"] = "0.2"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM"] = "0.2"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN"] = "0.9"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO"
+        ] = "0.9"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO"] = "2.0"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN"] = "0.5"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO"] = "0.3"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_REGION_CONTRAST_INDEX"] = "3.0"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO"] = "0.8"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO"] = "0.8"
@@ -737,6 +816,9 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO"
         ] = "0.7"
         os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO"
+        ] = "0.3"
+        os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MIN_SPARSE_SOURCE_REALIZATION_RATIO"
         ] = "0.2"
         os.environ[
@@ -765,6 +847,12 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_ENERGY_IMBALANCE_RATIO_HIGH", codes)
+        self.assertIn("EM_SIGMA_OMEGA_SCALE_MEAN_LOW", codes)
+        self.assertIn("EM_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO_LOW", codes)
+        self.assertIn("EM_SIGMA_OMEGA_SCALE_SPREAD_RATIO_HIGH", codes)
+        self.assertIn("EM_DISPERSIVE_LOSS_SCALE_MEAN_HIGH", codes)
+        self.assertIn("EM_BOUNDARY_ENERGY_RATIO_LOW", codes)
+        self.assertIn("EM_REGION_CONTRAST_INDEX_LOW", codes)
         self.assertIn("EM_DISPERSIVE_PHASE_ATTENUATION_MEAN_LOW", codes)
         self.assertIn("EM_BOUNDARY_ANCHOR_RATIO_LOW", codes)
         self.assertIn("EM_DISPERSIVE_COUPLING_RATIO_HIGH", codes)
@@ -790,6 +878,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO_LOW", codes)
         self.assertIn("EM_FALLBACK_HEAVY_SOURCE_REALIZATION_RATIO_LOW", codes)
         self.assertIn("EM_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO_HIGH", codes)
+        self.assertIn("EM_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO_HIGH", codes)
         self.assertIn("EM_OVERLAP_SOURCE_REGION_COVERAGE_RATIO_LOW", codes)
         self.assertIn("EM_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO_LOW", codes)
         self.assertIn("EM_OVERLAP_SOURCE_OVERLAP_RATIO_LOW", codes)
@@ -838,6 +927,16 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.2,
                 "threshold_assertions": [
+                    {"name": "em_homogeneous_sigma_omega_scale_mean", "observed": 0.30},
+                    {
+                        "name": "em_homogeneous_sigma_omega_response_coverage_ratio",
+                        "observed": 0.30,
+                    },
+                    {
+                        "name": "em_homogeneous_dispersive_loss_scale_mean",
+                        "observed": 0.60,
+                    },
+                    {"name": "em_homogeneous_boundary_energy_ratio", "observed": 0.20},
                     {
                         "name": "em_homogeneous_dispersive_phase_attenuation_mean",
                         "observed": 0.30,
@@ -846,6 +945,43 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
                         "observed": 0.25,
                     },
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {
+                        "name": "em_heterogeneous_sigma_omega_scale_spread_ratio",
+                        "observed": 2.4,
+                    },
+                    {
+                        "name": "em_heterogeneous_sigma_omega_response_coverage_ratio",
+                        "observed": 0.30,
+                    },
+                    {
+                        "name": "em_heterogeneous_dispersive_loss_scale_mean",
+                        "observed": 0.70,
+                    },
+                    {"name": "em_heterogeneous_region_contrast_index", "observed": 1.8},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {
+                        "name": "em_fallback_heavy_source_material_alignment_ratio",
+                        "observed": 0.8,
+                    }
                 ],
             }
         )
@@ -858,6 +994,22 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_speedup_ratio": 1.2,
                 "threshold_assertions": [
                     {
+                        "name": "em_homogeneous_sigma_omega_scale_mean",
+                        "observed": 0.90,
+                    },
+                    {
+                        "name": "em_homogeneous_sigma_omega_response_coverage_ratio",
+                        "observed": 0.90,
+                    },
+                    {
+                        "name": "em_homogeneous_dispersive_loss_scale_mean",
+                        "observed": 0.20,
+                    },
+                    {
+                        "name": "em_homogeneous_boundary_energy_ratio",
+                        "observed": 0.90,
+                    },
+                    {
                         "name": "em_homogeneous_dispersive_phase_attenuation_mean",
                         "observed": 0.90,
                     },
@@ -868,17 +1020,84 @@ class ReleaseReadinessTests(unittest.TestCase):
                 ],
             }
         )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {
+                        "name": "em_heterogeneous_sigma_omega_scale_spread_ratio",
+                        "observed": 1.0,
+                    },
+                    {
+                        "name": "em_heterogeneous_sigma_omega_response_coverage_ratio",
+                        "observed": 0.90,
+                    },
+                    {
+                        "name": "em_heterogeneous_dispersive_loss_scale_mean",
+                        "observed": 0.20,
+                    },
+                    {"name": "em_heterogeneous_region_contrast_index", "observed": 6.0},
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {
+                        "name": "em_fallback_heavy_source_material_alignment_ratio",
+                        "observed": 0.2,
+                    }
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REGION_CONTRAST_DROP_TREND_RATIO"
+        ] = "1.5"
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO"
         ] = "1.5"
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO"
         ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO"
+        ] = "1.5"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_SIGMA_OMEGA_SCALE_MEAN_TREND_WORSENING", codes)
+        self.assertIn("EM_SIGMA_OMEGA_RESPONSE_COVERAGE_TREND_WORSENING", codes)
+        self.assertIn("EM_SIGMA_OMEGA_SCALE_SPREAD_TREND_WORSENING", codes)
+        self.assertIn("EM_DISPERSIVE_LOSS_SCALE_TREND_WORSENING", codes)
+        self.assertIn("EM_BOUNDARY_ENERGY_TREND_WORSENING", codes)
+        self.assertIn("EM_REGION_CONTRAST_TREND_WORSENING", codes)
         self.assertIn("EM_DISPERSIVE_PHASE_ATTENUATION_TREND_WORSENING", codes)
         self.assertIn(
             "EM_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_WORSENING", codes
+        )
+        self.assertIn(
+            "EM_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_WORSENING", codes
         )
 
     def test_em_boundary_phased_assertion_trend_worsening_reasons_are_emitted(self):
@@ -2766,8 +2985,9 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM overlap interference index", summary)
         self.assertIn("EM boundary-kernel localization/ground/leakage", summary)
         self.assertIn("EM breach rate/threshold", summary)
+        self.assertIn("EM core trend ratios", summary)
         self.assertIn(
-            "EM non-core trend ratios (sparse assignment, sparse fallback, sparse source realization, sparse energy imbalance, fallback source realization, fallback energy imbalance, overlap ratio, overlap interference, boundary-kernel leakage)",
+            "EM non-core trend ratios (sparse assignment, sparse fallback, sparse source realization, sparse energy imbalance, fallback source realization, fallback energy imbalance, fallback material alignment, overlap ratio, overlap interference, boundary-kernel leakage)",
             summary,
         )
         self.assertIn("### Promotion Evidence Quality", summary)

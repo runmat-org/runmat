@@ -133,6 +133,12 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM": "0.15",
             "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM": "0.15",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO": "0.95",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO": "1.6",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN": "0.2",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_REGION_CONTRAST_INDEX": "5.0",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.55",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.55",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.55",
@@ -140,6 +146,12 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.15",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REGION_CONTRAST_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO": "1.1",
@@ -163,6 +175,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO": "1.1",
@@ -194,6 +207,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO": "0.15",
             "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REALIZATION_RATIO": "0.18",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO": "0.55",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.2",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO": "0.9",
@@ -294,6 +308,12 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.45",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM": "0.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM": "0.2",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN": "0.85",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO": "1.9",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO": "0.25",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_REGION_CONTRAST_INDEX": "4.0",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.45",
@@ -301,6 +321,12 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.25",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REGION_CONTRAST_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO": "1.2",
@@ -324,6 +350,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO": "1.2",
@@ -355,6 +382,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO": "0.12",
             "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REALIZATION_RATIO": "0.15",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO": "0.65",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO": "0.85",
@@ -455,6 +483,12 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.6",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM": "0.3",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN": "0.75",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO": "2.4",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN": "0.45",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO": "0.15",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_REGION_CONTRAST_INDEX": "2.5",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REGION_COVERAGE_RATIO": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.3",
@@ -462,6 +496,12 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REGION_CONTRAST_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_ATTENUATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_PHASE_CONDUCTIVITY_ATTENUATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_PENALTY_REAL_RESIDUAL_NORM_TREND_RATIO": "1.35",
@@ -485,6 +525,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_BOUNDARY_ANCHOR_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_REALIZATION_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_REGION_COVERAGE_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_OVERLAP_SOURCE_OVERLAP_DROP_TREND_RATIO": "1.35",
@@ -516,6 +557,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_BOUNDARY_ANCHOR_RATIO": "0.1",
             "RUNMAT_RELEASE_READINESS_EM_MIN_FALLBACK_HEAVY_SOURCE_REALIZATION_RATIO": "0.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_REGION_COVERAGE_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_MATERIAL_ALIGNMENT_RATIO": "0.8",
             "RUNMAT_RELEASE_READINESS_EM_MIN_OVERLAP_SOURCE_OVERLAP_RATIO": "0.8",
@@ -1481,6 +1523,45 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM", "0.2"),
         )
     )
+    em_min_sigma_omega_scale_mean_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN", "0.85"),
+        )
+    )
+    em_min_sigma_omega_response_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO",
+                "0.9",
+            ),
+        )
+    )
+    em_max_sigma_omega_scale_spread_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO", "1.9"),
+        )
+    )
+    em_max_dispersive_loss_scale_mean_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN", "0.3"),
+        )
+    )
+    em_min_boundary_energy_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO", "0.25"),
+        )
+    )
+    em_min_region_contrast_index_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_REGION_CONTRAST_INDEX",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_REGION_CONTRAST_INDEX", "4.0"),
+        )
+    )
     em_min_source_realization_ratio_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO",
@@ -1527,6 +1608,60 @@ def evaluate_release_readiness(
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO", "1.25"
+            ),
+        )
+    )
+    em_max_sigma_omega_scale_mean_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_sigma_omega_response_coverage_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_sigma_omega_scale_spread_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_dispersive_loss_scale_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_boundary_energy_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_region_contrast_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REGION_CONTRAST_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_REGION_CONTRAST_DROP_TREND_RATIO",
+                "1.2",
             ),
         )
     )
@@ -1730,6 +1865,15 @@ def evaluate_release_readiness(
             "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_fallback_heavy_source_material_alignment_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -1991,6 +2135,15 @@ def evaluate_release_readiness(
             profile_default(
                 "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_ENERGY_IMBALANCE_RATIO",
                 "0.8",
+            ),
+        )
+    )
+    em_max_fallback_heavy_source_material_alignment_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO",
+                "0.3",
             ),
         )
     )
@@ -2404,6 +2557,12 @@ def evaluate_release_readiness(
     em_max_flux_divergence_proxy = None
     em_max_real_residual_norm = None
     em_max_imag_residual_norm = None
+    em_min_sigma_omega_scale_mean = None
+    em_min_sigma_omega_response_coverage_ratio = None
+    em_max_sigma_omega_scale_spread_ratio = None
+    em_max_dispersive_loss_scale_mean = None
+    em_min_boundary_energy_ratio = None
+    em_min_region_contrast_index = None
     em_min_source_realization_ratio = None
     em_min_source_region_coverage_ratio = None
     em_min_source_material_alignment_ratio = None
@@ -2432,6 +2591,7 @@ def evaluate_release_readiness(
     em_min_fallback_heavy_boundary_anchor_ratio = None
     em_min_fallback_heavy_source_realization_ratio = None
     em_max_fallback_heavy_energy_imbalance_ratio = None
+    em_max_fallback_heavy_source_material_alignment_ratio = None
     em_min_overlap_source_region_coverage_ratio = None
     em_min_overlap_source_material_alignment_ratio = None
     em_min_overlap_source_overlap_ratio = None
@@ -2442,6 +2602,12 @@ def evaluate_release_readiness(
     em_breach_rate = None
     em_energy_imbalance_trend_ratio = None
     em_flux_divergence_trend_ratio = None
+    em_sigma_omega_scale_mean_drop_trend_ratio = None
+    em_sigma_omega_response_coverage_drop_trend_ratio = None
+    em_sigma_omega_scale_spread_trend_ratio = None
+    em_dispersive_loss_scale_trend_ratio = None
+    em_boundary_energy_drop_trend_ratio = None
+    em_region_contrast_drop_trend_ratio = None
     em_dispersive_phase_attenuation_trend_ratio = None
     em_dispersive_phase_conductivity_attenuation_trend_ratio = None
     em_boundary_penalty_real_residual_norm_trend_ratio = None
@@ -2465,6 +2631,7 @@ def evaluate_release_readiness(
     em_fallback_heavy_boundary_anchor_drop_trend_ratio = None
     em_fallback_heavy_source_realization_drop_trend_ratio = None
     em_fallback_heavy_energy_imbalance_trend_ratio = None
+    em_fallback_heavy_source_material_alignment_trend_ratio = None
     em_overlap_source_region_coverage_drop_trend_ratio = None
     em_overlap_source_material_alignment_drop_trend_ratio = None
     em_overlap_source_overlap_drop_trend_ratio = None
@@ -3242,6 +3409,110 @@ def evaluate_release_readiness(
         phase_assertion_specs = [
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_sigma_omega_scale_mean",
+                "min",
+                "EM_SIGMA_OMEGA_SCALE_MEAN_LOW",
+                "EM homogeneous sigma(omega) scale mean",
+                em_min_sigma_omega_scale_mean_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_sigma_omega_response_coverage_ratio",
+                "min",
+                "EM_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO_LOW",
+                "EM homogeneous sigma(omega) response coverage ratio",
+                em_min_sigma_omega_response_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_sigma_omega_scale_spread_ratio",
+                "max",
+                "EM_SIGMA_OMEGA_SCALE_SPREAD_RATIO_HIGH",
+                "EM heterogeneous sigma(omega) scale spread ratio",
+                em_max_sigma_omega_scale_spread_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_sigma_omega_response_coverage_ratio",
+                "min",
+                "EM_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO_LOW",
+                "EM heterogeneous sigma(omega) response coverage ratio",
+                em_min_sigma_omega_response_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_dispersive_loss_scale_mean",
+                "max",
+                "EM_DISPERSIVE_LOSS_SCALE_MEAN_HIGH",
+                "EM homogeneous dispersive loss scale mean",
+                em_max_dispersive_loss_scale_mean_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_dispersive_loss_scale_mean",
+                "max",
+                "EM_DISPERSIVE_LOSS_SCALE_MEAN_HIGH",
+                "EM heterogeneous dispersive loss scale mean",
+                em_max_dispersive_loss_scale_mean_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_boundary_energy_ratio",
+                "min",
+                "EM_BOUNDARY_ENERGY_RATIO_LOW",
+                "EM homogeneous boundary-energy ratio",
+                em_min_boundary_energy_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_region_contrast_index",
+                "min",
+                "EM_REGION_CONTRAST_INDEX_LOW",
+                "EM heterogeneous region contrast index",
+                em_min_region_contrast_index_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_source_material_alignment_ratio",
+                "min",
+                "EM_SOURCE_MATERIAL_ALIGNMENT_RATIO_LOW",
+                "EM homogeneous source-material alignment ratio",
+                em_min_source_material_alignment_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_source_material_alignment_ratio",
+                "min",
+                "EM_SOURCE_MATERIAL_ALIGNMENT_RATIO_LOW",
+                "EM heterogeneous source-material alignment ratio",
+                em_min_source_material_alignment_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_source_region_coverage_ratio",
+                "min",
+                "EM_SOURCE_REGION_COVERAGE_RATIO_LOW",
+                "EM homogeneous source-region coverage ratio",
+                em_min_source_region_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_source_region_coverage_ratio",
+                "min",
+                "EM_SOURCE_REGION_COVERAGE_RATIO_LOW",
+                "EM heterogeneous source-region coverage ratio",
+                em_min_source_region_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_source_realization_ratio",
+                "min",
+                "EM_SOURCE_REALIZATION_RATIO_LOW",
+                "EM heterogeneous source realization ratio",
+                em_min_source_realization_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
                 "em_homogeneous_dispersive_phase_attenuation_mean",
                 "min",
                 "EM_DISPERSIVE_PHASE_ATTENUATION_MEAN_LOW",
@@ -3473,6 +3744,14 @@ def evaluate_release_readiness(
                 em_max_fallback_heavy_energy_imbalance_ratio_threshold,
             ),
             (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "em_fallback_heavy_source_material_alignment_ratio",
+                "max",
+                "EM_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_RATIO_HIGH",
+                "EM fallback-heavy source-material alignment ratio",
+                em_max_fallback_heavy_source_material_alignment_ratio_threshold,
+            ),
+            (
                 "electromagnetic_reference_overlap_interference_gpu_provider",
                 "em_overlap_source_region_coverage_ratio",
                 "min",
@@ -3585,7 +3864,43 @@ def evaluate_release_readiness(
                 continue
 
             observed = max(values) if mode == "max" else min(values)
-            if assertion_name.endswith("dispersive_phase_attenuation_mean"):
+            if assertion_name.endswith("sigma_omega_scale_mean"):
+                if (
+                    em_min_sigma_omega_scale_mean is None
+                    or observed < em_min_sigma_omega_scale_mean
+                ):
+                    em_min_sigma_omega_scale_mean = observed
+            elif assertion_name.endswith("sigma_omega_response_coverage_ratio"):
+                if (
+                    em_min_sigma_omega_response_coverage_ratio is None
+                    or observed < em_min_sigma_omega_response_coverage_ratio
+                ):
+                    em_min_sigma_omega_response_coverage_ratio = observed
+            elif assertion_name.endswith("sigma_omega_scale_spread_ratio"):
+                if (
+                    em_max_sigma_omega_scale_spread_ratio is None
+                    or observed > em_max_sigma_omega_scale_spread_ratio
+                ):
+                    em_max_sigma_omega_scale_spread_ratio = observed
+            elif assertion_name.endswith("dispersive_loss_scale_mean"):
+                if (
+                    em_max_dispersive_loss_scale_mean is None
+                    or observed > em_max_dispersive_loss_scale_mean
+                ):
+                    em_max_dispersive_loss_scale_mean = observed
+            elif assertion_name.endswith("boundary_energy_ratio"):
+                if (
+                    em_min_boundary_energy_ratio is None
+                    or observed < em_min_boundary_energy_ratio
+                ):
+                    em_min_boundary_energy_ratio = observed
+            elif assertion_name.endswith("region_contrast_index"):
+                if (
+                    em_min_region_contrast_index is None
+                    or observed < em_min_region_contrast_index
+                ):
+                    em_min_region_contrast_index = observed
+            elif assertion_name.endswith("dispersive_phase_attenuation_mean"):
                 if (
                     em_min_dispersive_phase_attenuation_mean is None
                     or observed < em_min_dispersive_phase_attenuation_mean
@@ -3734,6 +4049,12 @@ def evaluate_release_readiness(
                     or observed > em_max_fallback_heavy_energy_imbalance_ratio
                 ):
                     em_max_fallback_heavy_energy_imbalance_ratio = observed
+            elif assertion_name.endswith("fallback_heavy_source_material_alignment_ratio"):
+                if (
+                    em_max_fallback_heavy_source_material_alignment_ratio is None
+                    or observed > em_max_fallback_heavy_source_material_alignment_ratio
+                ):
+                    em_max_fallback_heavy_source_material_alignment_ratio = observed
             elif assertion_name.endswith("overlap_source_region_coverage_ratio"):
                 if (
                     em_min_overlap_source_region_coverage_ratio is None
@@ -4689,6 +5010,155 @@ def evaluate_release_readiness(
                 )
             )
 
+        sigma_omega_scale_mean_trend_candidates = [
+            fixture_assertion_trend_ratio("em_homogeneous_sigma_omega_scale_mean")
+        ]
+        sigma_omega_scale_mean_trend_candidates = [
+            value for value in sigma_omega_scale_mean_trend_candidates if value is not None
+        ]
+        if sigma_omega_scale_mean_trend_candidates:
+            em_sigma_omega_scale_mean_drop_trend_ratio = max(
+                sigma_omega_scale_mean_trend_candidates
+            )
+            if (
+                em_sigma_omega_scale_mean_drop_trend_ratio
+                > em_max_sigma_omega_scale_mean_drop_trend_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="EM_SIGMA_OMEGA_SCALE_MEAN_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "EM sigma(omega) scale-mean drop trend ratio "
+                            f"{em_sigma_omega_scale_mean_drop_trend_ratio:.3f} exceeds threshold "
+                            f"{em_max_sigma_omega_scale_mean_drop_trend_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        sigma_omega_response_coverage_trend_candidates = [
+            fixture_assertion_trend_ratio("em_homogeneous_sigma_omega_response_coverage_ratio"),
+            fixture_assertion_trend_ratio("em_heterogeneous_sigma_omega_response_coverage_ratio"),
+        ]
+        sigma_omega_response_coverage_trend_candidates = [
+            value
+            for value in sigma_omega_response_coverage_trend_candidates
+            if value is not None
+        ]
+        if sigma_omega_response_coverage_trend_candidates:
+            em_sigma_omega_response_coverage_drop_trend_ratio = max(
+                sigma_omega_response_coverage_trend_candidates
+            )
+            if (
+                em_sigma_omega_response_coverage_drop_trend_ratio
+                > em_max_sigma_omega_response_coverage_drop_trend_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="EM_SIGMA_OMEGA_RESPONSE_COVERAGE_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "EM sigma(omega) response coverage drop trend ratio "
+                            f"{em_sigma_omega_response_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                            f"{em_max_sigma_omega_response_coverage_drop_trend_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        em_sigma_omega_scale_spread_trend_ratio = fixture_assertion_trend_ratio(
+            "em_heterogeneous_sigma_omega_scale_spread_ratio",
+            ratio_mode="increase",
+        )
+        if (
+            em_sigma_omega_scale_spread_trend_ratio is not None
+            and em_sigma_omega_scale_spread_trend_ratio
+            > em_max_sigma_omega_scale_spread_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_SIGMA_OMEGA_SCALE_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM sigma(omega) scale-spread trend ratio "
+                        f"{em_sigma_omega_scale_spread_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_sigma_omega_scale_spread_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        dispersive_loss_scale_trend_candidates = [
+            fixture_assertion_trend_ratio(
+                "em_homogeneous_dispersive_loss_scale_mean",
+                ratio_mode="increase",
+            ),
+            fixture_assertion_trend_ratio(
+                "em_heterogeneous_dispersive_loss_scale_mean",
+                ratio_mode="increase",
+            ),
+        ]
+        dispersive_loss_scale_trend_candidates = [
+            value for value in dispersive_loss_scale_trend_candidates if value is not None
+        ]
+        if dispersive_loss_scale_trend_candidates:
+            em_dispersive_loss_scale_trend_ratio = max(
+                dispersive_loss_scale_trend_candidates
+            )
+            if (
+                em_dispersive_loss_scale_trend_ratio
+                > em_max_dispersive_loss_scale_trend_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="EM_DISPERSIVE_LOSS_SCALE_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "EM dispersive loss-scale trend ratio "
+                            f"{em_dispersive_loss_scale_trend_ratio:.3f} exceeds threshold "
+                            f"{em_max_dispersive_loss_scale_trend_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        em_boundary_energy_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_homogeneous_boundary_energy_ratio"
+        )
+        if (
+            em_boundary_energy_drop_trend_ratio is not None
+            and em_boundary_energy_drop_trend_ratio
+            > em_max_boundary_energy_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_BOUNDARY_ENERGY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM boundary-energy drop trend ratio "
+                        f"{em_boundary_energy_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_boundary_energy_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_region_contrast_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_heterogeneous_region_contrast_index"
+        )
+        if (
+            em_region_contrast_drop_trend_ratio is not None
+            and em_region_contrast_drop_trend_ratio
+            > em_max_region_contrast_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_REGION_CONTRAST_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM region-contrast drop trend ratio "
+                        f"{em_region_contrast_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_region_contrast_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         phase_attenuation_trend_candidates = [
             fixture_assertion_trend_ratio(
                 "em_homogeneous_dispersive_phase_attenuation_mean"
@@ -5176,6 +5646,29 @@ def evaluate_release_readiness(
                         "EM fallback-heavy energy-imbalance trend ratio "
                         f"{em_fallback_heavy_energy_imbalance_trend_ratio:.3f} exceeds threshold "
                         f"{em_max_fallback_heavy_energy_imbalance_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_fallback_heavy_source_material_alignment_trend_ratio = (
+            fixture_assertion_trend_ratio(
+                "em_fallback_heavy_source_material_alignment_ratio",
+                ratio_mode="increase",
+            )
+        )
+        if (
+            em_fallback_heavy_source_material_alignment_trend_ratio is not None
+            and em_fallback_heavy_source_material_alignment_trend_ratio
+            > em_max_fallback_heavy_source_material_alignment_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_FALLBACK_HEAVY_SOURCE_MATERIAL_ALIGNMENT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM fallback-heavy source-material alignment trend ratio "
+                        f"{em_fallback_heavy_source_material_alignment_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_fallback_heavy_source_material_alignment_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
@@ -5847,6 +6340,18 @@ def evaluate_release_readiness(
         "em_max_real_residual_norm_threshold": em_max_real_residual_norm_threshold,
         "em_max_imag_residual_norm": em_max_imag_residual_norm,
         "em_max_imag_residual_norm_threshold": em_max_imag_residual_norm_threshold,
+        "em_min_sigma_omega_scale_mean": em_min_sigma_omega_scale_mean,
+        "em_min_sigma_omega_scale_mean_threshold": em_min_sigma_omega_scale_mean_threshold,
+        "em_min_sigma_omega_response_coverage_ratio": em_min_sigma_omega_response_coverage_ratio,
+        "em_min_sigma_omega_response_coverage_ratio_threshold": em_min_sigma_omega_response_coverage_ratio_threshold,
+        "em_max_sigma_omega_scale_spread_ratio": em_max_sigma_omega_scale_spread_ratio,
+        "em_max_sigma_omega_scale_spread_ratio_threshold": em_max_sigma_omega_scale_spread_ratio_threshold,
+        "em_max_dispersive_loss_scale_mean": em_max_dispersive_loss_scale_mean,
+        "em_max_dispersive_loss_scale_mean_threshold": em_max_dispersive_loss_scale_mean_threshold,
+        "em_min_boundary_energy_ratio": em_min_boundary_energy_ratio,
+        "em_min_boundary_energy_ratio_threshold": em_min_boundary_energy_ratio_threshold,
+        "em_min_region_contrast_index": em_min_region_contrast_index,
+        "em_min_region_contrast_index_threshold": em_min_region_contrast_index_threshold,
         "em_min_source_realization_ratio": em_min_source_realization_ratio,
         "em_min_source_realization_ratio_threshold": em_min_source_realization_ratio_threshold,
         "em_min_source_region_coverage_ratio": em_min_source_region_coverage_ratio,
@@ -5903,6 +6408,8 @@ def evaluate_release_readiness(
         "em_min_fallback_heavy_source_realization_ratio_threshold": em_min_fallback_heavy_source_realization_ratio_threshold,
         "em_max_fallback_heavy_energy_imbalance_ratio": em_max_fallback_heavy_energy_imbalance_ratio,
         "em_max_fallback_heavy_energy_imbalance_ratio_threshold": em_max_fallback_heavy_energy_imbalance_ratio_threshold,
+        "em_max_fallback_heavy_source_material_alignment_ratio": em_max_fallback_heavy_source_material_alignment_ratio,
+        "em_max_fallback_heavy_source_material_alignment_ratio_threshold": em_max_fallback_heavy_source_material_alignment_ratio_threshold,
         "em_min_overlap_source_region_coverage_ratio": em_min_overlap_source_region_coverage_ratio,
         "em_min_overlap_source_region_coverage_ratio_threshold": em_min_overlap_source_region_coverage_ratio_threshold,
         "em_min_overlap_source_material_alignment_ratio": em_min_overlap_source_material_alignment_ratio,
@@ -5923,6 +6430,18 @@ def evaluate_release_readiness(
         "em_max_energy_imbalance_trend_ratio_threshold": em_max_energy_imbalance_trend_ratio_threshold,
         "em_flux_divergence_trend_ratio": em_flux_divergence_trend_ratio,
         "em_max_flux_divergence_trend_ratio_threshold": em_max_flux_divergence_trend_ratio_threshold,
+        "em_sigma_omega_scale_mean_drop_trend_ratio": em_sigma_omega_scale_mean_drop_trend_ratio,
+        "em_max_sigma_omega_scale_mean_drop_trend_ratio_threshold": em_max_sigma_omega_scale_mean_drop_trend_ratio_threshold,
+        "em_sigma_omega_response_coverage_drop_trend_ratio": em_sigma_omega_response_coverage_drop_trend_ratio,
+        "em_max_sigma_omega_response_coverage_drop_trend_ratio_threshold": em_max_sigma_omega_response_coverage_drop_trend_ratio_threshold,
+        "em_sigma_omega_scale_spread_trend_ratio": em_sigma_omega_scale_spread_trend_ratio,
+        "em_max_sigma_omega_scale_spread_trend_ratio_threshold": em_max_sigma_omega_scale_spread_trend_ratio_threshold,
+        "em_dispersive_loss_scale_trend_ratio": em_dispersive_loss_scale_trend_ratio,
+        "em_max_dispersive_loss_scale_trend_ratio_threshold": em_max_dispersive_loss_scale_trend_ratio_threshold,
+        "em_boundary_energy_drop_trend_ratio": em_boundary_energy_drop_trend_ratio,
+        "em_max_boundary_energy_drop_trend_ratio_threshold": em_max_boundary_energy_drop_trend_ratio_threshold,
+        "em_region_contrast_drop_trend_ratio": em_region_contrast_drop_trend_ratio,
+        "em_max_region_contrast_drop_trend_ratio_threshold": em_max_region_contrast_drop_trend_ratio_threshold,
         "em_dispersive_phase_attenuation_trend_ratio": em_dispersive_phase_attenuation_trend_ratio,
         "em_max_dispersive_phase_attenuation_trend_ratio_threshold": em_max_dispersive_phase_attenuation_trend_ratio_threshold,
         "em_dispersive_phase_conductivity_attenuation_trend_ratio": em_dispersive_phase_conductivity_attenuation_trend_ratio,
@@ -5969,6 +6488,8 @@ def evaluate_release_readiness(
         "em_max_fallback_heavy_source_realization_drop_trend_ratio_threshold": em_max_fallback_heavy_source_realization_drop_trend_ratio_threshold,
         "em_fallback_heavy_energy_imbalance_trend_ratio": em_fallback_heavy_energy_imbalance_trend_ratio,
         "em_max_fallback_heavy_energy_imbalance_trend_ratio_threshold": em_max_fallback_heavy_energy_imbalance_trend_ratio_threshold,
+        "em_fallback_heavy_source_material_alignment_trend_ratio": em_fallback_heavy_source_material_alignment_trend_ratio,
+        "em_max_fallback_heavy_source_material_alignment_trend_ratio_threshold": em_max_fallback_heavy_source_material_alignment_trend_ratio_threshold,
         "em_overlap_source_region_coverage_drop_trend_ratio": em_overlap_source_region_coverage_drop_trend_ratio,
         "em_max_overlap_source_region_coverage_drop_trend_ratio_threshold": em_max_overlap_source_region_coverage_drop_trend_ratio_threshold,
         "em_overlap_source_material_alignment_drop_trend_ratio": em_overlap_source_material_alignment_drop_trend_ratio,
@@ -6361,6 +6882,30 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_max_flux_divergence_proxy_threshold') if result.get('em_max_flux_divergence_proxy_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM sigma(omega) scale mean/response coverage: "
+        f"`{result.get('em_min_sigma_omega_scale_mean') if result.get('em_min_sigma_omega_scale_mean') is not None else '-'}`/`{result.get('em_min_sigma_omega_response_coverage_ratio') if result.get('em_min_sigma_omega_response_coverage_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM sigma(omega) scale mean/response coverage thresholds: "
+        f"`{result.get('em_min_sigma_omega_scale_mean_threshold') if result.get('em_min_sigma_omega_scale_mean_threshold') is not None else '-'}`/`{result.get('em_min_sigma_omega_response_coverage_ratio_threshold') if result.get('em_min_sigma_omega_response_coverage_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM sigma(omega) spread/loss scale: "
+        f"`{result.get('em_max_sigma_omega_scale_spread_ratio') if result.get('em_max_sigma_omega_scale_spread_ratio') is not None else '-'}`/`{result.get('em_max_dispersive_loss_scale_mean') if result.get('em_max_dispersive_loss_scale_mean') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM sigma(omega) spread/loss scale thresholds: "
+        f"`{result.get('em_max_sigma_omega_scale_spread_ratio_threshold') if result.get('em_max_sigma_omega_scale_spread_ratio_threshold') is not None else '-'}`/`{result.get('em_max_dispersive_loss_scale_mean_threshold') if result.get('em_max_dispersive_loss_scale_mean_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM boundary-energy/region-contrast: "
+        f"`{result.get('em_min_boundary_energy_ratio') if result.get('em_min_boundary_energy_ratio') is not None else '-'}`/`{result.get('em_min_region_contrast_index') if result.get('em_min_region_contrast_index') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM boundary-energy/region-contrast thresholds: "
+        f"`{result.get('em_min_boundary_energy_ratio_threshold') if result.get('em_min_boundary_energy_ratio_threshold') is not None else '-'}`/`{result.get('em_min_region_contrast_index_threshold') if result.get('em_min_region_contrast_index_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- Max EM boundary-penalty residual norms (real/imag): "
         f"`{result.get('em_max_boundary_penalty_real_residual_norm') if result.get('em_max_boundary_penalty_real_residual_norm') is not None else '-'}`/`{result.get('em_max_boundary_penalty_imag_residual_norm') if result.get('em_max_boundary_penalty_imag_residual_norm') is not None else '-'}`"
     )
@@ -6425,6 +6970,10 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_min_fallback_heavy_source_realization_ratio_threshold') if result.get('em_min_fallback_heavy_source_realization_ratio_threshold') is not None else '-'}`/`{result.get('em_max_fallback_heavy_energy_imbalance_ratio_threshold') if result.get('em_max_fallback_heavy_energy_imbalance_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM fallback-heavy source-material alignment ratio/threshold: "
+        f"`{result.get('em_max_fallback_heavy_source_material_alignment_ratio') if result.get('em_max_fallback_heavy_source_material_alignment_ratio') is not None else '-'}`/`{result.get('em_max_fallback_heavy_source_material_alignment_ratio_threshold') if result.get('em_max_fallback_heavy_source_material_alignment_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- EM overlap region/material/overlap ratios: "
         f"`{result.get('em_min_overlap_source_region_coverage_ratio') if result.get('em_min_overlap_source_region_coverage_ratio') is not None else '-'}`/`{result.get('em_min_overlap_source_material_alignment_ratio') if result.get('em_min_overlap_source_material_alignment_ratio') is not None else '-'}`/`{result.get('em_min_overlap_source_overlap_ratio') if result.get('em_min_overlap_source_overlap_ratio') is not None else '-'}`"
     )
@@ -6453,12 +7002,16 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_breach_rate') if result.get('em_breach_rate') is not None else '-'}`/`{result.get('em_max_breach_rate_threshold') if result.get('em_max_breach_rate_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM core trend ratios (energy, flux, sigma mean, sigma coverage, sigma spread, loss scale, boundary energy, region contrast, phase attenuation, phase conductivity attenuation): "
+        f"`{result.get('em_energy_imbalance_trend_ratio') if result.get('em_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_flux_divergence_trend_ratio') if result.get('em_flux_divergence_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_mean_drop_trend_ratio') if result.get('em_sigma_omega_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_response_coverage_drop_trend_ratio') if result.get('em_sigma_omega_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_spread_trend_ratio') if result.get('em_sigma_omega_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_trend_ratio') if result.get('em_dispersive_loss_scale_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_energy_drop_trend_ratio') if result.get('em_boundary_energy_drop_trend_ratio') is not None else '-'}`/`{result.get('em_region_contrast_drop_trend_ratio') if result.get('em_region_contrast_drop_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_trend_ratio') if result.get('em_dispersive_phase_attenuation_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') if result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
         "- EM boundary/phased trend ratios (penalty real, penalty imag, penalty anchor, penalty conditioning, phased overlap, phased interference, phased region coverage, phased energy consistency): "
         f"`{result.get('em_boundary_penalty_real_residual_norm_trend_ratio') if result.get('em_boundary_penalty_real_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_penalty_imag_residual_norm_trend_ratio') if result.get('em_boundary_penalty_imag_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_penalty_anchor_drop_trend_ratio') if result.get('em_boundary_penalty_anchor_drop_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_penalty_conditioning_drop_trend_ratio') if result.get('em_boundary_penalty_conditioning_drop_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_overlap_trend_ratio') if result.get('em_phased_source_overlap_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_interference_trend_ratio') if result.get('em_phased_source_interference_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_region_coverage_drop_trend_ratio') if result.get('em_phased_source_region_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_phased_source_energy_consistency_trend_ratio') if result.get('em_phased_source_energy_consistency_trend_ratio') is not None else '-'}`"
     )
     lines.append(
-        "- EM non-core trend ratios (sparse assignment, sparse fallback, sparse source realization, sparse energy imbalance, fallback source realization, fallback energy imbalance, overlap ratio, overlap interference, boundary-kernel leakage): "
-        f"`{result.get('em_sparse_assignment_coverage_drop_trend_ratio') if result.get('em_sparse_assignment_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_fallback_coefficient_trend_ratio') if result.get('em_sparse_fallback_coefficient_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_source_realization_drop_trend_ratio') if result.get('em_sparse_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_energy_imbalance_trend_ratio') if result.get('em_sparse_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_fallback_heavy_source_realization_drop_trend_ratio') if result.get('em_fallback_heavy_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_fallback_heavy_energy_imbalance_trend_ratio') if result.get('em_fallback_heavy_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_overlap_source_overlap_drop_trend_ratio') if result.get('em_overlap_source_overlap_drop_trend_ratio') is not None else '-'}`/`{result.get('em_overlap_source_interference_trend_ratio') if result.get('em_overlap_source_interference_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_kernel_insulation_leakage_trend_ratio') if result.get('em_boundary_kernel_insulation_leakage_trend_ratio') is not None else '-'}`"
+        "- EM non-core trend ratios (sparse assignment, sparse fallback, sparse source realization, sparse energy imbalance, fallback source realization, fallback energy imbalance, fallback material alignment, overlap ratio, overlap interference, boundary-kernel leakage): "
+        f"`{result.get('em_sparse_assignment_coverage_drop_trend_ratio') if result.get('em_sparse_assignment_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_fallback_coefficient_trend_ratio') if result.get('em_sparse_fallback_coefficient_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_source_realization_drop_trend_ratio') if result.get('em_sparse_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sparse_energy_imbalance_trend_ratio') if result.get('em_sparse_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_fallback_heavy_source_realization_drop_trend_ratio') if result.get('em_fallback_heavy_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_fallback_heavy_energy_imbalance_trend_ratio') if result.get('em_fallback_heavy_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_fallback_heavy_source_material_alignment_trend_ratio') if result.get('em_fallback_heavy_source_material_alignment_trend_ratio') is not None else '-'}`/`{result.get('em_overlap_source_overlap_drop_trend_ratio') if result.get('em_overlap_source_overlap_drop_trend_ratio') is not None else '-'}`/`{result.get('em_overlap_source_interference_trend_ratio') if result.get('em_overlap_source_interference_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_kernel_insulation_leakage_trend_ratio') if result.get('em_boundary_kernel_insulation_leakage_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Plasticity Posture")
