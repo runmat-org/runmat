@@ -434,6 +434,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS": "2500",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "5000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.25",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS": "true",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "true",
         },
@@ -758,6 +759,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS": "4000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "8000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.45",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS": "false",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "false",
         },
@@ -1064,6 +1066,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS": "8000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "12000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.8",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO": "1.5",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS": "false",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "false",
         },
@@ -1316,6 +1319,14 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO", "1.45"),
         )
     )
+    key_perf_max_speedup_drop_trend_ratio = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO", "1.25"
+            ),
+        )
+    )
     key_perf_max_run_ms = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS",
@@ -1443,6 +1454,7 @@ def evaluate_release_readiness(
     if rolling and key_perf_records:
         hist = {fixture: [] for fixture in key_perf_records}
         solve_hist = {fixture: [] for fixture in key_perf_records}
+        speedup_hist = {fixture: [] for fixture in key_perf_records}
         for report in rolling:
             for fixture, rec in records_for_fixtures(report, set(hist.keys())).items():
                 value = rec.get("gpu_run_ms")
@@ -1451,6 +1463,9 @@ def evaluate_release_readiness(
                 solve_value = rec.get("gpu_solver_solve_ms")
                 if isinstance(solve_value, (int, float)) and solve_value > 0:
                     solve_hist[fixture].append(float(solve_value))
+                speedup_value = rec.get("gpu_speedup_ratio")
+                if isinstance(speedup_value, (int, float)) and speedup_value > 0:
+                    speedup_hist[fixture].append(float(speedup_value))
         for fixture, rec in key_perf_records.items():
             current = rec.get("gpu_run_ms")
             history = hist.get(fixture, [])
@@ -1489,6 +1504,27 @@ def evaluate_release_readiness(
                                 detail=(
                                     f"{fixture} gpu_solver_solve_ms slowdown ratio {solve_ratio:.3f} "
                                     f"exceeds {key_perf_max_solve_slowdown_ratio:.3f}"
+                                ),
+                            )
+                        )
+            current_speedup = rec.get("gpu_speedup_ratio")
+            speedup_history = speedup_hist.get(fixture, [])
+            if (
+                isinstance(current_speedup, (int, float))
+                and current_speedup > 0
+                and speedup_history
+            ):
+                speedup_baseline = statistics.median(speedup_history)
+                if speedup_baseline > 0:
+                    speedup_drop_ratio = speedup_baseline / float(current_speedup)
+                    if speedup_drop_ratio > key_perf_max_speedup_drop_trend_ratio:
+                        reasons.append(
+                            Reason(
+                                code="KEY_PERF_SPEEDUP_TREND_WORSENING",
+                                severity="fail" if protected else "warn",
+                                detail=(
+                                    f"{fixture} gpu_speedup_ratio drop ratio {speedup_drop_ratio:.3f} "
+                                    f"exceeds {key_perf_max_speedup_drop_trend_ratio:.3f}"
                                 ),
                             )
                         )
