@@ -206,6 +206,10 @@ REQUIRED_FIXTURES = {
         "cfd_turbulence_intensity",
         "cfd_reynolds_proxy",
         "cfd_profile_point_count",
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+        "transient_prepared_cache_hit_ratio",
+        "transient_prepared_cache_misses",
     },
     "cht_coupled_gpu_provider": {
         "cht_reference_density_kg_per_m3",
@@ -217,6 +221,10 @@ REQUIRED_FIXTURES = {
         "cht_applied_temperature_delta_k",
         "cht_step_count",
         "cht_time_step_s",
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+        "transient_prepared_cache_hit_ratio",
+        "transient_prepared_cache_misses",
     },
     "fsi_coupled_gpu_provider": {
         "fsi_reference_density_kg_per_m3",
@@ -229,6 +237,10 @@ REQUIRED_FIXTURES = {
         "fsi_time_step_s",
         "fsi_structural_step_count",
         "fsi_cfd_profile_point_count",
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+        "transient_prepared_cache_hit_ratio",
+        "transient_prepared_cache_misses",
     },
 }
 

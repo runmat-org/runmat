@@ -445,6 +445,10 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cfd_turbulence_intensity",
                     "cfd_reynolds_proxy",
                     "cfd_profile_point_count",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                    "transient_prepared_cache_hit_ratio",
+                    "transient_prepared_cache_misses",
                 },
             ),
             _record(
@@ -459,6 +463,10 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "cht_applied_temperature_delta_k",
                     "cht_step_count",
                     "cht_time_step_s",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                    "transient_prepared_cache_hit_ratio",
+                    "transient_prepared_cache_misses",
                 },
             ),
             _record(
@@ -474,6 +482,10 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "fsi_time_step_s",
                     "fsi_structural_step_count",
                     "fsi_cfd_profile_point_count",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                    "transient_prepared_cache_hit_ratio",
+                    "transient_prepared_cache_misses",
                 },
             ),
         ]

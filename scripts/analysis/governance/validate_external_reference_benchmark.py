@@ -88,14 +88,26 @@ REQUIRED_METRICS_BY_FIXTURE = {
     "cfd_steady_gpu_provider": {
         "cfd_reference_density_kg_per_m3",
         "cfd_reynolds_proxy",
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+        "transient_prepared_cache_hit_ratio",
+        "transient_prepared_cache_misses",
     },
     "cht_coupled_gpu_provider": {
         "cht_applied_temperature_delta_k",
         "cht_reynolds_proxy",
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+        "transient_prepared_cache_hit_ratio",
+        "transient_prepared_cache_misses",
     },
     "fsi_coupled_gpu_provider": {
         "fsi_reynolds_proxy",
         "fsi_structural_step_count",
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+        "transient_prepared_cache_hit_ratio",
+        "transient_prepared_cache_misses",
     },
     "thermo_gradient_pathological_gpu_provider": {
         "thermo_gradient_pathological_spread_ratio",

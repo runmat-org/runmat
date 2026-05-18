@@ -699,6 +699,46 @@
       "tolerance_rel": 0.2
     },
     {
+      "name": "transient_max_residual_norm",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_residual_norm",
+      "reference": 1.0752752029478579e-17,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "transient_max_energy_growth_ratio",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_energy_growth_ratio",
+      "reference": 1.0000193285689896,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 0.03
+    },
+    {
+      "name": "transient_prepared_cache_hit_ratio",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_hit_ratio",
+      "reference": 0.9166666666666666,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.15
+    },
+    {
+      "name": "transient_prepared_cache_misses",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_misses",
+      "reference": 1.0,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 2.0
+    },
+    {
       "name": "cht_applied_temperature_delta_k",
       "fixture_id": "cht_coupled_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -719,6 +759,46 @@
       "tolerance_rel": 0.2
     },
     {
+      "name": "transient_max_residual_norm",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_residual_norm",
+      "reference": 1.4291845127021133e-17,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "transient_max_energy_growth_ratio",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_energy_growth_ratio",
+      "reference": 1.0000199973612758,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 0.03
+    },
+    {
+      "name": "transient_prepared_cache_hit_ratio",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_hit_ratio",
+      "reference": 0.9166666666666666,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.15
+    },
+    {
+      "name": "transient_prepared_cache_misses",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_misses",
+      "reference": 1.0,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 2.0
+    },
+    {
       "name": "fsi_reynolds_proxy",
       "fixture_id": "fsi_coupled_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -737,6 +817,46 @@
       "reference": 1.0,
       "tolerance_abs": 0.0,
       "tolerance_rel": 0.0
+    },
+    {
+      "name": "transient_max_residual_norm",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_residual_norm",
+      "reference": 1.0752752029478579e-17,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "transient_max_energy_growth_ratio",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_energy_growth_ratio",
+      "reference": 1.0000193285689896,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 0.03
+    },
+    {
+      "name": "transient_prepared_cache_hit_ratio",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_hit_ratio",
+      "reference": 0.9166666666666666,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.15
+    },
+    {
+      "name": "transient_prepared_cache_misses",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_misses",
+      "reference": 1.0,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 2.0
     },
     {
       "name": "thermo_gradient_pathological_spread_ratio",
