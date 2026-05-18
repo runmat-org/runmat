@@ -541,6 +541,9 @@ pub fn run_electromagnetic_with_options(
         &vector_potential_imag,
         h,
     );
+    let flux_magnitude_proxy = flux_density_from_magnitude_vector_potential(&vector_potential, h);
+    let flux_phasor_coherence_ratio =
+        flux_phasor_coherence_ratio(&flux_density, &flux_magnitude_proxy);
 
     let real_applied = apply_k(&summary.operator, &vector_potential_real);
     let imag_applied = apply_k(&summary.operator, &vector_potential_imag);
@@ -751,7 +754,7 @@ pub fn run_electromagnetic_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} conductivity_frequency_scale_mean={} conductivity_frequency_scale_spread_ratio={} conductivity_frequency_response_coverage_ratio={} relative_permittivity_frequency_scale_mean={} relative_permittivity_frequency_scale_spread_ratio={} relative_permittivity_frequency_response_coverage_ratio={} relative_permeability_frequency_scale_mean={} relative_permeability_frequency_scale_spread_ratio={} relative_permeability_frequency_response_coverage_ratio={} dispersive_loss_scale_mean={} dispersive_loss_scale_spread_ratio={} dispersive_phase_attenuation_mean={} dispersive_phase_attenuation_spread_ratio={} dispersive_conductivity_coupling_ratio={} dispersive_phase_conductivity_attenuation_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_proxy={} flux_divergence_proxy={} energy_imbalance_ratio={} boundary_energy_ratio={} boundary_penalty_conditioning_contribution={} source_region_energy_consistency_ratio={} real_residual_norm={} imag_residual_norm={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
+            "enabled={} reference_frequency_hz={} applied_current_a={} conductivity_mean_s_per_m={} relative_permittivity_mean={} relative_permeability_mean={} conductivity_spread_ratio={} conductivity_frequency_scale_mean={} conductivity_frequency_scale_spread_ratio={} conductivity_frequency_response_coverage_ratio={} relative_permittivity_frequency_scale_mean={} relative_permittivity_frequency_scale_spread_ratio={} relative_permittivity_frequency_response_coverage_ratio={} relative_permeability_frequency_scale_mean={} relative_permeability_frequency_scale_spread_ratio={} relative_permeability_frequency_response_coverage_ratio={} dispersive_loss_scale_mean={} dispersive_loss_scale_spread_ratio={} dispersive_phase_attenuation_mean={} dispersive_phase_attenuation_spread_ratio={} dispersive_conductivity_coupling_ratio={} dispersive_phase_conductivity_attenuation_ratio={} relative_permittivity_spread_ratio={} relative_permeability_spread_ratio={} electromagnetic_material_heterogeneity_index={} assignment_coverage_ratio={} fallback_coefficient_ratio={} region_coefficient_contrast_index={} solver_conditioning_proxy={} source_realization_ratio={} source_region_coverage_ratio={} source_material_alignment_ratio={} source_localization_ratio={} source_overlap_ratio={} source_interference_index={} boundary_anchor_ratio={} boundary_condition_localization_ratio={} ground_anchor_effectiveness_ratio={} insulation_leakage_proxy={} flux_divergence_proxy={} flux_phasor_coherence_ratio={} energy_imbalance_ratio={} boundary_energy_ratio={} boundary_penalty_conditioning_contribution={} source_region_energy_consistency_ratio={} real_residual_norm={} imag_residual_norm={} reluctivity={} effective_permittivity={} max_residual_norm={} solve_quality={} placeholder_quality={} energy_proxy={}",
             domain.enabled,
             domain.reference_frequency_hz,
             domain.applied_current_a,
@@ -792,6 +795,7 @@ pub fn run_electromagnetic_with_options(
             ground_anchor_effectiveness_ratio,
             insulation_leakage_proxy,
             flux_divergence_proxy,
+            flux_phasor_coherence_ratio,
             energy_imbalance_ratio,
             boundary_energy_ratio,
             boundary_penalty_conditioning_contribution,
@@ -1687,6 +1691,39 @@ fn flux_density_from_complex_vector_potential(real: &[f64], imag: &[f64], h: f64
     flux_density
 }
 
+fn flux_density_from_magnitude_vector_potential(magnitude: &[f64], h: f64) -> Vec<f64> {
+    let node_count = magnitude.len();
+    let mut flux_density = vec![0.0_f64; node_count];
+    if node_count < 2 || !h.is_finite() || h <= 0.0 {
+        return flux_density;
+    }
+    let inv_two_h = 0.5 / h;
+    for i in 1..(node_count - 1) {
+        flux_density[i] = ((magnitude[i + 1] - magnitude[i - 1]) * inv_two_h).abs();
+    }
+    flux_density[0] = flux_density[1];
+    flux_density[node_count - 1] = flux_density[node_count - 2];
+    flux_density
+}
+
+fn flux_phasor_coherence_ratio(complex_flux: &[f64], magnitude_proxy_flux: &[f64]) -> f64 {
+    let pair_count = complex_flux.len().min(magnitude_proxy_flux.len());
+    if pair_count == 0 {
+        return 1.0;
+    }
+    let mut complex_energy = 0.0_f64;
+    let mut proxy_energy = 0.0_f64;
+    for i in 0..pair_count {
+        complex_energy += complex_flux[i] * complex_flux[i];
+        proxy_energy += magnitude_proxy_flux[i] * magnitude_proxy_flux[i];
+    }
+    if complex_energy <= 1.0e-18 {
+        1.0
+    } else {
+        (proxy_energy / complex_energy).clamp(0.0, 1.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use runmat_analysis_core::{ConductivityFrequencyPoint, MaterialElectricalModel};
@@ -1694,7 +1731,8 @@ mod tests {
     use super::{
         conductivity_frequency_sample, conductivity_scale_at_frequency,
         dispersive_loss_scale_at_frequency, dispersive_phase_attenuation_for_loss_scale,
-        flux_density_from_complex_vector_potential, relative_permeability_scale_at_frequency,
+        flux_density_from_complex_vector_potential, flux_density_from_magnitude_vector_potential,
+        flux_phasor_coherence_ratio, relative_permeability_scale_at_frequency,
         relative_permittivity_scale_at_frequency,
     };
 
@@ -1889,5 +1927,43 @@ mod tests {
         let flux_density = flux_density_from_complex_vector_potential(&real, &imag, 0.1);
 
         assert!(flux_density.iter().all(|value| value.abs() <= 1.0e-12));
+    }
+
+    #[test]
+    fn flux_phasor_coherence_ratio_drops_for_quadrature_variation() {
+        let real = vec![0.0, 1.0, 0.0, -1.0, 0.0];
+        let imag = vec![1.0, 0.0, -1.0, 0.0, 1.0];
+        let complex_flux = flux_density_from_complex_vector_potential(&real, &imag, 0.25);
+        let magnitude = real
+            .iter()
+            .zip(imag.iter())
+            .map(|(re, im)| (re * re + im * im).sqrt())
+            .collect::<Vec<_>>();
+        let magnitude_proxy = flux_density_from_magnitude_vector_potential(&magnitude, 0.25);
+        let coherence = flux_phasor_coherence_ratio(&complex_flux, &magnitude_proxy);
+
+        assert!(
+            coherence < 0.25,
+            "expected strong quadrature loss, got {coherence}"
+        );
+    }
+
+    #[test]
+    fn flux_phasor_coherence_ratio_is_unity_for_in_phase_signal() {
+        let real = vec![0.0, 0.5, 1.0, 1.5, 2.0];
+        let imag = vec![0.0; 5];
+        let complex_flux = flux_density_from_complex_vector_potential(&real, &imag, 0.5);
+        let magnitude = real
+            .iter()
+            .zip(imag.iter())
+            .map(|(re, im)| (re * re + im * im).sqrt())
+            .collect::<Vec<_>>();
+        let magnitude_proxy = flux_density_from_magnitude_vector_potential(&magnitude, 0.5);
+        let coherence = flux_phasor_coherence_ratio(&complex_flux, &magnitude_proxy);
+
+        assert!(
+            (coherence - 1.0).abs() < 1.0e-12,
+            "expected unity coherence, got {coherence}"
+        );
     }
 }

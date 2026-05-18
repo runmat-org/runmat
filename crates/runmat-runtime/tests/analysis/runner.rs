@@ -5158,6 +5158,20 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "em_homogeneous_flux_phasor_coherence_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "flux_phasor_coherence_ratio",
+                            ),
+                            Some(0.5),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "em_homogeneous_flux_divergence_proxy",
                             "FEA_EM_STATIC",
                             diagnostic_metric(
@@ -5547,6 +5561,20 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.7),
                             Some(0.85),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_flux_phasor_coherence_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "flux_phasor_coherence_ratio",
+                            ),
+                            Some(0.2),
+                            Some(1.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -6334,14 +6362,10 @@ pub(super) fn run_fixture(
                         .data
                         .summary
                         .electromagnetic_resonance_bandwidth_hz;
-                    electromagnetic_resonance_q_proxy = gpu_results
-                        .data
-                        .summary
-                        .electromagnetic_resonance_q_proxy;
-                    electromagnetic_resonance_flux_gain = gpu_results
-                        .data
-                        .summary
-                        .electromagnetic_resonance_flux_gain;
+                    electromagnetic_resonance_q_proxy =
+                        gpu_results.data.summary.electromagnetic_resonance_q_proxy;
+                    electromagnetic_resonance_flux_gain =
+                        gpu_results.data.summary.electromagnetic_resonance_flux_gain;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(

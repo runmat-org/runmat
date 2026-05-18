@@ -259,6 +259,16 @@
       "tolerance_rel": 0.35
     },
     {
+      "name": "em_homogeneous_flux_phasor_coherence_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_flux_phasor_coherence_ratio",
+      "reference": 0.95,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.25
+    },
+    {
       "name": "em_homogeneous_energy_imbalance_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -849,6 +859,16 @@
       "reference": 0.14285714285714288,
       "tolerance_abs": 0.15,
       "tolerance_rel": 1.0
+    },
+    {
+      "name": "em_heterogeneous_flux_phasor_coherence_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_flux_phasor_coherence_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
     },
     {
       "name": "em_heterogeneous_energy_imbalance_ratio",

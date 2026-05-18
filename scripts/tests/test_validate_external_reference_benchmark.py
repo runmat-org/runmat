@@ -592,6 +592,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "em_homogeneous_flux_phasor_coherence_ratio",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 0.95,
+            "reference": 0.95,
+            "pass": True,
+        },
+        {
             "name": "em_homogeneous_energy_imbalance_ratio",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 0.00004,
@@ -1044,6 +1051,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 0.14,
             "reference": 0.14,
+            "pass": True,
+        },
+        {
+            "name": "em_heterogeneous_flux_phasor_coherence_ratio",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 0.65,
+            "reference": 0.65,
             "pass": True,
         },
         {
