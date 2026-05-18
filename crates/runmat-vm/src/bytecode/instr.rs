@@ -138,19 +138,35 @@ pub enum Instr {
 
     // Cell array construction and indexing.
     CreateCell2D(usize, usize),
-    IndexCell(usize),
+    IndexCell {
+        num_indices: usize,
+        end_offsets: Vec<(usize, isize)>,
+    },
 
     // Expands cell contents into a comma-separated list with fixed output arity.
-    IndexCellExpand(usize, usize),
+    IndexCellExpand {
+        num_indices: usize,
+        out_count: usize,
+        end_offsets: Vec<(usize, isize)>,
+    },
 
     // Expands cell contents into a first-class comma-separated list value.
-    IndexCellList(usize),
+    IndexCellList {
+        num_indices: usize,
+        end_offsets: Vec<(usize, isize)>,
+    },
 
     // Indexed assignment updates the base value and pushes the updated base.
     StoreIndex(usize),
-    StoreIndexCell(usize),
+    StoreIndexCell {
+        num_indices: usize,
+        end_offsets: Vec<(usize, isize)>,
+    },
     StoreIndexDelete(usize),
-    StoreIndexCellDelete(usize),
+    StoreIndexCellDelete {
+        num_indices: usize,
+        end_offsets: Vec<(usize, isize)>,
+    },
 
     // Slice assignment with compiler-encoded colon and plain `end` masks.
     StoreSlice(usize, usize, u32, u32),
@@ -337,12 +353,19 @@ impl Instr {
             Instr::CreateMatrixDynamic(rows) => effect(*rows, 1),
             Instr::CreateRange(has_step) => effect(if *has_step { 3 } else { 2 }, 1),
             Instr::Unpack(n) => effect(1, *n),
-            Instr::Index(n) | Instr::IndexCell(n) | Instr::IndexCellList(n) => effect(n + 1, 1),
-            Instr::IndexCellExpand(n, out_count) => effect(n + 1, *out_count),
+            Instr::Index(n) => effect(n + 1, 1),
+            Instr::IndexCell { num_indices, .. } | Instr::IndexCellList { num_indices, .. } => {
+                effect(num_indices + 1, 1)
+            }
+            Instr::IndexCellExpand {
+                num_indices,
+                out_count,
+                ..
+            } => effect(num_indices + 1, *out_count),
             Instr::StoreIndex(n)
-            | Instr::StoreIndexCell(n)
             | Instr::StoreIndexDelete(n)
-            | Instr::StoreIndexCellDelete(n) => effect(n + 2, 1),
+            | Instr::StoreIndexCell { num_indices: n, .. }
+            | Instr::StoreIndexCellDelete { num_indices: n, .. } => effect(n + 2, 1),
             Instr::IndexSlice(dims, numeric_count, _, _)
             | Instr::StoreSlice(dims, numeric_count, _, _)
             | Instr::StoreSliceDelete(dims, numeric_count, _, _) => {

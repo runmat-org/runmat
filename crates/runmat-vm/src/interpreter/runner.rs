@@ -557,13 +557,13 @@ async fn run_interpreter_inner(
             | Instr::Index(_)
             | Instr::IndexSlice(_, _, _, _)
             | Instr::IndexSliceExpr { .. }
-            | Instr::IndexCell(_)
-            | Instr::IndexCellExpand(_, _)
-            | Instr::IndexCellList(_)
+            | Instr::IndexCell { .. }
+            | Instr::IndexCellExpand { .. }
+            | Instr::IndexCellList { .. }
             | Instr::StoreIndex(_)
-            | Instr::StoreIndexCell(_)
+            | Instr::StoreIndexCell { .. }
             | Instr::StoreIndexDelete(_)
-            | Instr::StoreIndexCellDelete(_)
+            | Instr::StoreIndexCellDelete { .. }
             | Instr::StoreSlice(_, _, _, _)
             | Instr::StoreSliceDelete(_, _, _, _)
             | Instr::StoreSliceExpr { .. }

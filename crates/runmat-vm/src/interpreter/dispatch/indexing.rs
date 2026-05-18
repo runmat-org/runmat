@@ -19,21 +19,6 @@ fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
     format!("{context}: {}", err.message()).into()
 }
 
-const CELL_END_PLUS_TAG_MASK: u64 = 0x7ff8_0000_0000_0000;
-const CELL_END_PLUS_TAG_VALUE: u64 = 0x7ff8_c311_0000_0000;
-const CELL_END_PLUS_OFFSET_MASK: u64 = 0x0000_0000_ffff_ffff;
-
-fn decode_cell_end_plus(value: f64) -> Option<usize> {
-    if !value.is_nan() {
-        return None;
-    }
-    let bits = value.to_bits();
-    if (bits & CELL_END_PLUS_TAG_MASK) != CELL_END_PLUS_TAG_VALUE {
-        return None;
-    }
-    Some((bits & CELL_END_PLUS_OFFSET_MASK) as usize)
-}
-
 async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, RuntimeError> {
     let mut out = Vec::with_capacity(values.len());
     for value in values {
@@ -68,54 +53,55 @@ fn assign_scalar_struct_index(
     }
 }
 
-fn resolve_cell_indices(
-    values: &[Value],
-    rows: usize,
-    cols: usize,
-) -> Result<Vec<usize>, RuntimeError> {
+fn resolve_cell_indices(values: &[Value]) -> Result<Vec<usize>, RuntimeError> {
     values
         .iter()
-        .enumerate()
-        .map(|(dim, value)| match value {
-            Value::Num(index) => {
-                let len = if values.len() == 1 {
-                    rows * cols
-                } else if dim == 0 {
-                    rows
-                } else {
-                    cols
-                };
-                if let Some(offset) = decode_cell_end_plus(*index) {
-                    let resolved = len + offset;
-                    if resolved < 1 || resolved > len {
-                        return Err(crate::interpreter::errors::mex(
-                            "CellIndexOutOfBounds",
-                            "Cell index out of bounds",
-                        ));
-                    }
-                    return Ok(resolved);
-                }
-                if *index == 0.0 && index.is_sign_negative() {
-                    return Ok(len);
-                }
-                if *index < 0.0 {
-                    let resolved = len as isize + *index as isize;
-                    if resolved < 1 || resolved as usize > len {
-                        return Err(crate::interpreter::errors::mex(
-                            "CellIndexOutOfBounds",
-                            "Cell index out of bounds",
-                        ));
-                    }
-                    return Ok(resolved as usize);
-                }
-                Ok(*index as usize)
-            }
+        .map(|value| match value {
+            Value::Num(index) => Ok(*index as usize),
             _ => {
                 let index: f64 = value.try_into()?;
                 Ok(index as usize)
             }
         })
         .collect()
+}
+
+fn apply_cell_end_offsets_for_base(
+    base: &Value,
+    raw_indices: &[Value],
+    end_offsets: &[(usize, isize)],
+) -> Result<Vec<Value>, RuntimeError> {
+    if end_offsets.is_empty() {
+        return Ok(raw_indices.to_vec());
+    }
+    let Value::Cell(ca) = base else {
+        return Ok(raw_indices.to_vec());
+    };
+    let mut adjusted = raw_indices.to_vec();
+    for (position, offset) in end_offsets {
+        if *position >= adjusted.len() {
+            return Err(crate::interpreter::errors::mex(
+                "CellIndexOutOfBounds",
+                "Cell end selector position is out of bounds",
+            ));
+        }
+        let len = if adjusted.len() == 1 {
+            ca.rows * ca.cols
+        } else if *position == 0 {
+            ca.rows
+        } else {
+            ca.cols
+        };
+        let resolved = (len as isize) + *offset;
+        if resolved < 1 || (resolved as usize) > len {
+            return Err(crate::interpreter::errors::mex(
+                "CellIndexOutOfBounds",
+                "Cell index out of bounds",
+            ));
+        }
+        adjusted[*position] = Value::Num(resolved as f64);
+    }
+    Ok(adjusted)
 }
 
 fn gather_cell_with_plan(
@@ -205,7 +191,7 @@ async fn execute_brace_operation(
                     .await?
                 }
                 Value::Cell(ca) => {
-                    let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;
+                    let indices = resolve_cell_indices(raw_indices)?;
                     crate::ops::cells::index_cell_value(&ca, &indices)?
                 }
                 _ => {
@@ -253,7 +239,7 @@ async fn execute_brace_operation(
                     .await?
                 }
                 Value::Cell(ca) => {
-                    let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;
+                    let indices = resolve_cell_indices(raw_indices)?;
                     crate::ops::cells::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
                         runmat_gc::gc_record_write(oldv, newv);
                     })?
@@ -484,11 +470,16 @@ pub async fn dispatch_indexing(
             }
             Ok(true)
         }
-        crate::bytecode::Instr::IndexCell(num_indices) => {
+        crate::bytecode::Instr::IndexCell {
+            num_indices,
+            end_offsets,
+        } => {
             let raw_indices = pop_index_values(stack, *num_indices)?;
             let base = pop_index_base(stack)?;
+            let adjusted_indices =
+                apply_cell_end_offsets_for_base(&base, &raw_indices, end_offsets)?;
             let outcome =
-                execute_brace_operation(base, &raw_indices, BraceIndexOperation::ReadSingle)
+                execute_brace_operation(base, &adjusted_indices, BraceIndexOperation::ReadSingle)
                     .await?;
             match outcome {
                 BraceIndexOutcome::Value(value) => stack.push(value),
@@ -501,12 +492,18 @@ pub async fn dispatch_indexing(
             }
             Ok(true)
         }
-        crate::bytecode::Instr::IndexCellExpand(num_indices, out_count) => {
+        crate::bytecode::Instr::IndexCellExpand {
+            num_indices,
+            out_count,
+            end_offsets,
+        } => {
             let raw_indices = pop_index_values(stack, *num_indices)?;
             let base = pop_index_base(stack)?;
+            let adjusted_indices =
+                apply_cell_end_offsets_for_base(&base, &raw_indices, end_offsets)?;
             let outcome = execute_brace_operation(
                 base,
-                &raw_indices,
+                &adjusted_indices,
                 BraceIndexOperation::Expand {
                     out_count: *out_count,
                 },
@@ -527,11 +524,16 @@ pub async fn dispatch_indexing(
             }
             Ok(true)
         }
-        crate::bytecode::Instr::IndexCellList(num_indices) => {
+        crate::bytecode::Instr::IndexCellList {
+            num_indices,
+            end_offsets,
+        } => {
             let raw_indices = pop_index_values(stack, *num_indices)?;
             let base = pop_index_base(stack)?;
+            let adjusted_indices =
+                apply_cell_end_offsets_for_base(&base, &raw_indices, end_offsets)?;
             let outcome =
-                execute_brace_operation(base, &raw_indices, BraceIndexOperation::List).await?;
+                execute_brace_operation(base, &adjusted_indices, BraceIndexOperation::List).await?;
             match outcome {
                 BraceIndexOutcome::Value(value) => stack.push(value),
                 BraceIndexOutcome::Expanded(_) => {
@@ -543,9 +545,15 @@ pub async fn dispatch_indexing(
             }
             Ok(true)
         }
-        crate::bytecode::Instr::StoreIndexCell(num_indices)
-        | crate::bytecode::Instr::StoreIndexCellDelete(num_indices) => {
-            let delete = matches!(instr, crate::bytecode::Instr::StoreIndexCellDelete(_));
+        crate::bytecode::Instr::StoreIndexCell {
+            num_indices,
+            end_offsets,
+        }
+        | crate::bytecode::Instr::StoreIndexCellDelete {
+            num_indices,
+            end_offsets,
+        } => {
+            let delete = matches!(instr, crate::bytecode::Instr::StoreIndexCellDelete { .. });
             if delete {
                 return Err(crate::interpreter::errors::mex(
                     "UnsupportedCellBraceDeletion",
@@ -558,9 +566,14 @@ pub async fn dispatch_indexing(
             ))?;
             let raw_indices = pop_index_values(stack, *num_indices)?;
             let base = pop_index_base(stack)?;
-            let outcome =
-                execute_brace_operation(base, &raw_indices, BraceIndexOperation::Store { rhs })
-                    .await?;
+            let adjusted_indices =
+                apply_cell_end_offsets_for_base(&base, &raw_indices, end_offsets)?;
+            let outcome = execute_brace_operation(
+                base,
+                &adjusted_indices,
+                BraceIndexOperation::Store { rhs },
+            )
+            .await?;
             match outcome {
                 BraceIndexOutcome::Value(value) => stack.push(value),
                 BraceIndexOutcome::Expanded(_) => {
