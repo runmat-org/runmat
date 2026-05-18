@@ -472,11 +472,7 @@ fn dynamic_call_rvalue(
 }
 
 fn requested_output_count_for_arg_expansion(requested: &RequestedOutputCount) -> usize {
-    match requested {
-        RequestedOutputCount::Zero => 0,
-        RequestedOutputCount::One => 1,
-        RequestedOutputCount::Exactly(count) => *count,
-    }
+    requested.fixed_count()
 }
 
 fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {

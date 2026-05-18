@@ -335,12 +335,11 @@ Target outcome:
 Current state:
 
 - Multi-output direct, dynamic, and expanded calls are typed in bytecode.
-- `MirOutputTarget::VarargoutExpansion` still has a bytecode gap, but it may not be constructed by current semantic lowering.
+- MIR output targets are fixed per-assignment (`Place` or `Discard`) and compile-time-checked against requested output count.
 
-Design decision needed:
+Design follow-up:
 
-- If varargout target expansion is not representable from current parser/HIR, mark it future design and do not keep a misleading runtime gap.
-- If it is intended soon, define the target-list ABI:
+- If varargout target expansion is intended in the future, define the target-list ABI explicitly:
   - fixed outputs before expansion
   - varargout capture cell/output-list target
   - discard targets
@@ -403,7 +402,7 @@ Collapse opportunity:
 Treat current MIR bytecode gap markers as follows:
 
 - `control-flow terminator`: design gap for async/await or future terminators, not a small VM patch unless a concrete source reproducer exists.
-- `varargout expansion`: HIR/MIR output-target design gap; first confirm whether it is constructible.
+- `varargout expansion`: parser/HIR does not currently construct this shape; keep as future ABI design work rather than a live bytecode gap.
 - `slice index`: comparison-derived logical tensor masks and call-result index variables now lower through semantic slice bytecode for read/write; remaining gaps are selector-plan normalization for range/end/colon in non-tensor and cell contexts.
 - `dot assignment` / `dot indexing`: static member read/write source now ratchets through semantic member MIR; remaining `IndexKind::Dot` branches appear transitional and should be verified for removal or mapped explicitly if a source reproducer reaches them.
 - `indexed member store-back`: struct-field indexed assignment and cell-member store-back are ratcheted through semantic place chains; remaining forms are likely object/dynamic/dot descriptor work.
@@ -452,10 +451,10 @@ Current ratchet status:
 - VM range, meshgrid-range, global/persistent, and logical-operator tests now run semantic bytecode.
 - VM indexing, matrix-slicing, and lvalue-assignment tests now run semantic bytecode.
 - VM cell-array, exception, datetime, and most closure/callback tests now run semantic bytecode; captured and nested closure capture tests remain legacy-executed pending semantic capture propagation.
-- VM control-flow tests now mostly run semantic bytecode; unknown-builtin catch behavior and varargout mismatch diagnostics remain legacy-executed semantic gaps.
+- VM control-flow tests now mostly run semantic bytecode; unknown-builtin catch behavior remains a legacy-executed semantic gap.
 - VM multidimensional indexing tests now run semantic bytecode for logical row selection and slice assignment cases; 3D indexing/slicing cases remain legacy-executed pending semantic N-D selector support.
 - VM indexing-property tests now run semantic bytecode for scalar/logical/range write broadcasts, end-arithmetic stores, negative-step linear indexing, roundtrip scatter, fastpath broadcasts, and simple cell expansion; advanced N-D empty/vector selector and expansion cases remain legacy-executed.
-- Remaining `functions.rs` legacy execution sites cover semantic gaps for varargout mismatch diagnostics, struct-field vector/range indexing through member reads, test-class constructor resolution, metaclass postfix member/method lowering, dependent property backing behavior, `containers.Map` package calls, and string aggregate concatenation.
+- Remaining `functions.rs` legacy execution sites cover semantic gaps for struct-field vector/range indexing through member reads, test-class constructor resolution, metaclass postfix member/method lowering, dependent property backing behavior, `containers.Map` package calls, and string aggregate concatenation.
 - Turbine mixed arithmetic/function-call, simple scalar function compilation, scalar callback variable-isolation, compute-intensive scalar callback, nested scalar callback, function-parameter validation, and error-handling success-path coverage now use semantic registry-backed named calls instead of hand-built legacy function metadata.
 - Turbine fallback-boundary tests now use unresolved-name bytecode or semantic registry fixtures; no `LegacyUserFunction` test fixtures remain.
 - Remaining production legacy recompilation usage is gone; source-level compatibility AST references are confined to `runmat-hir` compatibility/inference code and tests.

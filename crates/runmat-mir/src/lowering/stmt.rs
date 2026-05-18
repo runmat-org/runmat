@@ -253,9 +253,5 @@ fn lower_output_target(
 }
 
 fn fixed_requested_output_count(requested_outputs: &RequestedOutputCount, _context: &str) -> usize {
-    match requested_outputs {
-        RequestedOutputCount::Zero => 0,
-        RequestedOutputCount::One => 1,
-        RequestedOutputCount::Exactly(count) => *count,
-    }
+    requested_outputs.fixed_count()
 }

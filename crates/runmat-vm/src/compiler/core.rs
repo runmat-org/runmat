@@ -1803,11 +1803,7 @@ impl Compiler {
     }
 
     fn call_requested_output_count(&self, call: &MirCall) -> Result<usize, CompileError> {
-        match call.requested_outputs {
-            RequestedOutputCount::Zero => Ok(0),
-            RequestedOutputCount::One => Ok(1),
-            RequestedOutputCount::Exactly(count) => Ok(count),
-        }
+        Ok(call.requested_outputs.fixed_count())
     }
 
     fn resolved_call_output_count(&self, call: &MirCall) -> Result<usize, CompileError> {
@@ -1819,11 +1815,7 @@ impl Compiler {
         targets: &runmat_mir::MirOutputTargetList,
     ) -> Result<usize, CompileError> {
         let expected = targets.targets.len();
-        let count = match targets.requested_outputs {
-            RequestedOutputCount::Zero => 0,
-            RequestedOutputCount::One => 1,
-            RequestedOutputCount::Exactly(count) => count,
-        };
+        let count = targets.requested_outputs.fixed_count();
         if count != expected {
             return Err(self.compile_error(format!(
                 "MIR multi-assign output target count mismatch: requested {count}, targets {expected}"

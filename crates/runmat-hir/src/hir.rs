@@ -553,6 +553,16 @@ pub enum RequestedOutputCount {
     Exactly(usize),
 }
 
+impl RequestedOutputCount {
+    pub fn fixed_count(&self) -> usize {
+        match self {
+            RequestedOutputCount::Zero => 0,
+            RequestedOutputCount::One => 1,
+            RequestedOutputCount::Exactly(count) => *count,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum IndexKind {
     Paren,
