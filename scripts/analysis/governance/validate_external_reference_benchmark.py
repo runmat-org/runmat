@@ -511,12 +511,14 @@ REQUIRED_METRICS_BY_FIXTURE = {
     "nonlinear_plastic_hardening_reference_complex_gpu_provider": {
         "plasticity_hardening_reference_complex_severity_peak",
         "plasticity_hardening_reference_complex_severity_mean",
+        "plasticity_hardening_reference_complex_load_amplification_ratio",
         "plasticity_hardening_reference_complex_load_realization_ratio",
     },
     "nonlinear_contact_frictionless_reference_complex_gpu_provider": {
         "contact_frictionless_complex_severity_peak",
         "contact_frictionless_complex_severity_mean",
         "contact_frictionless_complex_load_amplification_ratio",
+        "contact_frictionless_complex_load_realization_ratio",
     },
     "acoustic_harmonic_gpu_provider": {
         "acoustic_max_m_orthogonality_offdiag",
