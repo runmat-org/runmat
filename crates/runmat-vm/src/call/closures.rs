@@ -2,26 +2,17 @@ use crate::call::descriptor::{
     execute_callable_descriptor, try_execute_callable_descriptor, CallableCallKind,
     CallableDescriptor,
 };
-use crate::call::shared::{external_qualified_display_name, external_qualified_identity};
+use crate::call::shared::{
+    call_getfield_with_indices, external_qualified_display_name, external_qualified_identity,
+};
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
-use runmat_builtins::{builtin_functions, lookup_method, Access, CellArray, Closure, Value};
+use runmat_builtins::{builtin_functions, lookup_method, Access, Closure, Value};
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, SymbolName};
 use runmat_runtime::RuntimeError;
 
 fn requested_output_arity(requested_outputs: Option<usize>) -> usize {
     requested_outputs.unwrap_or(1)
-}
-
-async fn call_explicit_builtin(
-    name: &str,
-    args: &[Value],
-    requested_outputs: Option<usize>,
-) -> Result<Value, RuntimeError> {
-    match requested_outputs {
-        Some(count) => runmat_runtime::call_builtin_async_with_outputs(name, args, count).await,
-        None => runmat_runtime::call_builtin_async(name, args).await,
-    }
 }
 
 fn dynamic_identity(name: String) -> CallableIdentity {
@@ -251,16 +242,7 @@ pub async fn call_method_or_member_index_with_outputs(
                 Err(err) => return Err(err),
             }
 
-            let mut getfield_args = Vec::with_capacity(3);
-            getfield_args.push(Value::Object(obj));
-            getfield_args.push(Value::String(name));
-            if !args.is_empty() {
-                let idx_count = args.len();
-                let idx_cell = CellArray::new(args, 1, idx_count)
-                    .map_err(|e| format!("getfield idx build: {e}"))?;
-                getfield_args.push(Value::Cell(idx_cell));
-            }
-            call_explicit_builtin("getfield", &getfield_args, requested_outputs).await
+            call_getfield_with_indices(Value::Object(obj), name, args, requested_outputs).await
         }
         Value::HandleObject(handle) => {
             if let Ok(v) = crate::call::shared::call_object_named_method_with_outputs(
@@ -274,16 +256,8 @@ pub async fn call_method_or_member_index_with_outputs(
                 return Ok(v);
             }
 
-            let mut getfield_args = Vec::with_capacity(3);
-            getfield_args.push(Value::HandleObject(handle));
-            getfield_args.push(Value::String(name));
-            if !args.is_empty() {
-                let idx_count = args.len();
-                let idx_cell = CellArray::new(args, 1, idx_count)
-                    .map_err(|e| format!("getfield idx build: {e}"))?;
-                getfield_args.push(Value::Cell(idx_cell));
-            }
-            call_explicit_builtin("getfield", &getfield_args, requested_outputs).await
+            call_getfield_with_indices(Value::HandleObject(handle), name, args, requested_outputs)
+                .await
         }
         Value::ClassRef(cls) => {
             let classref_fallback = fallback_policy.after_object_dispatch_probe();
@@ -312,18 +286,7 @@ pub async fn call_method_or_member_index_with_outputs(
             )
             .await
         }
-        other => {
-            let mut getfield_args = Vec::with_capacity(3);
-            getfield_args.push(other);
-            getfield_args.push(Value::String(name));
-            if !args.is_empty() {
-                let idx_count = args.len();
-                let idx_cell = CellArray::new(args, 1, idx_count)
-                    .map_err(|e| format!("getfield idx build: {e}"))?;
-                getfield_args.push(Value::Cell(idx_cell));
-            }
-            call_explicit_builtin("getfield", &getfield_args, requested_outputs).await
-        }
+        other => call_getfield_with_indices(other, name, args, requested_outputs).await,
     }
 }
 

@@ -249,6 +249,29 @@ fn normalize_method_outputs(value: Value, requested_outputs: usize) -> Value {
     }
 }
 
+pub(crate) async fn call_getfield_with_indices(
+    base: Value,
+    field: String,
+    indices: Vec<Value>,
+    requested_outputs: Option<usize>,
+) -> Result<Value, RuntimeError> {
+    let mut getfield_args = Vec::with_capacity(3);
+    getfield_args.push(base);
+    getfield_args.push(Value::String(field));
+    if !indices.is_empty() {
+        let idx_count = indices.len();
+        let idx_cell = runmat_builtins::CellArray::new(indices, 1, idx_count)
+            .map_err(|e| format!("getfield idx build: {e}"))?;
+        getfield_args.push(Value::Cell(idx_cell));
+    }
+    match requested_outputs {
+        Some(count) => {
+            runmat_runtime::call_builtin_async_with_outputs("getfield", &getfield_args, count).await
+        }
+        None => runmat_runtime::call_builtin_async("getfield", &getfield_args).await,
+    }
+}
+
 pub(crate) async fn call_object_operator_method(
     base: Value,
     method: &str,
