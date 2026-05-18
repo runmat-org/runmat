@@ -4,7 +4,6 @@ mod diagnostic;
 mod error;
 mod hir;
 mod ids;
-pub(crate) mod inference;
 pub(crate) mod lowering;
 mod lowering_context;
 mod span;
@@ -20,9 +19,6 @@ pub mod compatibility {
         CompatibilityHirProgram as HirProgram, CompatibilityHirStmt as HirStmt,
         CompatibilityLoweringResult as LoweringResult,
     };
-    pub use crate::inference::function_outputs::infer_function_output_types;
-    pub use crate::inference::function_vars::infer_function_variable_types;
-    pub use crate::inference::globals::infer_global_variable_types;
 
     pub fn lower(
         prog: &AstProgram,

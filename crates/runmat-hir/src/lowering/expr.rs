@@ -4,7 +4,7 @@ use crate::hir::{
     CompatibilityHirExpr as HirExpr, CompatibilityHirExprKind as HirExprKind,
     CompatibilityHirLValue as HirLValue, CompatibilityHirStmt as HirStmt,
 };
-use crate::inference::shared::resolve_context_from_args;
+use crate::lowering::resolve_context::resolve_context_from_args;
 use crate::{SemanticError, Type, VarId, TEST_CLASS_REGISTRATION_BUILTIN_NAME};
 use runmat_parser::{self as parser, BinOp, Expr as AstExpr};
 use std::collections::HashMap;
