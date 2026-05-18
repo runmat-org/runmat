@@ -3625,6 +3625,107 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("CONTACT_REFERENCE_TREND_WORSENING", codes)
 
+    def test_reference_severity_assertion_breaches_emit_reasons(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {
+                        "name": "plasticity_hardening_reference_severity_peak",
+                        "observed": 0.85,
+                    }
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {
+                        "name": "contact_frictionless_complex_severity_mean",
+                        "observed": 0.9,
+                    }
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY"] = "0.8"
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY"] = "0.8"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_REFERENCE_SEVERITY_ASSERTION_HIGH", codes)
+        self.assertIn("CONTACT_REFERENCE_SEVERITY_ASSERTION_HIGH", codes)
+
+    def test_reference_severity_assertion_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {
+                        "name": "plasticity_hardening_reference_complex_severity_peak",
+                        "observed": 0.75,
+                    }
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {
+                        "name": "contact_frictionless_severity_peak",
+                        "observed": 0.78,
+                    }
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 95.0,
+                "threshold_assertions": [
+                    {
+                        "name": "plasticity_hardening_reference_complex_severity_peak",
+                        "observed": 0.4,
+                    }
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 95.0,
+                "threshold_assertions": [
+                    {
+                        "name": "contact_frictionless_severity_peak",
+                        "observed": 0.5,
+                    }
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO"] = "1.3"
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO"] = "1.3"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_REFERENCE_SEVERITY_ASSERTION_TREND_WORSENING", codes)
+        self.assertIn("CONTACT_REFERENCE_SEVERITY_ASSERTION_TREND_WORSENING", codes)
+
     def test_reference_complex_assertion_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(

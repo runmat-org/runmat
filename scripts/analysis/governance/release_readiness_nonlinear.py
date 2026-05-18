@@ -3560,6 +3560,8 @@ def evaluate_release_readiness(
     plastic_load_realization_drop_trend_ratio = None
     plastic_load_amplification_trend_ratio = None
     plastic_reference_trend_ratio = None
+    plastic_reference_severity_assertion_max = None
+    plastic_reference_severity_trend_ratio = None
     plastic_reference_complex_load_realization_assertion = None
     plastic_reference_complex_load_realization_drop_trend_ratio = None
     plastic_promotion_ready = False
@@ -3579,6 +3581,8 @@ def evaluate_release_readiness(
     contact_load_realization_drop_trend_ratio = None
     contact_load_amplification_trend_ratio = None
     contact_reference_trend_ratio = None
+    contact_reference_severity_assertion_max = None
+    contact_reference_severity_trend_ratio = None
     contact_reference_complex_load_amplification_assertion = None
     contact_reference_complex_load_amplification_trend_ratio = None
     contact_promotion_ready = False
@@ -5983,6 +5987,89 @@ def evaluate_release_readiness(
                     )
                 )
 
+    plastic_reference_fixture_ids = {
+        "nonlinear_plastic_hardening_reference_gpu_provider",
+        "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+    }
+    contact_reference_fixture_ids = {
+        "nonlinear_contact_frictionless_reference_gpu_provider",
+        "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+    }
+    plastic_reference_severity_assertion_names = (
+        "plasticity_hardening_reference_severity_peak",
+        "plasticity_hardening_reference_severity_mean",
+        "plasticity_hardening_reference_complex_severity_peak",
+        "plasticity_hardening_reference_complex_severity_mean",
+    )
+    contact_reference_severity_assertion_names = (
+        "contact_frictionless_severity_peak",
+        "contact_frictionless_severity_mean",
+        "contact_frictionless_complex_severity_peak",
+        "contact_frictionless_complex_severity_mean",
+    )
+
+    plastic_reference_severity_values = []
+    for rec in report_records(latest):
+        if rec.get("fixture_id") not in plastic_reference_fixture_ids:
+            continue
+        for assertion_name in plastic_reference_severity_assertion_names:
+            observed = threshold_assertion_observed(rec, assertion_name)
+            if observed is not None:
+                plastic_reference_severity_values.append(observed)
+    if plastic_reference_severity_values:
+        plastic_reference_severity_assertion_max = max(plastic_reference_severity_values)
+        if plastic_reference_severity_assertion_max > plastic_max_nonlinear_severity_threshold:
+            reasons.append(
+                Reason(
+                    code="PLASTIC_REFERENCE_SEVERITY_ASSERTION_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "plastic reference severity assertion maximum "
+                        f"{plastic_reference_severity_assertion_max:.3f} exceeds threshold "
+                        f"{plastic_max_nonlinear_severity_threshold:.3f}"
+                    ),
+                )
+            )
+    elif protected or plastic_require_metrics:
+        reasons.append(
+            Reason(
+                code="PLASTIC_REFERENCE_SEVERITY_ASSERTION_MISSING",
+                severity="warn",
+                detail="plastic reference severity assertions missing from report records",
+            )
+        )
+
+    contact_reference_severity_values = []
+    for rec in report_records(latest):
+        if rec.get("fixture_id") not in contact_reference_fixture_ids:
+            continue
+        for assertion_name in contact_reference_severity_assertion_names:
+            observed = threshold_assertion_observed(rec, assertion_name)
+            if observed is not None:
+                contact_reference_severity_values.append(observed)
+    if contact_reference_severity_values:
+        contact_reference_severity_assertion_max = max(contact_reference_severity_values)
+        if contact_reference_severity_assertion_max > contact_max_nonlinear_severity_threshold:
+            reasons.append(
+                Reason(
+                    code="CONTACT_REFERENCE_SEVERITY_ASSERTION_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "contact reference severity assertion maximum "
+                        f"{contact_reference_severity_assertion_max:.3f} exceeds threshold "
+                        f"{contact_max_nonlinear_severity_threshold:.3f}"
+                    ),
+                )
+            )
+    elif protected or contact_require_metrics:
+        reasons.append(
+            Reason(
+                code="CONTACT_REFERENCE_SEVERITY_ASSERTION_MISSING",
+                severity="warn",
+                detail="contact reference severity assertions missing from report records",
+            )
+        )
+
     plastic_reference_complex_values = []
     for rec in report_records(latest):
         if rec.get("fixture_id") != "nonlinear_plastic_hardening_reference_complex_gpu_provider":
@@ -8374,10 +8461,6 @@ def evaluate_release_readiness(
                 )
             )
 
-        plastic_reference_fixture_ids = {
-            "nonlinear_plastic_hardening_reference_gpu_provider",
-            "nonlinear_plastic_hardening_reference_complex_gpu_provider",
-        }
         latest_plastic_reference_values = []
         for rec in report_records(latest):
             if rec.get("fixture_id") not in plastic_reference_fixture_ids:
@@ -8414,6 +8497,34 @@ def evaluate_release_readiness(
                             ),
                         )
                     )
+
+        plastic_reference_severity_trend_candidates = []
+        for assertion_name in plastic_reference_severity_assertion_names:
+            trend_ratio = fixture_assertion_trend_ratio(
+                assertion_name,
+                ratio_mode="increase",
+            )
+            if trend_ratio is not None:
+                plastic_reference_severity_trend_candidates.append(trend_ratio)
+        if plastic_reference_severity_trend_candidates:
+            plastic_reference_severity_trend_ratio = max(
+                plastic_reference_severity_trend_candidates
+            )
+            if (
+                plastic_reference_severity_trend_ratio
+                > plastic_reference_max_trend_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="PLASTIC_REFERENCE_SEVERITY_ASSERTION_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "plastic reference severity assertion trend ratio "
+                            f"{plastic_reference_severity_trend_ratio:.3f} exceeds "
+                            f"threshold {plastic_reference_max_trend_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
 
         contact_trend_ratio = fixture_trend_ratio("contact_nonlinear_severity")
         if (
@@ -8493,13 +8604,9 @@ def evaluate_release_readiness(
                 )
             )
 
-        reference_fixture_ids = {
-            "nonlinear_contact_frictionless_reference_gpu_provider",
-            "nonlinear_contact_frictionless_reference_complex_gpu_provider",
-        }
         latest_contact_reference_values = []
         for rec in report_records(latest):
-            if rec.get("fixture_id") not in reference_fixture_ids:
+            if rec.get("fixture_id") not in contact_reference_fixture_ids:
                 continue
             raw_value = rec.get("contact_nonlinear_severity")
             if isinstance(raw_value, (int, float)):
@@ -8507,7 +8614,7 @@ def evaluate_release_readiness(
         rolling_contact_reference_values = []
         for report in rolling:
             for rec in report_records(report):
-                if rec.get("fixture_id") not in reference_fixture_ids:
+                if rec.get("fixture_id") not in contact_reference_fixture_ids:
                     continue
                 raw_value = rec.get("contact_nonlinear_severity")
                 if isinstance(raw_value, (int, float)):
@@ -8534,6 +8641,34 @@ def evaluate_release_readiness(
                         )
                     )
 
+        contact_reference_severity_trend_candidates = []
+        for assertion_name in contact_reference_severity_assertion_names:
+            trend_ratio = fixture_assertion_trend_ratio(
+                assertion_name,
+                ratio_mode="increase",
+            )
+            if trend_ratio is not None:
+                contact_reference_severity_trend_candidates.append(trend_ratio)
+        if contact_reference_severity_trend_candidates:
+            contact_reference_severity_trend_ratio = max(
+                contact_reference_severity_trend_candidates
+            )
+            if (
+                contact_reference_severity_trend_ratio
+                > contact_reference_max_trend_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="CONTACT_REFERENCE_SEVERITY_ASSERTION_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "contact reference severity assertion trend ratio "
+                            f"{contact_reference_severity_trend_ratio:.3f} exceeds "
+                            f"threshold {contact_reference_max_trend_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+
     if electro_time_scale_breach_values:
         electro_time_scale_breach_rate = (
             sum(1 for breached in electro_time_scale_breach_values if breached)
@@ -8548,17 +8683,9 @@ def evaluate_release_readiness(
                         f"electro-thermal time-scale breach rate {electro_time_scale_breach_rate:.3f} exceeds "
                         f"threshold {electro_max_time_scale_breach_rate_threshold:.3f}"
                     ),
-                )
-            )
+                        )
+                    )
 
-    plastic_reference_fixture_ids = {
-        "nonlinear_plastic_hardening_reference_gpu_provider",
-        "nonlinear_plastic_hardening_reference_complex_gpu_provider",
-    }
-    contact_reference_fixture_ids = {
-        "nonlinear_contact_frictionless_reference_gpu_provider",
-        "nonlinear_contact_frictionless_reference_complex_gpu_provider",
-    }
     plastic_promotion_sample_count = sum(
         1
         for rec in report_records(latest)
@@ -9189,6 +9316,8 @@ def evaluate_release_readiness(
         "plastic_max_load_amplification_trend_ratio_threshold": plastic_max_load_amplification_trend_ratio_threshold,
         "plastic_reference_trend_ratio": plastic_reference_trend_ratio,
         "plastic_reference_max_trend_ratio_threshold": plastic_reference_max_trend_ratio_threshold,
+        "plastic_reference_severity_assertion_max": plastic_reference_severity_assertion_max,
+        "plastic_reference_severity_trend_ratio": plastic_reference_severity_trend_ratio,
         "plastic_reference_complex_load_realization_assertion": plastic_reference_complex_load_realization_assertion,
         "plastic_min_reference_complex_load_realization_ratio_threshold": plastic_min_reference_complex_load_realization_ratio_threshold,
         "plastic_reference_complex_load_realization_drop_trend_ratio": plastic_reference_complex_load_realization_drop_trend_ratio,
@@ -9224,6 +9353,8 @@ def evaluate_release_readiness(
         "contact_max_load_amplification_trend_ratio_threshold": contact_max_load_amplification_trend_ratio_threshold,
         "contact_reference_trend_ratio": contact_reference_trend_ratio,
         "contact_reference_max_trend_ratio_threshold": contact_reference_max_trend_ratio_threshold,
+        "contact_reference_severity_assertion_max": contact_reference_severity_assertion_max,
+        "contact_reference_severity_trend_ratio": contact_reference_severity_trend_ratio,
         "contact_reference_complex_load_amplification_assertion": contact_reference_complex_load_amplification_assertion,
         "contact_max_reference_complex_load_amplification_ratio_threshold": contact_max_reference_complex_load_amplification_ratio_threshold,
         "contact_reference_complex_load_amplification_trend_ratio": contact_reference_complex_load_amplification_trend_ratio,
@@ -9868,6 +9999,10 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('plastic_reference_max_trend_ratio_threshold') if result.get('plastic_reference_max_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- Plastic reference severity assertion max/trend: "
+        f"`{result.get('plastic_reference_severity_assertion_max') if result.get('plastic_reference_severity_assertion_max') is not None else '-'}`/`{result.get('plastic_reference_severity_trend_ratio') if result.get('plastic_reference_severity_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
         "- Plastic reference-complex load realization assertion/threshold: "
         f"`{result.get('plastic_reference_complex_load_realization_assertion') if result.get('plastic_reference_complex_load_realization_assertion') is not None else '-'}`/`{result.get('plastic_min_reference_complex_load_realization_ratio_threshold') if result.get('plastic_min_reference_complex_load_realization_ratio_threshold') is not None else '-'}`"
     )
@@ -9932,6 +10067,10 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Contact reference trend threshold: "
         f"`{result.get('contact_reference_max_trend_ratio_threshold') if result.get('contact_reference_max_trend_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact reference severity assertion max/trend: "
+        f"`{result.get('contact_reference_severity_assertion_max') if result.get('contact_reference_severity_assertion_max') is not None else '-'}`/`{result.get('contact_reference_severity_trend_ratio') if result.get('contact_reference_severity_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- Contact reference-complex load amplification assertion/threshold: "
