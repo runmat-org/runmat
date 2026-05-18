@@ -13,12 +13,7 @@ pub mod compatibility {
     use crate::{LoweringContext, SemanticError};
     use runmat_parser::Program as AstProgram;
 
-    pub use crate::hir::{
-        CompatibilityHirClassMember as HirClassMember, CompatibilityHirExpr as HirExpr,
-        CompatibilityHirExprKind as HirExprKind, CompatibilityHirLValue as HirLValue,
-        CompatibilityHirProgram as HirProgram, CompatibilityHirStmt as HirStmt,
-        CompatibilityLoweringResult as LoweringResult,
-    };
+    pub use crate::hir::CompatibilityLoweringResult as LoweringResult;
 
     pub fn lower(
         prog: &AstProgram,
