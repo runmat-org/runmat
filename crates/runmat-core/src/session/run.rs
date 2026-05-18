@@ -310,6 +310,7 @@ impl RunMatSession {
         let PreparedExecution {
             ast,
             lowering,
+            mir,
             mut bytecode,
             semantic_function_registry_after_success,
             next_semantic_function_id_after_success,
@@ -368,7 +369,6 @@ impl RunMatSession {
 
         #[cfg(not(target_arch = "wasm32"))]
         let fusion_snapshot = if self.emit_fusion_plan {
-            let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)?;
             let analysis = runmat_mir::analysis::analyze_assembly(&mir);
             build_fusion_snapshot(
                 bytecode.accel_graph.as_ref(),

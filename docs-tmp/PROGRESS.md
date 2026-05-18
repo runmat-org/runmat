@@ -17,6 +17,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 reuse prepared MIR artifacts for fusion planning metadata
+  - `RunMatSession::compile_input` now carries the lowered MIR assembly in `PreparedExecution`, making MIR an explicit prepared artifact instead of a compile-only temporary.
+  - Fusion-plan preview (`compile_fusion_plan`) and runtime fusion snapshot emission now reuse prepared MIR directly for analysis fact counts rather than lowering MIR again from HIR.
+  - This tightens semantic ownership boundaries in core session flow and removes duplicate MIR lowering work on fusion metadata paths.
+  - Validation: `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic fusion summary decoupled from accel-graph presence
   - `runmat-core` fusion snapshot generation no longer requires an accel graph artifact to emit semantic-candidate summaries.
   - When bytecode fusion groups are empty but semantic MIR candidate evidence exists, summary decisions now include explicit accel-graph presence state (`present`/`missing`) in planner reasoning.

@@ -107,6 +107,7 @@ pub struct RunMatSession {
 pub(crate) struct PreparedExecution {
     ast: runmat_parser::Program,
     lowering: LoweringResult,
+    mir: runmat_mir::MirAssembly,
     pub(crate) bytecode: runmat_vm::Bytecode,
     semantic_function_registry_after_success: runmat_vm::SemanticFunctionRegistry,
     next_semantic_function_id_after_success: usize,

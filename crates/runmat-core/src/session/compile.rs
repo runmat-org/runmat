@@ -24,7 +24,7 @@ impl RunMatSession {
                     .with_top_level_await_enabled(self.top_level_await_enabled),
             )?
         };
-        let mut bytecode = {
+        let (mut bytecode, mir) = {
             let _span = info_span!("runtime.compile.bytecode").entered();
             self.compile_semantic_bytecode(&lowering)?
         };
@@ -34,6 +34,7 @@ impl RunMatSession {
         Ok(PreparedExecution {
             ast,
             lowering,
+            mir,
             bytecode,
             semantic_function_registry_after_success,
             next_semantic_function_id_after_success,
@@ -67,7 +68,7 @@ impl RunMatSession {
     fn compile_semantic_bytecode(
         &self,
         lowering: &LoweringResult,
-    ) -> std::result::Result<runmat_vm::Bytecode, RunError> {
+    ) -> std::result::Result<(runmat_vm::Bytecode, runmat_mir::MirAssembly), RunError> {
         let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)?;
         let Some(entrypoint) = lowering.assembly.entrypoints.first() else {
             let semantic_functions =
@@ -77,9 +78,12 @@ impl RunMatSession {
             let mut bytecode = runmat_vm::Bytecode::empty();
             bytecode.semantic_functions = semantic_functions;
             bytecode.semantic_function_registry = semantic_function_registry;
-            return Ok(bytecode);
+            return Ok((bytecode, mir));
         };
-        Ok(runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)?)
+        Ok((
+            runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)?,
+            mir,
+        ))
     }
 
     fn prepare_session_semantic_function_registry(
@@ -162,8 +166,7 @@ impl RunMatSession {
         input: &str,
     ) -> std::result::Result<Option<FusionPlanSnapshot>, RunError> {
         let prepared = self.compile_input(input)?;
-        let mir = runmat_mir::lowering::lower_assembly(&prepared.lowering.assembly)?;
-        let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+        let analysis = runmat_mir::analysis::analyze_assembly(&prepared.mir);
         Ok(build_fusion_snapshot(
             prepared.bytecode.accel_graph.as_ref(),
             &prepared.bytecode.fusion_groups,
