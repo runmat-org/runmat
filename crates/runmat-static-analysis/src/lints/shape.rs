@@ -184,8 +184,7 @@ impl ShapeLintContext {
                 let base_shape = self.infer_mir_operand(body, base).shape;
                 for component in &indexing.components {
                     match component {
-                        runmat_mir::MirIndexComponent::Expr(operand)
-                        | runmat_mir::MirIndexComponent::Logical(operand) => {
+                        runmat_mir::MirIndexComponent::Expr(operand) => {
                             let idx_shape = self.infer_mir_operand(body, operand).shape;
                             if indexing.components.len() == 1 {
                                 self.check_logical_index(
@@ -243,9 +242,9 @@ impl ShapeLintContext {
                     int_vector: self.int_vector_env.get(&key).cloned(),
                 }
             }
-            runmat_mir::MirOperand::Constant(_)
-            | runmat_mir::MirOperand::Temp(_)
-            | runmat_mir::MirOperand::FunctionHandle(_) => MirShapeValue::default(),
+            runmat_mir::MirOperand::Constant(_) | runmat_mir::MirOperand::FunctionHandle(_) => {
+                MirShapeValue::default()
+            }
         }
     }
 
