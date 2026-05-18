@@ -1373,6 +1373,7 @@ def evaluate_release_readiness(
             if not (
                 isinstance(speedup_value, (int, float))
                 and math.isfinite(float(speedup_value))
+                and float(speedup_value) > 0
             ):
                 missing_fields.append("gpu_speedup_ratio")
             solve_ms_value = rec.get("gpu_solver_solve_ms")
