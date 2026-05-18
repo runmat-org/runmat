@@ -2167,6 +2167,59 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO", "1.35"),
         )
     )
+    thermal_max_residual_norm_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM_TREND_RATIO", "1.2"
+            ),
+        )
+    )
+    thermal_max_conductivity_spread_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    thermal_max_heat_capacity_spread_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    thermal_max_spatial_gradient_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPATIAL_GRADIENT_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPATIAL_GRADIENT_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    thermal_max_monotonic_response_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_MONOTONIC_RESPONSE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMAL_MAX_MONOTONIC_RESPONSE_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    thermal_max_response_realization_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESPONSE_REALIZATION_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESPONSE_REALIZATION_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
     thermal_require_metrics = is_true(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS",
@@ -5029,6 +5082,12 @@ def evaluate_release_readiness(
     thermal_max_response_realization_ratio = None
     thermal_spread_breach_rate = None
     thermal_spread_trend_ratio = None
+    thermal_residual_norm_trend_ratio = None
+    thermal_conductivity_spread_trend_ratio = None
+    thermal_heat_capacity_spread_trend_ratio = None
+    thermal_spatial_gradient_trend_ratio = None
+    thermal_monotonic_response_drop_trend_ratio = None
+    thermal_response_realization_drop_trend_ratio = None
     electro_coupling_enabled_rate = None
     electro_max_transient_severity = None
     electro_max_nonlinear_severity = None
@@ -9663,6 +9722,118 @@ def evaluate_release_readiness(
                         )
                     )
 
+        thermal_residual_norm_trend_ratio = fixture_trend_ratio("thermal_max_residual_norm")
+        if (
+            thermal_residual_norm_trend_ratio is not None
+            and thermal_residual_norm_trend_ratio
+            > thermal_max_residual_norm_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMAL_RESIDUAL_NORM_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"thermal residual norm trend ratio {thermal_residual_norm_trend_ratio:.3f} exceeds "
+                        f"threshold {thermal_max_residual_norm_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        thermal_conductivity_spread_trend_ratio = fixture_trend_ratio(
+            "thermal_conductivity_spread_ratio"
+        )
+        if (
+            thermal_conductivity_spread_trend_ratio is not None
+            and thermal_conductivity_spread_trend_ratio
+            > thermal_max_conductivity_spread_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMAL_CONDUCTIVITY_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"thermal conductivity spread trend ratio {thermal_conductivity_spread_trend_ratio:.3f} exceeds "
+                        f"threshold {thermal_max_conductivity_spread_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        thermal_heat_capacity_spread_trend_ratio = fixture_trend_ratio(
+            "thermal_heat_capacity_spread_ratio"
+        )
+        if (
+            thermal_heat_capacity_spread_trend_ratio is not None
+            and thermal_heat_capacity_spread_trend_ratio
+            > thermal_max_heat_capacity_spread_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMAL_HEAT_CAPACITY_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"thermal heat-capacity spread trend ratio {thermal_heat_capacity_spread_trend_ratio:.3f} exceeds "
+                        f"threshold {thermal_max_heat_capacity_spread_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        thermal_spatial_gradient_trend_ratio = fixture_trend_ratio(
+            "thermal_spatial_gradient_index"
+        )
+        if (
+            thermal_spatial_gradient_trend_ratio is not None
+            and thermal_spatial_gradient_trend_ratio
+            > thermal_max_spatial_gradient_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMAL_SPATIAL_GRADIENT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"thermal spatial gradient trend ratio {thermal_spatial_gradient_trend_ratio:.3f} exceeds "
+                        f"threshold {thermal_max_spatial_gradient_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        thermal_monotonic_response_drop_trend_ratio = fixture_trend_ratio(
+            "thermal_monotonic_response_fraction", ratio_mode="drop"
+        )
+        if (
+            thermal_monotonic_response_drop_trend_ratio is not None
+            and thermal_monotonic_response_drop_trend_ratio
+            > thermal_max_monotonic_response_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMAL_MONOTONIC_RESPONSE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"thermal monotonic response drop trend ratio {thermal_monotonic_response_drop_trend_ratio:.3f} exceeds "
+                        f"threshold {thermal_max_monotonic_response_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        thermal_response_realization_drop_trend_ratio = fixture_trend_ratio(
+            "thermal_response_realization_ratio", ratio_mode="drop"
+        )
+        if (
+            thermal_response_realization_drop_trend_ratio is not None
+            and thermal_response_realization_drop_trend_ratio
+            > thermal_max_response_realization_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMAL_RESPONSE_REALIZATION_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"thermal response realization drop trend ratio {thermal_response_realization_drop_trend_ratio:.3f} exceeds "
+                        f"threshold {thermal_max_response_realization_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         coverage_drop_ratios = []
         extrapolation_trend_ratios = []
         for fixture_id, latest_rec in latest_by_fixture.items():
@@ -13783,6 +13954,18 @@ def evaluate_release_readiness(
         "thermal_max_spread_breach_rate_threshold": thermal_max_spread_breach_rate_threshold,
         "thermal_spread_trend_ratio": thermal_spread_trend_ratio,
         "thermal_max_spread_trend_ratio_threshold": thermal_max_spread_trend_ratio_threshold,
+        "thermal_residual_norm_trend_ratio": thermal_residual_norm_trend_ratio,
+        "thermal_max_residual_norm_trend_ratio_threshold": thermal_max_residual_norm_trend_ratio_threshold,
+        "thermal_conductivity_spread_trend_ratio": thermal_conductivity_spread_trend_ratio,
+        "thermal_max_conductivity_spread_trend_ratio_threshold": thermal_max_conductivity_spread_trend_ratio_threshold,
+        "thermal_heat_capacity_spread_trend_ratio": thermal_heat_capacity_spread_trend_ratio,
+        "thermal_max_heat_capacity_spread_trend_ratio_threshold": thermal_max_heat_capacity_spread_trend_ratio_threshold,
+        "thermal_spatial_gradient_trend_ratio": thermal_spatial_gradient_trend_ratio,
+        "thermal_max_spatial_gradient_trend_ratio_threshold": thermal_max_spatial_gradient_trend_ratio_threshold,
+        "thermal_monotonic_response_drop_trend_ratio": thermal_monotonic_response_drop_trend_ratio,
+        "thermal_max_monotonic_response_drop_trend_ratio_threshold": thermal_max_monotonic_response_drop_trend_ratio_threshold,
+        "thermal_response_realization_drop_trend_ratio": thermal_response_realization_drop_trend_ratio,
+        "thermal_max_response_realization_drop_trend_ratio_threshold": thermal_max_response_realization_drop_trend_ratio_threshold,
         "electro_coupling_enabled_rate": electro_coupling_enabled_rate,
         "electro_max_transient_severity": electro_max_transient_severity,
         "electro_max_nonlinear_severity": electro_max_nonlinear_severity,
@@ -14715,6 +14898,14 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Thermal spread trend threshold: "
         f"`{result.get('thermal_max_spread_trend_ratio_threshold') if result.get('thermal_max_spread_trend_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal trend ratios (residual, conductivity spread, heat-capacity spread, spatial gradient, monotonic drop, response-realization drop): "
+        f"`{result.get('thermal_residual_norm_trend_ratio') if result.get('thermal_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('thermal_conductivity_spread_trend_ratio') if result.get('thermal_conductivity_spread_trend_ratio') is not None else '-'}`/`{result.get('thermal_heat_capacity_spread_trend_ratio') if result.get('thermal_heat_capacity_spread_trend_ratio') is not None else '-'}`/`{result.get('thermal_spatial_gradient_trend_ratio') if result.get('thermal_spatial_gradient_trend_ratio') is not None else '-'}`/`{result.get('thermal_monotonic_response_drop_trend_ratio') if result.get('thermal_monotonic_response_drop_trend_ratio') is not None else '-'}`/`{result.get('thermal_response_realization_drop_trend_ratio') if result.get('thermal_response_realization_drop_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal trend thresholds (residual, conductivity spread, heat-capacity spread, spatial gradient, monotonic drop, response-realization drop): "
+        f"`{result.get('thermal_max_residual_norm_trend_ratio_threshold') if result.get('thermal_max_residual_norm_trend_ratio_threshold') is not None else '-'}`/`{result.get('thermal_max_conductivity_spread_trend_ratio_threshold') if result.get('thermal_max_conductivity_spread_trend_ratio_threshold') is not None else '-'}`/`{result.get('thermal_max_heat_capacity_spread_trend_ratio_threshold') if result.get('thermal_max_heat_capacity_spread_trend_ratio_threshold') is not None else '-'}`/`{result.get('thermal_max_spatial_gradient_trend_ratio_threshold') if result.get('thermal_max_spatial_gradient_trend_ratio_threshold') is not None else '-'}`/`{result.get('thermal_max_monotonic_response_drop_trend_ratio_threshold') if result.get('thermal_max_monotonic_response_drop_trend_ratio_threshold') is not None else '-'}`/`{result.get('thermal_max_response_realization_drop_trend_ratio_threshold') if result.get('thermal_max_response_realization_drop_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Nonlinear Core Posture")
