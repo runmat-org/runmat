@@ -745,6 +745,12 @@ where
                     (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
                         expand_cell_indices(&ca, &indices)?
                     }
+                    (Value::OutputList(outputs), 1) | (Value::OutputList(outputs), 2) => {
+                        let cols = outputs.len();
+                        let cell = runmat_builtins::CellArray::new(outputs, 1, cols)
+                            .map_err(|e| format!("output-list expansion: {e}"))?;
+                        expand_cell_indices(&cell, &indices)?
+                    }
                     (other @ Value::Object(_), _) | (other @ Value::HandleObject(_), _) => {
                         expand_object_indices(other, indices).await?
                     }
@@ -951,5 +957,43 @@ mod tests {
         ))
         .expect("expanded args");
         assert_eq!(expanded, vec![Value::Num(42.0)]);
+    }
+
+    #[test]
+    fn build_expanded_args_from_specs_supports_output_list_index_expansion() {
+        let mut stack = vec![
+            Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
+            Value::Num(1.0),
+        ];
+        let specs = vec![ArgSpec {
+            is_expand: true,
+            num_indices: 1,
+            expand_all: false,
+        }];
+        let expanded = block_on(build_expanded_args_from_specs(
+            &mut stack,
+            &specs,
+            "expand-all failed",
+            "expand-indices failed",
+            |_base| async move { panic!("unexpected object expand-all path") },
+            |_base, _indices| async move { panic!("unexpected object expand-indices path") },
+        ))
+        .expect("expanded args");
+        assert_eq!(expanded, vec![Value::Num(9.0)]);
+
+        let mut stack = vec![
+            Value::OutputList(vec![Value::Num(9.0), Value::Num(2.0)]),
+            Value::Tensor(runmat_builtins::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        ];
+        let expanded = block_on(build_expanded_args_from_specs(
+            &mut stack,
+            &specs,
+            "expand-all failed",
+            "expand-indices failed",
+            |_base| async move { panic!("unexpected object expand-all path") },
+            |_base, _indices| async move { panic!("unexpected object expand-indices path") },
+        ))
+        .expect("expanded args");
+        assert_eq!(expanded, vec![Value::Num(9.0), Value::Num(2.0)]);
     }
 }
