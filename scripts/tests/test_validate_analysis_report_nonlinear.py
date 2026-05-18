@@ -771,6 +771,40 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "transient_prepared_cache_misses",
                 },
             ),
+            _record(
+                "fsi_coupled_cpu",
+                {
+                    "fsi_reference_density_kg_per_m3",
+                    "fsi_dynamic_viscosity_pa_s",
+                    "fsi_inlet_velocity_m_per_s",
+                    "fsi_turbulence_intensity",
+                    "fsi_reynolds_proxy",
+                    "fsi_profile_point_count",
+                    "fsi_step_count",
+                    "fsi_time_step_s",
+                    "fsi_structural_step_count",
+                    "fsi_cfd_profile_point_count",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                },
+            ),
+            _record(
+                "fsi_coupled_gpu_fallback",
+                {
+                    "fsi_reference_density_kg_per_m3",
+                    "fsi_dynamic_viscosity_pa_s",
+                    "fsi_inlet_velocity_m_per_s",
+                    "fsi_turbulence_intensity",
+                    "fsi_reynolds_proxy",
+                    "fsi_profile_point_count",
+                    "fsi_step_count",
+                    "fsi_time_step_s",
+                    "fsi_structural_step_count",
+                    "fsi_cfd_profile_point_count",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                },
+            ),
         ]
 
     def _run_main_with_report(self, report_path: Path) -> int:
@@ -1103,6 +1137,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "cht_step_count"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_fsi_cpu_cfd_profile_count_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "fsi_coupled_cpu":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "fsi_cfd_profile_point_count"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
