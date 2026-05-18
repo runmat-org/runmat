@@ -1,3 +1,4 @@
+import ast
 import unittest
 import os
 import inspect
@@ -9,6 +10,7 @@ from scripts.analysis.governance.release_readiness_nonlinear import (
 )
 from scripts.analysis.governance.validate_analysis_report_nonlinear import (
     PERFORMANCE_REQUIRED_FIELDS,
+    REQUIRED_FIXTURES,
 )
 from scripts.analysis.governance.validate_external_reference_benchmark import (
     REQUIRED_METRICS_BY_FIXTURE,
@@ -1483,6 +1485,66 @@ class ReleaseReadinessTests(unittest.TestCase):
             required_fields = PERFORMANCE_REQUIRED_FIELDS[fixture_id]
             self.assertIn("gpu_speedup_ratio", required_fields)
             self.assertIn("gpu_solver_solve_ms", required_fields)
+
+    def test_em_phase_assertions_match_schema_and_external_contracts(self):
+        source = inspect.getsource(evaluate_release_readiness)
+        tree = ast.parse(source)
+        phase_assertion_specs = None
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "phase_assertion_specs":
+                    phase_assertion_specs = node.value
+                    break
+            if phase_assertion_specs is not None:
+                break
+        self.assertIsNotNone(phase_assertion_specs)
+        self.assertIsInstance(phase_assertion_specs, ast.List)
+
+        missing_from_schema = []
+        missing_from_external = []
+        for spec in phase_assertion_specs.elts:
+            if not isinstance(spec, ast.Tuple) or len(spec.elts) < 2:
+                continue
+            fixture_node = spec.elts[0]
+            assertion_node = spec.elts[1]
+            if not (
+                isinstance(fixture_node, ast.Constant)
+                and isinstance(fixture_node.value, str)
+                and isinstance(assertion_node, ast.Constant)
+                and isinstance(assertion_node.value, str)
+            ):
+                continue
+            fixture_id = fixture_node.value
+            assertion_name = assertion_node.value
+            if not fixture_id.startswith("electromagnetic_reference_"):
+                continue
+            if not assertion_name.startswith("em_"):
+                continue
+            schema_required = REQUIRED_FIXTURES.get(fixture_id, set())
+            if assertion_name not in schema_required:
+                missing_from_schema.append(f"{fixture_id}.{assertion_name}")
+            external_required = REQUIRED_METRICS_BY_FIXTURE.get(fixture_id, set())
+            if assertion_name not in external_required:
+                missing_from_external.append(f"{fixture_id}.{assertion_name}")
+
+        self.assertEqual(
+            missing_from_schema,
+            [],
+            (
+                "release-readiness EM phase assertions missing from schema assertion "
+                "contracts: " + ", ".join(sorted(missing_from_schema))
+            ),
+        )
+        self.assertEqual(
+            missing_from_external,
+            [],
+            (
+                "release-readiness EM phase assertions missing from external comparator "
+                "contracts: " + ", ".join(sorted(missing_from_external))
+            ),
+        )
 
     def test_em_metric_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
