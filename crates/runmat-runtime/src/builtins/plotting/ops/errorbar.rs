@@ -437,29 +437,29 @@ fn parse_errorbar_args(args: Vec<Value>) -> crate::BuiltinResult<ErrorBarArgs> {
                     rest,
                 ))
             } else {
-                let fifth = it.next();
-                let sixth = it.next();
-                match (fifth, sixth) {
-                    (Some(fifth), Some(sixth)) => Ok((
-                        target_axes,
-                        first,
-                        second,
-                        Some(fifth),
-                        Some(sixth),
-                        third,
-                        fourth,
-                        it.collect(),
+                let rest = it.collect::<Vec<_>>();
+                match rest.as_slice() {
+                    [] => Ok((target_axes, first, second, None, None, third, fourth, rest)),
+                    [fifth, ..] if is_styleish(fifth) => {
+                        Ok((target_axes, first, second, None, None, third, fourth, rest))
+                    }
+                    [fifth, sixth, tail @ ..] if is_numericish(fifth) && is_numericish(sixth) => {
+                        Ok((
+                            target_axes,
+                            first,
+                            second,
+                            Some(fifth.clone()),
+                            Some(sixth.clone()),
+                            third,
+                            fourth,
+                            tail.to_vec(),
+                        ))
+                    }
+                    [fifth, ..] if is_numericish(fifth) => Err(plotting_error(
+                        BUILTIN_NAME,
+                        "errorbar: expected positive X error data after negative X error data",
                     )),
-                    _ => Ok((
-                        target_axes,
-                        first,
-                        second,
-                        None,
-                        None,
-                        third,
-                        fourth,
-                        it.collect(),
-                    )),
+                    _ => Ok((target_axes, first, second, None, None, third, fourth, rest)),
                 }
             }
         }
@@ -468,6 +468,13 @@ fn parse_errorbar_args(args: Vec<Value>) -> crate::BuiltinResult<ErrorBarArgs> {
 
 fn is_styleish(value: &Value) -> bool {
     matches!(value, Value::String(_) | Value::CharArray(_))
+}
+
+fn is_numericish(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Tensor(_) | Value::GpuTensor(_) | Value::Num(_) | Value::Int(_) | Value::Bool(_)
+    )
 }
 
 #[cfg(test)]
@@ -552,6 +559,101 @@ mod tests {
         );
         assert_eq!(error.x_neg, vec![0.1, 0.2]);
         assert_eq!(error.y_pos, vec![0.2, 0.3]);
+    }
+
+    #[test]
+    fn errorbar_accepts_line_spec_before_name_value_pairs() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        errorbar_builtin(vec![
+            Value::Tensor(vec_tensor(&[1.0, 2.0])),
+            Value::Tensor(vec_tensor(&[3.0, 4.0])),
+            Value::Tensor(vec_tensor(&[0.2, 0.3])),
+            Value::Tensor(vec_tensor(&[0.4, 0.5])),
+            Value::String("o-".into()),
+            Value::String("LineWidth".into()),
+            Value::Num(1.5),
+        ])
+        .unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::ErrorBar(error) = fig.plots().next().unwrap() else {
+            panic!("expected errorbar");
+        };
+        assert_eq!(
+            error.orientation,
+            runmat_plot::plots::errorbar::ErrorBarOrientation::Vertical
+        );
+        assert_eq!(error.line_style, runmat_plot::plots::LineStyle::Solid);
+        assert_eq!(error.line_width, 1.5);
+        let marker = error.marker.as_ref().expect("expected marker");
+        assert_eq!(
+            marker.kind,
+            runmat_plot::plots::scatter::MarkerStyle::Circle
+        );
+    }
+
+    #[test]
+    fn errorbar_accepts_name_value_pairs_after_asymmetric_vertical_data() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        errorbar_builtin(vec![
+            Value::Tensor(vec_tensor(&[1.0, 2.0])),
+            Value::Tensor(vec_tensor(&[3.0, 4.0])),
+            Value::Tensor(vec_tensor(&[0.2, 0.3])),
+            Value::Tensor(vec_tensor(&[0.4, 0.5])),
+            Value::String("LineWidth".into()),
+            Value::Num(1.5),
+        ])
+        .unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::ErrorBar(error) = fig.plots().next().unwrap() else {
+            panic!("expected errorbar");
+        };
+        assert_eq!(
+            error.orientation,
+            runmat_plot::plots::errorbar::ErrorBarOrientation::Vertical
+        );
+        assert_eq!(error.line_width, 1.5);
+    }
+
+    #[test]
+    fn errorbar_preserves_both_direction_form_with_trailing_style() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        errorbar_builtin(vec![
+            Value::Tensor(vec_tensor(&[1.0, 2.0])),
+            Value::Tensor(vec_tensor(&[3.0, 4.0])),
+            Value::Tensor(vec_tensor(&[0.2, 0.3])),
+            Value::Tensor(vec_tensor(&[0.4, 0.5])),
+            Value::Tensor(vec_tensor(&[0.1, 0.2])),
+            Value::Tensor(vec_tensor(&[0.2, 0.3])),
+            Value::String("o-".into()),
+            Value::String("LineWidth".into()),
+            Value::Num(1.5),
+        ])
+        .unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::ErrorBar(error) = fig.plots().next().unwrap() else {
+            panic!("expected errorbar");
+        };
+        assert_eq!(
+            error.orientation,
+            runmat_plot::plots::errorbar::ErrorBarOrientation::Both
+        );
+        assert_eq!(error.x_neg, vec![0.1, 0.2]);
+        assert_eq!(error.x_pos, vec![0.2, 0.3]);
+        assert_eq!(error.line_width, 1.5);
+        let marker = error.marker.as_ref().expect("expected marker");
+        assert_eq!(
+            marker.kind,
+            runmat_plot::plots::scatter::MarkerStyle::Circle
+        );
     }
 
     #[test]
