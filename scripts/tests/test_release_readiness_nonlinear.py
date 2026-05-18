@@ -1182,6 +1182,38 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_ENERGY_IMBALANCE_TREND_WORSENING", codes)
 
+    def test_em_core_source_realization_trend_uses_homogeneous_assertion(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {"name": "em_homogeneous_source_realization_ratio", "observed": 0.3}
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {"name": "em_homogeneous_source_realization_ratio", "observed": 0.9}
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_SOURCE_REALIZATION_DROP_TREND_RATIO"
+        ] = "1.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_CORE_SOURCE_REALIZATION_TREND_WORSENING", codes)
+
     def test_em_dispersive_phase_assertion_trend_worsening_reasons_are_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(

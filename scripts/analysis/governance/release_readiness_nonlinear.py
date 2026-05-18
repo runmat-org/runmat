@@ -7402,25 +7402,32 @@ def evaluate_release_readiness(
                     )
                 )
 
-        em_core_source_realization_drop_trend_ratio = fixture_assertion_trend_ratio(
-            "em_heterogeneous_source_realization_ratio"
-        )
-        if (
-            em_core_source_realization_drop_trend_ratio is not None
-            and em_core_source_realization_drop_trend_ratio
-            > em_max_core_source_realization_drop_trend_ratio_threshold
-        ):
-            reasons.append(
-                Reason(
-                    code="EM_CORE_SOURCE_REALIZATION_TREND_WORSENING",
-                    severity="fail" if protected else "warn",
-                    detail=(
-                        "EM core source-realization drop trend ratio "
-                        f"{em_core_source_realization_drop_trend_ratio:.3f} exceeds threshold "
-                        f"{em_max_core_source_realization_drop_trend_ratio_threshold:.3f}"
-                    ),
-                )
+        core_source_realization_trend_candidates = [
+            fixture_assertion_trend_ratio("em_homogeneous_source_realization_ratio"),
+            fixture_assertion_trend_ratio("em_heterogeneous_source_realization_ratio"),
+        ]
+        core_source_realization_trend_candidates = [
+            value for value in core_source_realization_trend_candidates if value is not None
+        ]
+        if core_source_realization_trend_candidates:
+            em_core_source_realization_drop_trend_ratio = max(
+                core_source_realization_trend_candidates
             )
+            if (
+                em_core_source_realization_drop_trend_ratio
+                > em_max_core_source_realization_drop_trend_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="EM_CORE_SOURCE_REALIZATION_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "EM core source-realization drop trend ratio "
+                            f"{em_core_source_realization_drop_trend_ratio:.3f} exceeds threshold "
+                            f"{em_max_core_source_realization_drop_trend_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
 
         core_source_region_coverage_trend_candidates = [
             fixture_assertion_trend_ratio("em_homogeneous_source_region_coverage_ratio"),
