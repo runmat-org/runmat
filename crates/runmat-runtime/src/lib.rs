@@ -138,17 +138,23 @@ async fn dispatch_object_external_member(
     class_name: String,
     member: &str,
     args: Vec<Value>,
+    requested_outputs: usize,
 ) -> BuiltinResult<Value> {
     dispatch_callable_with_policy(
         class_member_identity(&class_name, member),
         runmat_hir::CallableFallbackPolicy::ExternalBoundary,
         args,
+        requested_outputs,
     )
     .await
 }
 
-async fn dispatch_named_with_current_outputs(name: &str, args: &[Value]) -> BuiltinResult<Value> {
-    match current_requested_outputs() {
+async fn dispatch_named_with_requested_outputs(
+    name: &str,
+    args: &[Value],
+    requested_outputs: usize,
+) -> BuiltinResult<Value> {
+    match requested_outputs {
         out_count if out_count != 1 => call_builtin_async_with_outputs(name, args, out_count).await,
         _ => call_builtin_async(name, args).await,
     }
@@ -158,12 +164,13 @@ async fn dispatch_callable_with_policy(
     identity: runmat_hir::CallableIdentity,
     fallback_policy: runmat_hir::CallableFallbackPolicy,
     args: Vec<Value>,
+    requested_outputs: usize,
 ) -> BuiltinResult<Value> {
     let request = crate::user_functions::SemanticCallableRequest::resolved(
         identity.clone(),
         fallback_policy,
         args.clone(),
-        current_requested_outputs(),
+        requested_outputs,
         crate::user_functions::SemanticCallableKind::Other,
     );
     if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await {
@@ -172,7 +179,7 @@ async fn dispatch_callable_with_policy(
 
     if fallback_policy.allows_vm_name_fallback_for(&identity) {
         if let Some(name) = identity.display_name() {
-            return dispatch_named_with_current_outputs(&name, &args).await;
+            return dispatch_named_with_requested_outputs(&name, &args, requested_outputs).await;
         }
     }
 
@@ -358,7 +365,15 @@ async fn call_method_builtin(
             let mut args = Vec::with_capacity(1 + rest.len());
             args.push(receiver.clone());
             args.extend(rest);
-            match dispatch_object_external_member(class_name, &method, args.clone()).await {
+            let requested_outputs = current_requested_outputs();
+            match dispatch_object_external_member(
+                class_name,
+                &method,
+                args.clone(),
+                requested_outputs,
+            )
+            .await
+            {
                 Ok(v) => return Ok(v),
                 Err(err) if is_undefined_function_error(&err) => {}
                 Err(err) => return Err(err),
@@ -367,6 +382,7 @@ async fn call_method_builtin(
                 runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(method)),
                 runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
                 args,
+                requested_outputs,
             )
             .await
         }
@@ -395,6 +411,7 @@ async fn subsasgn_dispatch(
                 class_name,
                 OBJECT_SUBSASGN_METHOD,
                 vec![receiver, Value::String(kind), payload, rhs],
+                current_requested_outputs(),
             )
             .await
         }
@@ -415,6 +432,7 @@ async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::Bu
                 class_name,
                 OBJECT_SUBSREF_METHOD,
                 vec![receiver, Value::String(kind), payload],
+                current_requested_outputs(),
             )
             .await
         }
@@ -1170,20 +1188,31 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         identity: runmat_hir::CallableIdentity,
         fallback_policy: runmat_hir::CallableFallbackPolicy,
         args: &[Value],
+        requested_outputs: usize,
     ) -> crate::BuiltinResult<Value> {
-        dispatch_callable_with_policy(identity, fallback_policy, args.to_vec()).await
+        dispatch_callable_with_policy(identity, fallback_policy, args.to_vec(), requested_outputs)
+            .await
     }
 
-    async fn call_by_name(name: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
+    async fn call_by_name(
+        name: &str,
+        args: &[Value],
+        requested_outputs: usize,
+    ) -> crate::BuiltinResult<Value> {
         let (identity, fallback_policy) = callable_identity_for_handle_name(name);
-        call_by_identity(identity, fallback_policy, args).await
+        call_by_identity(identity, fallback_policy, args, requested_outputs).await
     }
 
-    async fn call_external_by_name(name: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
+    async fn call_external_by_name(
+        name: &str,
+        args: &[Value],
+        requested_outputs: usize,
+    ) -> crate::BuiltinResult<Value> {
         call_by_identity(
             external_callable_identity_for_name(name),
             runmat_hir::CallableFallbackPolicy::ExternalBoundary,
             args,
+            requested_outputs,
         )
         .await
     }
@@ -1193,7 +1222,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         // Function handle strings like "@sin"
         Value::String(s) => {
             if let Some(name) = s.strip_prefix('@') {
-                call_by_name(name, &rest).await
+                call_by_name(name, &rest, requested_outputs).await
             } else {
                 Err(
                     (format!("feval: expected function handle string starting with '@', got {s}"))
@@ -1206,7 +1235,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             if ca.rows == 1 {
                 let s: String = ca.data.iter().collect();
                 if let Some(name) = s.strip_prefix('@') {
-                    call_by_name(name, &rest).await
+                    call_by_name(name, &rest, requested_outputs).await
                 } else {
                     Err((format!(
                         "feval: expected function handle string starting with '@', got {s}"
@@ -1217,8 +1246,10 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                 Err(("feval: function handle char array must be a row vector".to_string()).into())
             }
         }
-        Value::FunctionHandle(name) => call_by_name(&name, &rest).await,
-        Value::ExternalFunctionHandle(name) => call_external_by_name(&name, &rest).await,
+        Value::FunctionHandle(name) => call_by_name(&name, &rest, requested_outputs).await,
+        Value::ExternalFunctionHandle(name) => {
+            call_external_by_name(&name, &rest, requested_outputs).await
+        }
         Value::SemanticFunctionHandle { name, function } => {
             let request = crate::user_functions::SemanticCallableRequest::semantic(
                 function,
@@ -1256,7 +1287,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                 ))
                 .into());
             }
-            call_by_name(&c.function_name, &args).await
+            call_by_name(&c.function_name, &args, requested_outputs).await
         }
         other => Err((format!("feval: unsupported function value {other:?}")).into()),
     }
