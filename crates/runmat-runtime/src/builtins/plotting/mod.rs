@@ -108,6 +108,8 @@ pub(crate) mod stairs;
 pub(crate) mod stem;
 #[path = "ops/subplot.rs"]
 pub(crate) mod subplot;
+#[path = "ops/suptitle.rs"]
+pub(crate) mod suptitle;
 #[path = "ops/surf.rs"]
 pub(crate) mod surf;
 #[path = "ops/surfc.rs"]
