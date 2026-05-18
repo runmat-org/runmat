@@ -205,6 +205,30 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
                 "em_homogeneous_boundary_anchor_ratio",
             ),
             (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_sweep_count",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_resonance_peak_frequency_hz",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_resonance_peak_flux_density",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_resonance_bandwidth_hz",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_resonance_q_proxy",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_resonance_flux_gain",
+            ),
+            (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "em_heterogeneous_sigma_omega_scale_spread_ratio",
             ),
@@ -307,6 +331,30 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "em_heterogeneous_boundary_anchor_ratio",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_sweep_count",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_resonance_peak_frequency_hz",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_resonance_peak_flux_density",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_resonance_bandwidth_hz",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_resonance_q_proxy",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_resonance_flux_gain",
             ),
             (
                 "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
@@ -688,11 +736,18 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ("acoustic_harmonic_gpu_provider", "acoustic_mode_count"),
             ("acoustic_harmonic_gpu_provider", "acoustic_residual_warn_threshold"),
         }
-        observed = {
-            (metric.get("fixture_id"), metric.get("assertion_name"))
-            for metric in metrics
-            if metric.get("source") == "threshold_assertion"
-        }
+        observed = set()
+        for metric in metrics:
+            fixture_id = metric.get("fixture_id")
+            if not isinstance(fixture_id, str):
+                continue
+            source = metric.get("source", "field")
+            if source == "threshold_assertion":
+                metric_name = metric.get("assertion_name")
+            else:
+                metric_name = metric.get("name")
+            if isinstance(metric_name, str):
+                observed.add((fixture_id, metric_name))
         missing = required - observed
         self.assertFalse(
             missing,

@@ -305,6 +305,15 @@ CONTACT_REQUIRED_FIELDS = {
     "contact_nonlinear_severity",
 }
 
+EM_SWEEP_RESONANCE_REQUIRED_FIELDS = {
+    "electromagnetic_sweep_count",
+    "electromagnetic_resonance_peak_frequency_hz",
+    "electromagnetic_resonance_peak_flux_density",
+    "electromagnetic_resonance_bandwidth_hz",
+    "electromagnetic_resonance_q_proxy",
+    "electromagnetic_resonance_flux_gain",
+}
+
 PERFORMANCE_REQUIRED_FIELDS = {
     "nonlinear_assembly_gpu_provider": {
         "gpu_speedup_ratio",
@@ -555,6 +564,22 @@ def main() -> int:
             if missing_fields:
                 errors.append(
                     f"fixture {fixture_id} missing contact summary fields: {', '.join(missing_fields)}"
+                )
+
+        if fixture_id in {
+            "electromagnetic_reference_homogeneous_gpu_provider",
+            "electromagnetic_reference_heterogeneous_gpu_provider",
+        }:
+            missing_fields = []
+            for field in sorted(EM_SWEEP_RESONANCE_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM sweep/resonance fields: "
+                    + ", ".join(missing_fields)
                 )
 
         if fixture_id in PERFORMANCE_REQUIRED_FIELDS:

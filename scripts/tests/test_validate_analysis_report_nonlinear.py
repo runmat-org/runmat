@@ -368,7 +368,15 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "em_homogeneous_source_region_coverage_ratio",
                     "em_homogeneous_boundary_anchor_ratio",
                 },
-            ),
+            )
+            | {
+                "electromagnetic_sweep_count": 5.0,
+                "electromagnetic_resonance_peak_frequency_hz": 60.0,
+                "electromagnetic_resonance_peak_flux_density": 1.0,
+                "electromagnetic_resonance_bandwidth_hz": 20.0,
+                "electromagnetic_resonance_q_proxy": 3.0,
+                "electromagnetic_resonance_flux_gain": 1.2,
+            },
             _record(
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 {
@@ -400,7 +408,15 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "em_heterogeneous_energy_imbalance_ratio",
                     "em_heterogeneous_boundary_anchor_ratio",
                 },
-            ),
+            )
+            | {
+                "electromagnetic_sweep_count": 5.0,
+                "electromagnetic_resonance_peak_frequency_hz": 75.0,
+                "electromagnetic_resonance_peak_flux_density": 1.3,
+                "electromagnetic_resonance_bandwidth_hz": 24.0,
+                "electromagnetic_resonance_q_proxy": 3.1,
+                "electromagnetic_resonance_flux_gain": 1.25,
+            },
             _record(
                 "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
                 {

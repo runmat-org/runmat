@@ -3019,6 +3019,42 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO", "0.8"),
         )
     )
+    em_min_sweep_count_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SWEEP_COUNT",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_SWEEP_COUNT", "5.0"),
+        )
+    )
+    em_min_resonance_peak_frequency_hz_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FREQUENCY_HZ",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FREQUENCY_HZ", "1.0"),
+        )
+    )
+    em_min_resonance_peak_flux_density_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FLUX_DENSITY",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FLUX_DENSITY", "1e-06"),
+        )
+    )
+    em_min_resonance_bandwidth_hz_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_BANDWIDTH_HZ",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_BANDWIDTH_HZ", "0.1"),
+        )
+    )
+    em_min_resonance_q_proxy_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_Q_PROXY",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_Q_PROXY", "1.25"),
+        )
+    )
+    em_min_resonance_flux_gain_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_FLUX_GAIN",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_FLUX_GAIN", "1.0"),
+        )
+    )
     em_max_breach_rate_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE",
@@ -3038,6 +3074,54 @@ def evaluate_release_readiness(
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO", "1.25"
+            ),
+        )
+    )
+    em_max_sweep_count_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SWEEP_COUNT_DROP_TREND_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SWEEP_COUNT_DROP_TREND_RATIO", "1.2"),
+        )
+    )
+    em_max_resonance_peak_frequency_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FREQUENCY_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FREQUENCY_TREND_RATIO",
+                "1.25",
+            ),
+        )
+    )
+    em_max_resonance_peak_flux_density_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FLUX_DENSITY_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FLUX_DENSITY_TREND_RATIO",
+                "1.25",
+            ),
+        )
+    )
+    em_max_resonance_bandwidth_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_BANDWIDTH_TREND_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_BANDWIDTH_TREND_RATIO", "1.25"),
+        )
+    )
+    em_max_resonance_q_proxy_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_Q_PROXY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_Q_PROXY_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_resonance_flux_gain_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_FLUX_GAIN_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_FLUX_GAIN_DROP_TREND_RATIO",
+                "1.2",
             ),
         )
     )
@@ -4383,6 +4467,12 @@ def evaluate_release_readiness(
     em_min_core_assignment_coverage_ratio = None
     em_max_core_fallback_coefficient_ratio = None
     em_min_boundary_anchor_ratio = None
+    em_min_sweep_count = None
+    em_min_resonance_peak_frequency_hz = None
+    em_min_resonance_peak_flux_density = None
+    em_min_resonance_bandwidth_hz = None
+    em_min_resonance_q_proxy = None
+    em_min_resonance_flux_gain = None
     em_min_dispersive_phase_attenuation_mean = None
     em_min_dispersive_phase_conductivity_attenuation_ratio = None
     em_max_dispersive_phase_attenuation_spread_ratio = None
@@ -4439,6 +4529,12 @@ def evaluate_release_readiness(
     em_heterogeneous_material_heterogeneity_drop_trend_ratio = None
     em_dispersive_loss_scale_trend_ratio = None
     em_dispersive_loss_scale_spread_trend_ratio = None
+    em_sweep_count_drop_trend_ratio = None
+    em_resonance_peak_frequency_trend_ratio = None
+    em_resonance_peak_flux_density_trend_ratio = None
+    em_resonance_bandwidth_trend_ratio = None
+    em_resonance_q_proxy_drop_trend_ratio = None
+    em_resonance_flux_gain_drop_trend_ratio = None
     em_boundary_energy_drop_trend_ratio = None
     em_region_contrast_drop_trend_ratio = None
     em_core_boundary_anchor_drop_trend_ratio = None
@@ -7171,6 +7267,79 @@ def evaluate_release_readiness(
                     )
                 )
 
+        sweep_metric_specs = [
+            (
+                "electromagnetic_sweep_count",
+                em_min_sweep_count_threshold,
+                "EM_SWEEP_COUNT_LOW",
+                "min EM sweep count",
+            ),
+            (
+                "electromagnetic_resonance_peak_frequency_hz",
+                em_min_resonance_peak_frequency_hz_threshold,
+                "EM_RESONANCE_PEAK_FREQUENCY_LOW",
+                "min EM resonance peak frequency (Hz)",
+            ),
+            (
+                "electromagnetic_resonance_peak_flux_density",
+                em_min_resonance_peak_flux_density_threshold,
+                "EM_RESONANCE_PEAK_FLUX_DENSITY_LOW",
+                "min EM resonance peak flux density",
+            ),
+            (
+                "electromagnetic_resonance_bandwidth_hz",
+                em_min_resonance_bandwidth_hz_threshold,
+                "EM_RESONANCE_BANDWIDTH_LOW",
+                "min EM resonance bandwidth (Hz)",
+            ),
+            (
+                "electromagnetic_resonance_q_proxy",
+                em_min_resonance_q_proxy_threshold,
+                "EM_RESONANCE_Q_PROXY_LOW",
+                "min EM resonance Q proxy",
+            ),
+            (
+                "electromagnetic_resonance_flux_gain",
+                em_min_resonance_flux_gain_threshold,
+                "EM_RESONANCE_FLUX_GAIN_LOW",
+                "min EM resonance flux gain",
+            ),
+        ]
+        for field, threshold, code, label in sweep_metric_specs:
+            values = []
+            for rec in em_records:
+                raw_value = rec.get(field)
+                if isinstance(raw_value, (int, float)):
+                    value = float(raw_value)
+                    if math.isfinite(value):
+                        values.append(value)
+            if not values:
+                continue
+            observed = min(values)
+            if field == "electromagnetic_sweep_count":
+                em_min_sweep_count = observed
+            elif field == "electromagnetic_resonance_peak_frequency_hz":
+                em_min_resonance_peak_frequency_hz = observed
+            elif field == "electromagnetic_resonance_peak_flux_density":
+                em_min_resonance_peak_flux_density = observed
+            elif field == "electromagnetic_resonance_bandwidth_hz":
+                em_min_resonance_bandwidth_hz = observed
+            elif field == "electromagnetic_resonance_q_proxy":
+                em_min_resonance_q_proxy = observed
+            elif field == "electromagnetic_resonance_flux_gain":
+                em_min_resonance_flux_gain = observed
+
+            breached = observed < threshold
+            breaches.append(breached)
+            if breached:
+                reasons.append(
+                    Reason(
+                        code=code,
+                        severity="fail" if protected else "warn",
+                        detail=f"{label} {observed:.3f} below threshold {threshold:.3f}",
+                    )
+                )
+
         if missing_metric_fields and (protected or em_require_metrics):
             reasons.append(
                 Reason(
@@ -9309,6 +9478,136 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
+
+        em_sweep_count_drop_trend_ratio = fixture_trend_ratio(
+            "electromagnetic_sweep_count", latest_reducer=min, ratio_mode="drop"
+        )
+        if (
+            em_sweep_count_drop_trend_ratio is not None
+            and em_sweep_count_drop_trend_ratio
+            > em_max_sweep_count_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_SWEEP_COUNT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM sweep-count drop trend ratio "
+                        f"{em_sweep_count_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_sweep_count_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_resonance_peak_frequency_trend_ratio = fixture_trend_ratio(
+            "electromagnetic_resonance_peak_frequency_hz",
+            latest_reducer=min,
+            ratio_mode="symmetric",
+        )
+        if (
+            em_resonance_peak_frequency_trend_ratio is not None
+            and em_resonance_peak_frequency_trend_ratio
+            > em_max_resonance_peak_frequency_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_RESONANCE_PEAK_FREQUENCY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM resonance peak-frequency trend ratio "
+                        f"{em_resonance_peak_frequency_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_resonance_peak_frequency_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_resonance_peak_flux_density_trend_ratio = fixture_trend_ratio(
+            "electromagnetic_resonance_peak_flux_density",
+            latest_reducer=min,
+            ratio_mode="symmetric",
+        )
+        if (
+            em_resonance_peak_flux_density_trend_ratio is not None
+            and em_resonance_peak_flux_density_trend_ratio
+            > em_max_resonance_peak_flux_density_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_RESONANCE_PEAK_FLUX_DENSITY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM resonance peak-flux-density trend ratio "
+                        f"{em_resonance_peak_flux_density_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_resonance_peak_flux_density_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_resonance_bandwidth_trend_ratio = fixture_trend_ratio(
+            "electromagnetic_resonance_bandwidth_hz",
+            latest_reducer=min,
+            ratio_mode="symmetric",
+        )
+        if (
+            em_resonance_bandwidth_trend_ratio is not None
+            and em_resonance_bandwidth_trend_ratio
+            > em_max_resonance_bandwidth_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_RESONANCE_BANDWIDTH_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM resonance bandwidth trend ratio "
+                        f"{em_resonance_bandwidth_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_resonance_bandwidth_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_resonance_q_proxy_drop_trend_ratio = fixture_trend_ratio(
+            "electromagnetic_resonance_q_proxy",
+            latest_reducer=min,
+            ratio_mode="drop",
+        )
+        if (
+            em_resonance_q_proxy_drop_trend_ratio is not None
+            and em_resonance_q_proxy_drop_trend_ratio
+            > em_max_resonance_q_proxy_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_RESONANCE_Q_PROXY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM resonance Q-proxy drop trend ratio "
+                        f"{em_resonance_q_proxy_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_resonance_q_proxy_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_resonance_flux_gain_drop_trend_ratio = fixture_trend_ratio(
+            "electromagnetic_resonance_flux_gain",
+            latest_reducer=min,
+            ratio_mode="drop",
+        )
+        if (
+            em_resonance_flux_gain_drop_trend_ratio is not None
+            and em_resonance_flux_gain_drop_trend_ratio
+            > em_max_resonance_flux_gain_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_RESONANCE_FLUX_GAIN_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM resonance flux-gain drop trend ratio "
+                        f"{em_resonance_flux_gain_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_resonance_flux_gain_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
 
         sigma_omega_scale_mean_trend_candidates = [
             fixture_assertion_trend_ratio("em_homogeneous_sigma_omega_scale_mean"),
@@ -11645,6 +11944,18 @@ def evaluate_release_readiness(
         "em_max_core_fallback_coefficient_ratio_threshold": em_max_core_fallback_coefficient_ratio_threshold,
         "em_min_boundary_anchor_ratio": em_min_boundary_anchor_ratio,
         "em_min_boundary_anchor_ratio_threshold": em_min_boundary_anchor_ratio_threshold,
+        "em_min_sweep_count": em_min_sweep_count,
+        "em_min_sweep_count_threshold": em_min_sweep_count_threshold,
+        "em_min_resonance_peak_frequency_hz": em_min_resonance_peak_frequency_hz,
+        "em_min_resonance_peak_frequency_hz_threshold": em_min_resonance_peak_frequency_hz_threshold,
+        "em_min_resonance_peak_flux_density": em_min_resonance_peak_flux_density,
+        "em_min_resonance_peak_flux_density_threshold": em_min_resonance_peak_flux_density_threshold,
+        "em_min_resonance_bandwidth_hz": em_min_resonance_bandwidth_hz,
+        "em_min_resonance_bandwidth_hz_threshold": em_min_resonance_bandwidth_hz_threshold,
+        "em_min_resonance_q_proxy": em_min_resonance_q_proxy,
+        "em_min_resonance_q_proxy_threshold": em_min_resonance_q_proxy_threshold,
+        "em_min_resonance_flux_gain": em_min_resonance_flux_gain,
+        "em_min_resonance_flux_gain_threshold": em_min_resonance_flux_gain_threshold,
         "em_min_dispersive_phase_attenuation_mean": em_min_dispersive_phase_attenuation_mean,
         "em_min_dispersive_phase_attenuation_mean_threshold": em_min_dispersive_phase_attenuation_mean_threshold,
         "em_min_dispersive_phase_conductivity_attenuation_ratio": em_min_dispersive_phase_conductivity_attenuation_ratio,
@@ -11717,6 +12028,18 @@ def evaluate_release_readiness(
         "em_max_energy_imbalance_trend_ratio_threshold": em_max_energy_imbalance_trend_ratio_threshold,
         "em_flux_divergence_trend_ratio": em_flux_divergence_trend_ratio,
         "em_max_flux_divergence_trend_ratio_threshold": em_max_flux_divergence_trend_ratio_threshold,
+        "em_sweep_count_drop_trend_ratio": em_sweep_count_drop_trend_ratio,
+        "em_max_sweep_count_drop_trend_ratio_threshold": em_max_sweep_count_drop_trend_ratio_threshold,
+        "em_resonance_peak_frequency_trend_ratio": em_resonance_peak_frequency_trend_ratio,
+        "em_max_resonance_peak_frequency_trend_ratio_threshold": em_max_resonance_peak_frequency_trend_ratio_threshold,
+        "em_resonance_peak_flux_density_trend_ratio": em_resonance_peak_flux_density_trend_ratio,
+        "em_max_resonance_peak_flux_density_trend_ratio_threshold": em_max_resonance_peak_flux_density_trend_ratio_threshold,
+        "em_resonance_bandwidth_trend_ratio": em_resonance_bandwidth_trend_ratio,
+        "em_max_resonance_bandwidth_trend_ratio_threshold": em_max_resonance_bandwidth_trend_ratio_threshold,
+        "em_resonance_q_proxy_drop_trend_ratio": em_resonance_q_proxy_drop_trend_ratio,
+        "em_max_resonance_q_proxy_drop_trend_ratio_threshold": em_max_resonance_q_proxy_drop_trend_ratio_threshold,
+        "em_resonance_flux_gain_drop_trend_ratio": em_resonance_flux_gain_drop_trend_ratio,
+        "em_max_resonance_flux_gain_drop_trend_ratio_threshold": em_max_resonance_flux_gain_drop_trend_ratio_threshold,
         "em_sigma_omega_scale_mean_drop_trend_ratio": em_sigma_omega_scale_mean_drop_trend_ratio,
         "em_max_sigma_omega_scale_mean_drop_trend_ratio_threshold": em_max_sigma_omega_scale_mean_drop_trend_ratio_threshold,
         "em_sigma_omega_response_coverage_drop_trend_ratio": em_sigma_omega_response_coverage_drop_trend_ratio,
@@ -12572,8 +12895,20 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_min_boundary_kernel_localization_ratio_threshold') if result.get('em_min_boundary_kernel_localization_ratio_threshold') is not None else '-'}`/`{result.get('em_min_boundary_kernel_ground_anchor_effectiveness_ratio_threshold') if result.get('em_min_boundary_kernel_ground_anchor_effectiveness_ratio_threshold') is not None else '-'}`/`{result.get('em_max_boundary_kernel_insulation_leakage_proxy_threshold') if result.get('em_max_boundary_kernel_insulation_leakage_proxy_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM sweep/resonance minima (sweep, peak-freq, peak-flux, bandwidth, Q, flux-gain): "
+        f"`{result.get('em_min_sweep_count') if result.get('em_min_sweep_count') is not None else '-'}`/`{result.get('em_min_resonance_peak_frequency_hz') if result.get('em_min_resonance_peak_frequency_hz') is not None else '-'}`/`{result.get('em_min_resonance_peak_flux_density') if result.get('em_min_resonance_peak_flux_density') is not None else '-'}`/`{result.get('em_min_resonance_bandwidth_hz') if result.get('em_min_resonance_bandwidth_hz') is not None else '-'}`/`{result.get('em_min_resonance_q_proxy') if result.get('em_min_resonance_q_proxy') is not None else '-'}`/`{result.get('em_min_resonance_flux_gain') if result.get('em_min_resonance_flux_gain') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM sweep/resonance thresholds (sweep, peak-freq, peak-flux, bandwidth, Q, flux-gain): "
+        f"`{result.get('em_min_sweep_count_threshold') if result.get('em_min_sweep_count_threshold') is not None else '-'}`/`{result.get('em_min_resonance_peak_frequency_hz_threshold') if result.get('em_min_resonance_peak_frequency_hz_threshold') is not None else '-'}`/`{result.get('em_min_resonance_peak_flux_density_threshold') if result.get('em_min_resonance_peak_flux_density_threshold') is not None else '-'}`/`{result.get('em_min_resonance_bandwidth_hz_threshold') if result.get('em_min_resonance_bandwidth_hz_threshold') is not None else '-'}`/`{result.get('em_min_resonance_q_proxy_threshold') if result.get('em_min_resonance_q_proxy_threshold') is not None else '-'}`/`{result.get('em_min_resonance_flux_gain_threshold') if result.get('em_min_resonance_flux_gain_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- EM breach rate/threshold: "
         f"`{result.get('em_breach_rate') if result.get('em_breach_rate') is not None else '-'}`/`{result.get('em_max_breach_rate_threshold') if result.get('em_max_breach_rate_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM sweep/resonance trend ratios (sweep drop, peak-freq, peak-flux, bandwidth, Q drop, flux-gain drop): "
+        f"`{result.get('em_sweep_count_drop_trend_ratio') if result.get('em_sweep_count_drop_trend_ratio') is not None else '-'}`/`{result.get('em_resonance_peak_frequency_trend_ratio') if result.get('em_resonance_peak_frequency_trend_ratio') is not None else '-'}`/`{result.get('em_resonance_peak_flux_density_trend_ratio') if result.get('em_resonance_peak_flux_density_trend_ratio') is not None else '-'}`/`{result.get('em_resonance_bandwidth_trend_ratio') if result.get('em_resonance_bandwidth_trend_ratio') is not None else '-'}`/`{result.get('em_resonance_q_proxy_drop_trend_ratio') if result.get('em_resonance_q_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('em_resonance_flux_gain_drop_trend_ratio') if result.get('em_resonance_flux_gain_drop_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- EM core trend ratios (energy, flux, sigma mean, sigma coverage, heterogeneous sigma spread, homogeneous sigma spread, homogeneous conductivity spread, heterogeneous conductivity spread drop, homogeneous relative permittivity spread, heterogeneous relative permittivity spread drop, homogeneous relative permeability spread, heterogeneous relative permeability spread drop, relative permittivity frequency-scale mean drop, relative permittivity frequency-scale spread, relative permittivity frequency-response coverage drop, relative permeability frequency-scale mean drop, relative permeability frequency-scale spread, relative permeability frequency-response coverage drop, homogeneous material heterogeneity, heterogeneous material heterogeneity drop, loss scale, loss scale spread, boundary energy, region contrast, core boundary anchor, core dispersive coupling, core source realization, core source coverage, core source material, core assignment coverage, core fallback coefficient, phase attenuation, phase attenuation spread, phase conductivity attenuation): "

@@ -382,9 +382,21 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_SWEEP_COUNT",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FREQUENCY_HZ",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FLUX_DENSITY",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_BANDWIDTH_HZ",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_Q_PROXY",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_FLUX_GAIN",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SWEEP_COUNT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FREQUENCY_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FLUX_DENSITY_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_BANDWIDTH_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_Q_PROXY_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_FLUX_GAIN_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO",
@@ -1307,6 +1319,91 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_ENERGY_IMBALANCE_TREND_WORSENING", codes)
         self.assertIn("EM_FLUX_DIVERGENCE_TREND_WORSENING", codes)
+
+    def test_em_sweep_resonance_posture_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_sweep_count": 2.0,
+                "electromagnetic_resonance_peak_frequency_hz": 0.5,
+                "electromagnetic_resonance_peak_flux_density": 0.0,
+                "electromagnetic_resonance_bandwidth_hz": 0.05,
+                "electromagnetic_resonance_q_proxy": 0.4,
+                "electromagnetic_resonance_flux_gain": 0.8,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SWEEP_COUNT"] = "5.0"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FREQUENCY_HZ"] = "1.0"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FLUX_DENSITY"] = "0.1"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_BANDWIDTH_HZ"] = "0.1"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_Q_PROXY"] = "1.2"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_FLUX_GAIN"] = "1.0"
+        result = evaluate_release_readiness(latest, [], protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_SWEEP_COUNT_LOW", codes)
+        self.assertIn("EM_RESONANCE_PEAK_FREQUENCY_LOW", codes)
+        self.assertIn("EM_RESONANCE_PEAK_FLUX_DENSITY_LOW", codes)
+        self.assertIn("EM_RESONANCE_BANDWIDTH_LOW", codes)
+        self.assertIn("EM_RESONANCE_Q_PROXY_LOW", codes)
+        self.assertIn("EM_RESONANCE_FLUX_GAIN_LOW", codes)
+
+    def test_em_sweep_resonance_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_sweep_count": 3.0,
+                "electromagnetic_resonance_peak_frequency_hz": 20.0,
+                "electromagnetic_resonance_peak_flux_density": 0.6,
+                "electromagnetic_resonance_bandwidth_hz": 8.0,
+                "electromagnetic_resonance_q_proxy": 1.0,
+                "electromagnetic_resonance_flux_gain": 1.05,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_sweep_count": 6.0,
+                "electromagnetic_resonance_peak_frequency_hz": 40.0,
+                "electromagnetic_resonance_peak_flux_density": 1.2,
+                "electromagnetic_resonance_bandwidth_hz": 4.0,
+                "electromagnetic_resonance_q_proxy": 2.0,
+                "electromagnetic_resonance_flux_gain": 1.5,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_SWEEP_COUNT_DROP_TREND_RATIO"] = "1.5"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FREQUENCY_TREND_RATIO"] = (
+            "1.5"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FLUX_DENSITY_TREND_RATIO"
+        ] = "1.5"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_BANDWIDTH_TREND_RATIO"] = "1.5"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_Q_PROXY_DROP_TREND_RATIO"] = (
+            "1.5"
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_FLUX_GAIN_DROP_TREND_RATIO"] = (
+            "1.3"
+        )
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_SWEEP_COUNT_TREND_WORSENING", codes)
+        self.assertIn("EM_RESONANCE_PEAK_FREQUENCY_TREND_WORSENING", codes)
+        self.assertIn("EM_RESONANCE_PEAK_FLUX_DENSITY_TREND_WORSENING", codes)
+        self.assertIn("EM_RESONANCE_BANDWIDTH_TREND_WORSENING", codes)
+        self.assertIn("EM_RESONANCE_Q_PROXY_TREND_WORSENING", codes)
+        self.assertIn("EM_RESONANCE_FLUX_GAIN_TREND_WORSENING", codes)
 
     def test_em_flux_divergence_static_falls_back_to_homogeneous_assertion(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

@@ -319,6 +319,54 @@
       "tolerance_rel": 0.05
     },
     {
+      "name": "electromagnetic_sweep_count",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_sweep_count",
+      "reference": 5.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 0.3
+    },
+    {
+      "name": "electromagnetic_resonance_peak_frequency_hz",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_resonance_peak_frequency_hz",
+      "reference": 60.0,
+      "tolerance_abs": 30.0,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "electromagnetic_resonance_peak_flux_density",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_resonance_peak_flux_density",
+      "reference": 1.0,
+      "tolerance_abs": 0.6,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_resonance_bandwidth_hz",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_resonance_bandwidth_hz",
+      "reference": 20.0,
+      "tolerance_abs": 12.0,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_resonance_q_proxy",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_resonance_q_proxy",
+      "reference": 3.0,
+      "tolerance_abs": 1.5,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_resonance_flux_gain",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_resonance_flux_gain",
+      "reference": 1.2,
+      "tolerance_abs": 0.6,
+      "tolerance_rel": 0.6
+    },
+    {
       "name": "em_heterogeneous_sigma_omega_scale_mean",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -587,6 +635,54 @@
       "reference": 0.25333333333333335,
       "tolerance_abs": 0.25,
       "tolerance_rel": 1.0
+    },
+    {
+      "name": "electromagnetic_sweep_count",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_sweep_count",
+      "reference": 5.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 0.3
+    },
+    {
+      "name": "electromagnetic_resonance_peak_frequency_hz",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_resonance_peak_frequency_hz",
+      "reference": 75.0,
+      "tolerance_abs": 40.0,
+      "tolerance_rel": 0.55
+    },
+    {
+      "name": "electromagnetic_resonance_peak_flux_density",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_resonance_peak_flux_density",
+      "reference": 1.3,
+      "tolerance_abs": 0.8,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_resonance_bandwidth_hz",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_resonance_bandwidth_hz",
+      "reference": 24.0,
+      "tolerance_abs": 14.0,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_resonance_q_proxy",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_resonance_q_proxy",
+      "reference": 3.1,
+      "tolerance_abs": 1.6,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_resonance_flux_gain",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_resonance_flux_gain",
+      "reference": 1.25,
+      "tolerance_abs": 0.7,
+      "tolerance_rel": 0.6
     },
     {
       "name": "em_boundary_penalty_conditioning_contribution",
