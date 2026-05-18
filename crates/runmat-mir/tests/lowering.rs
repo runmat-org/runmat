@@ -158,21 +158,22 @@ fn method_syntax_lowers_with_object_dispatch_fallback_policy() {
 }
 
 #[test]
-fn lower_assembly_rejects_at_least_requested_outputs() {
-    let hir =
-        patch_entrypoint_call_requested_outputs("y = sqrt(9);", RequestedOutputCount::AtLeast(1));
-    let err = lower_assembly(&hir.assembly).expect_err("lower should fail");
-    assert!(err.message.contains("AtLeast is unsupported"));
+fn lower_assembly_accepts_zero_requested_outputs() {
+    let hir = patch_entrypoint_call_requested_outputs("y = sqrt(9);", RequestedOutputCount::Zero);
+    let mir = lower_assembly(&hir.assembly).expect("lower should succeed");
+    let body = mir.bodies.values().next().expect("body");
+    let call = first_call(body);
+    assert_eq!(call.requested_outputs, RequestedOutputCount::Zero);
 }
 
 #[test]
-fn lower_assembly_rejects_unknown_dynamic_requested_outputs() {
-    let hir = patch_entrypoint_call_requested_outputs(
-        "y = sqrt(9);",
-        RequestedOutputCount::UnknownDynamic,
-    );
-    let err = lower_assembly(&hir.assembly).expect_err("lower should fail");
-    assert!(err.message.contains("UnknownDynamic is unsupported"));
+fn lower_assembly_accepts_explicit_multi_requested_outputs() {
+    let hir =
+        patch_entrypoint_call_requested_outputs("y = sqrt(9);", RequestedOutputCount::Exactly(3));
+    let mir = lower_assembly(&hir.assembly).expect("lower should succeed");
+    let body = mir.bodies.values().next().expect("body");
+    let call = first_call(body);
+    assert_eq!(call.requested_outputs, RequestedOutputCount::Exactly(3));
 }
 
 #[test]
