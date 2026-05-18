@@ -134,9 +134,10 @@ fn value_kind(value: &Value) -> &'static str {
         Value::HandleObject(_) => "handle object",
         Value::Listener(_) => "listener",
         Value::Struct(_) => "struct",
-        Value::FunctionHandle(_) | Value::SemanticFunctionHandle { .. } | Value::Closure(_) => {
-            "function handle"
-        }
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
+        | Value::Closure(_) => "function handle",
         Value::ClassRef(_) => "class reference",
         Value::MException(_) => "exception",
         Value::OutputList(_) => "output list",

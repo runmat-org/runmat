@@ -86,6 +86,7 @@ async fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)

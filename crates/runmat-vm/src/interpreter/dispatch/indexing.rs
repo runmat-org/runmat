@@ -463,6 +463,7 @@ pub async fn dispatch_indexing(
                     stack.push(gather_cell_with_plan(ca, &plan)?);
                 }
                 Value::FunctionHandle(_)
+                | Value::ExternalFunctionHandle(_)
                 | Value::SemanticFunctionHandle { .. }
                 | Value::Closure(_) => {
                     let args = raw_indices;
@@ -726,6 +727,7 @@ pub async fn dispatch_indexing(
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::FunctionHandle(_)
+                | Value::ExternalFunctionHandle(_)
                 | Value::SemanticFunctionHandle { .. }
                 | Value::Closure(_) => {
                     if *colon_mask != 0 || *end_mask != 0 {

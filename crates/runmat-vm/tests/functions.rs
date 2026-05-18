@@ -821,7 +821,7 @@ fn import_static_method_function_handle_executes() {
     let bytecode =
         compile_semantic_source(program).expect("semantic import function handle compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "Point.origin")
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "Point.origin")
     ));
     let vars = execute_semantic_source(program);
     assert!(vars
@@ -835,7 +835,7 @@ fn import_wildcard_static_method_function_handle_executes() {
     let bytecode =
         compile_semantic_source(program).expect("semantic wildcard import function handle compile");
     assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "Point.origin")
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "Point.origin")
     ));
     let vars = execute_semantic_source(program);
     assert!(vars

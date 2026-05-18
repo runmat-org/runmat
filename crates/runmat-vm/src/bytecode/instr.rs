@@ -201,6 +201,7 @@ pub enum Instr {
 
     // Closure and static class dispatch.
     CreateFunctionHandle(String),
+    CreateExternalFunctionHandle(String),
     CreateSemanticFunctionHandle(FunctionId, String),
     CreateClosure(String, usize),
     CreateSemanticClosure(FunctionId, String, usize),
@@ -301,6 +302,7 @@ impl Instr {
             | Instr::LoadString(_)
             | Instr::LoadCharRow(_)
             | Instr::CreateFunctionHandle(_)
+            | Instr::CreateExternalFunctionHandle(_)
             | Instr::CreateSemanticFunctionHandle(_, _)
             | Instr::LoadVar(_)
             | Instr::LoadLocal(_) => effect(0, 1),

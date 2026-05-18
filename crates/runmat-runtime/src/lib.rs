@@ -488,6 +488,11 @@ async fn notify_builtin(
                 a.extend(args.into_iter());
                 let _ = crate::call_builtin_async("feval", &a).await?;
             }
+            Value::ExternalFunctionHandle(name) => {
+                let mut a = vec![Value::ExternalFunctionHandle(name.clone())];
+                a.extend(args.into_iter());
+                let _ = crate::call_builtin_async("feval", &a).await?;
+            }
             Value::SemanticFunctionHandle { .. } => {
                 let mut a = vec![cbv.clone()];
                 a.extend(args.into_iter());
@@ -1133,6 +1138,40 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             crate::call_builtin_async_with_outputs(name, args, requested_outputs).await
         }
     }
+
+    async fn call_external_by_name(
+        name: &str,
+        args: &[Value],
+        requested_outputs: usize,
+    ) -> crate::BuiltinResult<Value> {
+        let segments = name
+            .split('.')
+            .filter(|segment| !segment.is_empty())
+            .map(|segment| runmat_hir::SymbolName(segment.to_string()))
+            .collect::<Vec<_>>();
+        let identity = if segments.is_empty() {
+            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
+                runmat_hir::SymbolName(name.to_string()),
+            ]))
+        } else {
+            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
+        };
+        let request = crate::user_functions::SemanticCallableRequest::resolved(
+            identity,
+            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+            args.to_vec(),
+            requested_outputs,
+            crate::user_functions::SemanticCallableKind::Feval,
+        );
+        if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await {
+            return result;
+        }
+        Err(
+            crate::build_runtime_error(format!("Undefined function '{name}'"))
+                .with_identifier("RunMat:UndefinedFunction")
+                .build(),
+        )
+    }
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
 
     match f {
@@ -1164,6 +1203,9 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             }
         }
         Value::FunctionHandle(name) => call_by_name(&name, &rest, requested_outputs).await,
+        Value::ExternalFunctionHandle(name) => {
+            call_external_by_name(&name, &rest, requested_outputs).await
+        }
         Value::SemanticFunctionHandle { name, function } => {
             let request = crate::user_functions::SemanticCallableRequest::semantic(
                 function,
@@ -1244,9 +1286,9 @@ fn str2func_builtin(value: Value) -> crate::BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(name = "func2str", builtin_path = "crate")]
 fn func2str_builtin(value: Value) -> crate::BuiltinResult<Value> {
     match value {
-        Value::FunctionHandle(name) | Value::SemanticFunctionHandle { name, .. } => {
-            Ok(Value::String(name))
-        }
+        Value::FunctionHandle(name)
+        | Value::ExternalFunctionHandle(name)
+        | Value::SemanticFunctionHandle { name, .. } => Ok(Value::String(name)),
         Value::Closure(closure) => Ok(Value::String(closure.function_name)),
         other => Err((format!("func2str: expected function handle, got {other:?}")).into()),
     }
@@ -1638,6 +1680,21 @@ mod tests {
     }
 
     #[test]
+    fn feval_external_function_handle_errors_when_unresolved() {
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let err = block_on(feval_builtin(
+            Value::ExternalFunctionHandle("missing.external".to_string()),
+            vec![Value::Num(1.0)],
+        ))
+        .expect_err("external function handle should error when unresolved");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+        assert!(
+            err.message().contains("missing.external"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
     fn str2func_returns_semantic_handle_when_resolver_can_resolve() {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
@@ -1667,6 +1724,11 @@ mod tests {
         assert_eq!(
             func2str_builtin(Value::FunctionHandle("sin".to_string())).expect("func2str"),
             Value::String("sin".to_string())
+        );
+        assert_eq!(
+            func2str_builtin(Value::ExternalFunctionHandle("Point.origin".to_string()))
+                .expect("func2str"),
+            Value::String("Point.origin".to_string())
         );
         assert_eq!(
             func2str_builtin(Value::SemanticFunctionHandle {

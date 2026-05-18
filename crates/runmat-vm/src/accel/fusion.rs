@@ -35,7 +35,7 @@ pub fn value_kind(value: &Value) -> &'static str {
         Value::Object(_) => "Object",
         Value::HandleObject(_) => "HandleObject",
         Value::Listener(_) => "Listener",
-        Value::FunctionHandle(_) => "FunctionHandle",
+        Value::FunctionHandle(_) | Value::ExternalFunctionHandle(_) => "FunctionHandle",
         Value::SemanticFunctionHandle { .. } => "FunctionHandle",
         Value::Closure(_) => "Closure",
         Value::ClassRef(_) => "ClassRef",

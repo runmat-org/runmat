@@ -488,7 +488,9 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> usize {
         Value::Closure(closure) => closure.captures.iter().fold(0usize, |acc, v| {
             acc.saturating_add(value_memory_bytes(v, seen))
         }),
-        Value::FunctionHandle(_) | Value::SemanticFunctionHandle { .. } => 0,
+        Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. } => 0,
         Value::ClassRef(name) => name.len().saturating_mul(2),
         Value::MException(exc) => {
             let base = exc

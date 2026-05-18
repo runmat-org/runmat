@@ -728,6 +728,12 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CreateExternalFunctionHandle(name) => {
+            stack.push(Value::ExternalFunctionHandle(name.clone()));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CreateSemanticFunctionHandle(function, name) => {
             stack.push(Value::SemanticFunctionHandle {
                 name: name.clone(),

@@ -850,7 +850,9 @@ impl TypeName for Value {
             Value::Object(_) => "object",
             Value::HandleObject(_) => "handle object",
             Value::Listener(_) => "listener",
-            Value::FunctionHandle(_) | Value::SemanticFunctionHandle { .. } => "function handle",
+            Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::SemanticFunctionHandle { .. } => "function handle",
             Value::Closure(_) => "closure",
             Value::ClassRef(_) => "class reference",
             Value::MException(_) => "MException",

@@ -415,6 +415,7 @@ fn linear_to_indices(mut index: usize, shape: &[usize]) -> Vec<usize> {
 #[derive(Clone)]
 enum Callable {
     Builtin { name: String },
+    ExternalName { name: String },
     Closure(Closure),
     Special(SpecialCallable),
 }
@@ -454,6 +455,7 @@ impl Callable {
                 }
             }
             Value::FunctionHandle(name) => Self::from_text(&name, true),
+            Value::ExternalFunctionHandle(name) => Ok(Callable::ExternalName { name }),
             Value::SemanticFunctionHandle { name, function } => Ok(Callable::Closure(Closure {
                 function_name: name,
                 semantic_function: Some(function),
@@ -524,6 +526,34 @@ impl Callable {
                     return result;
                 }
                 call_builtin_async(name, args).await
+            }
+            Callable::ExternalName { name } => {
+                let segments = name
+                    .split('.')
+                    .filter(|segment| !segment.is_empty())
+                    .map(|segment| runmat_hir::SymbolName(segment.to_string()))
+                    .collect::<Vec<_>>();
+                let identity = if segments.is_empty() {
+                    runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
+                        runmat_hir::SymbolName(name.clone()),
+                    ]))
+                } else {
+                    runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
+                };
+                let request = user_functions::SemanticCallableRequest::resolved(
+                    identity,
+                    runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+                    args.to_vec(),
+                    1,
+                    user_functions::SemanticCallableKind::Cellfun,
+                );
+                if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
+                    return result;
+                }
+                Err(cellfun_error_with_identifier(
+                    format!("Undefined function '{name}'"),
+                    IDENT_FUNCTION_ERROR,
+                ))
             }
             Callable::Closure(c) => {
                 let mut captures = c.captures.clone();
@@ -850,6 +880,36 @@ pub(crate) mod tests {
             Value::Tensor(tensor) => {
                 assert_eq!(tensor.shape, vec![1, 1]);
                 assert_eq!(tensor.data, vec![13.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cellfun_external_handle_uses_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.callback").then_some(86)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 86);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(23.0)) })
+            }),
+        ));
+        let cell = crate::make_cell(vec![Value::Num(2.0)], 1, 1).expect("cell");
+
+        let result = cellfun_builtin(
+            Value::ExternalFunctionHandle("pkg.callback".to_string()),
+            vec![cell],
+        )
+        .expect("resolved external-handle cellfun");
+        match result {
+            Value::Tensor(tensor) => {
+                assert_eq!(tensor.shape, vec![1, 1]);
+                assert_eq!(tensor.data, vec![23.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

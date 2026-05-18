@@ -2557,7 +2557,7 @@ impl Compiler {
                         "MIR bytecode lowering for this function handle target is not implemented yet",
                     ));
                 };
-                self.emit(Instr::CreateFunctionHandle(name));
+                self.emit(Instr::CreateExternalFunctionHandle(name));
                 Ok(())
             }
             CallableIdentity::AnonymousFunction(function) => {

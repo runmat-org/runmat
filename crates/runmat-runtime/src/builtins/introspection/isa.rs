@@ -107,7 +107,10 @@ fn value_is_a(value: &Value, requested: &str) -> bool {
         "struct" => matches!(value, Value::Struct(_)),
         "function_handle" => matches!(
             value,
-            Value::FunctionHandle(_) | Value::SemanticFunctionHandle { .. } | Value::Closure(_)
+            Value::FunctionHandle(_)
+                | Value::ExternalFunctionHandle(_)
+                | Value::SemanticFunctionHandle { .. }
+                | Value::Closure(_)
         ),
         "gpuarray" => matches!(value, Value::GpuTensor(_)),
         "listener" | "event.listener" => matches!(value, Value::Listener(_)),

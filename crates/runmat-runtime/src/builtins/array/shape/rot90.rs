@@ -123,6 +123,7 @@ async fn rot90_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<V
         Value::GpuTensor(handle) => Ok(rot90_gpu(handle, steps).await?),
         Value::Cell(_) => Err(rot90_error("rot90: cell arrays are not yet supported")),
         Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::Struct(_)

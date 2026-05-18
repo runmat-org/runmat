@@ -1,7 +1,9 @@
 use crate::bytecode::SemanticFunctionRegistry;
 use crate::call::feval::forward_builtin_feval;
 use runmat_builtins::{Closure, Value};
-use runmat_hir::{BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId, SymbolName};
+use runmat_hir::{
+    BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId, QualifiedName, SymbolName,
+};
 use runmat_runtime::RuntimeError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,6 +77,19 @@ impl CallableDescriptor {
             None
         } else {
             Some(handle.to_string())
+        }
+    }
+
+    fn qualified_identity_from_name(name: &str) -> CallableIdentity {
+        let segments = name
+            .split('.')
+            .filter(|segment| !segment.is_empty())
+            .map(|segment| SymbolName(segment.to_string()))
+            .collect::<Vec<_>>();
+        if segments.is_empty() {
+            CallableIdentity::ExternalName(QualifiedName(vec![SymbolName(name.to_string())]))
+        } else {
+            CallableIdentity::ExternalName(QualifiedName(segments))
         }
     }
 
@@ -253,6 +268,13 @@ impl CallableDescriptor {
                     Self::resolve_named_target(&name, semantic_registry);
                 Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
             }
+            Value::ExternalFunctionHandle(name) => Self::feval_resolved_name(
+                Self::qualified_identity_from_name(&name),
+                name,
+                CallableFallbackPolicy::ExternalBoundary,
+                args,
+                requested_outputs,
+            ),
             Value::SemanticFunctionHandle { name, function } => Self::feval_semantic(
                 function,
                 name,
@@ -410,6 +432,20 @@ async fn execute_resolved_callable(
             {
                 return result;
             }
+            if matches!(fallback_policy, CallableFallbackPolicy::ExternalBoundary)
+                && matches!(other, CallableIdentity::ExternalName(_))
+            {
+                let Some(name) = other.display_name() else {
+                    return Err(undefined_name_error("<unnamed callable>", &metadata));
+                };
+                return forward_named_fallback(
+                    name,
+                    args,
+                    requested_outputs,
+                    CallableFallbackPolicy::RuntimeNameResolution,
+                )
+                .await;
+            }
             if !fallback_policy.allows_runtime_name_resolution() {
                 let name = other
                     .display_name()
@@ -467,6 +503,21 @@ async fn try_execute_resolved_callable(
                 runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
             {
                 return result.map(Some);
+            }
+            if matches!(fallback_policy, CallableFallbackPolicy::ExternalBoundary)
+                && matches!(other, CallableIdentity::ExternalName(_))
+            {
+                let Some(name) = other.display_name() else {
+                    return Ok(None);
+                };
+                return forward_named_fallback(
+                    name,
+                    args,
+                    requested_outputs,
+                    CallableFallbackPolicy::RuntimeNameResolution,
+                )
+                .await
+                .map(Some);
             }
             if !fallback_policy.allows_runtime_name_resolution() {
                 return Ok(None);

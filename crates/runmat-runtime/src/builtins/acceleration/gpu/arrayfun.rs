@@ -565,6 +565,7 @@ impl ArrayData {
 #[derive(Clone)]
 enum Callable {
     Builtin { name: String },
+    ExternalName { name: String },
     Closure(Closure),
 }
 
@@ -593,6 +594,7 @@ impl Callable {
             }
             Value::StringArray(sa) if sa.data.len() == 1 => Self::from_text(&sa.data[0]),
             Value::FunctionHandle(name) => Self::from_text(&name),
+            Value::ExternalFunctionHandle(name) => Ok(Callable::ExternalName { name }),
             Value::SemanticFunctionHandle { name, function } => Ok(Callable::Closure(Closure {
                 function_name: name,
                 semantic_function: Some(function),
@@ -639,7 +641,7 @@ impl Callable {
     fn builtin_name(&self) -> Option<&str> {
         match self {
             Callable::Builtin { name } => Some(name.as_str()),
-            Callable::Closure(_) => None,
+            Callable::ExternalName { .. } | Callable::Closure(_) => None,
         }
     }
 
@@ -657,6 +659,31 @@ impl Callable {
                     return result;
                 }
                 crate::call_builtin_async(name, args).await
+            }
+            Callable::ExternalName { name } => {
+                let segments = name
+                    .split('.')
+                    .filter(|segment| !segment.is_empty())
+                    .map(|segment| runmat_hir::SymbolName(segment.to_string()))
+                    .collect::<Vec<_>>();
+                let identity = if segments.is_empty() {
+                    runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
+                        runmat_hir::SymbolName(name.clone()),
+                    ]))
+                } else {
+                    runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
+                };
+                let request = user_functions::SemanticCallableRequest::resolved(
+                    identity,
+                    runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+                    args.to_vec(),
+                    1,
+                    user_functions::SemanticCallableKind::Arrayfun,
+                );
+                if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
+                    return result;
+                }
+                Err(arrayfun_flow(format!("Undefined function '{name}'")))
             }
             Callable::Closure(c) => {
                 let mut merged = c.captures.clone();
@@ -1140,6 +1167,39 @@ pub(crate) mod tests {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 2]);
                 assert_eq!(out.data, vec![21.0, 22.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arrayfun_external_handle_uses_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.callback").then_some(87)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 87);
+                assert_eq!(requested_outputs, 1);
+                let [Value::Num(value)] = args else {
+                    panic!("expected scalar numeric argument, got {args:?}");
+                };
+                let value = *value;
+                Box::pin(async move { Ok(Value::Num(value + 30.0)) })
+            }),
+        ));
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+
+        let result = call(
+            Value::ExternalFunctionHandle("pkg.callback".to_string()),
+            vec![Value::Tensor(tensor)],
+        )
+        .expect("resolved external-handle arrayfun");
+        match result {
+            Value::Tensor(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec![31.0, 32.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

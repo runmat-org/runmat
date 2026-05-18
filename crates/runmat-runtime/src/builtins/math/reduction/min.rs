@@ -581,6 +581,7 @@ fn materialize_for_min(name: &str, value: Value) -> BuiltinResult<InputData> {
             Err(min_error(format!("{name}: unsupported input type")))
         }
         Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
         | Value::SemanticFunctionHandle { .. }
         | Value::Closure(_)
         | Value::ClassRef(_)
