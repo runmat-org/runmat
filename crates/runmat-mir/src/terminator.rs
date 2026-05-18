@@ -1,5 +1,5 @@
 use crate::{BasicBlockId, MirLocalId, MirOperand, MirPlace, MirRvalue};
-use runmat_hir::{LoopIterationSemantics, Span};
+use runmat_hir::Span;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -24,7 +24,6 @@ pub enum MirTerminatorKind {
     For {
         binding: MirLocalId,
         iterable: MirRvalue,
-        semantics: LoopIterationSemantics,
         body_block: BasicBlockId,
         exit_block: BasicBlockId,
     },
@@ -38,7 +37,6 @@ pub enum MirTerminatorKind {
         future: MirOperand,
         result: Option<MirPlace>,
         resume: BasicBlockId,
-        cleanup: Option<BasicBlockId>,
     },
     Unreachable,
 }

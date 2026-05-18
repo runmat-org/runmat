@@ -656,10 +656,10 @@ impl BytecodeCompiler {
                         }
                     }
                     Instr::CallFunctionMulti {
-                        display_name,
+                        identity,
+                        fallback_policy,
                         arg_count,
                         out_count,
-                        ..
                     } => {
                         if *out_count > 1 {
                             match instructions.get(pc + 1) {
@@ -670,14 +670,14 @@ impl BytecodeCompiler {
                             }
                         }
 
-                        let func_name = display_name.as_deref().ok_or_else(|| {
-                            execution_error(
-                                "Named multi-output JIT call requires a display name".to_string(),
-                            )
-                        })?;
                         let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
                         let results = Self::compile_named_function_multi_call_jit(
-                            builder, ctx, func_name, &args, *out_count,
+                            builder,
+                            ctx,
+                            identity,
+                            *fallback_policy,
+                            &args,
+                            *out_count,
                         )?;
                         for result in results {
                             local_stack.push(result);
@@ -910,13 +910,16 @@ impl BytecodeCompiler {
     fn compile_named_function_multi_call_jit(
         builder: &mut FunctionBuilder,
         ctx: &mut CompileContext<'_>,
-        func_name: &str,
+        identity: &runmat_hir::CallableIdentity,
+        fallback_policy: runmat_hir::CallableFallbackPolicy,
         args: &[Value],
         out_count: usize,
     ) -> Result<Vec<Value>> {
-        let Some(function) = ctx.semantic_registry.resolve_name(func_name) else {
+        let Some(function) =
+            Self::resolve_named_multi_call_target(identity, fallback_policy, ctx.semantic_registry)
+        else {
             return Err(execution_error(
-                "Legacy multi-output function calls are not supported in JIT; use interpreter",
+                "Named multi-output function calls without semantic identities are not supported in JIT; use interpreter",
             ));
         };
 
@@ -927,6 +930,51 @@ impl BytecodeCompiler {
             function.0,
             args,
             out_count,
+        )
+    }
+
+    fn resolve_named_multi_call_target(
+        identity: &runmat_hir::CallableIdentity,
+        fallback_policy: runmat_hir::CallableFallbackPolicy,
+        semantic_registry: &runmat_vm::SemanticFunctionRegistry,
+    ) -> Option<runmat_hir::FunctionId> {
+        if let runmat_hir::CallableIdentity::SemanticFunction(function) = identity {
+            return Some(*function);
+        }
+        if !fallback_policy.allows_semantic_name_resolution_for(identity) {
+            return None;
+        }
+        let name = Self::semantic_lookup_name(identity)?;
+        semantic_registry.resolve_name(&name)
+    }
+
+    fn semantic_lookup_name(identity: &runmat_hir::CallableIdentity) -> Option<String> {
+        match identity {
+            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)) => {
+                if name.is_empty() {
+                    None
+                } else {
+                    Some(name.clone())
+                }
+            }
+            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments)) => {
+                Self::well_formed_external_name(segments)
+            }
+            _ => None,
+        }
+    }
+
+    fn well_formed_external_name(segments: &[runmat_hir::SymbolName]) -> Option<String> {
+        if segments.len() <= 1 || segments.iter().any(|segment| segment.0.is_empty()) {
+            return None;
+        }
+
+        Some(
+            segments
+                .iter()
+                .map(|segment| segment.0.as_str())
+                .collect::<Vec<_>>()
+                .join("."),
         )
     }
 

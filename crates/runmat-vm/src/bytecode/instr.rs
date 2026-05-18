@@ -21,7 +21,6 @@ pub enum EndExpr {
     ResolvedCall {
         identity: CallableIdentity,
         fallback_policy: CallableFallbackPolicy,
-        display_name: Option<String>,
         args: Vec<EndExpr>,
     },
     Add(Box<EndExpr>, Box<EndExpr>),
@@ -186,14 +185,12 @@ pub enum Instr {
     // Ambiguous `obj.name(...)` shape resolved at runtime as method call or member indexing.
     CallMethodOrMemberIndexMulti {
         identity: CallableIdentity,
-        display_name: Option<String>,
         fallback_policy: CallableFallbackPolicy,
         arg_count: usize,
         out_count: usize,
     },
     CallMethodOrMemberIndexExpandMultiOutput {
         identity: CallableIdentity,
-        display_name: Option<String>,
         fallback_policy: CallableFallbackPolicy,
         specs: Vec<ArgSpec>,
         out_count: usize,
@@ -232,7 +229,6 @@ pub enum Instr {
     // Calls a user function and shapes the result list to `out_count`.
     CallFunctionMulti {
         identity: CallableIdentity,
-        display_name: Option<String>,
         fallback_policy: CallableFallbackPolicy,
         arg_count: usize,
         out_count: usize,
@@ -241,7 +237,6 @@ pub enum Instr {
 
     CallFunctionExpandMultiOutput {
         identity: CallableIdentity,
-        display_name: Option<String>,
         fallback_policy: CallableFallbackPolicy,
         specs: Vec<ArgSpec>,
         out_count: usize,

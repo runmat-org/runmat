@@ -1,6 +1,6 @@
 use crate::{MirCallArg, MirIndexing, MirOperand};
 use runmat_hir::{
-    CallSyntax, ClassId, FunctionId, MemberName, OperatorKind, QualifiedName, RequestedOutputCount,
+    CallSyntax, FunctionId, MemberName, OperatorKind, QualifiedName, RequestedOutputCount,
 };
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +49,4 @@ pub enum MirRvalue {
 pub enum MirAggregateKind {
     Tensor,
     Cell,
-    Struct,
-    ObjectArray(ClassId),
 }

@@ -99,6 +99,7 @@ pub struct RunMatSession {
     workspace_version: u64,
     emit_fusion_plan: bool,
     compat_mode: CompatMode,
+    top_level_await_enabled: bool,
     /// Persisted numeric display format for this session (survives across executions).
     format_mode: runmat_builtins::FormatMode,
 }

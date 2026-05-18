@@ -18,7 +18,9 @@ impl RunMatSession {
             runmat_hir::lower(
                 &ast,
                 &LoweringContext::new(&workspace_bindings)
-                    .with_semantic_functions(&semantic_function_names),
+                    .with_semantic_functions(&semantic_function_names)
+                    .with_runmat_extensions_enabled(self.compat_mode.allows_runmat_extensions())
+                    .with_top_level_await_enabled(self.top_level_await_enabled),
             )?
         };
         let mut bytecode = {
@@ -389,22 +391,11 @@ fn bind_semantic_function_end_expr(
     registry: &runmat_vm::SemanticFunctionRegistry,
 ) {
     match expr {
-        runmat_vm::EndExpr::ResolvedCall {
-            identity,
-            display_name,
-            args,
-            ..
-        } => {
+        runmat_vm::EndExpr::ResolvedCall { identity, args, .. } => {
             if let runmat_hir::CallableIdentity::DynamicName(name) = identity {
                 let dynamic_name = name.0.clone();
                 if let Some(function) = registry.resolve_name(&dynamic_name) {
                     *identity = runmat_hir::CallableIdentity::SemanticFunction(function);
-                    *display_name = Some(dynamic_name);
-                }
-            }
-            if let runmat_hir::CallableIdentity::SemanticFunction(function_id) = identity {
-                if let Some(function) = registry.get(*function_id) {
-                    *display_name = Some(function.display_name.clone());
                 }
             }
             for arg in args {

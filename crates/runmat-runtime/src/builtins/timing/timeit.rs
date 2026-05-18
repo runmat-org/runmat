@@ -260,6 +260,14 @@ fn prepare_callable(
             handle: Value::String(format!("@{name}")),
             num_outputs,
         }),
+        Value::ExternalFunctionHandle(name) => Ok(TimeitCallable {
+            handle: Value::ExternalFunctionHandle(name),
+            num_outputs,
+        }),
+        Value::SemanticFunctionHandle { name, function } => Ok(TimeitCallable {
+            handle: Value::SemanticFunctionHandle { name, function },
+            num_outputs,
+        }),
         Value::Closure(closure) => Ok(TimeitCallable {
             handle: Value::Closure(closure),
             num_outputs,
@@ -360,6 +368,50 @@ pub(crate) mod tests {
 
     fn zero_outputs_handle() -> Value {
         Value::String("@__timeit_helper_zero_outputs".to_string())
+    }
+
+    #[test]
+    fn timeit_accepts_external_function_handle() {
+        let callable = prepare_callable(
+            Value::ExternalFunctionHandle("pkg.callback".to_string()),
+            Some(2),
+        )
+        .expect("timeit should accept external function handle");
+        assert_eq!(
+            callable.handle,
+            Value::ExternalFunctionHandle("pkg.callback".to_string())
+        );
+        assert_eq!(callable.num_outputs, Some(2));
+    }
+
+    #[test]
+    fn timeit_accepts_semantic_function_handle() {
+        let callable = prepare_callable(
+            Value::SemanticFunctionHandle {
+                name: "semantic_target".to_string(),
+                function: 41,
+            },
+            Some(1),
+        )
+        .expect("timeit should accept semantic function handle");
+        assert_eq!(
+            callable.handle,
+            Value::SemanticFunctionHandle {
+                name: "semantic_target".to_string(),
+                function: 41,
+            }
+        );
+        assert_eq!(callable.num_outputs, Some(1));
+    }
+
+    #[test]
+    fn timeit_external_function_handle_surfaces_undefined_function() {
+        let err = block_on(timeit_builtin(
+            Value::ExternalFunctionHandle("pkg.missing_callback".to_string()),
+            Vec::new(),
+        ))
+        .expect_err("unresolved external callback should fail");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

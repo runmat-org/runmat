@@ -1,5 +1,6 @@
 use crate::bytecode::SemanticFunctionRegistry;
 use crate::call::feval::forward_builtin_feval;
+use crate::call::shared::strict_callable_display_name;
 use runmat_builtins::{Closure, Value};
 use runmat_hir::{
     BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId, QualifiedName, SymbolName,
@@ -81,16 +82,21 @@ impl CallableDescriptor {
     }
 
     fn qualified_identity_from_name(name: &str) -> CallableIdentity {
-        let segments = name
-            .split('.')
-            .filter(|segment| !segment.is_empty())
-            .map(|segment| SymbolName(segment.to_string()))
-            .collect::<Vec<_>>();
-        if segments.is_empty() {
-            CallableIdentity::ExternalName(QualifiedName(vec![SymbolName(name.to_string())]))
-        } else {
+        if Self::is_well_formed_qualified_name(name) {
+            let segments = name
+                .split('.')
+                .map(|segment| SymbolName(segment.to_string()))
+                .collect::<Vec<_>>();
             CallableIdentity::ExternalName(QualifiedName(segments))
+        } else {
+            // Preserve malformed dotted names as a single segment instead of silently normalizing.
+            CallableIdentity::ExternalName(QualifiedName(vec![SymbolName(name.to_string())]))
         }
+    }
+
+    fn is_well_formed_qualified_name(name: &str) -> bool {
+        let segments = name.split('.').collect::<Vec<_>>();
+        segments.len() > 1 && segments.iter().all(|segment| !segment.is_empty())
     }
 
     fn semantic_inner(
@@ -120,7 +126,10 @@ impl CallableDescriptor {
         requested_outputs: usize,
         mut metadata: CallableMetadata,
     ) -> Self {
-        metadata.display_name = metadata.display_name.or(display_name);
+        metadata.display_name = metadata
+            .display_name
+            .or(display_name)
+            .or_else(|| strict_callable_display_name(&identity));
         Self {
             target: CallableTarget::Resolved {
                 identity,
@@ -182,12 +191,7 @@ impl CallableDescriptor {
                 CallableFallbackPolicy::None,
             );
         }
-        if name
-            .split('.')
-            .filter(|segment| !segment.is_empty())
-            .count()
-            > 1
-        {
+        if Self::is_well_formed_qualified_name(name) {
             return (
                 Self::qualified_identity_from_name(name),
                 CallableFallbackPolicy::ExternalBoundary,
@@ -210,7 +214,6 @@ impl CallableDescriptor {
 
     pub(crate) fn resolved(
         identity: CallableIdentity,
-        display_name: Option<String>,
         args: Vec<Value>,
         requested_outputs: usize,
         fallback_policy: CallableFallbackPolicy,
@@ -218,21 +221,15 @@ impl CallableDescriptor {
     ) -> Self {
         Self::resolved_inner(
             identity,
-            display_name.clone(),
+            None,
             fallback_policy,
             args,
             requested_outputs,
             CallableMetadata {
                 call_kind,
-                display_name,
                 ..CallableMetadata::default()
             },
         )
-    }
-
-    pub(crate) fn with_call_kind(mut self, call_kind: CallableCallKind) -> Self {
-        self.metadata.call_kind = call_kind;
-        self
     }
 
     pub(crate) fn from_feval_value(
@@ -383,6 +380,30 @@ fn undefined_name_error(name: &str, metadata: &CallableMetadata) -> RuntimeError
     )
 }
 
+fn undefined_identity_error(
+    identity: &CallableIdentity,
+    metadata: &CallableMetadata,
+) -> RuntimeError {
+    let location = match (metadata.source_id, metadata.span) {
+        (Some(source_id), Some(span)) => {
+            format!(
+                " at source {:?} span {}..{}",
+                source_id, span.start, span.end
+            )
+        }
+        (Some(source_id), None) => format!(" at source {:?}", source_id),
+        (None, Some(span)) => format!(" at span {}..{}", span.start, span.end),
+        (None, None) => String::new(),
+    };
+    crate::interpreter::errors::mex(
+        "UndefinedFunction",
+        &format!(
+            "Undefined function in {}: {identity:?}{location}",
+            metadata.call_kind.label()
+        ),
+    )
+}
+
 async fn call_builtin_with_requested_outputs(
     name: &str,
     args: &[Value],
@@ -436,10 +457,10 @@ async fn execute_resolved_callable(
                 return result;
             }
             let Some(name) = fallback_policy.vm_fallback_name_for(&other) else {
-                let name = other
-                    .display_name()
-                    .unwrap_or_else(|| "<unnamed callable>".into());
-                return Err(undefined_name_error(&name, &metadata));
+                if let Some(name) = strict_callable_display_name(&other) {
+                    return Err(undefined_name_error(&name, &metadata));
+                }
+                return Err(undefined_identity_error(&other, &metadata));
             };
             forward_named_fallback(name, args, requested_outputs).await
         }
@@ -487,9 +508,11 @@ async fn try_execute_resolved_callable(
             let Some(name) = fallback_policy.vm_fallback_name_for(&other) else {
                 return Ok(None);
             };
-            forward_named_fallback(name, args, requested_outputs)
-                .await
-                .map(Some)
+            match forward_named_fallback(name, args, requested_outputs).await {
+                Ok(value) => Ok(Some(value)),
+                Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => Ok(None),
+                Err(err) => Err(err),
+            }
         }
     }
 }
@@ -557,8 +580,8 @@ mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{Tensor, Value};
     use runmat_hir::{
-        BuiltinId, CallableFallbackPolicy, CallableIdentity, DefPath, DefPathSegment, PackageName,
-        QualifiedName, SymbolName,
+        BuiltinId, CallableFallbackPolicy, CallableIdentity, DefPath, DefPathSegment, FunctionId,
+        PackageName, QualifiedName, SymbolName,
     };
     use std::sync::Arc;
 
@@ -578,7 +601,6 @@ mod tests {
         let input = Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0], vec![1, 3]).expect("tensor"));
         let descriptor = CallableDescriptor::resolved(
             CallableIdentity::Builtin(BuiltinId("max".to_string())),
-            Some("max".to_string()),
             vec![input],
             2,
             CallableFallbackPolicy::None,
@@ -600,7 +622,6 @@ mod tests {
         .expect("runtime builtin with explicit zero outputs");
         let descriptor = CallableDescriptor::resolved(
             CallableIdentity::Builtin(BuiltinId("sqrt".to_string())),
-            Some("sqrt".to_string()),
             args,
             0,
             CallableFallbackPolicy::None,
@@ -614,7 +635,6 @@ mod tests {
     fn external_name_descriptor_does_not_fallback_to_builtin_name_resolution() {
         let descriptor = CallableDescriptor::resolved(
             CallableIdentity::ExternalName(QualifiedName(vec![SymbolName("sqrt".to_string())])),
-            Some("sqrt".to_string()),
             vec![Value::Num(9.0)],
             1,
             CallableFallbackPolicy::RuntimeNameResolution,
@@ -642,7 +662,6 @@ mod tests {
             CallableIdentity::ExternalName(QualifiedName(vec![SymbolName(
                 "remote_inc".to_string(),
             )])),
-            Some("remote_inc".to_string()),
             vec![Value::Num(2.0)],
             1,
             CallableFallbackPolicy::ExternalBoundary,
@@ -659,7 +678,6 @@ mod tests {
             CallableIdentity::ExternalName(QualifiedName(vec![SymbolName(
                 "definitely_missing".to_string(),
             )])),
-            Some("definitely_missing".to_string()),
             vec![Value::Num(2.0)],
             1,
             CallableFallbackPolicy::ExternalBoundary,
@@ -674,7 +692,6 @@ mod tests {
     fn external_name_descriptor_external_boundary_does_not_fallback_to_builtin_name_resolution() {
         let descriptor = CallableDescriptor::resolved(
             CallableIdentity::ExternalName(QualifiedName(vec![SymbolName("sqrt".to_string())])),
-            Some("sqrt".to_string()),
             vec![Value::Num(9.0)],
             1,
             CallableFallbackPolicy::ExternalBoundary,
@@ -690,7 +707,6 @@ mod tests {
     fn dynamic_name_descriptor_runtime_name_resolution_can_reach_builtin() {
         let descriptor = CallableDescriptor::resolved(
             CallableIdentity::DynamicName(SymbolName("sqrt".to_string())),
-            Some("sqrt".to_string()),
             vec![Value::Num(9.0)],
             1,
             CallableFallbackPolicy::RuntimeNameResolution,
@@ -705,7 +721,6 @@ mod tests {
     fn imported_identity_never_falls_back_to_builtin_name_resolution() {
         let descriptor = CallableDescriptor::resolved(
             imported_identity("sqrt"),
-            Some("pkg.sqrt".to_string()),
             vec![Value::Num(9.0)],
             1,
             CallableFallbackPolicy::RuntimeNameResolution,
@@ -758,6 +773,31 @@ mod tests {
     }
 
     #[test]
+    fn malformed_qualified_function_handle_remains_dynamic_name() {
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::FunctionHandle("pkg..remote_inc".to_string()),
+            vec![Value::Num(2.0)],
+            1,
+            &SemanticFunctionRegistry::default(),
+        );
+        let CallableTarget::Resolved {
+            identity,
+            fallback_policy,
+        } = &descriptor.target
+        else {
+            panic!("expected resolved target");
+        };
+        assert!(matches!(
+            identity,
+            CallableIdentity::DynamicName(SymbolName(name)) if name == "pkg..remote_inc"
+        ));
+        assert_eq!(
+            *fallback_policy,
+            CallableFallbackPolicy::RuntimeNameResolution
+        );
+    }
+
+    #[test]
     fn feval_at_handle_qualified_name_classifies_as_external_boundary() {
         let descriptor = CallableDescriptor::from_feval_value(
             Value::String("@pkg.remote_inc".to_string()),
@@ -774,5 +814,61 @@ mod tests {
         };
         assert!(matches!(identity, CallableIdentity::ExternalName(_)));
         assert_eq!(*fallback_policy, CallableFallbackPolicy::ExternalBoundary);
+    }
+
+    #[test]
+    fn resolved_descriptor_infers_display_name_from_identity_when_missing() {
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::ExternalName(QualifiedName(vec![
+                SymbolName("pkg".to_string()),
+                SymbolName("remote_inc".to_string()),
+            ])),
+            vec![Value::Num(2.0)],
+            1,
+            CallableFallbackPolicy::ExternalBoundary,
+            CallableCallKind::Direct,
+        );
+
+        assert_eq!(
+            descriptor.metadata.display_name.as_deref(),
+            Some("pkg.remote_inc")
+        );
+    }
+
+    #[test]
+    fn resolved_descriptor_does_not_infer_display_name_for_malformed_external_identity() {
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::ExternalName(QualifiedName(vec![
+                SymbolName("pkg".to_string()),
+                SymbolName("".to_string()),
+                SymbolName("remote_inc".to_string()),
+            ])),
+            vec![Value::Num(2.0)],
+            1,
+            CallableFallbackPolicy::ExternalBoundary,
+            CallableCallKind::Direct,
+        );
+
+        assert_eq!(descriptor.metadata.display_name, None);
+    }
+
+    #[test]
+    fn anonymous_identity_error_uses_typed_identity_not_placeholder_name() {
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::AnonymousFunction(FunctionId(42)),
+            vec![Value::Num(2.0)],
+            1,
+            CallableFallbackPolicy::None,
+            CallableCallKind::Direct,
+        );
+        let err = block_on(execute_callable_descriptor(descriptor))
+            .expect_err("anonymous identity should remain unresolved without semantic descriptor");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+        assert!(
+            err.message().contains("AnonymousFunction(FunctionId(42))")
+                && !err.message().contains("<unnamed callable>"),
+            "unexpected error: {}",
+            err.message()
+        );
     }
 }

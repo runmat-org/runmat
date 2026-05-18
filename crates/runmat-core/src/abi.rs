@@ -1,5 +1,6 @@
 use runmat_builtins::Value;
-use runmat_hir::{BindingName, DefPath, EntrypointId, Span};
+use runmat_hir::{BindingName, DefPath, Span};
+use runmat_parser::CompatMode;
 use uuid::Uuid;
 
 use crate::execution::{ExecutionProfiling, ExecutionStreamEntry, StdinEvent};
@@ -11,52 +12,29 @@ pub enum SourceInput {
     Text { name: String, text: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum EntrypointSelector {
-    SourcePath(String),
-    Named(String),
-    Id(EntrypointId),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostExecutionPolicy {
-    pub materialization: MaterializationPolicy,
     pub top_level_await: bool,
 }
 
 impl Default for HostExecutionPolicy {
     fn default() -> Self {
         Self {
-            materialization: MaterializationPolicy::MetadataOnly,
             top_level_await: true,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MaterializationPolicy {
-    MetadataOnly,
-    Preview { limit: usize },
-    HostValue,
-    PreserveProvider,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WorkspaceHandle(pub Uuid);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ResolverHandle(pub Uuid);
 
 #[derive(Debug, Clone)]
 pub struct ExecutionRequest {
     pub source: SourceInput,
-    pub entrypoint: EntrypointSelector,
-    pub compatibility: runmat_hir::CompatibilityMode,
+    pub compatibility: CompatMode,
     pub host_policy: HostExecutionPolicy,
-    pub inputs: RuntimeFlow,
     pub requested_outputs: runmat_hir::RequestedOutputCount,
     pub workspace: WorkspaceHandle,
-    pub resolver: ResolverHandle,
 }
 
 #[derive(Debug, Clone)]

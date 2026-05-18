@@ -1,7 +1,4 @@
-use crate::{
-    BasicBlock, BasicBlockId, MirOperand, MirPlace, MirSourceRecord, MirTerminator,
-    MirTerminatorKind,
-};
+use crate::{BasicBlock, BasicBlockId, MirOperand, MirPlace, MirTerminator, MirTerminatorKind};
 use runmat_hir::{
     ExprId, HirBlock, HirExpr, HirExprKind, HirStmt, HirStmtKind, SemanticError, Span, StmtId,
 };
@@ -18,7 +15,6 @@ use super::{
 pub(crate) struct ControlFlowBuilder {
     next_block: usize,
     blocks: Vec<BasicBlock>,
-    source_records: Vec<MirSourceRecord>,
 }
 
 impl ControlFlowBuilder {
@@ -37,7 +33,7 @@ impl ControlFlowBuilder {
         ctx: &MirLoweringContext,
         body: &HirBlock,
         return_terminator: MirTerminator,
-    ) -> Result<(Vec<BasicBlock>, Vec<MirSourceRecord>), SemanticError> {
+    ) -> Result<Vec<BasicBlock>, SemanticError> {
         let entry = self.fresh_block();
         let entry = self.lower_block_from(
             ctx,
@@ -51,7 +47,7 @@ impl ControlFlowBuilder {
         )?;
         self.blocks.push(entry);
         self.blocks.sort_by_key(|block| block.id.0);
-        Ok((self.blocks, self.source_records))
+        Ok(self.blocks)
     }
 
     fn lower_block_from(
@@ -67,12 +63,6 @@ impl ControlFlowBuilder {
     ) -> Result<BasicBlock, SemanticError> {
         let mut statements = Vec::new();
         for (idx, stmt) in body.statements.iter().enumerate().skip(start) {
-            self.source_records.push(MirSourceRecord {
-                block: id,
-                stmt: Some(stmt.id),
-                expr: stmt_expr_id(stmt),
-                span: stmt.span,
-            });
             if let Some(await_expr) = first_unlowered_await_in_stmt(stmt, await_replacements) {
                 let HirExprKind::Await(future_expr) = &await_expr.kind else {
                     unreachable!();
@@ -88,7 +78,7 @@ impl ControlFlowBuilder {
                     TopLevelAwaitResult::ExpressionStatement => (None, idx + 1, None),
                     TopLevelAwaitResult::Assignment(place) => (Some(place), idx + 1, None),
                     TopLevelAwaitResult::Nested => {
-                        let local = ctx.fresh_temp(await_expr.span, Some(await_expr.id));
+                        let local = ctx.fresh_temp(await_expr.span);
                         let mut replacements = await_replacements.clone();
                         replacements.insert(await_expr.id, MirOperand::Local(local));
                         (Some(MirPlace::Local(local)), idx, Some(replacements))
@@ -111,7 +101,6 @@ impl ControlFlowBuilder {
                             future,
                             result,
                             resume,
-                            cleanup: None,
                         },
                         span: stmt.span,
                     },
@@ -254,7 +243,6 @@ impl ControlFlowBuilder {
                 binding,
                 range,
                 body: loop_body,
-                semantics,
             } = &stmt.kind
             {
                 let iterable =
@@ -295,7 +283,6 @@ impl ControlFlowBuilder {
                         kind: MirTerminatorKind::For {
                             binding: ctx.local_for_binding(*binding)?,
                             iterable,
-                            semantics: semantics.clone(),
                             body_block: body_id,
                             exit_block: exit_id,
                         },
@@ -500,7 +487,6 @@ impl ControlFlowBuilder {
                                 future,
                                 result: None,
                                 resume,
-                                cleanup: None,
                             },
                             span: stmt.span,
                         },
@@ -533,7 +519,6 @@ impl ControlFlowBuilder {
                                 future,
                                 result: Some(result),
                                 resume,
-                                cleanup: None,
                             },
                             span: stmt.span,
                         },
@@ -724,23 +709,5 @@ fn lower_elseif_blocks(
             },
             span,
         }],
-    })
-}
-
-fn stmt_expr_id(stmt: &HirStmt) -> Option<ExprId> {
-    Some(match &stmt.kind {
-        HirStmtKind::ExprStmt(expr, _)
-        | HirStmtKind::Assign(_, expr, _)
-        | HirStmtKind::MultiAssign(_, expr, _) => expr.id,
-        HirStmtKind::If { cond, .. } | HirStmtKind::While { cond, .. } => cond.id,
-        HirStmtKind::For { range, .. } => range.id,
-        HirStmtKind::Switch { expr, .. } => expr.id,
-        HirStmtKind::TryCatch { .. }
-        | HirStmtKind::Global(_)
-        | HirStmtKind::Persistent(_)
-        | HirStmtKind::Break
-        | HirStmtKind::Continue
-        | HirStmtKind::Return
-        | HirStmtKind::Import(_) => return None,
     })
 }

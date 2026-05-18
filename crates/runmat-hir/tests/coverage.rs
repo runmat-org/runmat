@@ -1,6 +1,6 @@
 use runmat_hir::{
     lower, CallKind, DefPathSegment, FunctionHandleTarget, FunctionId, FunctionKind, HirAssembly,
-    HirExprKind, HirPlace, HirStmtKind, IndexKind, LoweringContext,
+    HirCall, HirCallableRef, HirExprKind, HirPlace, HirStmtKind, IndexKind, LoweringContext,
 };
 use runmat_parser::parse;
 use std::collections::HashMap;
@@ -196,8 +196,20 @@ fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
             )
     )));
 
-    let wildcard_imported_handle = lower_assembly("import Point.*; @origin;");
-    assert!(entry_body(&wildcard_imported_handle)
+    let qualified_handle = lower_assembly("@pkg.remote_inc;");
+    assert!(entry_body(&qualified_handle).iter().any(|stmt| matches!(
+        &stmt.kind,
+        HirStmtKind::ExprStmt(expr, _)
+            if matches!(
+                &expr.kind,
+                HirExprKind::FunctionHandle(FunctionHandleTarget::DefPath(path))
+                    if path.module.display_name().as_deref() == Some("pkg.remote_inc")
+                        && matches!(path.item.as_slice(), [DefPathSegment::Function(_)])
+            )
+    )));
+
+    let qualified_static_method_handle = lower_assembly("@Point.origin;");
+    assert!(entry_body(&qualified_static_method_handle)
         .iter()
         .any(|stmt| matches!(
             &stmt.kind,
@@ -207,6 +219,51 @@ fn methods_members_handles_and_anon_lower_to_semantic_shapes() {
                     HirExprKind::FunctionHandle(FunctionHandleTarget::DefPath(path))
                         if path.module.display_name().as_deref() == Some("Point.origin")
                             && matches!(path.item.as_slice(), [DefPathSegment::Function(_)])
+                )
+        )));
+
+    let wildcard_imported_handle = lower_assembly("import Point.*; @origin;");
+    assert!(entry_body(&wildcard_imported_handle)
+        .iter()
+        .any(|stmt| matches!(
+            &stmt.kind,
+            HirStmtKind::ExprStmt(expr, _)
+                if matches!(
+                    &expr.kind,
+                    HirExprKind::FunctionHandle(FunctionHandleTarget::DynamicName(name))
+                        if name.0 == "origin"
+                )
+        )));
+
+    let qualified_unresolved_call = lower_assembly("pkg.remote_inc(1);");
+    assert!(entry_body(&qualified_unresolved_call)
+        .iter()
+        .any(|stmt| matches!(
+            &stmt.kind,
+            HirStmtKind::ExprStmt(expr, _)
+                if matches!(
+                    &expr.kind,
+                    HirExprKind::Call(HirCall {
+                        callee: HirCallableRef::Unresolved(path),
+                        ..
+                    }) if path.display_name().as_deref() == Some("pkg.remote_inc")
+                        && path.0.len() == 2
+                )
+        )));
+
+    let nested_qualified_unresolved_call = lower_assembly("pkg.sub.remote(1);");
+    assert!(entry_body(&nested_qualified_unresolved_call)
+        .iter()
+        .any(|stmt| matches!(
+            &stmt.kind,
+            HirStmtKind::ExprStmt(expr, _)
+                if matches!(
+                    &expr.kind,
+                    HirExprKind::Call(HirCall {
+                        callee: HirCallableRef::Unresolved(path),
+                        ..
+                    }) if path.display_name().as_deref() == Some("pkg.sub.remote")
+                        && path.0.len() == 3
                 )
         )));
 
@@ -231,16 +288,15 @@ fn imported_call_lowers_to_package_function_identity() {
 }
 
 #[test]
-fn wildcard_import_call_lowers_to_package_function_identity() {
+fn wildcard_import_non_builtin_call_lowers_to_dynamic_identity() {
     let src = "import Point.*; __register_test_classes(); o = origin();";
     let ast = parse(src).unwrap();
     let result = lower(&ast, &LoweringContext::empty()).unwrap();
-    assert!(result.semantic_index.calls.iter().any(|call| matches!(
-        &call.kind,
-        CallKind::PackageFunction(path)
-            if path.module.display_name().as_deref() == Some("Point.origin")
-                && matches!(path.item.as_slice(), [DefPathSegment::Function(_)])
-    )));
+    assert!(result
+        .semantic_index
+        .calls
+        .iter()
+        .any(|call| matches!(&call.kind, CallKind::Dynamic)));
 }
 
 #[test]

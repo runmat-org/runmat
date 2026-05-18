@@ -8,10 +8,10 @@ use crate::{
     HirAssembly, HirBinding, HirBlock, HirCall, HirCallableRef, HirClass, HirCommandCall,
     HirEntrypoint, HirExpr, HirExprKind, HirFunction, HirImport, HirModule, HirPlace,
     HirStmt as SemanticHirStmt, HirStmtKind, ImportResolution, IndexComponent, IndexKind,
-    IndexResultContext, IndexingSemantics, LoopIterationSemantics, LoweringContext, LoweringResult,
-    ModuleId, OperatorKind, PackageName, PlaceMutation, PlaceMutationKind, QualifiedName,
-    ReferenceKind, ReferenceResolution, RequestedOutputCount, SemanticError, SemanticIndex,
-    SourceId, SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, WorkspaceExportPolicy,
+    IndexResultContext, IndexingSemantics, LoweringContext, LoweringResult, ModuleId, OperatorKind,
+    PackageName, PlaceMutation, PlaceMutationKind, QualifiedName, ReferenceKind,
+    ReferenceResolution, RequestedOutputCount, SemanticError, SemanticIndex, SourceId,
+    SourceUnitKind, Span, StmtId, StringLiteral, SymbolName, WorkspaceExportPolicy,
     WorkspaceVisibility, AWAIT_EXTENSION_NAME, DISCARD_OUTPUT_NAME, NARGIN_BUILTIN_NAME,
     NARGOUT_BUILTIN_NAME, SPAWN_EXTENSION_NAME,
 };
@@ -35,7 +35,8 @@ struct SemanticCtx {
     scopes: Vec<SemanticScope>,
     function_modifiers: Vec<FunctionModifiers>,
     top_level_await: Vec<bool>,
-    compatibility_mode: Option<crate::CompatibilityMode>,
+    runmat_extensions_enabled: bool,
+    top_level_await_enabled: bool,
     function_names: HashMap<String, FunctionId>,
     function_input_signatures: HashMap<String, (usize, bool)>,
     function_output_signatures: HashMap<String, (usize, bool)>,
@@ -47,17 +48,26 @@ pub fn lower(
     prog: &AstProgram,
     context: &LoweringContext<'_>,
 ) -> Result<LoweringResult, SemanticError> {
-    let (mut assembly, semantic_index) = SemanticCtx::lower_program(prog, context)?;
-    assembly.compatibility_mode = context.compatibility_mode.clone();
+    let (assembly, semantic_index) = SemanticCtx::lower_program(prog, context)?;
 
     Ok(LoweringResult {
         assembly,
-        compatibility_mode: context.compatibility_mode.clone(),
         semantic_index,
     })
 }
 
 impl SemanticCtx {
+    fn wildcard_import_candidate(import_path: &QualifiedName, name: &str) -> QualifiedName {
+        let mut segments = import_path.0.clone();
+        segments.push(SymbolName(name.to_string()));
+        QualifiedName(segments)
+    }
+
+    fn is_well_formed_qualified_name(name: &str) -> bool {
+        let segments = name.split('.').collect::<Vec<_>>();
+        segments.len() > 1 && segments.iter().all(|segment| !segment.is_empty())
+    }
+
     fn lower_program(
         prog: &AstProgram,
         context: &LoweringContext<'_>,
@@ -72,7 +82,8 @@ impl SemanticCtx {
             scopes: Vec::new(),
             function_modifiers: Vec::new(),
             top_level_await: Vec::new(),
-            compatibility_mode: context.compatibility_mode.clone(),
+            runmat_extensions_enabled: context.runmat_extensions_enabled,
+            top_level_await_enabled: context.top_level_await_enabled,
             function_names: HashMap::new(),
             function_input_signatures: HashMap::new(),
             function_output_signatures: HashMap::new(),
@@ -138,14 +149,14 @@ impl SemanticCtx {
                 origin: EntrypointOrigin::SourcePath,
                 policy: EntrypointPolicy {
                     workspace_export: WorkspaceExportPolicy::ExportTopLevelBindings,
-                    top_level_await: true,
+                    top_level_await: context.top_level_await_enabled,
                 },
             });
             let body = ctx.with_scope(
                 entry_function,
                 WorkspaceVisibility::TopLevel,
                 FunctionModifiers::default(),
-                true,
+                ctx.top_level_await_enabled,
                 |ctx| {
                     ctx.seed_existing_workspace_bindings(context.variables, entry_function);
                     ctx.lower_stmt_refs(&executable)
@@ -870,7 +881,6 @@ impl SemanticCtx {
                     binding,
                     range: self.lower_expr_semantic(expr)?,
                     body: self.lower_stmts_semantic(body)?,
-                    semantics: LoopIterationSemantics::ForColumns,
                 }
             }
             AstStmt::Global(names, _) => {
@@ -1084,10 +1094,7 @@ impl SemanticCtx {
             AstExpr::FuncCall(name, args, _) => {
                 let args: Vec<HirExpr> = self.lower_call_arguments_for_name(name, args)?;
                 if name == AWAIT_EXTENSION_NAME && args.len() == 1 {
-                    if matches!(
-                        self.compatibility_mode,
-                        Some(crate::CompatibilityMode::MatlabStrict)
-                    ) {
+                    if !self.runmat_extensions_enabled {
                         return Err(SemanticError::new(
                             "await is a RunMat extension and is not available in MATLAB strict mode",
                         )
@@ -1101,10 +1108,7 @@ impl SemanticCtx {
                     }
                     HirExprKind::Await(Box::new(args.into_iter().next().unwrap()))
                 } else if name == SPAWN_EXTENSION_NAME && args.len() == 1 {
-                    if matches!(
-                        self.compatibility_mode,
-                        Some(crate::CompatibilityMode::MatlabStrict)
-                    ) {
+                    if !self.runmat_extensions_enabled {
                         return Err(SemanticError::new(
                             "spawn is a RunMat extension and is not available in MATLAB strict mode",
                         )
@@ -1359,6 +1363,36 @@ impl SemanticCtx {
                             span,
                         });
                     }
+                    if self.lookup_binding(class_name).is_none() {
+                        let call_args =
+                            self.lower_call_arguments_for_name(&qualified_name, args)?;
+                        return Ok(HirExpr {
+                            id: self.alloc_expr_id(),
+                            kind: HirExprKind::Call(self.call_for_name(
+                                &qualified_name,
+                                call_args,
+                                CallSyntax::Plain,
+                                requested_outputs,
+                                span,
+                            )?),
+                            span,
+                        });
+                    }
+                }
+                if let Some(qualified_base) = self.unbound_qualified_member_base(base) {
+                    let qualified_name = format!("{qualified_base}.{name}");
+                    let call_args = self.lower_call_arguments_for_name(&qualified_name, args)?;
+                    return Ok(HirExpr {
+                        id: self.alloc_expr_id(),
+                        kind: HirExprKind::Call(self.call_for_name(
+                            &qualified_name,
+                            call_args,
+                            CallSyntax::Plain,
+                            requested_outputs,
+                            span,
+                        )?),
+                        span,
+                    });
                 }
                 let mut call_args = vec![self.lower_expr_semantic(base)?];
                 call_args.extend(
@@ -1545,6 +1579,8 @@ impl SemanticCtx {
         requested_outputs: RequestedOutputCount,
         span: Span,
     ) -> Result<HirCall, SemanticError> {
+        let qualified_call_name =
+            qualified_name(&name.split('.').map(ToString::to_string).collect::<Vec<_>>());
         let (callee, kind) = if let Some(function) = self.function_names.get(name) {
             (
                 HirCallableRef::Function(*function),
@@ -1568,12 +1604,12 @@ impl SemanticCtx {
             )
         } else {
             (
-                HirCallableRef::Unresolved(QualifiedName(vec![SymbolName(name.to_string())])),
+                HirCallableRef::Unresolved(qualified_call_name.clone()),
                 CallKind::Dynamic,
             )
         };
         self.semantic_index.calls.push(CallResolution {
-            name: QualifiedName(vec![SymbolName(name.to_string())]),
+            name: qualified_call_name,
             callee: callee.clone(),
             kind,
             requested_outputs: requested_outputs.clone(),
@@ -1608,20 +1644,14 @@ impl SemanticCtx {
                     .with_span(span),
             );
         }
-        let wildcard_matches: Vec<String> = imports
+        let wildcard_matches: Vec<QualifiedName> = imports
             .iter()
             .filter(|import| import.wildcard)
-            .filter_map(|import| import.path.display_name())
-            .map(|prefix| format!("{prefix}.{name}"))
+            .map(|import| Self::wildcard_import_candidate(&import.path, name))
+            .filter(|qualified| qualified.display_name().as_deref().is_some_and(is_builtin))
             .collect();
         if wildcard_matches.len() == 1 {
-            let qualified = &wildcard_matches[0];
-            return Ok(Some(def_path_for_import_path(&qualified_name(
-                &qualified
-                    .split('.')
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
-            ))));
+            return Ok(Some(def_path_for_import_path(&wildcard_matches[0])));
         }
         if wildcard_matches.len() > 1 {
             return Err(SemanticError::new(format!(
@@ -1649,6 +1679,13 @@ impl SemanticCtx {
             )));
         }
         if name.contains('.') {
+            if Self::is_well_formed_qualified_name(name) {
+                return Ok(crate::FunctionHandleTarget::DefPath(
+                    def_path_for_import_path(&qualified_name(
+                        &name.split('.').map(ToString::to_string).collect::<Vec<_>>(),
+                    )),
+                ));
+            }
             return Ok(crate::FunctionHandleTarget::DynamicName(SymbolName(
                 name.to_string(),
             )));
@@ -1671,11 +1708,11 @@ impl SemanticCtx {
                 def_path_for_import_path(&import.path),
             ));
         }
-        let wildcard_matches: Vec<String> = imports
+        let wildcard_matches: Vec<QualifiedName> = imports
             .iter()
             .filter(|import| import.wildcard)
-            .filter_map(|import| import.path.display_name())
-            .map(|prefix| format!("{prefix}.{name}"))
+            .map(|import| Self::wildcard_import_candidate(&import.path, name))
+            .filter(|qualified| qualified.display_name().as_deref().is_some_and(is_builtin))
             .collect();
         if wildcard_matches.len() > 1 {
             return Err(SemanticError::new(format!(
@@ -1683,19 +1720,24 @@ impl SemanticCtx {
             ))
             .with_span(span));
         }
-        if let Some(qualified) = wildcard_matches.first() {
+        if let Some(qualified) = wildcard_matches.first().cloned() {
             return Ok(crate::FunctionHandleTarget::DefPath(
-                def_path_for_import_path(&qualified_name(
-                    &qualified
-                        .split('.')
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>(),
-                )),
+                def_path_for_import_path(&qualified),
             ));
         }
         Ok(crate::FunctionHandleTarget::DynamicName(SymbolName(
             name.to_string(),
         )))
+    }
+
+    fn unbound_qualified_member_base(&self, expr: &AstExpr) -> Option<String> {
+        match expr {
+            AstExpr::Ident(name, _) => self.lookup_binding(name).is_none().then(|| name.clone()),
+            AstExpr::Member(base, member, _) => self
+                .unbound_qualified_member_base(base)
+                .map(|prefix| format!("{prefix}.{member}")),
+            _ => None,
+        }
     }
 }
 

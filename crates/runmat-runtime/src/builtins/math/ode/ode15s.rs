@@ -154,4 +154,40 @@ mod tests {
             other => panic!("unexpected output {other:?}"),
         }
     }
+
+    #[test]
+    fn ode15s_accepts_semantic_function_handle_rhs() {
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 57);
+                let y = match &args[1] {
+                    Value::Num(n) => *n,
+                    other => panic!("expected scalar state, got {other:?}"),
+                };
+                Box::pin(async move { Ok(Value::Num(-15.0 * y)) })
+            },
+        )));
+
+        let out = block_on(ode15s_builtin(
+            Value::SemanticFunctionHandle {
+                name: "semantic_stiff_decay".to_string(),
+                function: 57,
+            },
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .unwrap();
+
+        match out {
+            Value::Tensor(t) => {
+                assert_eq!(t.cols(), 1);
+                let last = t.data[t.rows() - 1];
+                assert!(last.is_finite());
+                assert!(last > 0.0);
+                assert!(last < 0.1);
+            }
+            other => panic!("unexpected output {other:?}"),
+        }
+    }
 }

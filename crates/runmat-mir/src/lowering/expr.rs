@@ -5,7 +5,7 @@ use crate::{
 use runmat_builtins::{BuiltinAsyncBehavior, BuiltinSemantics};
 use runmat_hir::{
     CallableIdentity, CommandArgument, ExprId, HirCallableRef, HirCommandCall, HirExpr,
-    HirExprKind, IndexComponent, IndexKind, IndexResultContext, IndexingSemantics,
+    HirExprKind, IndexComponent, IndexKind, IndexResultContext, IndexingSemantics, OperatorKind,
     RequestedOutputCount, SemanticError, StringLiteral,
 };
 use std::collections::HashMap;
@@ -189,22 +189,57 @@ fn lower_call_arg(
                         await_replacements,
                     )?);
                 }
-                IndexComponent::End { offset, .. } if *offset == 0 => {
+                IndexComponent::Logical(expr) => {
                     saw_non_colon = true;
-                    let local = ctx.fresh_temp(arg.span, Some(arg.id));
-                    temps.push(MirStmt {
-                        kind: MirStmtKind::Assign {
-                            place: MirPlace::Local(local),
-                            value: MirRvalue::End,
-                        },
-                        span: arg.span,
-                    });
-                    indices.push(MirOperand::Local(local));
+                    indices.push(lower_operand_with_replacements(
+                        ctx,
+                        expr,
+                        temps,
+                        await_replacements,
+                    )?);
                 }
-                _ => {
-                    return Err(SemanticError::new(
-                        "MIR lowering for this expansion index is not implemented yet",
-                    ))
+                IndexComponent::End { offset, .. } => {
+                    saw_non_colon = true;
+                    if *offset == 0 {
+                        let local = ctx.fresh_temp(arg.span);
+                        temps.push(MirStmt {
+                            kind: MirStmtKind::Assign {
+                                place: MirPlace::Local(local),
+                                value: MirRvalue::End,
+                            },
+                            span: arg.span,
+                        });
+                        indices.push(MirOperand::Local(local));
+                    } else {
+                        let end_local = ctx.fresh_temp(arg.span);
+                        temps.push(MirStmt {
+                            kind: MirStmtKind::Assign {
+                                place: MirPlace::Local(end_local),
+                                value: MirRvalue::End,
+                            },
+                            span: arg.span,
+                        });
+                        let local = ctx.fresh_temp(arg.span);
+                        let op = if offset.is_negative() {
+                            OperatorKind::Subtract
+                        } else {
+                            OperatorKind::Add
+                        };
+                        temps.push(MirStmt {
+                            kind: MirStmtKind::Assign {
+                                place: MirPlace::Local(local),
+                                value: MirRvalue::Binary(
+                                    MirOperand::Local(end_local),
+                                    op,
+                                    MirOperand::Constant(MirConstant::Number(
+                                        offset.unsigned_abs().to_string(),
+                                    )),
+                                ),
+                            },
+                            span: arg.span,
+                        });
+                        indices.push(MirOperand::Local(local));
+                    }
                 }
             }
         }
@@ -488,9 +523,7 @@ fn call_semantics(callee: &MirCallee) -> BuiltinSemantics {
             | CallableIdentity::AnonymousFunction(_),
         )
         | MirCallee::Dynamic(_) => BuiltinSemantics::unknown(),
-        MirCallee::Static(
-            CallableIdentity::SemanticFunction(_) | CallableIdentity::ClassConstructor(_),
-        ) => BuiltinSemantics {
+        MirCallee::Static(CallableIdentity::SemanticFunction(_)) => BuiltinSemantics {
             compatibility: runmat_builtins::BuiltinCompatibility::Matlab,
             async_behavior: BuiltinAsyncBehavior::NeverSuspends,
             effects: runmat_builtins::BuiltinEffects::none(),
@@ -517,8 +550,7 @@ fn call_fallback_policy(
     }
     match callee {
         MirCallee::Static(runmat_hir::CallableIdentity::SemanticFunction(_))
-        | MirCallee::Static(runmat_hir::CallableIdentity::Builtin(_))
-        | MirCallee::Static(runmat_hir::CallableIdentity::ClassConstructor(_)) => {
+        | MirCallee::Static(runmat_hir::CallableIdentity::Builtin(_)) => {
             runmat_hir::CallableFallbackPolicy::None
         }
         MirCallee::Static(runmat_hir::CallableIdentity::ExternalName(_)) => {
@@ -550,9 +582,6 @@ fn command_arg_constant(arg: &CommandArgument) -> MirConstant {
         CommandArgument::StringLiteral(value) => {
             MirConstant::String(StringLiteral(value.0.trim_matches('"').to_string()))
         }
-        CommandArgument::OptionToken(option) => {
-            MirConstant::String(StringLiteral(option.0.clone()))
-        }
     }
 }
 
@@ -578,7 +607,7 @@ pub(crate) fn lower_operand_with_replacements(
     }
 
     let value = lower_expr_with_replacements(ctx, expr, temps, await_replacements)?;
-    let local = ctx.fresh_temp(expr.span, Some(expr.id));
+    let local = ctx.fresh_temp(expr.span);
     temps.push(MirStmt {
         kind: MirStmtKind::Assign {
             place: MirPlace::Local(local),

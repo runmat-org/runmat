@@ -5,5 +5,5 @@ mod function;
 mod place;
 mod stmt;
 
-pub use ctx::MirLoweringContext;
-pub use function::{lower_assembly, lower_function};
+pub(crate) use ctx::MirLoweringContext;
+pub use function::lower_assembly;

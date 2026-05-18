@@ -658,12 +658,14 @@ impl TurbineEngine {
     fn hash_named_function_call<H: Hasher>(
         hasher: &mut H,
         discriminator: &str,
-        name: &str,
+        identity: &runmat_hir::CallableIdentity,
+        fallback_policy: runmat_hir::CallableFallbackPolicy,
         argc: usize,
         out_count: Option<usize>,
     ) {
         discriminator.hash(hasher);
-        name.hash(hasher);
+        identity.hash(hasher);
+        fallback_policy.hash(hasher);
         argc.hash(hasher);
         if let Some(out_count) = out_count {
             out_count.hash(hasher);
@@ -802,15 +804,16 @@ impl TurbineEngine {
                 }
                 Instr::Return => "Return".hash(&mut hasher),
                 Instr::CallFunctionMulti {
-                    display_name,
+                    identity,
+                    fallback_policy,
                     arg_count,
                     out_count,
-                    ..
                 } => {
                     Self::hash_named_function_call(
                         &mut hasher,
                         "CallFunctionMulti",
-                        display_name.as_deref().unwrap_or("<unnamed>"),
+                        identity,
+                        *fallback_policy,
                         *arg_count,
                         Some(*out_count),
                     );

@@ -30,3 +30,10 @@ impl ParserOptions {
         Self { compat_mode }
     }
 }
+
+impl CompatMode {
+    /// Whether semantic lowering should allow RunMat-only extension syntax.
+    pub fn allows_runmat_extensions(self) -> bool {
+        !matches!(self, Self::Strict)
+    }
+}

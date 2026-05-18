@@ -133,4 +133,41 @@ mod tests {
 
         assert!(err.to_string().contains("function value must be finite"));
     }
+
+    #[test]
+    fn ode45_accepts_external_function_handle_rhs() {
+        let _resolver =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg.decay").then_some(56)
+            })));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |function, args, _requested_outputs| {
+                assert_eq!(function, 56);
+                let y = match &args[1] {
+                    Value::Num(n) => *n,
+                    other => panic!("expected scalar state, got {other:?}"),
+                };
+                Box::pin(async move { Ok(Value::Num(-y)) })
+            },
+        )));
+
+        let out = block_on(ode45_builtin(
+            Value::ExternalFunctionHandle("pkg.decay".to_string()),
+            Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .unwrap();
+
+        match out {
+            Value::Tensor(t) => {
+                assert_eq!(t.cols(), 1);
+                let last = t.data[t.rows() - 1];
+                assert!(last.is_finite());
+                assert!(last > 0.0);
+                assert!(last < 1.0);
+            }
+            other => panic!("unexpected output {other:?}"),
+        }
+    }
 }

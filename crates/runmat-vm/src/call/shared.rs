@@ -26,19 +26,48 @@ pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Result<Vec<Value>, 
 }
 
 pub(crate) fn external_qualified_identity(base: &str, member: &str) -> CallableIdentity {
-    let mut segments: Vec<SymbolName> = base
-        .split('.')
-        .filter(|segment| !segment.is_empty())
-        .map(|segment| SymbolName(segment.to_string()))
-        .collect();
+    let base_segments = {
+        let split = base.split('.').collect::<Vec<_>>();
+        if !split.is_empty() && split.iter().all(|segment| !segment.is_empty()) {
+            split
+                .into_iter()
+                .map(|segment| SymbolName(segment.to_string()))
+                .collect::<Vec<_>>()
+        } else {
+            vec![SymbolName(base.to_string())]
+        }
+    };
+    let mut segments = base_segments;
     segments.push(SymbolName(member.to_string()));
     CallableIdentity::ExternalName(QualifiedName(segments))
 }
 
 pub(crate) fn external_qualified_display_name(base: &str, member: &str) -> String {
-    external_qualified_identity(base, member)
-        .display_name()
-        .unwrap_or_else(|| format!("{base}.{member}"))
+    strict_callable_display_name(&external_qualified_identity(base, member))
+        .expect("external qualified identity should always have a display name")
+}
+
+pub(crate) fn strict_callable_display_name(identity: &CallableIdentity) -> Option<String> {
+    match identity {
+        CallableIdentity::SemanticFunction(_) | CallableIdentity::AnonymousFunction(_) => None,
+        CallableIdentity::Builtin(id) => (!id.0.is_empty()).then_some(id.0.clone()),
+        CallableIdentity::Imported(path) => path.module.display_name(),
+        CallableIdentity::Method(id) => (!id.0.is_empty()).then_some(id.0.clone()),
+        CallableIdentity::DynamicName(name) => (!name.0.is_empty()).then_some(name.0.clone()),
+        CallableIdentity::ExternalName(QualifiedName(segments)) => {
+            if segments.is_empty() || segments.iter().any(|segment| segment.0.is_empty()) {
+                return None;
+            }
+
+            Some(
+                segments
+                    .iter()
+                    .map(|segment| segment.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            )
+        }
+    }
 }
 
 pub(crate) fn object_property_getter_name(field: &str) -> String {
@@ -331,7 +360,6 @@ pub(crate) async fn call_object_operator_method(
     crate::call::closures::call_method_or_member_index_with_outputs(
         base,
         CallableIdentity::DynamicName(SymbolName(method.to_string())),
-        Some(method.to_string()),
         vec![arg],
         1,
         CallableFallbackPolicy::ObjectDispatch,
@@ -348,7 +376,6 @@ pub(crate) async fn call_object_named_method_with_outputs(
     crate::call::closures::call_method_or_member_index_with_outputs(
         base,
         CallableIdentity::DynamicName(SymbolName(method.clone())),
-        Some(method),
         args,
         requested_outputs,
         CallableFallbackPolicy::ObjectDispatch,
@@ -435,7 +462,6 @@ pub(crate) async fn call_object_index_descriptor_method_with_outputs(
     crate::call::closures::call_method_or_member_index_with_outputs(
         base,
         CallableIdentity::DynamicName(SymbolName(method.clone())),
-        Some(method),
         args,
         requested_outputs,
         CallableFallbackPolicy::ObjectDispatch,
@@ -455,16 +481,13 @@ fn encode_end_expr_value(expr: &EndExpr) -> Result<Value, RuntimeError> {
         EndExpr::End => Ok(Value::String("end".to_string())),
         EndExpr::Const(v) => Ok(Value::Num(*v)),
         EndExpr::Var(i) => Ok(Value::String(format!("var:{i}"))),
-        EndExpr::ResolvedCall {
-            identity,
-            display_name,
-            args,
-            ..
-        } => {
-            let name = display_name
-                .clone()
-                .or_else(|| identity.display_name())
-                .unwrap_or_else(|| "<unnamed>".to_string());
+        EndExpr::ResolvedCall { identity, args, .. } => {
+            let name = strict_callable_display_name(identity).ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "UndefinedFunction",
+                    "end expression call missing callable name",
+                )
+            })?;
             let mut items = vec![Value::String("call".to_string()), Value::String(name)];
             for a in args {
                 items.push(encode_end_expr_value(a)?);
@@ -786,6 +809,8 @@ mod tests {
     use crate::bytecode::EndExpr;
     use futures::executor::block_on;
     use runmat_builtins::{HandleRef, Value};
+    use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
+    use runmat_hir::{QualifiedName, SymbolName};
 
     #[test]
     fn object_index_descriptor_serializes_protocol_args_once() {
@@ -831,6 +856,53 @@ mod tests {
         );
         assert_eq!(args[1], Value::String("field".to_string()));
         assert_eq!(args[2], Value::Num(9.0));
+    }
+
+    #[test]
+    fn external_qualified_identity_preserves_malformed_base_segment() {
+        let identity = super::external_qualified_identity("pkg..Point", "origin");
+        let CallableIdentity::ExternalName(QualifiedName(segments)) = identity else {
+            panic!("expected external qualified identity");
+        };
+        assert_eq!(
+            segments,
+            vec![
+                SymbolName("pkg..Point".to_string()),
+                SymbolName("origin".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn external_qualified_identity_splits_well_formed_base_segments() {
+        let identity = super::external_qualified_identity("pkg.Point", "origin");
+        let CallableIdentity::ExternalName(QualifiedName(segments)) = identity else {
+            panic!("expected external qualified identity");
+        };
+        assert_eq!(
+            segments,
+            vec![
+                SymbolName("pkg".to_string()),
+                SymbolName("Point".to_string()),
+                SymbolName("origin".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn external_qualified_display_name_preserves_malformed_base_shape() {
+        assert_eq!(
+            super::external_qualified_display_name("pkg..Point", "origin"),
+            "pkg..Point.origin"
+        );
+    }
+
+    #[test]
+    fn external_qualified_display_name_renders_well_formed_qualified_name() {
+        assert_eq!(
+            super::external_qualified_display_name("pkg.Point", "origin"),
+            "pkg.Point.origin"
+        );
     }
 
     #[test]
@@ -892,6 +964,52 @@ mod tests {
             other => panic!("expected range descriptor cell, got {other:?}"),
         }
         assert_eq!(selectors[1], Value::Num(4.0));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_end_call_without_callable_name() {
+        let err = build_object_paren_expr_selector_values(
+            1,
+            0,
+            0,
+            &[0],
+            &[(1.0, 1.0)],
+            &[None],
+            &[None],
+            &[EndExpr::ResolvedCall {
+                identity: CallableIdentity::SemanticFunction(FunctionId(7)),
+                fallback_policy: CallableFallbackPolicy::None,
+                args: vec![],
+            }],
+            &[],
+        )
+        .expect_err("missing callable name should fail");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_malformed_external_end_call_name() {
+        let err = build_object_paren_expr_selector_values(
+            1,
+            0,
+            0,
+            &[0],
+            &[(1.0, 1.0)],
+            &[None],
+            &[None],
+            &[EndExpr::ResolvedCall {
+                identity: CallableIdentity::ExternalName(QualifiedName(vec![
+                    SymbolName("pkg".to_string()),
+                    SymbolName("".to_string()),
+                    SymbolName("remote".to_string()),
+                ])),
+                fallback_policy: CallableFallbackPolicy::ExternalBoundary,
+                args: vec![],
+            }],
+            &[],
+        )
+        .expect_err("malformed external callable name should fail");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
     }
 
     #[test]

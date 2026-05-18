@@ -723,6 +723,8 @@ impl PageOperation {
     fn from_callable(value: Value) -> BuiltinResult<Self> {
         let raw = match value {
             Value::FunctionHandle(func) => func,
+            Value::ExternalFunctionHandle(func) => func,
+            Value::SemanticFunctionHandle { name, .. } => name,
             Value::String(s) => s,
             Value::StringArray(sa) => {
                 if sa.data.len() != 1 {
@@ -964,6 +966,47 @@ pub(crate) mod tests {
             vec![Value::Tensor(rhs)],
         );
         let result = block_on(result).expect("pagefun char array");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pagefun_mtimes_external_function_handle() {
+        let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+        let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
+        let result = pagefun_builtin(
+            Value::ExternalFunctionHandle("mtimes".to_string()),
+            Value::Tensor(lhs),
+            vec![Value::Tensor(rhs)],
+        );
+        let result = block_on(result).expect("pagefun external function handle");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.data, vec![19.0, 43.0, 22.0, 50.0]);
+            }
+            other => panic!("expected tensor result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pagefun_mtimes_semantic_function_handle() {
+        let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+        let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
+        let result = pagefun_builtin(
+            Value::SemanticFunctionHandle {
+                name: "mtimes".to_string(),
+                function: 17,
+            },
+            Value::Tensor(lhs),
+            vec![Value::Tensor(rhs)],
+        );
+        let result = block_on(result).expect("pagefun semantic function handle");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);

@@ -4,7 +4,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use futures::executor::block_on;
-use runmat_core::RunMatSession;
+use runmat_core::{abi, CompatMode, RunMatSession};
 use runmat_gc::{gc_test_context, GcConfig};
 use runmat_time::Instant;
 use std::thread;
@@ -136,6 +136,46 @@ fn test_complex_mathematical_operations() {
 
         let stats = engine.stats();
         assert_eq!(stats.total_executions, complex_operations.len());
+    });
+}
+
+#[test]
+fn test_strict_mode_rejects_runmat_extensions() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        engine.set_compat_mode(CompatMode::Strict);
+        let err = block_on(engine.execute("t = spawn(1);"))
+            .expect_err("strict mode should reject RunMat extensions");
+        assert!(
+            err.to_string().contains("spawn is a RunMat extension"),
+            "unexpected strict-mode error: {err}"
+        );
+    });
+}
+
+#[test]
+fn test_request_host_policy_disables_top_level_await() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        let err = block_on(engine.execute_request(abi::ExecutionRequest {
+            source: abi::SourceInput::Text {
+                name: "request-await-policy.m".to_string(),
+                text: "y = await(1);".to_string(),
+            },
+            compatibility: CompatMode::Matlab,
+            host_policy: abi::HostExecutionPolicy {
+                top_level_await: false,
+                ..abi::HostExecutionPolicy::default()
+            },
+            requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+            workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(13)),
+        }))
+        .expect_err("request should reject top-level await when host policy disables it");
+
+        assert!(
+            err.to_string().contains("await is only allowed"),
+            "unexpected top-level-await policy error: {err}"
+        );
     });
 }
 

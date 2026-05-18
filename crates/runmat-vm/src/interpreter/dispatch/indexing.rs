@@ -378,7 +378,6 @@ async fn resolve_range_end_index(
                 EndExpr::ResolvedCall {
                     identity,
                     fallback_policy,
-                    display_name,
                     args,
                 } => {
                     let mut argv: Vec<Value> = Vec::with_capacity(args.len());
@@ -388,13 +387,11 @@ async fn resolve_range_end_index(
                     }
                     let descriptor = CallableDescriptor::resolved(
                         identity.clone(),
-                        display_name.clone(),
                         argv,
                         1,
                         *fallback_policy,
                         CallableCallKind::EndExpr,
-                    )
-                    .with_call_kind(CallableCallKind::EndExpr);
+                    );
                     let v = normalize_requested_outputs(
                         execute_callable_descriptor(descriptor).await?,
                         1,

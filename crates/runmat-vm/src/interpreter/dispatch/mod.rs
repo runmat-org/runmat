@@ -484,7 +484,6 @@ pub async fn dispatch_instruction(
                 calls::UserCallContext {
                     stack,
                     identity: runmat_hir::CallableIdentity::SemanticFunction(*function),
-                    display_name: None,
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,
                     exception: calls::ExceptionRouteContext {
@@ -513,7 +512,6 @@ pub async fn dispatch_instruction(
         }
         Instr::CallFunctionMulti {
             identity,
-            display_name,
             fallback_policy,
             arg_count,
             out_count,
@@ -522,7 +520,6 @@ pub async fn dispatch_instruction(
                 calls::UserCallContext {
                     stack,
                     identity: identity.clone(),
-                    display_name: display_name.clone(),
                     fallback_policy: *fallback_policy,
                     out_count: *out_count,
                     exception: calls::ExceptionRouteContext {
@@ -561,7 +558,6 @@ pub async fn dispatch_instruction(
         }
         Instr::CallFunctionExpandMultiOutput {
             identity,
-            display_name,
             fallback_policy,
             specs,
             out_count,
@@ -571,7 +567,6 @@ pub async fn dispatch_instruction(
                 calls::UserCallContext {
                     stack,
                     identity: identity.clone(),
-                    display_name: display_name.clone(),
                     fallback_policy: *fallback_policy,
                     out_count: *out_count,
                     exception: calls::ExceptionRouteContext {
@@ -604,7 +599,6 @@ pub async fn dispatch_instruction(
                 calls::UserCallContext {
                     stack,
                     identity: runmat_hir::CallableIdentity::SemanticFunction(*function),
-                    display_name: None,
                     fallback_policy: runmat_hir::CallableFallbackPolicy::None,
                     out_count: *out_count,
                     exception: calls::ExceptionRouteContext {
@@ -633,7 +627,6 @@ pub async fn dispatch_instruction(
         }
         Instr::CallMethodOrMemberIndexMulti {
             identity,
-            display_name,
             fallback_policy,
             arg_count,
             out_count,
@@ -641,7 +634,6 @@ pub async fn dispatch_instruction(
             handle_method_or_member_index_multi_call(
                 stack,
                 identity.clone(),
-                display_name.clone(),
                 *fallback_policy,
                 *arg_count,
                 *out_count,
@@ -653,7 +645,6 @@ pub async fn dispatch_instruction(
         }
         Instr::CallMethodOrMemberIndexExpandMultiOutput {
             identity,
-            display_name,
             fallback_policy,
             specs,
             out_count,
@@ -661,7 +652,6 @@ pub async fn dispatch_instruction(
             handle_method_or_member_index_expand_multi_call(
                 stack,
                 identity.clone(),
-                display_name.clone(),
                 *fallback_policy,
                 specs,
                 *out_count,

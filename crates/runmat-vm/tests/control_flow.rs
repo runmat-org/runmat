@@ -149,6 +149,24 @@ fn nested_break_and_continue_scopes() {
 }
 
 #[test]
+fn for_loop_over_matrix_iterates_columns() {
+    let vars = execute_semantic_source(
+        r#"
+            A = [1 2 3; 10 20 30];
+            top_sum = 0;
+            bottom_sum = 0;
+            for col = A;
+                top_sum = top_sum + col(1);
+                bottom_sum = bottom_sum + col(2);
+            end
+        "#,
+    )
+    .unwrap();
+    assert!(has_num(&vars, 6.0));
+    assert!(has_num(&vars, 60.0));
+}
+
+#[test]
 fn undefined_variable_raises_mex() {
     let err = compile_semantic_source("y = x + 1;").err().unwrap();
     let message = err.message();

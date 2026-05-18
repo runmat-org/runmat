@@ -59,16 +59,19 @@ impl RunMatSession {
         let requested_outputs = request.requested_outputs.clone();
         let (source_name, source_text) = source_input_text(request.source)?;
         let previous_compat = self.compat_mode;
+        let previous_top_level_await_enabled = self.top_level_await_enabled;
         let previous_source_override = self.source_name_override.clone();
         let previous_workspace_handle = self.abi_workspace_handle;
 
-        self.compat_mode = parser_compat_from_abi(&request.compatibility);
+        self.compat_mode = request.compatibility;
+        self.top_level_await_enabled = request.host_policy.top_level_await;
         self.source_name_override = Some(source_name);
         self.abi_workspace_handle = request.workspace;
 
         let result = self.execute_outcome(&source_text).await;
 
         self.compat_mode = previous_compat;
+        self.top_level_await_enabled = previous_top_level_await_enabled;
         self.source_name_override = previous_source_override;
         self.abi_workspace_handle = previous_workspace_handle;
 
@@ -210,6 +213,7 @@ impl RunMatSession {
         // the calling future synchronously on the result (safe because the native
         // executor — futures::executor::block_on — is already synchronous).
         let compat = self.compat_mode;
+        let top_level_await_enabled = self.top_level_await_enabled;
         let _eval_hook_guard =
             runmat_runtime::interaction::replace_eval_hook(Some(std::sync::Arc::new(
                 move |expr: String| -> runmat_runtime::interaction::EvalHookFuture {
@@ -218,6 +222,7 @@ impl RunMatSession {
                     async fn eval_expr(
                         expr: String,
                         compat: runmat_parser::CompatMode,
+                        top_level_await_enabled: bool,
                     ) -> Result<Value, RuntimeError> {
                         let wrapped = format!("__runmat_input_result__ = ({expr});");
                         let ast = parse_with_options(&wrapped, ParserOptions::new(compat))
@@ -226,13 +231,17 @@ impl RunMatSession {
                                     .with_identifier("RunMat:input:ParseError")
                                     .build()
                             })?;
-                        let lowering =
-                            runmat_hir::lower(&ast, &LoweringContext::new(&HashMap::new()))
-                                .map_err(|e| {
-                                    build_runtime_error(format!("input: lowering error: {e}"))
-                                        .with_identifier("RunMat:input:LowerError")
-                                        .build()
-                                })?;
+                        let lowering = runmat_hir::lower(
+                            &ast,
+                            &LoweringContext::new(&HashMap::new())
+                                .with_runmat_extensions_enabled(compat.allows_runmat_extensions())
+                                .with_top_level_await_enabled(top_level_await_enabled),
+                        )
+                        .map_err(|e| {
+                            build_runtime_error(format!("input: lowering error: {e}"))
+                                .with_identifier("RunMat:input:LowerError")
+                                .build()
+                        })?;
                         let bc =
                             compile_eval_hook_bytecode(&lowering).map_err(RuntimeError::from)?;
                         let result_idx = bc.var_names.iter().find_map(|(idx, name)| {
@@ -253,7 +262,7 @@ impl RunMatSession {
                         // On WASM: await the inner interpret() directly. The JS async
                         // runtime handles both futures as cooperative state-machines and
                         // the WASM linear stack is large enough for the extra frames.
-                        Box::pin(eval_expr(expr, compat))
+                        Box::pin(eval_expr(expr, compat, top_level_await_enabled))
                     }
 
                     #[cfg(not(target_arch = "wasm32"))]
@@ -267,7 +276,11 @@ impl RunMatSession {
                         let spawn_result = std::thread::Builder::new()
                             .stack_size(16 * 1024 * 1024)
                             .spawn(move || {
-                                let result = futures::executor::block_on(eval_expr(expr, compat));
+                                let result = futures::executor::block_on(eval_expr(
+                                    expr,
+                                    compat,
+                                    top_level_await_enabled,
+                                ));
                                 let _ = tx.send(result);
                             });
                         Box::pin(async move {
@@ -1083,13 +1096,5 @@ fn source_input_text(
                 ))
             }
         }
-    }
-}
-
-fn parser_compat_from_abi(mode: &runmat_hir::CompatibilityMode) -> CompatMode {
-    match mode {
-        runmat_hir::CompatibilityMode::MatlabStrict => CompatMode::Strict,
-        runmat_hir::CompatibilityMode::RunMatExtended => CompatMode::RunMat,
-        runmat_hir::CompatibilityMode::Interactive => CompatMode::Matlab,
     }
 }

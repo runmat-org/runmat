@@ -62,10 +62,35 @@ fn current_requested_outputs() -> usize {
     crate::output_count::current_output_count().unwrap_or(1)
 }
 
-fn undefined_callable_error(name: Option<&str>) -> RuntimeError {
-    let detail = name
-        .map(|n| format!("Undefined function '{n}'"))
-        .unwrap_or_else(|| "Undefined function".to_string());
+fn strict_callable_display_name(identity: &runmat_hir::CallableIdentity) -> Option<String> {
+    match identity {
+        runmat_hir::CallableIdentity::SemanticFunction(_)
+        | runmat_hir::CallableIdentity::AnonymousFunction(_) => None,
+        runmat_hir::CallableIdentity::Builtin(runmat_hir::BuiltinId(name))
+        | runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(name))
+        | runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)) => {
+            (!name.is_empty()).then_some(name.clone())
+        }
+        runmat_hir::CallableIdentity::Imported(path) => path.module.display_name(),
+        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments)) => {
+            if segments.is_empty() || segments.iter().any(|segment| segment.0.is_empty()) {
+                return None;
+            }
+            Some(
+                segments
+                    .iter()
+                    .map(|segment| segment.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            )
+        }
+    }
+}
+
+fn undefined_callable_error(identity: &runmat_hir::CallableIdentity) -> RuntimeError {
+    let detail = strict_callable_display_name(identity)
+        .map(|name| format!("Undefined function '{name}'"))
+        .unwrap_or_else(|| format!("Undefined function for callable identity {identity:?}"));
     build_runtime_error(detail)
         .with_identifier("RunMat:UndefinedFunction")
         .build()
@@ -96,21 +121,25 @@ fn class_member_identity(class_name: &str, member: &str) -> runmat_hir::Callable
     ]))
 }
 
-fn qualified_name_segments(name: &str) -> Vec<runmat_hir::SymbolName> {
+pub(crate) fn qualified_name_segments(name: &str) -> Vec<runmat_hir::SymbolName> {
     name.split('.')
-        .filter(|segment| !segment.is_empty())
         .map(|segment| runmat_hir::SymbolName(segment.to_string()))
         .collect()
 }
 
-fn callable_identity_for_handle_name(
+pub(crate) fn is_well_formed_qualified_name(name: &str) -> bool {
+    let segments = qualified_name_segments(name);
+    segments.len() > 1 && segments.iter().all(|segment| !segment.0.is_empty())
+}
+
+pub(crate) fn callable_identity_for_handle_name(
     name: &str,
 ) -> (
     runmat_hir::CallableIdentity,
     runmat_hir::CallableFallbackPolicy,
 ) {
-    let segments = qualified_name_segments(name);
-    if segments.len() > 1 {
+    if is_well_formed_qualified_name(name) {
+        let segments = qualified_name_segments(name);
         (
             runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments)),
             runmat_hir::CallableFallbackPolicy::ExternalBoundary,
@@ -123,13 +152,13 @@ fn callable_identity_for_handle_name(
     }
 }
 
-fn external_callable_identity_for_name(name: &str) -> runmat_hir::CallableIdentity {
-    let segments = qualified_name_segments(name);
-    if segments.is_empty() {
+pub(crate) fn external_callable_identity_for_name(name: &str) -> runmat_hir::CallableIdentity {
+    if !is_well_formed_qualified_name(name) {
         runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
             runmat_hir::SymbolName(name.to_string()),
         ]))
     } else {
+        let segments = qualified_name_segments(name);
         runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
     }
 }
@@ -178,7 +207,7 @@ async fn dispatch_callable_with_policy(
         return dispatch_named_with_requested_outputs(&name, &args, requested_outputs).await;
     }
 
-    Err(undefined_callable_error(identity.display_name().as_deref()))
+    Err(undefined_callable_error(&identity))
 }
 
 pub use runtime_error::{
@@ -1312,7 +1341,7 @@ fn str2func_builtin(value: Value) -> crate::BuiltinResult<Value> {
 
     if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name) {
         Ok(Value::SemanticFunctionHandle { name, function })
-    } else if qualified_name_segments(&name).len() > 1 {
+    } else if is_well_formed_qualified_name(&name) {
         Ok(Value::ExternalFunctionHandle(name))
     } else {
         Ok(Value::FunctionHandle(name))
@@ -1767,6 +1796,65 @@ mod tests {
     }
 
     #[test]
+    fn str2func_malformed_qualified_name_returns_dynamic_handle() {
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let value = str2func_builtin(Value::String("Point..origin".to_string()))
+            .expect("str2func should succeed");
+        assert_eq!(value, Value::FunctionHandle("Point..origin".to_string()));
+    }
+
+    #[test]
+    fn callable_identity_for_malformed_handle_name_stays_dynamic() {
+        let (identity, fallback_policy) = callable_identity_for_handle_name("pkg..remote_inc");
+        assert!(matches!(
+            identity,
+            runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name))
+                if name == "pkg..remote_inc"
+        ));
+        assert_eq!(
+            fallback_policy,
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
+        );
+    }
+
+    #[test]
+    fn unresolved_callable_without_display_name_reports_typed_identity() {
+        let err = block_on(dispatch_callable_with_policy(
+            runmat_hir::CallableIdentity::AnonymousFunction(runmat_hir::FunctionId(77)),
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            vec![],
+            1,
+        ))
+        .expect_err("anonymous callable identity should fail unresolved");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+        assert!(
+            err.message().contains("AnonymousFunction(FunctionId(77))"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn unresolved_malformed_external_callable_reports_typed_identity() {
+        let err = block_on(dispatch_callable_with_policy(
+            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
+                runmat_hir::SymbolName("pkg".to_string()),
+                runmat_hir::SymbolName("".to_string()),
+                runmat_hir::SymbolName("remote".to_string()),
+            ])),
+            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+            vec![],
+            1,
+        ))
+        .expect_err("malformed external callable identity should fail unresolved");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+        assert!(
+            err.message()
+                .contains("ExternalName(QualifiedName([SymbolName(\"pkg\"), SymbolName(\"\"), SymbolName(\"remote\")]))"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
     fn feval_qualified_at_handle_errors_as_unresolved_external() {
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
         let err = block_on(feval_builtin(
@@ -1933,7 +2021,7 @@ mod tests {
     fn external_boundary_policy_uses_semantic_resolver() {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
-                (name == "resolved_target").then_some(45)
+                (name == "pkg.resolved_target").then_some(45)
             })));
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
@@ -1946,6 +2034,7 @@ mod tests {
 
         let request = crate::user_functions::SemanticCallableRequest::resolved(
             runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
+                runmat_hir::SymbolName("pkg".to_string()),
                 runmat_hir::SymbolName("resolved_target".to_string()),
             ])),
             runmat_hir::CallableFallbackPolicy::ExternalBoundary,
@@ -1958,6 +2047,35 @@ mod tests {
             .expect("external boundary policy should attempt semantic resolver")
             .expect("semantic invoker should succeed");
         assert_eq!(result, Value::Num(11.0));
+    }
+
+    #[test]
+    fn external_boundary_policy_malformed_external_identity_does_not_use_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "pkg..resolved_target").then_some(45)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 45);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(11.0)) })
+            }),
+        ));
+
+        let request = crate::user_functions::SemanticCallableRequest::resolved(
+            runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
+                runmat_hir::SymbolName("pkg..resolved_target".to_string()),
+            ])),
+            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+            vec![Value::Num(4.0)],
+            1,
+            crate::user_functions::SemanticCallableKind::Other,
+        );
+
+        let result = block_on(crate::user_functions::try_call_semantic_descriptor(request));
+        assert!(result.is_none());
     }
 
     #[test]
@@ -2051,7 +2169,7 @@ mod tests {
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             move |function, args, requested_outputs| {
                 assert_eq!(function, 44);
-                assert_eq!(requested_outputs, 1);
+                assert_eq!(requested_outputs, 0);
                 assert_eq!(args.len(), 1);
                 assert!(matches!(args[0], Value::HandleObject(_)));
                 seen_calls.fetch_add(1, Ordering::SeqCst);

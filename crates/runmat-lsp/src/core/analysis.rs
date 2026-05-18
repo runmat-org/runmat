@@ -6,8 +6,8 @@ use lsp_types::{
 };
 use runmat_builtins::{self, BuiltinFunction, Constant, Type};
 use runmat_hir::{
-    CompatibilityMode, FunctionKind, HirDiagnostic, HirDiagnosticSeverity, LoweringContext,
-    LoweringResult, SemanticError,
+    FunctionKind, HirDiagnostic, HirDiagnosticSeverity, LoweringContext, LoweringResult,
+    SemanticError,
 };
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
@@ -72,8 +72,8 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
     let tokens = tokenize_detailed(text);
     match parse_with_options(text, ParserOptions::new(compat)) {
         Ok(ast) => {
-            let lowering_context =
-                LoweringContext::empty().with_compatibility_mode(hir_compatibility_mode(compat));
+            let lowering_context = LoweringContext::empty()
+                .with_runmat_extensions_enabled(compat.allows_runmat_extensions());
             let lowering = match runmat_hir::lower(&ast, &lowering_context) {
                 Ok(result) => result,
                 Err(err) => {
@@ -136,14 +136,6 @@ fn compile_error_for_lowering(lowering: &LoweringResult) -> Option<CompileError>
         Err(err) => return Some(CompileError::from(err)),
     };
     runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id).err()
-}
-
-fn hir_compatibility_mode(compat: CompatMode) -> CompatibilityMode {
-    match compat {
-        CompatMode::RunMat => CompatibilityMode::RunMatExtended,
-        CompatMode::Matlab => CompatibilityMode::RunMatExtended,
-        CompatMode::Strict => CompatibilityMode::MatlabStrict,
-    }
 }
 
 pub fn diagnostics_for_document(text: &str, analysis: &DocumentAnalysis) -> Vec<Diagnostic> {

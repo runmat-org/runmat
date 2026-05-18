@@ -405,7 +405,14 @@ impl Parser {
                             span,
                         })
                     } else {
-                        let name = self.expect_ident()?;
+                        let mut name = self.expect_ident()?;
+                        while self.peek_token() == Some(&Token::Dot)
+                            && matches!(self.peek_token_at(1), Some(Token::Ident))
+                        {
+                            self.consume(&Token::Dot);
+                            name.push('.');
+                            name.push_str(&self.expect_ident()?);
+                        }
                         let end = self.last_token_end();
                         let span = self.span_from(start, end);
                         Ok(Expr::FuncHandle(name, span))

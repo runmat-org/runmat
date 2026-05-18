@@ -4,22 +4,20 @@ use crate::{
     MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
 };
 use runmat_hir::{
-    AsyncValueFact, CallableIdentity, DimFact, EmptyArrayRole, ExpansionSemantics, FutureFact,
-    FutureStateFact, NumericClass, NumericDomain, OperatorKind, ShapeFact, Span, SpawnSafetyFact,
-    TaskHandleFact, TensorElementDomainFact, TensorTypeFact, TypeFact, ValueFlowFact,
+    AsyncValueFact, CallableIdentity, DimFact, FutureFact, FutureStateFact, NumericClass,
+    NumericDomain, ShapeFact, Span, SpawnSafetyFact, TaskHandleFact, TensorElementDomainFact,
+    TensorTypeFact, TypeFact, ValueFlowFact,
 };
 use std::collections::{HashMap, VecDeque};
 
 use super::{
-    analyze_liveness, analyze_spawn_boundaries_with_summaries, diagnose_spawn_safety,
-    propagate_function_summaries, summarize_body, AnalysisStore, BindingFact, ExprFact, InitFact,
-    MirLocalFact, MirLocalKey, ModuleSummary,
+    spawn_safety::{analyze_assembly_spawn_boundaries, diagnose_spawn_safety},
+    AnalysisStore, InitFact, MirLocalFact, MirLocalKey,
 };
 
 #[derive(Debug, Clone)]
 struct InitDataflowResult {
     in_states: Vec<Option<Vec<InitFact>>>,
-    final_state: Vec<InitFact>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,10 +26,6 @@ struct SimpleValueFact {
     shape: ShapeFact,
     value_flow: ValueFlowFact,
     async_value: Option<AsyncValueFact>,
-    empty_array_role: Option<EmptyArrayRole>,
-    expansion: Option<ExpansionSemantics>,
-    operator: Option<OperatorKind>,
-    tensor_element_domain: Option<TensorElementDomainFact>,
 }
 
 impl Default for SimpleValueFact {
@@ -41,29 +35,14 @@ impl Default for SimpleValueFact {
             shape: ShapeFact::Unknown,
             value_flow: ValueFlowFact::UnknownList,
             async_value: None,
-            empty_array_role: None,
-            expansion: None,
-            operator: None,
-            tensor_element_domain: None,
         }
     }
 }
 
-pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
-    let result = compute_init_dataflow(body);
+fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
     let local_facts = compute_simple_local_facts(body);
 
-    for record in &body.source_map.statements {
-        if let Some(expr) = record.expr {
-            store
-                .expressions
-                .entry(expr)
-                .or_insert_with(default_expr_fact);
-        }
-    }
-
     for local in &body.locals {
-        let initialized = result.final_state[local.id.0];
         store.mir_locals.insert(
             MirLocalKey {
                 function: body.function,
@@ -80,80 +59,9 @@ pub fn analyze_body(body: &MirBody, store: &mut AnalysisStore) {
                     .clone()
                     .unwrap_or_default()
                     .async_value,
-                empty_array_role: local_facts[local.id.0]
-                    .clone()
-                    .unwrap_or_default()
-                    .empty_array_role,
-                expansion: local_facts[local.id.0]
-                    .clone()
-                    .unwrap_or_default()
-                    .expansion,
-                operator: local_facts[local.id.0].clone().unwrap_or_default().operator,
-                tensor_element_domain: local_facts[local.id.0]
-                    .clone()
-                    .unwrap_or_default()
-                    .tensor_element_domain,
-                initialized,
             },
         );
-        if let Some(binding) = local.binding {
-            insert_binding_fact(
-                store,
-                binding,
-                initialized,
-                local_facts[local.id.0].clone().unwrap_or_default().ty,
-            );
-        }
     }
-
-    for source in &body.source_map.locals {
-        if let Some(expr) = source.expr {
-            let fact = local_facts[source.local.0].clone().unwrap_or_default();
-            store.expressions.insert(
-                expr,
-                ExprFact {
-                    ty: fact.ty,
-                    shape: fact.shape,
-                    value_flow: fact.value_flow,
-                    async_value: fact.async_value,
-                    empty_array_role: fact.empty_array_role,
-                    expansion: fact.expansion,
-                    operator: fact.operator,
-                    tensor_element_domain: fact.tensor_element_domain,
-                },
-            );
-        }
-    }
-}
-
-fn default_expr_fact() -> ExprFact {
-    ExprFact {
-        ty: TypeFact::Unknown,
-        shape: ShapeFact::Unknown,
-        value_flow: ValueFlowFact::UnknownList,
-        async_value: None,
-        empty_array_role: None,
-        expansion: None,
-        operator: None,
-        tensor_element_domain: None,
-    }
-}
-
-fn insert_binding_fact(
-    store: &mut AnalysisStore,
-    binding: runmat_hir::BindingId,
-    initialized: InitFact,
-    ty: TypeFact,
-) {
-    let incoming = BindingFact { ty, initialized };
-    store
-        .bindings
-        .entry(binding)
-        .and_modify(|existing| {
-            existing.ty = join_type(&existing.ty, &incoming.ty);
-            existing.initialized = join_init(existing.initialized, incoming.initialized);
-        })
-        .or_insert(incoming);
 }
 
 fn compute_simple_local_facts(body: &MirBody) -> Vec<Option<SimpleValueFact>> {
@@ -287,15 +195,8 @@ fn simple_rvalue_fact(value: &MirRvalue) -> SimpleValueFact {
             cols,
             elements,
         } => aggregate_fact(kind, *rows, *cols, elements),
-        MirRvalue::Binary(_, op, _) | MirRvalue::Unary(op, _) => SimpleValueFact {
-            operator: Some(op.clone()),
-            expansion: Some(ExpansionSemantics::ImplicitExpansion),
-            ..SimpleValueFact::default()
-        },
-        MirRvalue::Range { .. } => SimpleValueFact {
-            expansion: Some(ExpansionSemantics::ExactShape),
-            ..SimpleValueFact::default()
-        },
+        MirRvalue::Binary(_, _, _) | MirRvalue::Unary(_, _) => SimpleValueFact::default(),
+        MirRvalue::Range { .. } => SimpleValueFact::default(),
         MirRvalue::Index { .. } => SimpleValueFact {
             value_flow: ValueFlowFact::UnknownList,
             ..SimpleValueFact::default()
@@ -319,22 +220,14 @@ fn aggregate_fact(
         dims: vec![DimFact::Known(rows), DimFact::Known(cols)],
     };
     match kind {
-        MirAggregateKind::Tensor => {
-            let element = tensor_element_domain(elements);
-            let empty_array_role = (rows == 0 || cols == 0).then_some(EmptyArrayRole::EmptyValue);
-            let mut fact = single_fact(
-                TypeFact::Tensor(TensorTypeFact {
-                    element: element.clone(),
-                    shape: shape.clone(),
-                }),
-                shape.clone(),
-            );
-            fact.empty_array_role = empty_array_role;
-            fact.tensor_element_domain = Some(element);
-            fact
-        }
+        MirAggregateKind::Tensor => single_fact(
+            TypeFact::Tensor(TensorTypeFact {
+                element: tensor_element_domain(elements),
+                shape: shape.clone(),
+            }),
+            shape.clone(),
+        ),
         MirAggregateKind::Cell => single_fact(TypeFact::Cell, shape),
-        MirAggregateKind::Struct | MirAggregateKind::ObjectArray(_) => SimpleValueFact::default(),
     }
 }
 
@@ -383,10 +276,6 @@ fn single_fact(ty: TypeFact, shape: ShapeFact) -> SimpleValueFact {
         shape,
         value_flow: ValueFlowFact::Single(ty),
         async_value: None,
-        empty_array_role: None,
-        expansion: None,
-        operator: None,
-        tensor_element_domain: None,
     }
 }
 
@@ -398,16 +287,6 @@ fn merge_simple_fact(slot: &mut Option<SimpleValueFact>, incoming: SimpleValueFa
                 shape: join_shape(&existing.shape, &incoming.shape),
                 value_flow: join_value_flow(&existing.value_flow, &incoming.value_flow),
                 async_value: join_async_value(&existing.async_value, &incoming.async_value),
-                empty_array_role: join_option_fact(
-                    &existing.empty_array_role,
-                    &incoming.empty_array_role,
-                ),
-                expansion: join_option_fact(&existing.expansion, &incoming.expansion),
-                operator: join_option_fact(&existing.operator, &incoming.operator),
-                tensor_element_domain: join_option_fact(
-                    &existing.tensor_element_domain,
-                    &incoming.tensor_element_domain,
-                ),
             };
         }
         None => *slot = Some(incoming),
@@ -449,74 +328,21 @@ fn join_async_value(
     }
 }
 
-fn join_option_fact<T: Clone + PartialEq>(left: &Option<T>, right: &Option<T>) -> Option<T> {
-    if left == right {
-        left.clone()
-    } else {
-        None
-    }
-}
-
 pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     let mut store = AnalysisStore::default();
     for body in assembly.bodies.values() {
         analyze_body(body, &mut store);
-        summarize_body(body, &mut store);
-        store.liveness.insert(body.function, analyze_liveness(body));
         store.diagnostics.extend(diagnose_uninitialized_reads(body));
         store.diagnostics.extend(diagnose_semantic_misuse(body));
     }
-    propagate_function_summaries(&mut store);
-    for body in assembly.bodies.values() {
-        if let (Some(module), Some(summary)) = (
-            body.source_map.module,
-            store.functions.get(&body.function).cloned(),
-        ) {
-            insert_module_summary(&mut store, module, body, &summary);
-        }
-    }
-    for body in assembly.bodies.values() {
-        let boundaries = analyze_spawn_boundaries_with_summaries(body, &store.functions);
+    let boundaries = analyze_assembly_spawn_boundaries(assembly);
+    for boundaries in boundaries.values() {
         store.diagnostics.extend(diagnose_spawn_safety(&boundaries));
-        store.spawn_boundaries.insert(body.function, boundaries);
     }
     store
 }
 
-fn insert_module_summary(
-    store: &mut AnalysisStore,
-    module: runmat_hir::ModuleId,
-    body: &MirBody,
-    summary: &super::FunctionSummary,
-) {
-    store
-        .modules
-        .entry(module)
-        .and_modify(|existing| {
-            if !existing.functions.contains(&summary.function) {
-                existing.functions.push(summary.function);
-            }
-            if existing.source_unit.is_none() {
-                existing.source_unit = body.source_map.source_unit.clone();
-            }
-            existing.workspace.extend(summary.effects.workspace.clone());
-            existing
-                .environment
-                .extend(summary.effects.environment.clone());
-            existing.may_call_unknown |= summary.may_call_unknown;
-        })
-        .or_insert_with(|| ModuleSummary {
-            module,
-            functions: vec![summary.function],
-            source_unit: body.source_map.source_unit.clone(),
-            compatibility_mode: body.source_map.compatibility_mode.clone(),
-            workspace: summary.effects.workspace.clone(),
-            environment: summary.effects.environment.clone(),
-            may_call_unknown: summary.may_call_unknown,
-        });
-}
-
-pub fn diagnose_uninitialized_reads(body: &MirBody) -> Vec<MirDiagnostic> {
+pub(super) fn diagnose_uninitialized_reads(body: &MirBody) -> Vec<MirDiagnostic> {
     let result = compute_init_dataflow(body);
     let mut diagnostics = Vec::new();
 
@@ -530,7 +356,7 @@ pub fn diagnose_uninitialized_reads(body: &MirBody) -> Vec<MirDiagnostic> {
     diagnostics
 }
 
-pub fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
+pub(super) fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
     let mut diagnostics = Vec::new();
     for block in &body.blocks {
         for stmt in &block.statements {
@@ -651,7 +477,6 @@ fn compute_init_dataflow(body: &MirBody) -> InitDataflowResult {
     if body.blocks.is_empty() {
         return InitDataflowResult {
             in_states: Vec::new(),
-            final_state: Vec::new(),
         };
     }
 
@@ -700,21 +525,7 @@ fn compute_init_dataflow(body: &MirBody) -> InitDataflowResult {
         }
     }
 
-    let mut final_state: Option<Vec<InitFact>> = None;
-    for (idx, block) in body.blocks.iter().enumerate() {
-        if matches!(block.terminator.kind, MirTerminatorKind::Return(_)) {
-            match &mut final_state {
-                Some(state) => {
-                    join_into(state, &out_states[idx]);
-                }
-                None => final_state = Some(out_states[idx].clone()),
-            }
-        }
-    }
-    InitDataflowResult {
-        in_states,
-        final_state: final_state.unwrap_or_else(|| vec![InitFact::Unassigned; local_count]),
-    }
+    InitDataflowResult { in_states }
 }
 
 fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<InitFact> {
@@ -980,9 +791,7 @@ fn successors(kind: &MirTerminatorKind) -> Vec<BasicBlockId> {
             catch_block,
             ..
         } => vec![*try_block, *catch_block],
-        MirTerminatorKind::Await {
-            resume, cleanup, ..
-        } => cleanup.map_or_else(|| vec![*resume], |cleanup| vec![*resume, cleanup]),
+        MirTerminatorKind::Await { resume, .. } => vec![*resume],
         MirTerminatorKind::Return(_) | MirTerminatorKind::Unreachable => Vec::new(),
     }
 }

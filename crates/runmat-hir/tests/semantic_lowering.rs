@@ -648,6 +648,47 @@ fn await_requires_async_function_or_top_level_script() {
 }
 
 #[test]
+fn lowering_policy_can_disable_top_level_await() {
+    let ast = runmat_parser::parse("y = await(1);").unwrap();
+    let err = lower(
+        &ast,
+        &LoweringContext::empty().with_top_level_await_enabled(false),
+    )
+    .unwrap_err();
+    assert!(err.message.contains("await is only allowed"));
+
+    let ast = runmat_parser::parse("x = 1;").unwrap();
+    let result = lower(
+        &ast,
+        &LoweringContext::empty().with_top_level_await_enabled(false),
+    )
+    .expect("lowering should still succeed");
+    assert!(
+        !result.assembly.entrypoints[0].policy.top_level_await,
+        "entrypoint policy should reflect top-level await host policy"
+    );
+}
+
+#[test]
+fn strict_mode_disables_runmat_extension_calls() {
+    let ast = runmat_parser::parse("t = spawn(f());").unwrap();
+    let err = lower(
+        &ast,
+        &LoweringContext::empty().with_runmat_extensions_enabled(false),
+    )
+    .unwrap_err();
+    assert!(err.message.contains("spawn is a RunMat extension"));
+
+    let ast = runmat_parser::parse("y = await(1);").unwrap();
+    let err = lower(
+        &ast,
+        &LoweringContext::empty().with_runmat_extensions_enabled(false),
+    )
+    .unwrap_err();
+    assert!(err.message.contains("await is a RunMat extension"));
+}
+
+#[test]
 fn spawn_rejects_anonymous_function_with_lexical_capture() {
     let ast = runmat_parser::parse("function y = f(x); y = spawn(@() x); end").unwrap();
     let err = lower(&ast, &LoweringContext::empty()).unwrap_err();

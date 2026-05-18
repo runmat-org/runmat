@@ -488,6 +488,11 @@ impl Callable {
                 if let Some(callable) = Self::resolved_semantic_handle(name) {
                     return Ok(callable);
                 }
+                if crate::is_well_formed_qualified_name(name) {
+                    return Ok(Callable::ExternalName {
+                        name: name.to_string(),
+                    });
+                }
                 Ok(Callable::Builtin {
                     name: name.to_string(),
                 })
@@ -506,6 +511,9 @@ impl Callable {
                 };
                 if let Some(callable) = Self::resolved_semantic_handle(&name) {
                     return Ok(callable);
+                }
+                if crate::is_well_formed_qualified_name(&name) {
+                    return Ok(Callable::ExternalName { name });
                 }
                 Ok(Callable::Builtin { name })
             }
@@ -528,20 +536,8 @@ impl Callable {
                 call_builtin_async(name, args).await
             }
             Callable::ExternalName { name } => {
-                let segments = name
-                    .split('.')
-                    .filter(|segment| !segment.is_empty())
-                    .map(|segment| runmat_hir::SymbolName(segment.to_string()))
-                    .collect::<Vec<_>>();
-                let identity = if segments.is_empty() {
-                    runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                        runmat_hir::SymbolName(name.clone()),
-                    ]))
-                } else {
-                    runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
-                };
                 let request = user_functions::SemanticCallableRequest::resolved(
-                    identity,
+                    crate::external_callable_identity_for_name(name),
                     runmat_hir::CallableFallbackPolicy::ExternalBoundary,
                     args.to_vec(),
                     1,
@@ -883,6 +879,16 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cellfun_qualified_text_callback_classifies_as_external_name() {
+        let callable =
+            Callable::from_text("pkg.callback", true).expect("qualified callback should parse");
+        assert!(matches!(
+            callable,
+            Callable::ExternalName { name } if name == "pkg.callback"
+        ));
     }
 
     #[test]

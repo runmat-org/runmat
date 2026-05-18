@@ -1,11 +1,12 @@
-use crate::{CompatibilityMode, FunctionId};
+use crate::FunctionId;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 pub struct LoweringContext<'a> {
     pub variables: &'a HashMap<String, usize>,
     pub semantic_functions: &'a HashMap<String, FunctionId>,
-    pub compatibility_mode: Option<CompatibilityMode>,
+    pub runmat_extensions_enabled: bool,
+    pub top_level_await_enabled: bool,
 }
 
 impl<'a> LoweringContext<'a> {
@@ -13,7 +14,8 @@ impl<'a> LoweringContext<'a> {
         Self {
             variables,
             semantic_functions: empty_semantic_functions(),
-            compatibility_mode: None,
+            runmat_extensions_enabled: true,
+            top_level_await_enabled: true,
         }
     }
 
@@ -25,8 +27,13 @@ impl<'a> LoweringContext<'a> {
         self
     }
 
-    pub fn with_compatibility_mode(mut self, compatibility_mode: CompatibilityMode) -> Self {
-        self.compatibility_mode = Some(compatibility_mode);
+    pub fn with_runmat_extensions_enabled(mut self, enabled: bool) -> Self {
+        self.runmat_extensions_enabled = enabled;
+        self
+    }
+
+    pub fn with_top_level_await_enabled(mut self, enabled: bool) -> Self {
+        self.top_level_await_enabled = enabled;
         self
     }
 
@@ -35,7 +42,8 @@ impl<'a> LoweringContext<'a> {
         Self {
             variables: EMPTY_VARS.get_or_init(HashMap::new),
             semantic_functions: empty_semantic_functions(),
-            compatibility_mode: None,
+            runmat_extensions_enabled: true,
+            top_level_await_enabled: true,
         }
     }
 }

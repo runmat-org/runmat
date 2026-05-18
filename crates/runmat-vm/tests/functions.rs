@@ -18,6 +18,46 @@ fn execute_semantic_source_result(
     interpret(&bytecode)
 }
 
+fn has_num(values: &[runmat_builtins::Value], expected: f64) -> bool {
+    values
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - expected).abs() < 1e-9))
+}
+
+fn has_object_class(values: &[runmat_builtins::Value], class_name: &str) -> bool {
+    values.iter().any(|v| match v {
+        runmat_builtins::Value::Object(obj) => obj.class_name == class_name,
+        runmat_builtins::Value::HandleObject(obj) => obj.class_name == class_name,
+        _ => false,
+    })
+}
+
+fn has_object_num_property(
+    values: &[runmat_builtins::Value],
+    class_name: &str,
+    property_name: &str,
+    expected: f64,
+) -> bool {
+    values.iter().any(|v| match v {
+        runmat_builtins::Value::Object(obj) if obj.class_name == class_name => {
+            matches!(
+                obj.properties.get(property_name),
+                Some(runmat_builtins::Value::Num(n)) if (*n - expected).abs() < 1e-9
+            )
+        }
+        _ => false,
+    })
+}
+
+fn assert_import_ambiguity_error(err: &runmat_runtime::RuntimeError) {
+    let msg = err.message().to_ascii_lowercase();
+    assert!(
+        msg.contains("ambig") || msg.contains("conflict") || msg.contains("duplicate"),
+        "expected import ambiguity/conflict diagnostic, got: {}",
+        err.message()
+    );
+}
+
 #[test]
 fn unresolved_external_function_handle_fails_without_legacy_fallback() {
     let err = execute_semantic_source_result("h = @definitely_missing_callback; y = feval(h, 1);")
@@ -31,9 +71,85 @@ fn unresolved_external_function_handle_fails_without_legacy_fallback() {
 }
 
 #[test]
+fn unresolved_qualified_external_function_handle_uses_external_handle_instruction() {
+    let bytecode = compile_semantic_source("h = @pkg.remote_inc; y = feval(h, 1);")
+        .expect("qualified handle source should compile");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+    ));
+    let err = interpret(&bytecode).expect_err("unresolved qualified callback should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn unresolved_external_direct_call_fails_without_runtime_name_fallback() {
     let err = execute_semantic_source_result("y = definitely_missing_callback(1);")
         .expect_err("unresolved external direct call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_qualified_direct_call_uses_external_boundary_typed_instruction() {
+    let bytecode = compile_semantic_source("a = pkg.remote_inc(7);")
+        .expect("qualified direct call source should compile");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionMulti {
+            identity: runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(path)),
+            fallback_policy,
+            arg_count,
+            out_count,
+            ..
+        } if path == &vec![
+                runmat_hir::SymbolName("pkg".to_string()),
+                runmat_hir::SymbolName("remote_inc".to_string()),
+            ]
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
+            && *arg_count == 1
+            && *out_count == 1
+    )));
+    let err = interpret(&bytecode).expect_err("unresolved qualified direct call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_nested_qualified_direct_call_uses_external_boundary_typed_instruction() {
+    let bytecode = compile_semantic_source("a = pkg.sub.remote(7);")
+        .expect("nested qualified direct call source should compile");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionMulti {
+            identity: runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(path)),
+            fallback_policy,
+            arg_count,
+            out_count,
+            ..
+        } if path == &vec![
+                runmat_hir::SymbolName("pkg".to_string()),
+                runmat_hir::SymbolName("sub".to_string()),
+                runmat_hir::SymbolName("remote".to_string()),
+            ]
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
+            && *arg_count == 1
+            && *out_count == 1
+    )));
+    let err =
+        interpret(&bytecode).expect_err("unresolved nested qualified direct call should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -182,12 +298,6 @@ fn too_many_outputs_and_varargout_mismatch() {
     let err_mis = execute_semantic_source_result(program_mis).err().unwrap();
     assert_eq!(err_mis.identifier(), Some("RunMat:VarargoutMismatch"));
 }
-#[allow(dead_code)]
-fn function_definition_and_calls() {
-    let result = execute_semantic_source_result("function y = f(x); y = x + 1; end; a = f(2);");
-    assert!(result.is_ok());
-}
-
 #[test]
 fn nested_function_calls() {
     let program = "function y = add(a, b); y = a + b; end; function y = multiply_and_add(x); y = add(x * 2, x * 3); end; result = multiply_and_add(4);";
@@ -406,9 +516,10 @@ fn semantic_eig_builtin_multi_assign_execute() {
 fn fprintf_inline_cast_argument_does_not_stack_underflow() {
     let program = r#"
         x = single(3.14);
-        fprintf("Value: %.4f\n", double(x));
+        n = fprintf("Value: %.4f\n", double(x));
     "#;
-    execute_semantic_source(program);
+    let vars = execute_semantic_source(program);
+    assert!(has_num(&vars, 14.0));
 }
 
 #[test]
@@ -716,10 +827,15 @@ fn classes_static_and_inheritance() {
     assert!(vars4.iter().any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI*4.0).abs() < 1e-9)));
 
     // Access control violations
-    assert!(execute_semantic_source_result(
-        "__register_test_classes(); p = new_object('Point'); s = getfield(p,'secret');"
+    let err = execute_semantic_source_result(
+        "__register_test_classes(); p = new_object('Point'); s = getfield(p,'secret');",
     )
-    .is_err());
+    .expect_err("private property get should error");
+    assert!(
+        err.message().contains("secret") && err.message().contains("Point"),
+        "unexpected error: {}",
+        err.message()
+    );
 }
 
 #[test]
@@ -750,13 +866,17 @@ fn classes_constructor_and_overloaded_indexing() {
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn classes_property_access_attributes() {
-    // Register classes
-    let _ = execute_semantic_source("__register_test_classes();");
-    // Private get already covered by existing test; ensure private set is also rejected
-    assert!(execute_semantic_source_result(
-        "__register_test_classes(); p = new_object('Point'); p = setfield(p,'secret', 7);"
+    // Private get already covered by existing test; ensure private set is rejected with
+    // an access-control diagnostic.
+    let err = execute_semantic_source_result(
+        "__register_test_classes(); p = new_object('Point'); p = setfield(p,'secret', 7);",
     )
-    .is_err());
+    .expect_err("private property set should error");
+    assert!(
+        err.message().contains("Property 'secret' is private"),
+        "unexpected error: {}",
+        err.message()
+    );
 }
 
 #[test]
@@ -784,23 +904,24 @@ fn import_specific_resolution_for_builtin() {
 fn import_ambiguity_specific_conflict_errors() {
     // Two specifics that map the same unqualified name should cause compile-time ambiguity.
     let program = "import PkgF.foo; import PkgG.foo; r = foo();";
-    let res = compile_semantic_source(program);
-    assert!(res.is_err());
+    let err = compile_semantic_source(program).expect_err("expected specific import ambiguity");
+    assert_import_ambiguity_error(&err);
 }
 
 #[test]
 fn import_ambiguity_wildcard_conflict_errors() {
     // Two wildcard imports that expose the same unqualified name should be ambiguous.
     let program = "import PkgF.*; import PkgG.*; r = foo();";
-    let res = compile_semantic_source(program);
-    assert!(res.is_err());
+    let err = compile_semantic_source(program).expect_err("expected wildcard import ambiguity");
+    assert_import_ambiguity_error(&err);
 }
 
 #[test]
 fn import_ambiguity_wildcard_handle_conflict_errors() {
     let program = "import PkgF.*; import PkgG.*; h = @foo;";
-    let res = compile_semantic_source(program);
-    assert!(res.is_err());
+    let err =
+        compile_semantic_source(program).expect_err("expected wildcard handle import ambiguity");
+    assert_import_ambiguity_error(&err);
 }
 #[test]
 fn import_static_method_via_specific_class_import() {
@@ -844,6 +965,23 @@ fn import_wildcard_static_method_function_handle_executes() {
 }
 
 #[test]
+fn qualified_static_method_function_handle_executes() {
+    let program = "__register_test_classes(); h = @Point.origin; o = feval(h);";
+    let bytecode = compile_semantic_source(program)
+        .expect("semantic qualified static method function handle compile");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CreateExternalFunctionHandle(name)
+            | runmat_vm::Instr::CreateFunctionHandle(name)
+            if name == "Point.origin"
+    )));
+    let vars = execute_semantic_source(program);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+}
+
+#[test]
 fn import_precedence_specific_over_wildcard_and_locals() {
     // Specific imports should take precedence over wildcard imports; locals should shadow both
     let program = r#"
@@ -871,8 +1009,8 @@ fn import_ambiguity_between_specifics_errors() {
         import PkgG.foo;
         y = foo();
     "#;
-    let res = compile_semantic_source(program);
-    assert!(res.is_err());
+    let err = compile_semantic_source(program).expect_err("expected specific import ambiguity");
+    assert_import_ambiguity_error(&err);
 }
 
 #[test]
@@ -883,8 +1021,8 @@ fn import_ambiguity_between_wildcards_errors() {
         import PkgG.*;
         y = foo();
     "#;
-    let res = compile_semantic_source(program);
-    assert!(res.is_err());
+    let err = compile_semantic_source(program).expect_err("expected wildcard import ambiguity");
+    assert_import_ambiguity_error(&err);
 }
 
 #[test]
@@ -942,8 +1080,8 @@ fn import_wildcard_static_method_ambiguity_errors() {
         import PkgG.*;
         z = foo();   % ambiguous via wildcard imports
     "#;
-    let res = compile_semantic_source(program);
-    assert!(res.is_err());
+    let err = compile_semantic_source(program).expect_err("expected wildcard import ambiguity");
+    assert_import_ambiguity_error(&err);
 }
 
 #[test]
@@ -987,8 +1125,16 @@ fn unqualified_static_property_without_imports_errors() {
         __register_test_classes();
         v = staticValue;
     "#;
-    let res = compile_semantic_source(program);
-    assert!(res.is_err());
+    let err = compile_semantic_source(program).expect_err("expected missing static property error");
+    let msg = err.message().to_ascii_lowercase();
+    assert!(
+        msg.contains("staticvalue")
+            && (msg.contains("undefined")
+                || msg.contains("unresolved")
+                || msg.contains("not found")),
+        "unexpected error: {}",
+        err.message()
+    );
 }
 
 #[test]
@@ -1033,7 +1179,14 @@ fn class_property_attribute_conflicts_error() {
             end
         end
     "#;
-    assert!(compile_semantic_source(program).is_err());
+    let err =
+        compile_semantic_source(program).expect_err("expected class property attribute conflict");
+    let msg = err.message().to_ascii_lowercase();
+    assert!(
+        msg.contains("constant") && msg.contains("dependent"),
+        "unexpected error: {}",
+        err.message()
+    );
 }
 
 #[test]
@@ -1048,31 +1201,34 @@ fn class_method_attribute_conflicts_error() {
             end
         end
     "#;
-    assert!(compile_semantic_source(program).is_err());
+    let err =
+        compile_semantic_source(program).expect_err("expected class method attribute conflict");
+    let msg = err.message().to_ascii_lowercase();
+    assert!(
+        msg.contains("abstract") && msg.contains("sealed"),
+        "unexpected error: {}",
+        err.message()
+    );
 }
 
 #[test]
 fn metaclass_context_with_imports() {
-    // Ensure ?pkg.Class parses and coexists with imports; no runtime error expected
+    // Ensure ?pkg.Class parses and coexists with imports in semantic execution.
     let program = "import pkg.*; ?pkg.Class; x=1;";
     let vars = execute_semantic_source(program);
-    // Either ok=1 was set or we have an MException present
-    let ok_or_exc = vars
+    assert!(vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9))
-        || vars
-            .iter()
-            .any(|v| matches!(v, runmat_builtins::Value::MException(_)));
-    assert!(ok_or_exc);
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-1.0).abs()<1e-9)));
 }
 
 #[test]
 fn metaclass_postfix_member_and_method() {
     let program = "__register_test_classes(); v = ?Point.staticValue; o = ?Point.origin();";
     let vars = execute_semantic_source(program);
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
+    assert!(has_num(&vars, 42.0));
+    assert!(has_object_class(&vars, "Point"));
+    assert!(has_object_num_property(&vars, "Point", "x", 0.0));
+    assert!(has_object_num_property(&vars, "Point", "y", 0.0));
 }
 
 #[test]
@@ -1119,7 +1275,13 @@ fn user_function_with_two_expanded_args() {
 fn expansion_on_non_cell_errors() {
     let program = "r = max(5, 10{1});";
     let bytecode = compile_semantic_source(program).expect("compile expansion error source");
-    assert!(interpret(&bytecode).is_err());
+    let err = interpret(&bytecode).expect_err("expansion on non-cell should fail");
+    let msg = err.message().to_ascii_lowercase();
+    assert!(
+        msg.contains("cell") || msg.contains("expand"),
+        "unexpected error: {}",
+        err.message()
+    );
 }
 
 #[cfg(any(feature = "test-classes", test))]
@@ -1260,8 +1422,11 @@ fn method_multi_output_uses_typed_instruction() {
     let bytecode = compile_semantic_source(source).expect("compile method multi-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CallMethodOrMemberIndexMulti { arg_count, out_count, .. }
-            if *arg_count == 2 && *out_count == 2
+        runmat_vm::Instr::CallMethodOrMemberIndexMulti {
+            arg_count,
+            out_count,
+            ..
+        } if *arg_count == 2 && *out_count == 2
     )));
 
     let vars = interpret(&bytecode).expect("execute method multi-output");
@@ -1277,8 +1442,11 @@ fn method_single_output_uses_typed_instruction() {
     let bytecode = compile_semantic_source(source).expect("compile method single-output");
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
-        runmat_vm::Instr::CallMethodOrMemberIndexMulti { arg_count, out_count, .. }
-            if *arg_count == 2 && *out_count == 1
+        runmat_vm::Instr::CallMethodOrMemberIndexMulti {
+            arg_count,
+            out_count,
+            ..
+        } if *arg_count == 2 && *out_count == 1
     )));
 }
 
@@ -1289,13 +1457,13 @@ fn unresolved_function_single_output_uses_typed_instruction() {
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFunctionMulti {
-            display_name,
+            identity: runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
             fallback_policy,
             arg_count,
             out_count,
             ..
-        } if display_name.as_deref() == Some("definitely_missing_callback")
-            && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
+        } if name == "definitely_missing_callback"
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
             && *arg_count == 1
             && *out_count == 1
     )));
@@ -1308,13 +1476,13 @@ fn unresolved_function_expand_single_output_uses_typed_instruction() {
     assert!(bytecode.instructions.iter().any(|instr| matches!(
         instr,
         runmat_vm::Instr::CallFunctionExpandMultiOutput {
-            display_name,
+            identity: runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)),
             fallback_policy,
             specs,
             out_count,
             ..
-        } if display_name.as_deref() == Some("definitely_missing_callback")
-            && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
+        } if name == "definitely_missing_callback"
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
             && *out_count == 1
             && specs.len() == 1
             && specs[0].is_expand
@@ -1410,8 +1578,17 @@ fn mixed_range_end_assign_matrix_rhs_exact_shape() {
 fn mixed_range_end_assign_shape_mismatch_error() {
     // RHS shape 3x1 does not match rows 2:end (len 2) and cannot broadcast
     let program = "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [1;2;3]; A(2:end, 1:2:end-1) = B;";
-    let res = execute_semantic_source_result(program);
-    assert!(res.is_err());
+    let err = execute_semantic_source_result(program)
+        .expect_err("shape-mismatched range assignment should fail");
+    let msg = err.message().to_ascii_lowercase();
+    assert!(
+        msg.contains("shape")
+            || msg.contains("size")
+            || msg.contains("broadcast")
+            || msg.contains("dimension"),
+        "unexpected error: {}",
+        err.message()
+    );
 }
 
 #[test]
@@ -1557,6 +1734,28 @@ fn feval_expand_multi_forwards_expanded_cell_args() {
 }
 
 #[test]
+fn feval_expand_cell_indices_support_end_offsets() {
+    let program = r#"
+        function y = f(a,b)
+            y = a + b;
+        end
+        C = {10, 20, 30};
+        r = feval(@f, C{end-1}, C{end});
+    "#;
+    let vars = execute_semantic_source(program);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-50.0).abs()<1e-9)));
+}
+
+#[test]
+fn feval_expand_cell_indices_end_plus_offset_errors() {
+    let program = "C = {10}; r = feval(@max, C{end+1}, 0);";
+    let err = execute_semantic_source_result(program).err().unwrap();
+    assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
+}
+
+#[test]
 fn varargout_expand_into_outer_call() {
     // h returns varargout with three numbers; max(h()) should consume two (max takes two args)
     let program = r#"
@@ -1594,30 +1793,31 @@ fn user_function_consumes_varargout_exact_needed() {
 #[test]
 fn operator_overloading_plus_times_lt_eq() {
     let setup = "__register_test_classes();";
-    // Try plus with mixed object/scalar; OverIdx has no plus, so fallback should not crash
     let program = format!(
         "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); r1 = o + 3;"
     );
-    let _ = execute_semantic_source(&program);
+    let vars = execute_semantic_source(&program);
+    assert!(has_num(&vars, 8.0));
 }
 
 #[test]
 fn operator_overloading_elementwise_vs_mtimes_and_mixed() {
     let setup = "__register_test_classes();";
-    // Exercise times and mtimes overload paths (will fallback if not implemented)
-    let program =
-        format!("{setup} o = new_object('OverIdx'); a = o .* 2; b = o * 2; c = 2 .* o; d = 2 * o;");
-    let _ = execute_semantic_source(&program);
+    let program = format!(
+        "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); a = o .* 2; b = o * 2; c = 2 .* o; d = 2 * o; s = a + b + c + d;"
+    );
+    let vars = execute_semantic_source(&program);
+    assert!(has_num(&vars, 40.0));
 }
 
 #[test]
 fn operator_overloading_relational_lt_eq() {
     let setup = "__register_test_classes();";
-    // lt and eq with mixed object/scalar on both sides
     let program = format!(
-        "{setup} o = new_object('OverIdx'); t1 = (o < 10); t2 = (10 < o); t3 = (o == 0); t4 = (0 == o);"
+        "{setup} o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5); t1 = (o < 10); t2 = (10 < o); t3 = (o == 0); t4 = (0 == o); s = t1 + t2 + t3 + t4;"
     );
-    let _ = execute_semantic_source(&program);
+    let vars = execute_semantic_source(&program);
+    assert!(has_num(&vars, 1.0));
 }
 
 #[test]
@@ -1682,7 +1882,10 @@ fn static_method_resolution_under_wildcard_import() {
         import Point.*;
         r = origin(); % static method
     "#;
-    execute_semantic_source(program);
+    let vars = execute_semantic_source(program);
+    assert!(has_object_class(&vars, "Point"));
+    assert!(has_object_num_property(&vars, "Point", "x", 0.0));
+    assert!(has_object_num_property(&vars, "Point", "y", 0.0));
 }
 
 #[test]
@@ -1721,8 +1924,11 @@ fn operator_overloading_numeric_results_and_bitwise_arrays() {
 #[test]
 fn operator_overloading_left_division_variants() {
     let setup = "__register_test_classes(); o = new_object('OverIdx'); o = call_method(o,'subsasgn','.', 'k', 5);";
-    let program = format!("{setup} a = (o .\\ 2); b = (2 .\\ o); c = (o ./ 2); d = (2 ./ o);",);
-    let _ = execute_semantic_source(&program);
+    let program = format!(
+        "{setup} a = (o .\\ 2); b = (2 .\\ o); c = (o ./ 2); d = (2 ./ o); s = a + b + c + d;",
+    );
+    let vars = execute_semantic_source(&program);
+    assert!(has_num(&vars, 5.8));
 }
 
 #[test]
@@ -1844,9 +2050,15 @@ fn class_dependent_property_get_set() {
         v = getfield(d, 'p');
     "#;
     let vars = execute_semantic_source(program);
-    assert!(vars
+    let sevens = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-7.0).abs()<1e-9)));
+        .filter(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-7.0).abs()<1e-9))
+        .count();
+    assert!(
+        sevens >= 2,
+        "expected both `b` and `v` to be 7; got {sevens} matches"
+    );
+    assert!(has_object_num_property(&vars, "D", "p_backing", 7.0));
 }
 
 #[test]
@@ -2134,8 +2346,8 @@ fn import_wildcard_vs_classstar_ambiguity_for_static_method() {
 		import Point.*;   % duplicate
 		r = origin();
 	"#;
-    let res = compile_semantic_source(program);
-    assert!(res.is_err());
+    let err = compile_semantic_source(program).expect_err("expected duplicate classstar import");
+    assert_import_ambiguity_error(&err);
 }
 
 #[test]

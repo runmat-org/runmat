@@ -349,6 +349,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_builtins::Tensor;
+    use std::sync::Arc;
 
     #[test]
     fn fzero_bracketed_builtin_handle() {
@@ -389,6 +390,35 @@ mod tests {
         .unwrap();
         match root {
             Value::Num(n) => assert!(n.abs() < 1.0e-6),
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fzero_accepts_semantic_function_handle_callback() {
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |function, args, requested_outputs| {
+                assert_eq!(function, 42);
+                assert_eq!(requested_outputs, 1);
+                let x = match &args[0] {
+                    Value::Num(value) => *value,
+                    other => panic!("expected scalar numeric argument, got {other:?}"),
+                };
+                Box::pin(async move { Ok(Value::Num(x - 2.0)) })
+            },
+        )));
+
+        let root = block_on(fzero_builtin(
+            Value::SemanticFunctionHandle {
+                name: "semantic_root".to_string(),
+                function: 42,
+            },
+            Value::Num(0.0),
+            Vec::new(),
+        ))
+        .unwrap();
+        match root {
+            Value::Num(n) => assert!((n - 2.0).abs() < 1.0e-6),
             other => panic!("unexpected value {other:?}"),
         }
     }

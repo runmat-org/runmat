@@ -121,6 +121,7 @@ impl RunMatSession {
             workspace_version: 0,
             emit_fusion_plan: false,
             compat_mode: CompatMode::Matlab,
+            top_level_await_enabled: true,
             format_mode: runmat_builtins::FormatMode::default(),
         };
 

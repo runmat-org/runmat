@@ -74,13 +74,10 @@ fn execute_request_uses_request_workspace_handle() {
             name: "request-test.m".to_string(),
             text: "requested = 7;".to_string(),
         },
-        entrypoint: abi::EntrypointSelector::SourcePath("request-test.m".to_string()),
-        compatibility: runmat_hir::CompatibilityMode::Interactive,
+        compatibility: CompatMode::Matlab,
         host_policy: abi::HostExecutionPolicy::default(),
-        inputs: abi::RuntimeFlow::NoValue,
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace,
-        resolver: abi::ResolverHandle(uuid::Uuid::from_u128(8)),
     }))
     .expect("exec succeeds");
 
@@ -101,18 +98,39 @@ fn execute_request_honors_zero_requested_outputs() {
             name: "request-zero-output.m".to_string(),
             text: "1 + 1".to_string(),
         },
-        entrypoint: abi::EntrypointSelector::SourcePath("request-zero-output.m".to_string()),
-        compatibility: runmat_hir::CompatibilityMode::Interactive,
+        compatibility: CompatMode::Matlab,
         host_policy: abi::HostExecutionPolicy::default(),
-        inputs: abi::RuntimeFlow::NoValue,
         requested_outputs: runmat_hir::RequestedOutputCount::Zero,
         workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(9)),
-        resolver: abi::ResolverHandle(uuid::Uuid::from_u128(10)),
     }))
     .expect("exec succeeds");
 
     assert!(outcome.flow.is_no_value());
     assert_eq!(outcome.display_events.len(), 1);
+}
+
+#[test]
+fn execute_request_honors_top_level_await_host_policy() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let err = block_on(session.execute_request(abi::ExecutionRequest {
+        source: abi::SourceInput::Text {
+            name: "request-await-policy.m".to_string(),
+            text: "y = await(1);".to_string(),
+        },
+        compatibility: CompatMode::Matlab,
+        host_policy: abi::HostExecutionPolicy {
+            top_level_await: false,
+            ..abi::HostExecutionPolicy::default()
+        },
+        requested_outputs: runmat_hir::RequestedOutputCount::Zero,
+        workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(11)),
+    }))
+    .expect_err("request should reject top-level await when host policy disables it");
+
+    assert!(
+        err.to_string().contains("await is only allowed"),
+        "unexpected top-level-await policy error: {err}"
+    );
 }
 
 #[test]
@@ -512,8 +530,8 @@ fn end_expression_user_function_call_uses_semantic_identity() {
             runmat_vm::Instr::IndexSliceExpr { end_numeric_exprs, .. }
                 if end_numeric_exprs.iter().any(|(_, expr)| matches!(
                     expr,
-                    runmat_vm::EndExpr::ResolvedCall { display_name, .. }
-                        if display_name.as_deref() == Some("pick")
+                    runmat_vm::EndExpr::ResolvedCall { identity, .. }
+                        if identity.display_name().as_deref() == Some("pick")
                 ))
         )),
         "end-expression user calls should carry semantic function identity"
@@ -540,8 +558,8 @@ fn end_expression_session_function_call_uses_semantic_identity() {
             runmat_vm::Instr::IndexSliceExpr { end_numeric_exprs, .. }
                 if end_numeric_exprs.iter().any(|(_, expr)| matches!(
                     expr,
-                    runmat_vm::EndExpr::ResolvedCall { display_name, .. }
-                        if display_name.as_deref() == Some("pick")
+                    runmat_vm::EndExpr::ResolvedCall { identity, .. }
+                        if identity.display_name().as_deref() == Some("pick")
                 ))
         )),
         "session end-expression user calls should carry semantic function identity"
@@ -1880,11 +1898,11 @@ fn dotted_member_index_call_uses_semantic_vm() {
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
             runmat_vm::Instr::CallMethodOrMemberIndexMulti {
-                display_name,
+                identity,
                 arg_count: 1,
                 out_count: 1,
                 ..
-            } if display_name.as_deref() == Some("a")
+            } if identity.display_name().as_deref() == Some("a")
         )),
         "dotted member index call should lower to typed method/member-index bytecode"
     );
@@ -1910,8 +1928,8 @@ fn dotted_member_index_expansion_uses_semantic_vm() {
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { display_name, out_count: 1, .. }
-                if display_name.as_deref() == Some("a")
+            runmat_vm::Instr::CallMethodOrMemberIndexExpandMultiOutput { identity, out_count: 1, .. }
+                if identity.display_name().as_deref() == Some("a")
         )),
         "expanded dotted member index call should lower to typed expansion bytecode"
     );

@@ -87,26 +87,18 @@ pub enum ImportedBuiltinResolution {
     NotFound,
 }
 
-fn imported_builtin_qualified_name(path: &[String], leaf: Option<&str>) -> String {
+fn imported_builtin_qualified_name(path: &[String], leaf: Option<&str>) -> Option<String> {
+    if path.iter().any(|segment| segment.is_empty()) {
+        return None;
+    }
     let mut segments: Vec<SymbolName> = path
         .iter()
-        .filter(|segment| !segment.is_empty())
         .map(|segment| SymbolName(segment.clone()))
         .collect();
     if let Some(leaf) = leaf {
         segments.push(SymbolName(leaf.to_string()));
     }
-    QualifiedName(segments).display_name().unwrap_or_else(|| {
-        if let Some(leaf) = leaf {
-            if path.is_empty() {
-                leaf.to_string()
-            } else {
-                format!("{}.{}", path.join("."), leaf)
-            }
-        } else {
-            path.join(".")
-        }
-    })
+    QualifiedName(segments).display_name()
 }
 
 pub async fn resolve_imported_builtin(
@@ -121,7 +113,9 @@ pub async fn resolve_imported_builtin(
             continue;
         }
         if path.last().map(|s| s.as_str()) == Some(name) {
-            let qual = imported_builtin_qualified_name(path, None);
+            let Some(qual) = imported_builtin_qualified_name(path, None) else {
+                continue;
+            };
             let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
             let result = runmat_runtime::call_builtin_async_with_outputs(
                 &qual,
@@ -154,7 +148,9 @@ pub async fn resolve_imported_builtin(
         if !*wildcard || path.is_empty() {
             continue;
         }
-        let qual = imported_builtin_qualified_name(path, Some(name));
+        let Some(qual) = imported_builtin_qualified_name(path, Some(name)) else {
+            continue;
+        };
         let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
         let result =
             runmat_runtime::call_builtin_async_with_outputs(&qual, &qual_args, requested_outputs)
@@ -195,5 +191,31 @@ pub fn rethrow_without_explicit_exception(
             None
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::imported_builtin_qualified_name;
+
+    #[test]
+    fn imported_builtin_qualified_name_uses_typed_segments() {
+        let specific = imported_builtin_qualified_name(&["PkgF".into(), "foo".into()], None);
+        assert_eq!(specific.as_deref(), Some("PkgF.foo"));
+
+        let wildcard = imported_builtin_qualified_name(&["PkgF".into()], Some("foo"));
+        assert_eq!(wildcard.as_deref(), Some("PkgF.foo"));
+    }
+
+    #[test]
+    fn imported_builtin_qualified_name_ignores_empty_segments_without_fallback() {
+        let empty = imported_builtin_qualified_name(&[], None);
+        assert_eq!(empty, None);
+
+        let only_empty = imported_builtin_qualified_name(&["".into()], None);
+        assert_eq!(only_empty, None);
+
+        let mixed_empty = imported_builtin_qualified_name(&["PkgF".into(), "".into()], Some("foo"));
+        assert_eq!(mixed_empty, None);
     }
 }

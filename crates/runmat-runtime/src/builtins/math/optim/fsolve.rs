@@ -420,4 +420,32 @@ mod tests {
         }
         assert!(!seen_shapes.lock().unwrap().is_empty());
     }
+
+    #[test]
+    fn fsolve_accepts_semantic_function_handle_callback() {
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |function, args, requested_outputs| {
+                assert_eq!(function, 43);
+                assert_eq!(requested_outputs, 1);
+                let x = match &args[0] {
+                    Value::Num(value) => *value,
+                    other => panic!("expected scalar numeric argument, got {other:?}"),
+                };
+                Box::pin(async move { Ok(Value::Num(x - 3.0)) })
+            },
+        )));
+        let root = block_on(fsolve_builtin(
+            Value::SemanticFunctionHandle {
+                name: "semantic_system".to_string(),
+                function: 43,
+            },
+            Value::Num(1.0),
+            Vec::new(),
+        ))
+        .unwrap();
+        match root {
+            Value::Num(n) => assert!((n - 3.0).abs() < 1.0e-5),
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
 }

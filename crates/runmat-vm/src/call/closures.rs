@@ -15,16 +15,31 @@ fn dynamic_identity(name: String) -> CallableIdentity {
     CallableIdentity::DynamicName(SymbolName(name))
 }
 
+fn method_member_name(identity: &CallableIdentity) -> Option<String> {
+    match identity {
+        CallableIdentity::DynamicName(runmat_hir::SymbolName(name)) => {
+            (!name.is_empty()).then_some(name.clone())
+        }
+        CallableIdentity::Method(runmat_hir::MethodId(name)) => {
+            (!name.is_empty()).then_some(name.clone())
+        }
+        CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments))
+            if segments.len() == 1 && !segments[0].0.is_empty() =>
+        {
+            Some(segments[0].0.clone())
+        }
+        _ => None,
+    }
+}
+
 async fn call_identity_with_policy(
     identity: CallableIdentity,
-    display_name: Option<String>,
     args: Vec<Value>,
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
     execute_callable_descriptor(CallableDescriptor::resolved(
         identity,
-        display_name,
         args,
         requested_outputs,
         fallback_policy,
@@ -35,14 +50,12 @@ async fn call_identity_with_policy(
 
 async fn try_call_identity_with_policy(
     identity: CallableIdentity,
-    display_name: Option<String>,
     args: Vec<Value>,
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Option<Value>, RuntimeError> {
     try_execute_callable_descriptor(CallableDescriptor::resolved(
         identity,
-        display_name,
         args,
         requested_outputs,
         fallback_policy,
@@ -76,7 +89,6 @@ async fn call_member_index_on_object_like(
         full_args.extend(args.iter().cloned());
         return call_identity_with_policy(
             dynamic_identity(m.function_name.clone()),
-            Some(m.function_name),
             full_args,
             requested_outputs,
             CallableFallbackPolicy::RuntimeNameResolution,
@@ -88,10 +100,8 @@ async fn call_member_index_on_object_like(
     method_args.push(receiver.clone());
     method_args.extend(args.iter().cloned());
     let qualified_identity = external_qualified_identity(class_name, &name);
-    let qualified_display_name = external_qualified_display_name(class_name, &name);
     if let Some(v) = try_call_identity_with_policy(
         qualified_identity.clone(),
-        Some(qualified_display_name.clone()),
         method_args.clone(),
         requested_outputs,
         CallableFallbackPolicy::ExternalBoundary,
@@ -102,7 +112,6 @@ async fn call_member_index_on_object_like(
     }
     if let Some(v) = try_call_identity_with_policy(
         dynamic_identity(name.clone()),
-        Some(name.clone()),
         method_args.clone(),
         requested_outputs,
         CallableFallbackPolicy::ObjectDispatch,
@@ -114,7 +123,6 @@ async fn call_member_index_on_object_like(
 
     match call_identity_with_policy(
         qualified_identity,
-        Some(qualified_display_name),
         method_args.clone(),
         requested_outputs,
         CallableFallbackPolicy::ExternalBoundary,
@@ -128,7 +136,6 @@ async fn call_member_index_on_object_like(
 
     match call_identity_with_policy(
         dynamic_identity(name.clone()),
-        Some(name.clone()),
         method_args,
         requested_outputs,
         post_object_fallback,
@@ -207,10 +214,7 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
                     captures: vec![],
                 }));
             }
-            let qualified_identity = external_qualified_identity(&cls, &name);
-            let Some(qualified_name) = qualified_identity.display_name() else {
-                return Err(format!("Unknown static method '{}' on class {}", name, cls).into());
-            };
+            let qualified_name = external_qualified_display_name(&cls, &name);
             if builtin_functions().iter().any(|b| b.name == qualified_name) {
                 Ok(Value::Closure(Closure {
                     semantic_function:
@@ -231,19 +235,16 @@ pub fn load_method_closure(base: Value, name: String) -> Result<Value, RuntimeEr
 pub async fn call_method_or_member_index_with_outputs(
     base: Value,
     identity: CallableIdentity,
-    display_name: Option<String>,
     args: Vec<Value>,
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
-    let name = display_name
-        .or_else(|| identity.display_name())
-        .ok_or_else(|| {
-            mex(
-                "UndefinedFunction",
-                "method/member-index call missing callable name",
-            )
-        })?;
+    let name = method_member_name(&identity).ok_or_else(|| {
+        mex(
+            "UndefinedFunction",
+            "method/member-index call missing callable name",
+        )
+    })?;
     match base {
         Value::Object(obj) => {
             let class_name = obj.class_name.clone();
@@ -276,7 +277,6 @@ pub async fn call_method_or_member_index_with_outputs(
                 }
                 return call_identity_with_policy(
                     dynamic_identity(m.function_name.clone()),
-                    Some(m.function_name),
                     args,
                     requested_outputs,
                     CallableFallbackPolicy::RuntimeNameResolution,
@@ -285,10 +285,8 @@ pub async fn call_method_or_member_index_with_outputs(
             }
 
             let qualified_identity = external_qualified_identity(&cls, &name);
-            let qualified_display_name = external_qualified_display_name(&cls, &name);
             call_identity_with_policy(
                 qualified_identity,
-                Some(qualified_display_name),
                 args,
                 requested_outputs,
                 CallableFallbackPolicy::ExternalBoundary,
@@ -324,7 +322,6 @@ mod tests {
         let value = block_on(call_method_or_member_index_with_outputs(
             Value::ClassRef("Point".to_string()),
             CallableIdentity::DynamicName(SymbolName("remote_inc".to_string())),
-            Some("remote_inc".to_string()),
             vec![Value::Num(2.0)],
             1,
             CallableFallbackPolicy::ObjectDispatch,
@@ -338,12 +335,24 @@ mod tests {
         let err = block_on(call_method_or_member_index_with_outputs(
             Value::ClassRef("Point".to_string()),
             CallableIdentity::DynamicName(SymbolName("sqrt".to_string())),
-            Some("sqrt".to_string()),
             vec![Value::Num(9.0)],
             1,
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect_err("classref external call should not fallback to builtin name resolution");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
+    fn method_member_call_rejects_identity_without_method_name() {
+        let err = block_on(call_method_or_member_index_with_outputs(
+            Value::ClassRef("Point".to_string()),
+            CallableIdentity::AnonymousFunction(runmat_hir::FunctionId(12)),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::ObjectDispatch,
+        ))
+        .expect_err("anonymous identity should not be used for method/member call");
         assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
     }
 }

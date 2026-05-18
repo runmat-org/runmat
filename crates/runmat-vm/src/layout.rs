@@ -290,7 +290,7 @@ mod tests {
         EntrypointPolicy, FunctionKind, FunctionModifiers, FunctionName, HirBinding, HirBlock,
         HirEntrypoint, HirFunction, ModuleId, Span,
     };
-    use runmat_mir::{MirBody, MirLocal, MirLocalKind, MirSourceMap};
+    use runmat_mir::{MirBody, MirLocal, MirLocalKind};
 
     #[test]
     fn layout_reuses_shared_input_output_binding_slot() {
@@ -344,7 +344,6 @@ mod tests {
                         span: Span::default(),
                     }],
                     blocks: vec![],
-                    source_map: MirSourceMap::default(),
                 },
             )]),
         };
@@ -444,7 +443,6 @@ mod tests {
                         },
                     ],
                     blocks: vec![],
-                    source_map: MirSourceMap::default(),
                 },
             )]),
         };

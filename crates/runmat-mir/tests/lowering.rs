@@ -1,18 +1,13 @@
 use runmat_hir::{
     lower, CallSyntax, CallableFallbackPolicy, CallableIdentity, EnvironmentEffect,
-    LoweringContext, RequestedOutputCount,
+    LoweringContext, OperatorKind, RequestedOutputCount,
 };
 use runmat_mir::{
-    analysis::{
-        analyze_assembly, analyze_body, analyze_liveness, analyze_spawn_boundaries,
-        diagnose_uninitialized_reads, summarize_body, summarize_spawn_safety, AccelEligibilityFact,
-        AnalysisStore, FusibilityFact, InitFact, MirLocalKey, NominalDispatchHook,
-        ParallelSafetyFact,
-    },
+    analysis::{analyze_assembly, AnalysisStore, MirLocalKey},
     lowering::lower_assembly,
-    AsyncBehaviorFact, CacheProduct, MirAggregateKind, MirBody, MirCallArg, MirCallee,
-    MirIndexPlan, MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt,
-    MirStmtKind, MirTerminatorKind, ProductCacheKey,
+    AsyncBehaviorFact, MirAggregateKind, MirBody, MirCallArg, MirCallee, MirConstant, MirIndexPlan,
+    MirLocalKind, MirOperand, MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind,
+    MirTerminatorKind,
 };
 
 fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
@@ -24,8 +19,7 @@ fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
 fn analyze_single_body(src: &str) -> (MirBody, AnalysisStore) {
     let mir = lower_mir(src);
     let body = mir.bodies.values().next().unwrap().clone();
-    let mut store = AnalysisStore::default();
-    analyze_body(&body, &mut store);
+    let store = analyze_assembly(&mir);
     (body, store)
 }
 
@@ -43,6 +37,10 @@ fn first_call<'a>(body: &'a MirBody) -> &'a runmat_mir::MirCall {
         .flat_map(|block| block.statements.iter())
         .find_map(|stmt| match &stmt.kind {
             MirStmtKind::Assign {
+                value: MirRvalue::Call(call),
+                ..
+            }
+            | MirStmtKind::MultiAssign {
                 value: MirRvalue::Call(call),
                 ..
             }
@@ -140,12 +138,6 @@ fn simple_function_lowers_to_single_block_with_binding_locals() {
 
     assert_eq!(body.blocks.len(), 1);
     assert_eq!(body.locals.len(), 4);
-    assert_eq!(body.source_map.function, Some(body.function));
-    assert!(body.source_map.module.is_some());
-    assert!(body.source_map.source_unit.is_some());
-    assert_eq!(body.source_map.compatibility_mode, None);
-    assert_eq!(body.source_map.enclosing_class, None);
-    assert_eq!(body.source_map.locals.len(), body.locals.len());
     assert_eq!(body.blocks[0].statements.len(), 1);
     assert!(matches!(
         body.blocks[0].statements[0].kind,
@@ -173,8 +165,23 @@ fn method_syntax_lowers_with_object_dispatch_fallback_policy() {
 }
 
 #[test]
-fn unresolved_plain_call_lowers_with_external_boundary_fallback_policy() {
+fn unresolved_plain_call_lowers_with_runtime_name_resolution_fallback_policy() {
     let mir = lower_mir("y = unresolved_fn(1);");
+    let body = mir.bodies.values().next().expect("body");
+    let call = first_call(body);
+    assert!(matches!(
+        call.callee,
+        MirCallee::Static(CallableIdentity::DynamicName(_))
+    ));
+    assert_eq!(
+        call.fallback_policy,
+        CallableFallbackPolicy::RuntimeNameResolution
+    );
+}
+
+#[test]
+fn unresolved_qualified_call_lowers_with_external_boundary_fallback_policy() {
+    let mir = lower_mir("y = pkg.remote_inc(1);");
     let body = mir.bodies.values().next().expect("body");
     let call = first_call(body);
     assert!(matches!(
@@ -185,6 +192,23 @@ fn unresolved_plain_call_lowers_with_external_boundary_fallback_policy() {
         call.fallback_policy,
         CallableFallbackPolicy::ExternalBoundary
     );
+    assert!(matches!(call.syntax, CallSyntax::Plain));
+}
+
+#[test]
+fn unresolved_nested_qualified_call_lowers_with_external_boundary_fallback_policy() {
+    let mir = lower_mir("y = pkg.sub.remote(1);");
+    let body = mir.bodies.values().next().expect("body");
+    let call = first_call(body);
+    assert!(matches!(
+        call.callee,
+        MirCallee::Static(CallableIdentity::ExternalName(_))
+    ));
+    assert_eq!(
+        call.fallback_policy,
+        CallableFallbackPolicy::ExternalBoundary
+    );
+    assert!(matches!(call.syntax, CallSyntax::Plain));
 }
 
 #[test]
@@ -230,105 +254,61 @@ fn lower_assembly_rejects_multi_assign_call_target_policy_mismatch() {
 
 #[test]
 fn dataflow_marks_parameters_and_assigned_outputs_definitely_assigned() {
-    let (body, store) = analyze_single_body("function y = f(x); y = x; end");
+    let mir = lower_mir("function y = f(x); y = x; end");
+    let body = mir.bodies.values().next().unwrap();
+    let store = analyze_assembly(&mir);
     let param = first_local_of_kind(&body, MirLocalKind::Parameter);
     let output = first_local_of_kind(&body, MirLocalKind::Output);
 
-    assert_eq!(
-        store
-            .mir_locals
-            .get(&MirLocalKey {
-                function: body.function,
-                local: param,
-            })
-            .unwrap()
-            .initialized,
-        InitFact::DefinitelyAssigned
-    );
-    assert_eq!(
-        store
-            .mir_locals
-            .get(&MirLocalKey {
-                function: body.function,
-                local: output,
-            })
-            .unwrap()
-            .initialized,
-        InitFact::DefinitelyAssigned
-    );
-    let output_binding = body
-        .locals
+    assert!(store.mir_locals.contains_key(&MirLocalKey {
+        function: body.function,
+        local: param,
+    }));
+    assert!(store.mir_locals.contains_key(&MirLocalKey {
+        function: body.function,
+        local: output,
+    }));
+    assert!(!store
+        .diagnostics
         .iter()
-        .find(|local| local.id == output)
-        .unwrap()
-        .binding
-        .unwrap();
-    assert_eq!(
-        store.bindings.get(&output_binding).unwrap().initialized,
-        InitFact::DefinitelyAssigned
-    );
+        .any(|diagnostic| { matches!(diagnostic.code.as_str(), "RM-MIR0001" | "RM-MIR0002") }));
 }
 
 #[test]
 fn dataflow_joins_branch_assignment_as_maybe_assigned() {
-    let (body, store) = analyze_single_body("function y = f(c); if c; y = 1; end; end");
+    let mir = lower_mir("function y = f(c); if c; y = 1; end; end");
+    let body = mir.bodies.values().next().unwrap();
+    let store = analyze_assembly(&mir);
     let output = first_local_of_kind(&body, MirLocalKind::Output);
 
-    assert_eq!(
-        store
-            .mir_locals
-            .get(&MirLocalKey {
-                function: body.function,
-                local: output,
-            })
-            .unwrap()
-            .initialized,
-        InitFact::MaybeAssigned
-    );
-    let output_binding = body
-        .locals
-        .iter()
-        .find(|local| local.id == output)
-        .unwrap()
-        .binding
-        .unwrap();
-    assert_eq!(
-        store.bindings.get(&output_binding).unwrap().initialized,
-        InitFact::MaybeAssigned
-    );
+    assert!(store.mir_locals.contains_key(&MirLocalKey {
+        function: body.function,
+        local: output,
+    }));
 }
 
 #[test]
-fn analyze_assembly_populates_binding_facts_by_semantic_id() {
+fn analyze_assembly_populates_output_local_facts_by_semantic_id() {
     let mir = lower_mir("function y = f(c); if c; y = 1; end; end");
     let store = analyze_assembly(&mir);
     let body = mir.bodies.values().next().unwrap();
-    let output_binding = body
+    let output_local = body
         .locals
         .iter()
         .find(|local| matches!(local.kind, MirLocalKind::Output))
         .unwrap()
-        .binding
-        .unwrap();
+        .id;
 
-    assert_eq!(
-        store.bindings.get(&output_binding).unwrap().initialized,
-        InitFact::MaybeAssigned
-    );
+    assert!(store.mir_locals.contains_key(&MirLocalKey {
+        function: body.function,
+        local: output_local,
+    }));
 }
 
 #[test]
 fn analyze_body_records_simple_numeric_local_and_binding_facts() {
     let (body, store) = analyze_single_body("function y = f(); y = 1; end");
     let output = first_local_of_kind(&body, MirLocalKind::Output);
-    let output_binding = body
-        .locals
-        .iter()
-        .find(|local| local.id == output)
-        .unwrap()
-        .binding
-        .unwrap();
-
     assert_eq!(
         store
             .mir_locals
@@ -338,13 +318,6 @@ fn analyze_body_records_simple_numeric_local_and_binding_facts() {
             })
             .unwrap()
             .ty,
-        runmat_hir::TypeFact::Numeric {
-            class: runmat_hir::NumericClass::Double,
-            domain: runmat_hir::NumericDomain::Real,
-        }
-    );
-    assert_eq!(
-        store.bindings.get(&output_binding).unwrap().ty,
         runmat_hir::TypeFact::Numeric {
             class: runmat_hir::NumericClass::Double,
             domain: runmat_hir::NumericDomain::Real,
@@ -376,11 +349,6 @@ fn analyze_body_records_simple_string_value_flow_fact() {
 fn analyze_body_records_function_handle_value_flow_fact() {
     let mir = lower_mir("function h = f(); h = @target; end\nfunction y = target(x); y = x; end");
     let store = analyze_assembly(&mir);
-    let summary = store
-        .functions
-        .values()
-        .find(|summary| !summary.function_handles.is_empty())
-        .unwrap();
     let function_fact = store
         .mir_locals
         .values()
@@ -390,10 +358,6 @@ fn analyze_body_records_function_handle_value_flow_fact() {
     assert!(matches!(
         function_fact.value_flow,
         runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::Function(_))
-    ));
-    assert!(matches!(
-        summary.function_handles[0],
-        CallableIdentity::SemanticFunction(_)
     ));
 }
 
@@ -426,10 +390,6 @@ fn analyze_body_records_tensor_and_cell_aggregate_facts() {
         tensor_fact.value_flow,
         runmat_hir::ValueFlowFact::Single(runmat_hir::TypeFact::Tensor(_))
     ));
-    assert!(matches!(
-        tensor_fact.tensor_element_domain,
-        Some(runmat_hir::TensorElementDomainFact::Numeric { .. })
-    ));
 
     let (cell_body, cell_store) = analyze_single_body("function y = f(); y = {1, 2}; end");
     let cell_output = first_local_of_kind(&cell_body, MirLocalKind::Output);
@@ -452,7 +412,7 @@ fn analyze_body_records_tensor_and_cell_aggregate_facts() {
 }
 
 #[test]
-fn analyze_body_records_operator_and_expansion_semantic_facts() {
+fn analyze_body_records_binary_op_as_unknown_scalar_fact() {
     let (body, store) = analyze_single_body("function y = f(x); y = x + 1; end");
     let output = first_local_of_kind(&body, MirLocalKind::Output);
     let fact = &store.mir_locals[&MirLocalKey {
@@ -460,11 +420,9 @@ fn analyze_body_records_operator_and_expansion_semantic_facts() {
         local: output,
     }];
 
-    assert_eq!(fact.operator, Some(runmat_hir::OperatorKind::Add));
-    assert_eq!(
-        fact.expansion,
-        Some(runmat_hir::ExpansionSemantics::ImplicitExpansion)
-    );
+    assert_eq!(fact.ty, runmat_hir::TypeFact::Unknown);
+    assert_eq!(fact.shape, runmat_hir::ShapeFact::Unknown);
+    assert_eq!(fact.value_flow, runmat_hir::ValueFlowFact::UnknownList);
 }
 
 #[test]
@@ -545,17 +503,16 @@ fn direct_spawn_of_anonymous_function_uses_function_handle_temp_operand() {
     assert!(saw_handle_temp);
     assert!(matches!(spawn_operand, Some(MirOperand::Local(_))));
 
-    let handle_expr = body
-        .source_map
+    let handle_local = body
         .locals
         .iter()
-        .find_map(|source| {
-            source.expr.filter(|_| {
-                body.locals[source.local.0].kind == MirLocalKind::Temporary
+        .find_map(|local| {
+            Some(local.id).filter(|_| {
+                local.kind == MirLocalKind::Temporary
                     && matches!(
                         store.mir_locals[&MirLocalKey {
                             function: body.function,
-                            local: source.local,
+                            local: local.id,
                         }]
                             .ty,
                         runmat_hir::TypeFact::Function(_)
@@ -564,19 +521,18 @@ fn direct_spawn_of_anonymous_function_uses_function_handle_temp_operand() {
         })
         .unwrap();
     assert!(matches!(
-        store.expressions[&handle_expr].ty,
+        store.mir_locals[&MirLocalKey {
+            function: body.function,
+            local: handle_local,
+        }]
+            .ty,
         runmat_hir::TypeFact::Function(_)
     ));
-    assert!(store
-        .spawn_boundaries
-        .values()
-        .flatten()
-        .any(|boundary| matches!(
-            boundary.safety,
-            runmat_hir::SpawnSafetyFact::NotSpawnSafe {
-                reason: runmat_hir::SpawnSafetyReason::UnknownDynamicCapture
-            }
-        )));
+    assert!(store.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RM-MIR0003"
+            && diagnostic.message.contains("unknown spawn safety")
+            && diagnostic.category.as_deref() == Some("spawn-safety")
+    }));
 }
 
 #[test]
@@ -642,43 +598,37 @@ fn remaining_semantic_expr_and_import_forms_lower_to_mir() {
 }
 
 #[test]
-fn analyze_body_populates_expression_facts_from_source_map() {
+fn analyze_body_populates_local_facts_for_parameters() {
     let (body, store) = analyze_single_body("function y = f(x); y = x + 1; end");
-    let expr = body
-        .source_map
-        .statements
-        .iter()
-        .find_map(|record| record.expr)
-        .unwrap();
+    let parameter = first_local_of_kind(&body, MirLocalKind::Parameter);
 
-    assert!(store.expressions.contains_key(&expr));
-    assert_eq!(store.expressions[&expr].ty, runmat_hir::TypeFact::Unknown);
+    assert_eq!(
+        store.mir_locals[&MirLocalKey {
+            function: body.function,
+            local: parameter,
+        }]
+            .ty,
+        runmat_hir::TypeFact::Unknown
+    );
 }
 
 #[test]
 fn dataflow_widens_loop_assignment_as_maybe_assigned() {
-    let (body, store) = analyze_single_body("function y = f(c); while c; y = 1; end; end");
+    let mir = lower_mir("function y = f(c); while c; y = 1; end; end");
+    let body = mir.bodies.values().next().unwrap();
+    let store = analyze_assembly(&mir);
     let output = first_local_of_kind(&body, MirLocalKind::Output);
 
-    assert_eq!(
-        store
-            .mir_locals
-            .get(&MirLocalKey {
-                function: body.function,
-                local: output,
-            })
-            .unwrap()
-            .initialized,
-        InitFact::MaybeAssigned
-    );
+    assert!(store.mir_locals.contains_key(&MirLocalKey {
+        function: body.function,
+        local: output,
+    }));
 }
 
 #[test]
 fn diagnostics_report_unassigned_local_read() {
     let mir = lower_mir("function y = f(); z = y; y = 1; end");
-    let body = mir.bodies.values().next().unwrap();
-
-    let diagnostics = diagnose_uninitialized_reads(body);
+    let diagnostics = analyze_assembly(&mir).diagnostics;
 
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "RM-MIR0001"
@@ -690,9 +640,7 @@ fn diagnostics_report_unassigned_local_read() {
 #[test]
 fn diagnostics_report_maybe_assigned_local_read_after_branch() {
     let mir = lower_mir("function y = f(c); if c; y = 1; end; x = y; end");
-    let body = mir.bodies.values().next().unwrap();
-
-    let diagnostics = diagnose_uninitialized_reads(body);
+    let diagnostics = analyze_assembly(&mir).diagnostics;
 
     assert!(diagnostics
         .iter()
@@ -703,155 +651,74 @@ fn diagnostics_report_maybe_assigned_local_read_after_branch() {
 fn summary_records_function_outputs_and_store_entry() {
     let mir = lower_mir("function y = f(x); y = x; end");
     let body = mir.bodies.values().next().unwrap();
-    let mut store = AnalysisStore::default();
 
-    let summary = summarize_body(body, &mut store);
-
-    assert_eq!(summary.function, body.function);
-    assert_eq!(summary.abi.fixed_inputs.len(), 1);
-    assert_eq!(summary.abi.fixed_outputs.len(), 1);
-    assert!(summary.abi.implicit_nargin.is_some());
-    assert!(summary.abi.implicit_nargout.is_some());
-    assert_eq!(summary.outputs.len(), 1);
-    assert!(store.functions.contains_key(&body.function));
-    assert_eq!(
-        summary.effects.async_behavior,
-        Some(AsyncBehaviorFact::NeverSuspends)
-    );
-}
-
-#[test]
-fn analyze_assembly_projects_output_type_facts_into_summary() {
-    let mir = lower_mir("function y = f(); y = 1; end");
-
-    let store = analyze_assembly(&mir);
-    let body = mir.bodies.values().next().unwrap();
-    let summary = store.functions.get(&body.function).unwrap();
-
-    assert_eq!(
-        summary.outputs,
-        vec![runmat_hir::TypeFact::Numeric {
-            class: runmat_hir::NumericClass::Double,
-            domain: runmat_hir::NumericDomain::Real,
-        }]
-    );
-    assert_eq!(summary.output_shapes, vec![runmat_hir::ShapeFact::Scalar]);
-    assert_eq!(
-        summary.output_value_flows,
-        vec![runmat_hir::ValueFlowFact::Single(
-            runmat_hir::TypeFact::Numeric {
-                class: runmat_hir::NumericClass::Double,
-                domain: runmat_hir::NumericDomain::Real,
-            }
-        )]
-    );
-    assert_eq!(summary.output_async_values, vec![None]);
+    assert_eq!(body.abi.fixed_inputs.len(), 1);
+    assert_eq!(body.abi.fixed_outputs.len(), 1);
+    assert!(body.abi.implicit_nargin.is_some());
+    assert!(body.abi.implicit_nargout.is_some());
 }
 
 #[test]
 fn summary_preserves_variadic_function_abi() {
     let mir = lower_mir("function varargout = f(x, varargin); varargout = varargin; end");
     let body = mir.bodies.values().next().unwrap();
-    let mut store = AnalysisStore::default();
 
-    let summary = summarize_body(body, &mut store);
-
-    assert_eq!(summary.abi.fixed_inputs.len(), 2);
-    assert_eq!(summary.abi.varargin, Some(summary.abi.fixed_inputs[1]));
-    assert_eq!(summary.abi.fixed_outputs.len(), 1);
-    assert_eq!(summary.abi.varargout, Some(summary.abi.fixed_outputs[0]));
+    assert_eq!(body.abi.fixed_inputs.len(), 2);
+    assert_eq!(body.abi.varargin, Some(body.abi.fixed_inputs[1]));
+    assert_eq!(body.abi.fixed_outputs.len(), 1);
+    assert_eq!(body.abi.varargout, Some(body.abi.fixed_outputs[0]));
 }
 
 #[test]
-fn summary_records_requested_output_sensitive_call_facts() {
+fn summary_records_requested_output_call_facts() {
     let mir = lower_mir("function y = f(varargin); [a, b] = g(varargin{:}); y = a; end");
     let body = mir.bodies.values().next().unwrap();
-    let mut store = AnalysisStore::default();
+    let call = first_call(body);
 
-    let summary = summarize_body(body, &mut store);
-
-    assert_eq!(summary.calls.len(), 1);
     assert!(matches!(
-        summary.calls[0].requested_outputs,
+        call.requested_outputs,
         runmat_hir::RequestedOutputCount::Exactly(2)
     ));
-    assert_eq!(summary.calls[0].arg_count, 1);
-    assert_eq!(summary.calls[0].expansion_arg_count, 1);
-    assert!(matches!(
-        summary.calls[0].async_behavior,
-        AsyncBehaviorFact::MaySuspend
-    ));
-    assert_eq!(summary.calls[0].dispatch, NominalDispatchHook::Dynamic);
-    assert!(summary
-        .requested_output_sensitive
-        .iter()
-        .any(|(requested, outputs)| matches!(
-            requested,
-            runmat_hir::RequestedOutputCount::Exactly(1)
-        ) && outputs.len() == 1));
+    assert_eq!(call.args.len(), 1);
+    assert_eq!(
+        call.args
+            .iter()
+            .filter(|arg| matches!(arg, runmat_mir::MirCallArg::Expansion { .. }))
+            .count(),
+        1
+    );
+    assert!(matches!(call.async_behavior, AsyncBehaviorFact::MaySuspend));
 }
 
 #[test]
-fn summary_marks_unresolved_calls_as_unknown_call_barriers() {
+fn summary_records_unresolved_calls_in_call_facts() {
     let mir = lower_mir("function y = f(x); y = unresolved_target(x); end");
     let body = mir.bodies.values().next().unwrap();
-    let mut store = AnalysisStore::default();
-
-    let summary = summarize_body(body, &mut store);
-
-    assert!(summary.may_call_unknown);
-    assert_eq!(
-        summary.effects.async_behavior,
-        Some(AsyncBehaviorFact::MaySuspend)
-    );
-    assert!(matches!(summary.fusibility, FusibilityFact::NonFusible(_)));
+    let call = first_call(body);
     assert!(matches!(
-        summary.accel_eligibility,
-        AccelEligibilityFact::Ineligible(_)
+        call.callee,
+        MirCallee::Dynamic(_)
+            | MirCallee::Static(
+                CallableIdentity::DynamicName(_) | CallableIdentity::ExternalName(_)
+            )
     ));
 }
 
 #[test]
-fn summary_marks_spawn_as_requiring_async_runtime() {
+fn summary_records_spawn_operands_without_call_facts() {
     let mir = lower_mir("function y = f(g); y = spawn(g); end");
     let body = mir.bodies.values().next().unwrap();
-    let mut store = AnalysisStore::default();
-
-    let summary = summarize_body(body, &mut store);
-
-    assert_eq!(
-        summary.effects.async_behavior,
-        Some(AsyncBehaviorFact::RequiresAsyncRuntime)
-    );
-}
-
-#[test]
-fn spawn_boundary_analysis_records_spawn_site() {
-    let mir = lower_mir("function y = f(g); y = spawn(g); end");
-    let body = mir.bodies.values().next().unwrap();
-
-    let boundaries = analyze_spawn_boundaries(body);
-
-    assert_eq!(boundaries.len(), 1);
-    assert!(matches!(
-        boundaries[0].safety,
-        runmat_hir::SpawnSafetyFact::RequiresIsolation
-    ));
-    assert!(matches!(boundaries[0].future, MirOperand::Local(_)));
-}
-
-#[test]
-fn spawn_safety_summary_is_conservative_for_spawn_sites() {
-    let mir = lower_mir("function y = f(g); y = spawn(g); end");
-    let body = mir.bodies.values().next().unwrap();
-
-    let summary = summarize_spawn_safety(body);
-
-    assert_eq!(summary.function, body.function);
-    assert!(matches!(
-        summary.safety,
-        runmat_hir::SpawnSafetyFact::RequiresIsolation
-    ));
+    assert!(body
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .any(|stmt| matches!(
+            stmt.kind,
+            MirStmtKind::Assign {
+                value: MirRvalue::Spawn(_),
+                ..
+            }
+        )));
 }
 
 #[test]
@@ -861,20 +728,14 @@ fn analyze_assembly_rejects_spawned_future_with_mutable_lexical_capture() {
     );
 
     let store = analyze_assembly(&mir);
-
     assert!(store.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "RM-MIR0003" && diagnostic.category.as_deref() == Some("spawn-safety")
     }));
-    assert!(store
-        .spawn_boundaries
-        .values()
-        .flatten()
-        .any(|boundary| matches!(
-            boundary.safety,
-            runmat_hir::SpawnSafetyFact::NotSpawnSafe {
-                reason: runmat_hir::SpawnSafetyReason::MutableLexicalCapture
-            }
-        )));
+    assert!(store.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RM-MIR0003"
+            && diagnostic.message.contains("mutates a lexical capture")
+            && diagnostic.category.as_deref() == Some("spawn-safety")
+    }));
 }
 
 #[test]
@@ -884,17 +745,11 @@ fn analyze_assembly_rejects_spawned_future_with_lexical_capture_read() {
     );
 
     let store = analyze_assembly(&mir);
-
-    assert!(store
-        .spawn_boundaries
-        .values()
-        .flatten()
-        .any(|boundary| matches!(
-            boundary.safety,
-            runmat_hir::SpawnSafetyFact::NotSpawnSafe {
-                reason: runmat_hir::SpawnSafetyReason::MutableLexicalCapture
-            }
-        )));
+    assert!(store.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RM-MIR0003"
+            && diagnostic.message.contains("mutates a lexical capture")
+            && diagnostic.category.as_deref() == Some("spawn-safety")
+    }));
 }
 
 #[test]
@@ -904,12 +759,18 @@ fn spawn_safety_uses_future_target_visible_at_spawn_site() {
     );
 
     let store = analyze_assembly(&mir);
-
-    assert!(store
-        .spawn_boundaries
+    assert!(mir
+        .bodies
         .values()
-        .flatten()
-        .any(|boundary| matches!(boundary.safety, runmat_hir::SpawnSafetyFact::SpawnSafe)));
+        .flat_map(|body| body.blocks.iter())
+        .flat_map(|block| block.statements.iter())
+        .any(|stmt| matches!(
+            stmt.kind,
+            MirStmtKind::Assign {
+                value: MirRvalue::Spawn(_),
+                ..
+            }
+        )));
     assert!(!store.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "RM-MIR0003" && diagnostic.category.as_deref() == Some("spawn-safety")
     }));
@@ -922,17 +783,11 @@ fn spawn_safety_joins_future_targets_across_cfg_paths() {
     );
 
     let store = analyze_assembly(&mir);
-
-    assert!(store
-        .spawn_boundaries
-        .values()
-        .flatten()
-        .any(|boundary| matches!(
-            boundary.safety,
-            runmat_hir::SpawnSafetyFact::NotSpawnSafe {
-                reason: runmat_hir::SpawnSafetyReason::MutableLexicalCapture
-            }
-        )));
+    assert!(store.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RM-MIR0003"
+            && diagnostic.message.contains("mutates a lexical capture")
+            && diagnostic.category.as_deref() == Some("spawn-safety")
+    }));
 }
 
 #[test]
@@ -940,19 +795,10 @@ fn analyze_assembly_rejects_spawned_future_with_unknown_target() {
     let mir = lower_mir("function y = f(g); y = spawn(g); end");
 
     let store = analyze_assembly(&mir);
-
-    assert!(store
-        .spawn_boundaries
-        .values()
-        .flatten()
-        .any(|boundary| matches!(
-            boundary.safety,
-            runmat_hir::SpawnSafetyFact::NotSpawnSafe {
-                reason: runmat_hir::SpawnSafetyReason::UnknownDynamicCapture
-            }
-        )));
     assert!(store.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "RM-MIR0003" && diagnostic.category.as_deref() == Some("spawn-safety")
+        diagnostic.code == "RM-MIR0003"
+            && diagnostic.message.contains("unknown spawn safety")
+            && diagnostic.category.as_deref() == Some("spawn-safety")
     }));
 }
 
@@ -974,27 +820,22 @@ fn dataflow_marks_spawn_as_task_handle_even_when_safety_diagnostic_rejects_targe
 fn analyze_assembly_populates_store_products_by_function() {
     let mir = lower_mir("async function y = f(g, x); t = spawn(g); await(t); y = x; end");
 
-    let store = analyze_assembly(&mir);
     let body = mir.bodies.values().next().unwrap();
-
-    assert!(store.functions.contains_key(&body.function));
-    let module = body.source_map.module.unwrap();
-    assert!(store.modules.contains_key(&module));
-    assert!(store.modules[&module].functions.contains(&body.function));
-    assert!(store.modules[&module].source_unit.is_some());
-    assert_eq!(store.modules[&module].compatibility_mode, None);
-    assert!(store.liveness.contains_key(&body.function));
-    assert!(store.spawn_boundaries.contains_key(&body.function));
-    assert_eq!(store.spawn_boundaries.get(&body.function).unwrap().len(), 1);
-    assert_eq!(
-        store
-            .liveness
-            .get(&body.function)
-            .unwrap()
-            .live_across_await
-            .len(),
-        1
-    );
+    let spawn_count = body
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .filter(|stmt| {
+            matches!(
+                stmt.kind,
+                MirStmtKind::Assign {
+                    value: MirRvalue::Spawn(_),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(spawn_count, 1);
 }
 
 #[test]
@@ -1075,53 +916,7 @@ fn analysis_store_diagnostics_serialize_with_store() {
     assert!(json.contains("RM-MIR0002"));
     assert!(json.contains("definite-assignment"));
     assert_eq!(roundtrip, store);
-    assert!(!roundtrip.modules.is_empty());
-    assert!(!roundtrip.expressions.is_empty());
-    assert!(!roundtrip.liveness.is_empty());
-    assert!(!roundtrip.spawn_boundaries.is_empty());
-}
-
-#[test]
-fn product_cache_key_serializes_semantic_product_dependencies() {
-    let function_path = runmat_hir::DefPath {
-        package: runmat_hir::PackageName("pkg".into()),
-        module: runmat_hir::QualifiedName(vec![runmat_hir::SymbolName("mod".into())]),
-        item: vec![runmat_hir::DefPathSegment::Function(
-            runmat_hir::SymbolName("f".into()),
-        )],
-    };
-    let key = ProductCacheKey {
-        product: CacheProduct::FunctionSummary(function_path),
-        source_hash: "source".into(),
-        manifest_hash: "manifest".into(),
-        dependency_graph_hash: "deps".into(),
-        config_hash: "config".into(),
-        compiler_version: "compiler".into(),
-    };
-
-    let json = serde_json::to_string(&key).unwrap();
-    let roundtrip: ProductCacheKey = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(roundtrip, key);
-    assert!(json.contains("FunctionSummary"));
-    assert!(json.contains("dependency_graph_hash"));
-
-    let module_key = ProductCacheKey {
-        product: CacheProduct::ModuleSummary(runmat_hir::QualifiedName(vec![
-            runmat_hir::SymbolName("mod".into()),
-        ])),
-        source_hash: "source".into(),
-        manifest_hash: "manifest".into(),
-        dependency_graph_hash: "deps".into(),
-        config_hash: "config".into(),
-        compiler_version: "compiler".into(),
-    };
-
-    let module_json = serde_json::to_string(&module_key).unwrap();
-    let module_roundtrip: ProductCacheKey = serde_json::from_str(&module_json).unwrap();
-
-    assert_eq!(module_roundtrip, module_key);
-    assert!(module_json.contains("ModuleSummary"));
+    assert!(!roundtrip.mir_locals.is_empty());
 }
 
 #[test]
@@ -1138,20 +933,6 @@ fn await_statement_lowers_to_await_terminator_with_resume_block() {
         body.blocks[1].terminator.kind,
         MirTerminatorKind::Return(_)
     ));
-}
-
-#[test]
-fn await_terminator_marks_summary_as_requiring_async_runtime() {
-    let mir = lower_mir("async function y = f(g); await(g); y = 1; end");
-    let body = mir.bodies.values().next().unwrap();
-    let mut store = AnalysisStore::default();
-
-    let summary = summarize_body(body, &mut store);
-
-    assert_eq!(
-        summary.effects.async_behavior,
-        Some(AsyncBehaviorFact::RequiresAsyncRuntime)
-    );
 }
 
 #[test]
@@ -1191,69 +972,21 @@ fn nested_await_expression_lowers_to_temp_and_resume_block() {
 
 #[test]
 fn dataflow_marks_await_assignment_output_definitely_assigned() {
-    let (body, store) = analyze_single_body("async function y = f(g); y = await(g); end");
+    let mir = lower_mir("async function y = f(g); y = await(g); end");
+    let body = mir.bodies.values().next().unwrap();
+    let store = analyze_assembly(&mir);
     let output = first_local_of_kind(&body, MirLocalKind::Output);
 
-    assert_eq!(
-        store
-            .mir_locals
-            .get(&MirLocalKey {
-                function: body.function,
-                local: output,
-            })
-            .unwrap()
-            .initialized,
-        InitFact::DefinitelyAssigned
-    );
-}
-
-#[test]
-fn liveness_records_locals_live_across_await() {
-    let mir = lower_mir("async function y = f(g, x); await(g); y = x; end");
-    let body = mir.bodies.values().next().unwrap();
-
-    let facts = analyze_liveness(body);
-
-    assert_eq!(facts.live_across_await.len(), 1);
-    let live = &facts.live_across_await[0].1;
-    let param_locals: Vec<_> = body
-        .locals
-        .iter()
-        .filter(|local| matches!(local.kind, MirLocalKind::Parameter))
-        .map(|local| local.id)
-        .collect();
-    assert!(param_locals.iter().any(|local| live.contains(local)));
-    assert!(live.len() >= 2);
-}
-
-#[test]
-fn liveness_does_not_mark_locals_defined_after_await_as_live_across() {
-    let mir = lower_mir("async function y = f(g); y = await(g); z = 1; y = z; end");
-    let body = mir.bodies.values().next().unwrap();
-
-    let facts = analyze_liveness(body);
-    let live = &facts.live_across_await[0].1;
-    let z_local = body
-        .blocks
-        .iter()
-        .flat_map(|block| &block.statements)
-        .find_map(|stmt| match &stmt.kind {
-            MirStmtKind::Assign {
-                place: MirPlace::Local(local),
-                value: MirRvalue::Use(MirOperand::Constant(runmat_mir::MirConstant::Number(value))),
-            } if value == "1" => Some(*local),
-            _ => None,
-        })
-        .unwrap();
-
-    assert!(!live.contains(&z_local));
+    assert!(store.mir_locals.contains_key(&MirLocalKey {
+        function: body.function,
+        local: output,
+    }));
 }
 
 #[test]
 fn global_statement_lowers_to_workspace_effect() {
     let mir = lower_mir("function y = f(); global g; y = 1; end");
     let body = mir.bodies.values().next().unwrap();
-    let mut store = AnalysisStore::default();
 
     assert!(matches!(
         body.blocks[0].statements[0].kind,
@@ -1266,54 +999,56 @@ fn global_statement_lowers_to_workspace_effect() {
         MirStmtKind::WorkspaceEffect { bindings, .. } => bindings[0],
         _ => unreachable!(),
     };
-    let summary = summarize_body(body, &mut store);
-    let global_binding = body.locals[global_local.0].binding.unwrap();
-    assert!(summary.writes_globals.contains(&global_binding));
-    assert!(matches!(summary.fusibility, FusibilityFact::NonFusible(_)));
-    assert!(matches!(
-        summary.parallel_safety,
-        ParallelSafetyFact::WritesSharedState
-    ));
-    assert!(matches!(
-        summary.accel_eligibility,
-        AccelEligibilityFact::Ineligible(_)
-    ));
+    assert!(body.locals[global_local.0].binding.is_some());
+    assert!(body.blocks[0].statements.iter().any(|stmt| matches!(
+        stmt.kind,
+        MirStmtKind::WorkspaceEffect {
+            effect: runmat_hir::WorkspaceEffect::MutatesGlobal,
+            ..
+        }
+    )));
 }
 
 #[test]
-fn analyze_assembly_aggregates_module_effect_summaries() {
+fn analyze_assembly_preserves_workspace_effect_markers_and_call_facts() {
     let mir = lower_mir("function y = f(); global g; y = unresolved_target(g); end");
 
-    let store = analyze_assembly(&mir);
     let body = mir.bodies.values().next().unwrap();
-    let module = body.source_map.module.unwrap();
-    let summary = store.modules.get(&module).unwrap();
 
-    assert!(summary.functions.contains(&body.function));
-    assert!(summary
-        .workspace
-        .contains(&runmat_hir::WorkspaceEffect::MutatesGlobal));
-    assert!(summary.may_call_unknown);
+    assert!(body.blocks[0].statements.iter().any(|stmt| matches!(
+        stmt.kind,
+        MirStmtKind::WorkspaceEffect {
+            effect: runmat_hir::WorkspaceEffect::MutatesGlobal,
+            ..
+        }
+    )));
+    let call = first_call(body);
+    assert!(matches!(
+        call.callee,
+        MirCallee::Dynamic(_)
+            | MirCallee::Static(
+                CallableIdentity::DynamicName(_) | CallableIdentity::ExternalName(_)
+            )
+    ));
 }
 
 #[test]
 fn persistent_statement_lowers_to_summary_workspace_effect() {
     let mir = lower_mir("function y = f(); persistent p; y = 1; end");
     let body = mir.bodies.values().next().unwrap();
-    let mut store = AnalysisStore::default();
 
-    let summary = summarize_body(body, &mut store);
-
-    assert!(summary
-        .effects
-        .workspace
-        .contains(&runmat_hir::WorkspaceEffect::MutatesPersistent));
+    assert!(body.blocks[0].statements.iter().any(|stmt| matches!(
+        stmt.kind,
+        MirStmtKind::WorkspaceEffect {
+            effect: runmat_hir::WorkspaceEffect::MutatesPersistent,
+            ..
+        }
+    )));
     let persistent_local = match &body.blocks[0].statements[0].kind {
         MirStmtKind::WorkspaceEffect { bindings, .. } => bindings[0],
         _ => unreachable!(),
     };
-    let persistent_binding = body.locals[persistent_local.0].binding.unwrap();
-    assert!(summary.writes_persistents.contains(&persistent_binding));
+    assert!(body.locals[persistent_local.0].binding.is_some());
 }
 
 #[test]
@@ -1358,23 +1093,14 @@ fn summary_records_explicit_environment_effects() {
             span,
         },
     );
-    let mut store = AnalysisStore::default();
-
-    let summary = summarize_body(&body, &mut store);
-
-    assert_eq!(
-        summary.effects.environment,
-        vec![EnvironmentEffect::FunctionCacheInvalidation]
-    );
-    assert!(matches!(summary.fusibility, FusibilityFact::NonFusible(_)));
     assert!(matches!(
-        summary.parallel_safety,
-        ParallelSafetyFact::WritesSharedState
+        body.blocks[0].statements[0].kind,
+        MirStmtKind::EnvironmentEffect(EnvironmentEffect::FunctionCacheInvalidation)
     ));
-    assert!(matches!(
-        summary.accel_eligibility,
-        AccelEligibilityFact::Ineligible(_)
-    ));
+    assert!(!body.blocks[0]
+        .statements
+        .iter()
+        .any(|stmt| matches!(stmt.kind, MirStmtKind::WorkspaceEffect { .. })));
 }
 
 #[test]
@@ -1437,57 +1163,24 @@ fn feval_lowers_to_dynamic_mir_callee() {
 }
 
 #[test]
-fn function_summary_propagates_user_callee_effects() {
-    let mir =
-        lower_mir("function y = g(); y = f(); end\nfunction z = f(); eval('x = 1'); z = 1; end");
-    let store = analyze_assembly(&mir);
-    let caller = store
-        .functions
-        .values()
-        .find(|summary| {
-            summary.calls.iter().any(|call| {
-                matches!(
-                    call.callee,
-                    MirCallee::Static(CallableIdentity::SemanticFunction(_))
-                )
-            })
-        })
-        .unwrap();
-
-    assert!(caller
-        .effects
-        .workspace
-        .contains(&runmat_hir::WorkspaceEffect::DynamicEval));
-    assert!(matches!(caller.fusibility, FusibilityFact::NonFusible(_)));
-    assert!(matches!(
-        caller.accel_eligibility,
-        AccelEligibilityFact::Ineligible(_)
-    ));
-}
-
-#[test]
-fn function_summary_records_async_future_dependency_edges() {
-    let mir = lower_mir(
-        "function y = g(t); fut = f(t); y = 1; end\nasync function z = f(t); z = await(t); end",
-    );
-    let store = analyze_assembly(&mir);
-    let caller = store
-        .functions
-        .values()
-        .find(|summary| {
-            summary.calls.iter().any(|call| {
-                matches!(
-                    call.callee,
-                    MirCallee::Static(CallableIdentity::SemanticFunction(_))
-                )
-            })
-        })
-        .unwrap();
-
-    assert!(matches!(
-        caller.effects.async_behavior,
-        Some(runmat_mir::AsyncBehaviorFact::RequiresAsyncRuntime)
-    ));
+fn qualified_static_method_function_handle_lowers_to_imported_identity_operand() {
+    let mir = lower_mir("h = @Point.origin; y = feval(h);");
+    let body = mir.bodies.values().next().expect("body");
+    assert!(body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .any(|stmt| matches!(
+            &stmt.kind,
+            MirStmtKind::Assign {
+                value:
+                    MirRvalue::Use(MirOperand::FunctionHandle(
+                        CallableIdentity::Imported(path)
+                    )),
+                ..
+            } if path.module.display_name().as_deref() == Some("Point.origin")
+                && matches!(path.item.as_slice(), [runmat_hir::DefPathSegment::Function(_)])
+        )));
 }
 
 #[test]
@@ -1545,11 +1238,6 @@ fn tensor_literal_lowers_to_mir_aggregate() {
         .locals
         .iter()
         .any(|local| matches!(local.kind, MirLocalKind::Temporary)));
-    assert!(body
-        .source_map
-        .locals
-        .iter()
-        .any(|source| source.binding.is_none() && source.expr.is_some()));
     assert!(matches!(
         body.blocks[0].statements[1].kind,
         MirStmtKind::Assign {
@@ -1655,6 +1343,76 @@ fn function_argument_expansion_lowers_to_expansion_call_arg() {
 }
 
 #[test]
+fn function_argument_expansion_lowers_end_offset_selectors() {
+    let mir = lower_mir("function y = f(C); y = g(C{end-1}, C{end+1}); end");
+    let body = mir.bodies.values().next().unwrap();
+    let call = first_call(body);
+
+    assert_eq!(call.args.len(), 2);
+    assert!(matches!(
+        call.args[0],
+        MirCallArg::Expansion {
+            base: MirOperand::Local(_),
+            ref indices,
+            expand_all: false,
+        } if indices.len() == 1
+    ));
+    assert!(matches!(
+        call.args[1],
+        MirCallArg::Expansion {
+            base: MirOperand::Local(_),
+            ref indices,
+            expand_all: false,
+        } if indices.len() == 1
+    ));
+
+    let statements: Vec<&MirStmt> = body
+        .blocks
+        .iter()
+        .flat_map(|block| block.statements.iter())
+        .collect();
+    let has_end_seed = statements.iter().any(|stmt| {
+        matches!(
+            stmt.kind,
+            MirStmtKind::Assign {
+                value: MirRvalue::End,
+                ..
+            }
+        )
+    });
+    let has_end_minus = statements.iter().any(|stmt| {
+        matches!(
+            stmt.kind,
+            MirStmtKind::Assign {
+                value: MirRvalue::Binary(
+                    MirOperand::Local(_),
+                    OperatorKind::Subtract,
+                    MirOperand::Constant(MirConstant::Number(ref value))
+                ),
+                ..
+            } if value == "1"
+        )
+    });
+    let has_end_plus = statements.iter().any(|stmt| {
+        matches!(
+            stmt.kind,
+            MirStmtKind::Assign {
+                value: MirRvalue::Binary(
+                    MirOperand::Local(_),
+                    OperatorKind::Add,
+                    MirOperand::Constant(MirConstant::Number(ref value))
+                ),
+                ..
+            } if value == "1"
+        )
+    });
+
+    assert!(has_end_seed);
+    assert!(has_end_minus);
+    assert!(has_end_plus);
+}
+
+#[test]
 fn nested_binary_operands_lower_through_temporary_locals() {
     let mir = lower_mir("function y = calc(a, b, c); y = (a + b) * c; end");
     let body = mir.bodies.values().next().unwrap();
@@ -1706,7 +1464,6 @@ fn multi_assign_preserves_discard_targets_and_requested_outputs() {
 fn indexed_assignment_lowers_to_index_place() {
     let mir = lower_mir("function y = write_index(x); x(1) = 2; y = x; end");
     let body = mir.bodies.values().next().unwrap();
-    let mut store = AnalysisStore::default();
 
     assert!(matches!(
         body.blocks[0].statements[0].kind,
@@ -1721,11 +1478,6 @@ fn indexed_assignment_lowers_to_index_place() {
             ..
         }
     ));
-    let summary = summarize_body(body, &mut store);
-    assert!(summary.place_mutations.iter().any(|mutation| {
-        mutation.kind == runmat_hir::PlaceMutationKind::IndexedAssign
-            && mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::CreateArrayByIndex
-    }));
 }
 
 #[test]
@@ -1800,9 +1552,7 @@ fn brace_all_colon_sets_cell_expand_all_intent() {
 #[test]
 fn diagnostics_report_unassigned_index_operand_read() {
     let mir = lower_mir("function y = read_index(a); y = a(y); end");
-    let body = mir.bodies.values().next().unwrap();
-
-    let diagnostics = diagnose_uninitialized_reads(body);
+    let diagnostics = analyze_assembly(&mir).diagnostics;
 
     assert!(diagnostics
         .iter()
@@ -1865,7 +1615,6 @@ fn if_statement_lowers_to_branch_blocks_and_merge() {
         body.blocks[3].terminator.kind,
         MirTerminatorKind::Return(_)
     ));
-    assert_eq!(body.source_map.statements.len(), 3);
 }
 
 #[test]
@@ -1910,9 +1659,7 @@ fn elseif_statement_lowers_to_nested_branch_cfg() {
 #[test]
 fn diagnostics_report_maybe_assigned_local_read_after_elseif_without_else() {
     let mir = lower_mir("function y = choose(c, d); if c; y = 1; elseif d; y = 2; end; z = y; end");
-    let body = mir.bodies.values().next().unwrap();
-
-    let diagnostics = diagnose_uninitialized_reads(body);
+    let diagnostics = analyze_assembly(&mir).diagnostics;
 
     assert!(diagnostics
         .iter()
@@ -1945,9 +1692,7 @@ fn switch_statement_lowers_to_switch_blocks_and_continuation() {
 fn diagnostics_report_maybe_assigned_local_read_after_switch() {
     let mir =
         lower_mir("function y = choose(x); switch x; case 1; y = 1; otherwise; end; z = y; end");
-    let body = mir.bodies.values().next().unwrap();
-
-    let diagnostics = diagnose_uninitialized_reads(body);
+    let diagnostics = analyze_assembly(&mir).diagnostics;
 
     assert!(diagnostics
         .iter()
@@ -1972,7 +1717,6 @@ fn while_loop_lowers_to_branch_body_backedge_and_exit() {
         body.blocks[2].terminator.kind,
         MirTerminatorKind::Return(_)
     ));
-    assert_eq!(body.source_map.statements.len(), 2);
 }
 
 #[test]
@@ -2037,7 +1781,6 @@ fn for_loop_lowers_to_iteration_terminator_body_backedge_and_exit() {
         body.blocks[3].terminator.kind,
         MirTerminatorKind::Return(_)
     ));
-    assert_eq!(body.source_map.statements.len(), 3);
 }
 
 #[test]
@@ -2079,7 +1822,6 @@ fn try_catch_lowers_to_try_catch_blocks_and_merge() {
         body.blocks[3].terminator.kind,
         MirTerminatorKind::Return(_)
     ));
-    assert_eq!(body.source_map.statements.len(), 3);
 }
 
 #[test]

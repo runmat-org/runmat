@@ -1,22 +1,17 @@
-use crate::{MirLocal, MirLocalId, MirLocalKind, MirLocalSource};
-use runmat_hir::{BindingId, ExprId, FunctionId, HirFunction, SemanticError, Span};
+use crate::{MirLocal, MirLocalId, MirLocalKind};
+use runmat_hir::{BindingId, FunctionId, HirFunction, SemanticError, Span};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Default)]
-pub struct MirLoweringContext {
-    pub(crate) binding_locals: HashMap<BindingId, MirLocalId>,
+pub(crate) struct MirLoweringContext {
+    binding_locals: HashMap<BindingId, MirLocalId>,
     async_functions: HashSet<FunctionId>,
     next_local: usize,
     temp_locals: RefCell<Vec<MirLocal>>,
-    temp_sources: RefCell<Vec<MirLocalSource>>,
 }
 
 impl MirLoweringContext {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub(crate) fn with_async_functions(async_functions: HashSet<FunctionId>) -> Self {
         Self {
             async_functions,
@@ -38,10 +33,7 @@ impl MirLoweringContext {
             .ok_or_else(|| SemanticError::new("binding has no MIR local"))
     }
 
-    pub(crate) fn locals_for_function(
-        &mut self,
-        function: &HirFunction,
-    ) -> (Vec<MirLocal>, Vec<MirLocalSource>) {
+    pub(crate) fn locals_for_function(&mut self, function: &HirFunction) -> Vec<MirLocal> {
         let mut locals: Vec<_> = function
             .locals
             .iter()
@@ -56,20 +48,12 @@ impl MirLoweringContext {
                 } else {
                     MirLocalKind::Binding
                 };
-                (
-                    MirLocal {
-                        id: local,
-                        binding: Some(*binding),
-                        kind,
-                        span: function.span,
-                    },
-                    MirLocalSource {
-                        local,
-                        binding: Some(*binding),
-                        expr: None,
-                        span: function.span,
-                    },
-                )
+                MirLocal {
+                    id: local,
+                    binding: Some(*binding),
+                    kind,
+                    span: function.span,
+                }
             })
             .collect();
 
@@ -79,27 +63,19 @@ impl MirLoweringContext {
             }
             let local = MirLocalId(locals.len());
             self.binding_locals.insert(capture.binding, local);
-            locals.push((
-                MirLocal {
-                    id: local,
-                    binding: Some(capture.binding),
-                    kind: MirLocalKind::Capture,
-                    span: function.span,
-                },
-                MirLocalSource {
-                    local,
-                    binding: Some(capture.binding),
-                    expr: None,
-                    span: function.span,
-                },
-            ));
+            locals.push(MirLocal {
+                id: local,
+                binding: Some(capture.binding),
+                kind: MirLocalKind::Capture,
+                span: function.span,
+            });
         }
 
         self.next_local = locals.len();
-        locals.into_iter().unzip()
+        locals
     }
 
-    pub(crate) fn fresh_temp(&self, span: Span, expr: Option<ExprId>) -> MirLocalId {
+    pub(crate) fn fresh_temp(&self, span: Span) -> MirLocalId {
         let local = MirLocalId(self.next_local + self.temp_locals.borrow().len());
         self.temp_locals.borrow_mut().push(MirLocal {
             id: local,
@@ -107,19 +83,10 @@ impl MirLoweringContext {
             kind: MirLocalKind::Temporary,
             span,
         });
-        self.temp_sources.borrow_mut().push(MirLocalSource {
-            local,
-            binding: None,
-            expr,
-            span,
-        });
         local
     }
 
-    pub(crate) fn take_temp_locals(&self) -> (Vec<MirLocal>, Vec<MirLocalSource>) {
-        (
-            std::mem::take(&mut *self.temp_locals.borrow_mut()),
-            std::mem::take(&mut *self.temp_sources.borrow_mut()),
-        )
+    pub(crate) fn take_temp_locals(&self) -> Vec<MirLocal> {
+        std::mem::take(&mut *self.temp_locals.borrow_mut())
     }
 }

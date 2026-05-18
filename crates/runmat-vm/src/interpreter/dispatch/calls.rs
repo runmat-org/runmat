@@ -61,7 +61,6 @@ pub struct BuiltinCallContext<'a> {
 pub struct UserCallContext<'a> {
     pub stack: &'a mut Vec<Value>,
     pub identity: CallableIdentity,
-    pub display_name: Option<String>,
     pub fallback_policy: CallableFallbackPolicy,
     pub out_count: usize,
     pub exception: ExceptionRouteContext<'a>,
@@ -233,7 +232,6 @@ pub async fn handle_prepared_user_function_call(
     let UserCallContext {
         stack,
         identity,
-        display_name,
         fallback_policy,
         out_count,
         exception,
@@ -246,7 +244,6 @@ pub async fn handle_prepared_user_function_call(
     } = exception;
     let descriptor = CallableDescriptor::resolved(
         identity,
-        display_name,
         args,
         out_count,
         fallback_policy,
@@ -285,26 +282,17 @@ pub async fn handle_user_function_call(
 pub async fn handle_method_or_member_index_multi_call(
     stack: &mut Vec<Value>,
     identity: CallableIdentity,
-    display_name: Option<String>,
     fallback_policy: CallableFallbackPolicy,
     arg_count: usize,
     out_count: usize,
 ) -> Result<MethodHandling, RuntimeError> {
-    handle_method_or_member_index_call_inner(
-        stack,
-        identity,
-        display_name,
-        fallback_policy,
-        arg_count,
-        out_count,
-    )
-    .await
+    handle_method_or_member_index_call_inner(stack, identity, fallback_policy, arg_count, out_count)
+        .await
 }
 
 async fn handle_method_or_member_index_call_inner(
     stack: &mut Vec<Value>,
     identity: CallableIdentity,
-    display_name: Option<String>,
     fallback_policy: CallableFallbackPolicy,
     arg_count: usize,
     requested_outputs: usize,
@@ -314,7 +302,6 @@ async fn handle_method_or_member_index_call_inner(
     let value = call_closures::call_method_or_member_index_with_outputs(
         base,
         identity,
-        display_name,
         args,
         requested_outputs,
         fallback_policy,
@@ -327,7 +314,6 @@ async fn handle_method_or_member_index_call_inner(
 pub async fn handle_method_or_member_index_expand_multi_call(
     stack: &mut Vec<Value>,
     identity: CallableIdentity,
-    display_name: Option<String>,
     fallback_policy: CallableFallbackPolicy,
     specs: &[ArgSpec],
     requested_outputs: usize,
@@ -344,7 +330,6 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     let value = call_closures::call_method_or_member_index_with_outputs(
         base,
         identity,
-        display_name,
         args,
         requested_outputs,
         fallback_policy,

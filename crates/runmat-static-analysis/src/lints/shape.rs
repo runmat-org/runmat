@@ -369,9 +369,6 @@ impl ShapeLintContext {
                 }
             }
             runmat_mir::MirAggregateKind::Cell => Some(Shape(vec![Some(1), Some(elements.len())])),
-            runmat_mir::MirAggregateKind::Struct | runmat_mir::MirAggregateKind::ObjectArray(_) => {
-                None
-            }
         };
         MirShapeValue {
             shape,

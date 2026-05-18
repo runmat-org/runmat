@@ -408,10 +408,11 @@ fn function_return_expansion_into_slice_with_empty() {
             end
         end
         A = zeros(2,3);
-        % Empty expansion: ensure we don't crash; assign nothing
+        % Empty varargout under fixed single-output call currently surfaces arity mismatch.
         x = g(0);
     "#;
-    let _ = execute_semantic_source(program);
+    let err = execute_semantic_source(program).expect_err("expected varargout arity mismatch");
+    assert_eq!(err.identifier(), Some("RunMat:VarargoutMismatch"));
 }
 
 #[test]

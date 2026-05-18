@@ -1,36 +1,15 @@
-use runmat_hir::{
-    AsyncValueFact, BindingId, CompatibilityMode, EmptyArrayRole, EnvironmentEffect,
-    ExpansionSemantics, ExprId, FunctionId, ModuleId, OperatorKind, ShapeFact, SourceUnitKind,
-    TensorElementDomainFact, TypeFact, ValueFlowFact, WorkspaceEffect,
-};
+use runmat_hir::FunctionId;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 
 use crate::{MirDiagnostic, MirLocalId};
 
-use super::{FunctionSummary, LivenessFacts, MirLocalFact};
+use super::MirLocalFact;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct AnalysisStore {
-    pub bindings: HashMap<BindingId, BindingFact>,
-    pub expressions: HashMap<ExprId, ExprFact>,
     pub mir_locals: HashMap<MirLocalKey, MirLocalFact>,
-    pub functions: HashMap<FunctionId, FunctionSummary>,
-    pub modules: HashMap<ModuleId, ModuleSummary>,
-    pub liveness: HashMap<FunctionId, LivenessFacts>,
-    pub spawn_boundaries: HashMap<FunctionId, Vec<crate::SpawnBoundary>>,
     pub diagnostics: Vec<MirDiagnostic>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ModuleSummary {
-    pub module: ModuleId,
-    pub functions: Vec<FunctionId>,
-    pub source_unit: Option<SourceUnitKind>,
-    pub compatibility_mode: Option<CompatibilityMode>,
-    pub workspace: Vec<WorkspaceEffect>,
-    pub environment: Vec<EnvironmentEffect>,
-    pub may_call_unknown: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -66,26 +45,8 @@ impl<'de> Deserialize<'de> for MirLocalKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BindingFact {
-    pub ty: TypeFact,
-    pub initialized: InitFact,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ExprFact {
-    pub ty: TypeFact,
-    pub shape: ShapeFact,
-    pub value_flow: ValueFlowFact,
-    pub async_value: Option<AsyncValueFact>,
-    pub empty_array_role: Option<EmptyArrayRole>,
-    pub expansion: Option<ExpansionSemantics>,
-    pub operator: Option<OperatorKind>,
-    pub tensor_element_domain: Option<TensorElementDomainFact>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum InitFact {
+pub(super) enum InitFact {
     Unassigned,
     MaybeAssigned,
     DefinitelyAssigned,

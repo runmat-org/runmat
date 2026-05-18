@@ -16,7 +16,6 @@ pub struct HirAssembly {
     pub classes: Vec<HirClass>,
     pub bindings: Vec<HirBinding>,
     pub entrypoints: Vec<HirEntrypoint>,
-    pub compatibility_mode: Option<CompatibilityMode>,
 }
 
 /// Source unit metadata plus references to module-owned semantic items.
@@ -214,7 +213,6 @@ pub enum HirStmtKind {
         binding: BindingId,
         range: HirExpr,
         body: HirBlock,
-        semantics: LoopIterationSemantics,
     },
     Switch {
         expr: HirExpr,
@@ -296,7 +294,6 @@ pub struct HirCall {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum HirCallableRef {
     Function(FunctionId),
-    ClassConstructor(ClassId),
     Builtin(BuiltinId),
     Imported(DefPath),
     DynamicExpr(Box<HirExpr>),
@@ -319,24 +316,26 @@ impl HirCallableRef {
             HirCallableRef::Function(function) => {
                 Some(CallableIdentity::SemanticFunction(*function))
             }
-            HirCallableRef::ClassConstructor(class) => {
-                Some(CallableIdentity::ClassConstructor(*class))
-            }
             HirCallableRef::Builtin(builtin) => Some(CallableIdentity::Builtin(builtin.clone())),
             HirCallableRef::Imported(path) => Some(CallableIdentity::Imported(path.clone())),
             HirCallableRef::DynamicExpr(_) => None,
-            HirCallableRef::Unresolved(name) => Some(CallableIdentity::ExternalName(name.clone())),
+            HirCallableRef::Unresolved(name) => {
+                if name.0.len() == 1 {
+                    Some(CallableIdentity::DynamicName(name.0[0].clone()))
+                } else {
+                    Some(CallableIdentity::ExternalName(name.clone()))
+                }
+            }
         }
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub enum CallableIdentity {
     SemanticFunction(FunctionId),
     Builtin(BuiltinId),
     Imported(DefPath),
     Method(MethodId),
-    ClassConstructor(ClassId),
     AnonymousFunction(FunctionId),
     DynamicName(SymbolName),
     ExternalName(QualifiedName),
@@ -345,21 +344,17 @@ pub enum CallableIdentity {
 impl CallableIdentity {
     pub fn display_name(&self) -> Option<String> {
         match self {
-            CallableIdentity::SemanticFunction(_)
-            | CallableIdentity::ClassConstructor(_)
-            | CallableIdentity::AnonymousFunction(_) => None,
-            CallableIdentity::Builtin(id) => Some(id.0.clone()),
-            CallableIdentity::Imported(path) => {
-                path.module.display_name().or_else(|| path.display_name())
-            }
-            CallableIdentity::Method(id) => Some(id.0.clone()),
-            CallableIdentity::DynamicName(name) => Some(name.0.clone()),
+            CallableIdentity::SemanticFunction(_) | CallableIdentity::AnonymousFunction(_) => None,
+            CallableIdentity::Builtin(id) => (!id.0.is_empty()).then_some(id.0.clone()),
+            CallableIdentity::Imported(path) => path.module.display_name(),
+            CallableIdentity::Method(id) => (!id.0.is_empty()).then_some(id.0.clone()),
+            CallableIdentity::DynamicName(name) => (!name.0.is_empty()).then_some(name.0.clone()),
             CallableIdentity::ExternalName(name) => name.display_name(),
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash, Serialize, Deserialize)]
 pub enum CallableFallbackPolicy {
     None,
     RuntimeNameResolution,
@@ -368,6 +363,10 @@ pub enum CallableFallbackPolicy {
 }
 
 impl CallableFallbackPolicy {
+    fn is_well_formed_external_name(name: &QualifiedName) -> bool {
+        name.0.len() > 1 && name.0.iter().all(|segment| !segment.0.is_empty())
+    }
+
     pub fn allows_runtime_name_resolution(self) -> bool {
         matches!(self, CallableFallbackPolicy::RuntimeNameResolution)
     }
@@ -375,8 +374,9 @@ impl CallableFallbackPolicy {
     pub fn allows_semantic_name_resolution_for(self, identity: &CallableIdentity) -> bool {
         match identity {
             CallableIdentity::DynamicName(_) => self.allows_runtime_name_resolution(),
-            CallableIdentity::ExternalName(_) => {
+            CallableIdentity::ExternalName(name) => {
                 matches!(self, CallableFallbackPolicy::ExternalBoundary)
+                    && Self::is_well_formed_external_name(name)
             }
             _ => false,
         }
@@ -384,9 +384,12 @@ impl CallableFallbackPolicy {
 
     pub fn allows_vm_name_fallback_for(self, identity: &CallableIdentity) -> bool {
         match identity {
-            CallableIdentity::DynamicName(_) => self.allows_runtime_name_resolution(),
+            CallableIdentity::DynamicName(_)
+            | CallableIdentity::Imported(_)
+            | CallableIdentity::Method(_) => self.allows_runtime_name_resolution(),
             CallableIdentity::ExternalName(name) => {
-                matches!(self, CallableFallbackPolicy::ExternalBoundary) && name.0.len() > 1
+                matches!(self, CallableFallbackPolicy::ExternalBoundary)
+                    && Self::is_well_formed_external_name(name)
             }
             _ => false,
         }
@@ -396,7 +399,24 @@ impl CallableFallbackPolicy {
         if !self.allows_vm_name_fallback_for(identity) {
             return None;
         }
-        identity.display_name()
+
+        match identity {
+            CallableIdentity::DynamicName(SymbolName(name))
+            | CallableIdentity::Method(MethodId(name)) => {
+                (!name.is_empty()).then_some(name.clone())
+            }
+            CallableIdentity::Imported(path) => path.module.display_name(),
+            CallableIdentity::ExternalName(name) if Self::is_well_formed_external_name(name) => {
+                Some(
+                    name.0
+                        .iter()
+                        .map(|segment| segment.0.as_str())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                )
+            }
+            _ => None,
+        }
     }
 
     pub fn supports_vm_static_call(self) -> bool {
@@ -448,7 +468,6 @@ pub struct HirCommandCall {
 pub enum CommandArgument {
     Word(SymbolName),
     StringLiteral(StringLiteral),
-    OptionToken(CommandOptionName),
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -607,7 +626,6 @@ pub enum IndexResultContext {
 pub enum FunctionHandleTarget {
     Function(FunctionId),
     Builtin(BuiltinId),
-    Method(MethodId),
     Anonymous(FunctionId),
     DefPath(DefPath),
     DynamicName(SymbolName),
@@ -620,7 +638,6 @@ impl FunctionHandleTarget {
                 CallableIdentity::SemanticFunction(*function)
             }
             FunctionHandleTarget::Builtin(builtin) => CallableIdentity::Builtin(builtin.clone()),
-            FunctionHandleTarget::Method(method) => CallableIdentity::Method(method.clone()),
             FunctionHandleTarget::Anonymous(function) => {
                 CallableIdentity::AnonymousFunction(*function)
             }
@@ -706,53 +723,6 @@ pub enum NumericClass {
     UInt32,
     Int64,
     UInt64,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum AggregateKind {
-    Struct,
-    Cell,
-    ObjectArray(ClassId),
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum LoopIterationSemantics {
-    ForColumns,
-    WhileCondition,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize, Default)]
-pub enum CompatibilityMode {
-    MatlabStrict,
-    #[default]
-    RunMatExtended,
-    Interactive,
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub enum EvaluationContext {
-    Statement,
-    Expression,
-    AssignmentRhs { targets: OutputTargetList },
-    FunctionArgument,
-    ConcatElement,
-    CellElement,
-    IndexOperand,
-    CommandArgument,
-    NameValueArgument,
-    LineSpecArgument,
-    DynamicFieldName,
-    ForRange,
-    Condition,
-    SwitchExpression,
-    CaseExpression,
-    ReturnValue { requested_outputs: RequestedOutputs },
-}
-
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct RequestedOutputs {
-    pub count: RequestedOutputCount,
-    pub targets: OutputTargetList,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -1008,22 +978,12 @@ impl DefPath {
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub enum DefPathSegment {
     Function(SymbolName),
-    Class(SymbolName),
-    Method(SymbolName),
-    Property(SymbolName),
-    Entrypoint(EntrypointName),
-    Synthetic(SyntheticName),
 }
 
 impl DefPathSegment {
     pub fn display_name(&self) -> String {
         match self {
-            DefPathSegment::Function(name)
-            | DefPathSegment::Class(name)
-            | DefPathSegment::Method(name)
-            | DefPathSegment::Property(name) => name.0.clone(),
-            DefPathSegment::Entrypoint(name) => name.0.clone(),
-            DefPathSegment::Synthetic(name) => name.0.clone(),
+            DefPathSegment::Function(name) => name.0.clone(),
         }
     }
 }
@@ -1033,7 +993,7 @@ pub struct QualifiedName(pub Vec<SymbolName>);
 
 impl QualifiedName {
     pub fn display_name(&self) -> Option<String> {
-        if self.0.is_empty() {
+        if self.0.is_empty() || self.0.iter().any(|segment| segment.0.is_empty()) {
             None
         } else {
             Some(
@@ -1069,16 +1029,10 @@ pub struct MethodName(pub String);
 pub struct PackageName(pub String);
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct SyntheticName(pub String);
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct BuiltinId(pub String);
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct MethodId(pub String);
-
-#[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
-pub struct CommandOptionName(pub String);
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, Deserialize)]
 pub struct StringLiteral(pub String);
@@ -1086,7 +1040,6 @@ pub struct StringLiteral(pub String);
 #[derive(Debug, Clone)]
 pub struct LoweringResult {
     pub assembly: HirAssembly,
-    pub compatibility_mode: Option<CompatibilityMode>,
     pub semantic_index: SemanticIndex,
 }
 
@@ -1106,7 +1059,6 @@ mod tests {
         let entrypoint = EntrypointId(0);
 
         let assembly = HirAssembly {
-            compatibility_mode: None,
             modules: vec![HirModule {
                 id: module,
                 name: QualifiedName(vec![SymbolName("demo".into())]),
@@ -1284,6 +1236,40 @@ mod tests {
         };
         let identity = CallableIdentity::Imported(path);
         assert_eq!(identity.display_name().as_deref(), Some("pkg.demo.f"));
+
+        let empty_module_path = DefPath {
+            package: PackageName("pkg".into()),
+            module: QualifiedName(vec![]),
+            item: vec![DefPathSegment::Function(SymbolName("f".into()))],
+        };
+        let empty_module_identity = CallableIdentity::Imported(empty_module_path);
+        assert_eq!(empty_module_identity.display_name(), None);
+    }
+
+    #[test]
+    fn qualified_name_display_name_rejects_empty_segments() {
+        let malformed = QualifiedName(vec![
+            SymbolName("pkg".into()),
+            SymbolName("".into()),
+            SymbolName("remote".into()),
+        ]);
+        assert_eq!(malformed.display_name(), None);
+    }
+
+    #[test]
+    fn callable_identity_display_name_rejects_empty_name_fields() {
+        assert_eq!(
+            CallableIdentity::Builtin(BuiltinId(String::new())).display_name(),
+            None
+        );
+        assert_eq!(
+            CallableIdentity::Method(MethodId(String::new())).display_name(),
+            None
+        );
+        assert_eq!(
+            CallableIdentity::DynamicName(SymbolName(String::new())).display_name(),
+            None
+        );
     }
 
     #[test]
@@ -1314,22 +1300,54 @@ mod tests {
     }
 
     #[test]
-    fn vm_name_fallback_policy_only_allows_dynamic_or_qualified_external_names() {
+    fn callable_name_fallback_policies_require_well_formed_external_names() {
         let dynamic = CallableIdentity::DynamicName(SymbolName("sqrt".into()));
+        let imported = CallableIdentity::Imported(DefPath {
+            package: PackageName("Point".into()),
+            module: QualifiedName(vec![
+                SymbolName("Point".into()),
+                SymbolName("origin".into()),
+            ]),
+            item: vec![DefPathSegment::Function(SymbolName("origin".into()))],
+        });
+        let method = CallableIdentity::Method(MethodId("deal".into()));
         let single_external =
             CallableIdentity::ExternalName(QualifiedName(vec![SymbolName("sqrt".into())]));
         let qualified_external = CallableIdentity::ExternalName(QualifiedName(vec![
             SymbolName("OverIdx".into()),
             SymbolName("plus".into()),
         ]));
+        let malformed_external = CallableIdentity::ExternalName(QualifiedName(vec![
+            SymbolName("OverIdx".into()),
+            SymbolName("".into()),
+            SymbolName("plus".into()),
+        ]));
+
+        assert!(CallableFallbackPolicy::RuntimeNameResolution
+            .allows_semantic_name_resolution_for(&dynamic));
+        assert!(
+            !CallableFallbackPolicy::ExternalBoundary.allows_semantic_name_resolution_for(&dynamic)
+        );
+        assert!(!CallableFallbackPolicy::ExternalBoundary
+            .allows_semantic_name_resolution_for(&single_external));
+        assert!(CallableFallbackPolicy::ExternalBoundary
+            .allows_semantic_name_resolution_for(&qualified_external));
+        assert!(!CallableFallbackPolicy::ExternalBoundary
+            .allows_semantic_name_resolution_for(&malformed_external));
 
         assert!(CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&dynamic));
+        assert!(
+            CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&imported)
+        );
+        assert!(CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&method));
         assert!(!CallableFallbackPolicy::ExternalBoundary.allows_vm_name_fallback_for(&dynamic));
         assert!(
             !CallableFallbackPolicy::ExternalBoundary.allows_vm_name_fallback_for(&single_external)
         );
         assert!(CallableFallbackPolicy::ExternalBoundary
             .allows_vm_name_fallback_for(&qualified_external));
+        assert!(!CallableFallbackPolicy::ExternalBoundary
+            .allows_vm_name_fallback_for(&malformed_external));
 
         assert_eq!(
             CallableFallbackPolicy::RuntimeNameResolution.vm_fallback_name_for(&dynamic),
@@ -1340,12 +1358,24 @@ mod tests {
             None
         );
         assert_eq!(
+            CallableFallbackPolicy::RuntimeNameResolution.vm_fallback_name_for(&imported),
+            Some("Point.origin".into())
+        );
+        assert_eq!(
+            CallableFallbackPolicy::RuntimeNameResolution.vm_fallback_name_for(&method),
+            Some("deal".into())
+        );
+        assert_eq!(
             CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&single_external),
             None
         );
         assert_eq!(
             CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&qualified_external),
             Some("OverIdx.plus".into())
+        );
+        assert_eq!(
+            CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&malformed_external),
+            None
         );
     }
 }

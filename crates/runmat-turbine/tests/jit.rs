@@ -18,7 +18,6 @@ fn named_call_instr(name: &str, arg_count: usize, out_count: usize) -> Instr {
         identity: ::runmat_hir::CallableIdentity::DynamicName(::runmat_hir::SymbolName(
             name.to_string(),
         )),
-        display_name: Some(name.to_string()),
         fallback_policy: ::runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
         arg_count,
         out_count,
@@ -1620,6 +1619,298 @@ fn test_jit_mixed_execution_patterns() {
     assert_eq!(vars[1], Value::Num(8.0), "y should be 8");
     assert_eq!(vars[2], Value::Num(64.0), "z should be square(8) = 64");
     assert_eq!(vars[3], Value::Num(74.0), "result should be 64 + 10 = 74");
+}
+
+#[test]
+fn test_jit_named_multi_output_call_resolves_identity_without_display_name() {
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+
+    let function = runmat_hir::FunctionId(1);
+    let mut semantic_functions = HashMap::new();
+    semantic_functions.insert(
+        function,
+        SemanticFunctionBytecode {
+            function,
+            display_name: "double_pair".to_string(),
+            source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(2.0),
+                Instr::Mul,
+                Instr::StoreVar(1),
+                Instr::LoadVar(0),
+                Instr::LoadConst(3.0),
+                Instr::Mul,
+                Instr::StoreVar(2),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0],
+            varargin_slot: None,
+            output_slots: vec![1, 2],
+            varargout_slot: None,
+            capture_slots: Vec::new(),
+        },
+    );
+
+    let bytecode = Bytecode {
+        semantic_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(4.0),
+                Instr::CallFunctionMulti {
+                    identity: ::runmat_hir::CallableIdentity::DynamicName(
+                        ::runmat_hir::SymbolName("double_pair".to_string()),
+                    ),
+                    fallback_policy: ::runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+                    arg_count: 1,
+                    out_count: 2,
+                },
+                Instr::Unpack(2),
+                Instr::StoreVar(0),
+                Instr::StoreVar(1),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "named multi-output call should JIT via identity"
+    );
+    assert_eq!(vars[0], Value::Num(12.0));
+    assert_eq!(vars[1], Value::Num(8.0));
+}
+
+#[test]
+fn test_jit_named_multi_output_call_does_not_resolve_imported_identity_by_display_name() {
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+
+    let function = runmat_hir::FunctionId(1);
+    let mut semantic_functions = HashMap::new();
+    semantic_functions.insert(
+        function,
+        SemanticFunctionBytecode {
+            function,
+            display_name: "double_pair".to_string(),
+            source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(2.0),
+                Instr::Mul,
+                Instr::StoreVar(1),
+                Instr::LoadVar(0),
+                Instr::LoadConst(3.0),
+                Instr::Mul,
+                Instr::StoreVar(2),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0],
+            varargin_slot: None,
+            output_slots: vec![1, 2],
+            varargout_slot: None,
+            capture_slots: Vec::new(),
+        },
+    );
+
+    let imported_identity = ::runmat_hir::CallableIdentity::Imported(::runmat_hir::DefPath {
+        package: ::runmat_hir::PackageName("pkg".to_string()),
+        module: ::runmat_hir::QualifiedName(vec![
+            ::runmat_hir::SymbolName("pkg".to_string()),
+            ::runmat_hir::SymbolName("double_pair".to_string()),
+        ]),
+        item: vec![::runmat_hir::DefPathSegment::Function(
+            ::runmat_hir::SymbolName("double_pair".to_string()),
+        )],
+    });
+
+    let bytecode = Bytecode {
+        semantic_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(4.0),
+                Instr::CallFunctionMulti {
+                    identity: imported_identity,
+                    fallback_policy: ::runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+                    arg_count: 1,
+                    out_count: 2,
+                },
+                Instr::Unpack(2),
+                Instr::StoreVar(0),
+                Instr::StoreVar(1),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let err = engine
+        .execute_or_compile(&bytecode, &mut vars)
+        .expect_err("imported identity should not resolve through display-name lookup");
+    assert!(
+        err.to_string().contains("Undefined function")
+            && err.to_string().contains("pkg.double_pair"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn test_jit_named_multi_output_call_resolves_well_formed_external_identity() {
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+
+    let function = runmat_hir::FunctionId(1);
+    let mut semantic_functions = HashMap::new();
+    semantic_functions.insert(
+        function,
+        SemanticFunctionBytecode {
+            function,
+            display_name: "pkg.remote_pair".to_string(),
+            source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(2.0),
+                Instr::Mul,
+                Instr::StoreVar(1),
+                Instr::LoadVar(0),
+                Instr::LoadConst(3.0),
+                Instr::Mul,
+                Instr::StoreVar(2),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0],
+            varargin_slot: None,
+            output_slots: vec![1, 2],
+            varargout_slot: None,
+            capture_slots: Vec::new(),
+        },
+    );
+
+    let bytecode = Bytecode {
+        semantic_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(4.0),
+                Instr::CallFunctionMulti {
+                    identity: ::runmat_hir::CallableIdentity::ExternalName(
+                        ::runmat_hir::QualifiedName(vec![
+                            ::runmat_hir::SymbolName("pkg".to_string()),
+                            ::runmat_hir::SymbolName("remote_pair".to_string()),
+                        ]),
+                    ),
+                    fallback_policy: ::runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+                    arg_count: 1,
+                    out_count: 2,
+                },
+                Instr::Unpack(2),
+                Instr::StoreVar(0),
+                Instr::StoreVar(1),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_ok(),
+        "well-formed external identity should resolve through semantic registry"
+    );
+    assert_eq!(vars[0], Value::Num(12.0));
+    assert_eq!(vars[1], Value::Num(8.0));
+}
+
+#[test]
+fn test_jit_named_multi_output_call_does_not_resolve_malformed_external_identity() {
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+
+    let function = runmat_hir::FunctionId(1);
+    let mut semantic_functions = HashMap::new();
+    semantic_functions.insert(
+        function,
+        SemanticFunctionBytecode {
+            function,
+            display_name: "pkg..remote_pair".to_string(),
+            source_id: None,
+            instructions: vec![
+                Instr::LoadVar(0),
+                Instr::LoadConst(2.0),
+                Instr::Mul,
+                Instr::StoreVar(1),
+                Instr::LoadVar(0),
+                Instr::LoadConst(3.0),
+                Instr::Mul,
+                Instr::StoreVar(2),
+            ],
+            instr_spans: Vec::new(),
+            call_arg_spans: Vec::new(),
+            var_count: 3,
+            input_slots: vec![0],
+            varargin_slot: None,
+            output_slots: vec![1, 2],
+            varargout_slot: None,
+            capture_slots: Vec::new(),
+        },
+    );
+
+    let bytecode = Bytecode {
+        semantic_functions,
+        ..Bytecode::with_instructions(
+            vec![
+                Instr::LoadConst(4.0),
+                Instr::CallFunctionMulti {
+                    identity: ::runmat_hir::CallableIdentity::ExternalName(
+                        ::runmat_hir::QualifiedName(vec![::runmat_hir::SymbolName(
+                            "pkg..remote_pair".to_string(),
+                        )]),
+                    ),
+                    fallback_policy: ::runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+                    arg_count: 1,
+                    out_count: 2,
+                },
+                Instr::Unpack(2),
+                Instr::StoreVar(0),
+                Instr::StoreVar(1),
+            ],
+            2,
+        )
+    };
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+    let err = engine
+        .execute_or_compile(&bytecode, &mut vars)
+        .expect_err("malformed external identity should remain unresolved");
+    assert!(
+        err.to_string().contains("Undefined function")
+            && err.to_string().contains("pkg..remote_pair"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]

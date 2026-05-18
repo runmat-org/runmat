@@ -1,41 +1,214 @@
 use crate::{
-    BasicBlockId, MirBody, MirDiagnostic, MirDiagnosticSeverity, MirOperand, MirPlace, MirRvalue,
-    MirStmtKind, MirTerminatorKind, SpawnBoundary,
+    BasicBlockId, MirAssembly, MirBody, MirCallee, MirDiagnostic, MirDiagnosticSeverity,
+    MirIndexComponent, MirIndexing, MirLocal, MirLocalId, MirLocalKind, MirOperand, MirPlace,
+    MirRvalue, MirStmtKind, MirTerminatorKind, SpawnBoundary,
 };
-use runmat_hir::{FunctionId, Span, SpawnSafetyFact, SpawnSafetyReason};
-use serde::{Deserialize, Serialize};
+use runmat_hir::{BindingId, FunctionId, Span, SpawnSafetyFact, SpawnSafetyReason};
 use std::collections::{BTreeSet, HashMap};
 
-use super::FunctionSummary;
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SpawnSafetySummary {
-    pub function: FunctionId,
-    pub safety: SpawnSafetyFact,
+#[derive(Debug, Clone, PartialEq)]
+struct CaptureFacts {
+    reads_captures: BTreeSet<BindingId>,
+    writes_captures: BTreeSet<BindingId>,
 }
 
-pub fn analyze_spawn_boundaries(body: &MirBody) -> Vec<SpawnBoundary> {
-    let mut boundaries = Vec::new();
+fn analyze_capture_facts(body: &MirBody) -> CaptureFacts {
+    let mut reads_captures = BTreeSet::new();
+    let mut writes_captures = BTreeSet::new();
+
     for block in &body.blocks {
         for stmt in &block.statements {
             match &stmt.kind {
-                MirStmtKind::Assign { value, .. }
-                | MirStmtKind::MultiAssign { value, .. }
-                | MirStmtKind::Expr(value) => {
-                    collect_spawn_rvalue(value, stmt.span, &mut boundaries)
+                MirStmtKind::Assign { place, value } => {
+                    scan_rvalue(body, value, &mut reads_captures);
+                    scan_place_write(body, place, &mut writes_captures);
                 }
-                MirStmtKind::PlaceMutation(_)
-                | MirStmtKind::WorkspaceEffect { .. }
-                | MirStmtKind::EnvironmentEffect(_) => {}
+                MirStmtKind::MultiAssign { targets, value } => {
+                    scan_rvalue(body, value, &mut reads_captures);
+                    for target in &targets.targets {
+                        if let crate::MirOutputTarget::Place(place) = target {
+                            scan_place_write(body, place, &mut writes_captures);
+                        }
+                    }
+                }
+                MirStmtKind::Expr(value) => {
+                    scan_rvalue(body, value, &mut reads_captures);
+                }
+                MirStmtKind::PlaceMutation(_) => {}
+                MirStmtKind::WorkspaceEffect { .. } | MirStmtKind::EnvironmentEffect(_) => {}
             }
         }
+
+        match &block.terminator.kind {
+            MirTerminatorKind::Branch { cond, .. } => {
+                scan_operand(body, cond, &mut reads_captures);
+            }
+            MirTerminatorKind::Switch { discr, cases, .. } => {
+                scan_operand(body, discr, &mut reads_captures);
+                for (case, _) in cases {
+                    scan_operand(body, case, &mut reads_captures);
+                }
+            }
+            MirTerminatorKind::For {
+                binding, iterable, ..
+            } => {
+                scan_rvalue(body, iterable, &mut reads_captures);
+                scan_local_write(body, *binding, &mut writes_captures);
+            }
+            MirTerminatorKind::Return(return_outputs) => {
+                for output in return_outputs {
+                    scan_operand(body, output, &mut reads_captures);
+                }
+            }
+            MirTerminatorKind::Await { future, .. } => {
+                scan_operand(body, future, &mut reads_captures);
+            }
+            MirTerminatorKind::Goto(_)
+            | MirTerminatorKind::TryCatch { .. }
+            | MirTerminatorKind::Unreachable => {}
+        }
     }
-    boundaries
+
+    CaptureFacts {
+        reads_captures,
+        writes_captures,
+    }
 }
 
-pub fn analyze_spawn_boundaries_with_summaries(
+fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<BindingId>) {
+    match value {
+        MirRvalue::Use(operand) | MirRvalue::Unary(_, operand) => {
+            scan_operand(body, operand, reads_captures);
+        }
+        MirRvalue::Binary(left, _, right) => {
+            scan_operand(body, left, reads_captures);
+            scan_operand(body, right, reads_captures);
+        }
+        MirRvalue::Range { start, step, end } => {
+            scan_operand(body, start, reads_captures);
+            if let Some(step) = step {
+                scan_operand(body, step, reads_captures);
+            }
+            scan_operand(body, end, reads_captures);
+        }
+        MirRvalue::Call(call) => {
+            if let MirCallee::Dynamic(callee) = &call.callee {
+                scan_operand(body, callee, reads_captures);
+            }
+            for arg in &call.args {
+                scan_operand(body, arg.operand(), reads_captures);
+            }
+        }
+        MirRvalue::Aggregate { elements, .. } => {
+            for element in elements {
+                scan_operand(body, element, reads_captures);
+            }
+        }
+        MirRvalue::Index { base, indexing } => {
+            scan_operand(body, base, reads_captures);
+            scan_indexing(body, indexing, reads_captures);
+        }
+        MirRvalue::Future { args, .. } => {
+            for arg in args {
+                scan_operand(body, arg.operand(), reads_captures);
+            }
+        }
+        MirRvalue::Member { base, .. } => {
+            scan_operand(body, base, reads_captures);
+        }
+        MirRvalue::DynamicMember { base, member } => {
+            scan_operand(body, base, reads_captures);
+            scan_operand(body, member, reads_captures);
+        }
+        MirRvalue::MetaClass(_) | MirRvalue::Colon | MirRvalue::End => {}
+        MirRvalue::Spawn(future) => {
+            scan_operand(body, future, reads_captures);
+        }
+    }
+}
+
+fn scan_place_write(body: &MirBody, place: &MirPlace, writes_captures: &mut BTreeSet<BindingId>) {
+    if let Some(local) = place_root(place) {
+        scan_local_write(body, local, writes_captures);
+    }
+}
+
+fn scan_indexing(body: &MirBody, indexing: &MirIndexing, reads_captures: &mut BTreeSet<BindingId>) {
+    for component in &indexing.components {
+        match component {
+            MirIndexComponent::Expr(operand) => {
+                scan_operand(body, operand, reads_captures);
+            }
+            MirIndexComponent::Colon | MirIndexComponent::End { .. } => {}
+        }
+    }
+}
+
+fn place_root(place: &MirPlace) -> Option<MirLocalId> {
+    match place {
+        MirPlace::Local(local) => Some(*local),
+        MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) | MirPlace::Index(base, _) => {
+            place_root(base)
+        }
+        MirPlace::Binding(_) => None,
+    }
+}
+
+fn scan_operand(body: &MirBody, operand: &MirOperand, reads_captures: &mut BTreeSet<BindingId>) {
+    match operand {
+        MirOperand::Local(local) => {
+            if let Some(binding) = capture_binding(body, *local) {
+                reads_captures.insert(binding);
+            }
+        }
+        MirOperand::FunctionHandle(_) => {}
+        MirOperand::Constant(_) => {}
+    }
+}
+
+fn scan_local_write(body: &MirBody, local: MirLocalId, writes_captures: &mut BTreeSet<BindingId>) {
+    if let Some(binding) = capture_binding(body, local) {
+        writes_captures.insert(binding);
+    }
+}
+
+fn capture_binding(body: &MirBody, local: MirLocalId) -> Option<BindingId> {
+    local_for_id(body, local).and_then(|local| {
+        if matches!(local.kind, MirLocalKind::Capture) {
+            local.binding
+        } else {
+            None
+        }
+    })
+}
+
+fn local_for_id(body: &MirBody, local: MirLocalId) -> Option<&MirLocal> {
+    body.locals.iter().find(|candidate| candidate.id == local)
+}
+
+pub(super) fn analyze_assembly_spawn_boundaries(
+    assembly: &MirAssembly,
+) -> HashMap<FunctionId, Vec<SpawnBoundary>> {
+    let capture_facts: HashMap<_, _> = assembly
+        .bodies
+        .values()
+        .map(|body| (body.function, analyze_capture_facts(body)))
+        .collect();
+    assembly
+        .bodies
+        .iter()
+        .map(|(function, body)| {
+            (
+                *function,
+                analyze_spawn_boundaries_with_capture_facts(body, &capture_facts),
+            )
+        })
+        .collect()
+}
+
+fn analyze_spawn_boundaries_with_capture_facts(
     body: &MirBody,
-    summaries: &HashMap<FunctionId, FunctionSummary>,
+    capture_facts: &HashMap<FunctionId, CaptureFacts>,
 ) -> Vec<SpawnBoundary> {
     let in_states = future_target_in_states(body);
     let block_index: HashMap<_, _> = body
@@ -57,7 +230,7 @@ pub fn analyze_spawn_boundaries_with_summaries(
                     collect_classified_spawn_rvalue(
                         value,
                         stmt.span,
-                        summaries,
+                        capture_facts,
                         &state,
                         &mut boundaries,
                     );
@@ -72,7 +245,7 @@ pub fn analyze_spawn_boundaries_with_summaries(
                     collect_classified_spawn_rvalue(
                         value,
                         stmt.span,
-                        summaries,
+                        capture_facts,
                         &state,
                         &mut boundaries,
                     );
@@ -137,7 +310,7 @@ fn transfer_future_targets(block: &crate::BasicBlock, state: &mut [BTreeSet<Func
     }
 }
 
-pub fn diagnose_spawn_safety(boundaries: &[SpawnBoundary]) -> Vec<MirDiagnostic> {
+pub(super) fn diagnose_spawn_safety(boundaries: &[SpawnBoundary]) -> Vec<MirDiagnostic> {
     boundaries
         .iter()
         .filter_map(|boundary| match &boundary.safety {
@@ -149,45 +322,10 @@ pub fn diagnose_spawn_safety(boundaries: &[SpawnBoundary]) -> Vec<MirDiagnostic>
         .collect()
 }
 
-pub fn summarize_spawn_safety(body: &MirBody) -> SpawnSafetySummary {
-    let safety = if analyze_spawn_boundaries(body).is_empty() {
-        SpawnSafetyFact::SpawnSafe
-    } else {
-        SpawnSafetyFact::RequiresIsolation
-    };
-    SpawnSafetySummary {
-        function: body.function,
-        safety,
-    }
-}
-
-fn collect_spawn_rvalue(value: &MirRvalue, span: Span, boundaries: &mut Vec<SpawnBoundary>) {
-    match value {
-        MirRvalue::Spawn(future) => boundaries.push(SpawnBoundary {
-            future: future.clone(),
-            safety: SpawnSafetyFact::RequiresIsolation,
-            span,
-        }),
-        MirRvalue::Use(_)
-        | MirRvalue::Unary(_, _)
-        | MirRvalue::Binary(_, _, _)
-        | MirRvalue::Range { .. }
-        | MirRvalue::Call(_)
-        | MirRvalue::Aggregate { .. }
-        | MirRvalue::Index { .. }
-        | MirRvalue::Member { .. }
-        | MirRvalue::DynamicMember { .. }
-        | MirRvalue::MetaClass(_)
-        | MirRvalue::Colon
-        | MirRvalue::End
-        | MirRvalue::Future { .. } => {}
-    }
-}
-
 fn collect_classified_spawn_rvalue(
     value: &MirRvalue,
     span: Span,
-    summaries: &HashMap<FunctionId, FunctionSummary>,
+    capture_facts: &HashMap<FunctionId, CaptureFacts>,
     future_targets: &[BTreeSet<FunctionId>],
     boundaries: &mut Vec<SpawnBoundary>,
 ) {
@@ -199,7 +337,7 @@ fn collect_classified_spawn_rvalue(
         safety: SpawnSafetyFact::RequiresIsolation,
         span,
     };
-    boundary.safety = classify_spawn_boundary(&boundary, summaries, future_targets);
+    boundary.safety = classify_spawn_boundary(&boundary, capture_facts, future_targets);
     boundaries.push(boundary);
 }
 
@@ -212,7 +350,7 @@ fn future_target(value: &MirRvalue) -> Option<FunctionId> {
 
 fn classify_spawn_boundary(
     boundary: &SpawnBoundary,
-    summaries: &HashMap<FunctionId, FunctionSummary>,
+    capture_facts: &HashMap<FunctionId, CaptureFacts>,
     future_targets: &[BTreeSet<FunctionId>],
 ) -> SpawnSafetyFact {
     let Some(targets) = spawn_targets(&boundary.future, future_targets) else {
@@ -222,7 +360,7 @@ fn classify_spawn_boundary(
     };
     let mut requires_isolation = false;
     for target in targets {
-        let Some(summary) = summaries.get(&target) else {
+        let Some(summary) = capture_facts.get(&target) else {
             requires_isolation = true;
             continue;
         };
@@ -277,9 +415,7 @@ fn successors(kind: &MirTerminatorKind) -> Vec<BasicBlockId> {
             catch_block,
             ..
         } => vec![*try_block, *catch_block],
-        MirTerminatorKind::Await {
-            resume, cleanup, ..
-        } => cleanup.map_or_else(|| vec![*resume], |cleanup| vec![*resume, cleanup]),
+        MirTerminatorKind::Await { resume, .. } => vec![*resume],
         MirTerminatorKind::Return(_) | MirTerminatorKind::Unreachable => Vec::new(),
     }
 }

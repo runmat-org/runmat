@@ -1,11 +1,5 @@
-use crate::AsyncBehaviorFact;
-use runmat_hir::{
-    AsyncValueFact, EmptyArrayRole, EnvironmentEffect, ExpansionSemantics, OperatorKind, ShapeFact,
-    TensorElementDomainFact, TypeFact, ValueFlowFact, WorkspaceEffect,
-};
+use runmat_hir::{AsyncValueFact, ShapeFact, TypeFact, ValueFlowFact};
 use serde::{Deserialize, Serialize};
-
-use super::InitFact;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MirLocalFact {
@@ -13,42 +7,4 @@ pub struct MirLocalFact {
     pub shape: ShapeFact,
     pub value_flow: ValueFlowFact,
     pub async_value: Option<AsyncValueFact>,
-    pub empty_array_role: Option<EmptyArrayRole>,
-    pub expansion: Option<ExpansionSemantics>,
-    pub operator: Option<OperatorKind>,
-    pub tensor_element_domain: Option<TensorElementDomainFact>,
-    pub initialized: InitFact,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct EffectSummary {
-    pub workspace: Vec<WorkspaceEffect>,
-    pub environment: Vec<EnvironmentEffect>,
-    pub async_behavior: Option<AsyncBehaviorFact>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub enum FusibilityFact {
-    #[default]
-    Unknown,
-    Fusible,
-    NonFusible(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub enum ParallelSafetyFact {
-    #[default]
-    Unknown,
-    Safe,
-    ReadsSharedState,
-    WritesSharedState,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub enum AccelEligibilityFact {
-    #[default]
-    Unknown,
-    Ineligible(String),
-    Eligible,
-    Preferred,
 }

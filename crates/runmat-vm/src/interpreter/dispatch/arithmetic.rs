@@ -40,7 +40,6 @@ pub async fn dispatch_arithmetic(
                     let identity = external_qualified_identity(&class_name, "minus");
                     let descriptor = CallableDescriptor::resolved(
                         identity,
-                        Some(format!("{class_name}.minus")),
                         vec![lhs, obj],
                         1,
                         CallableFallbackPolicy::RuntimeNameResolution,

@@ -5,7 +5,7 @@ use crate::layout::VmAssemblyLayout;
 use runmat_builtins::{self, Type};
 use runmat_hir::{
     BindingId, CallSyntax, CallableIdentity, EntrypointId, FunctionId, HirAssembly, IndexKind,
-    IndexResultContext, OperatorKind, RequestedOutputCount,
+    IndexResultContext, OperatorKind, QualifiedName, RequestedOutputCount,
 };
 use runmat_mir::{
     BasicBlockId, MirAggregateKind, MirAssembly, MirBody, MirCall, MirCallArg, MirCallee,
@@ -32,7 +32,6 @@ pub struct Compiler {
     pub function: Option<FunctionId>,
     pub body: Option<MirBody>,
     pub class_registrations: Vec<ClassRegistration>,
-    pub class_names: HashMap<runmat_hir::ClassId, String>,
     current_span: Option<runmat_hir::Span>,
     pending_place_mutation: Option<MirPlaceMutation>,
 }
@@ -311,24 +310,6 @@ fn hir_class_registrations(hir: &HirAssembly) -> Vec<ClassRegistration> {
         .collect()
 }
 
-fn hir_class_names(hir: &HirAssembly) -> HashMap<runmat_hir::ClassId, String> {
-    hir.classes
-        .iter()
-        .map(|class| {
-            (
-                class.id,
-                class
-                    .name
-                    .0
-                    .iter()
-                    .map(|part| part.0.clone())
-                    .collect::<Vec<_>>()
-                    .join("."),
-            )
-        })
-        .collect()
-}
-
 fn member_access_name(access: runmat_hir::MemberAccess) -> &'static str {
     match access {
         runmat_hir::MemberAccess::Private => "private",
@@ -413,7 +394,6 @@ impl Compiler {
             function: Some(function),
             body: Some(body),
             class_registrations: hir_class_registrations(hir),
-            class_names: hir_class_names(hir),
             current_span: None,
             pending_place_mutation: None,
         })
@@ -456,7 +436,6 @@ impl Compiler {
             function: Some(function),
             body: Some(body),
             class_registrations: hir_class_registrations(hir),
-            class_names: hir_class_names(hir),
             current_span: None,
             pending_place_mutation: None,
         })
@@ -608,7 +587,7 @@ impl Compiler {
                     if values.is_empty() && block_index + 1 < blocks.len() {
                         self.emit(Instr::Return);
                     } else {
-                        self.compile_mir_return(&block.terminator.kind)?;
+                        self.compile_mir_return(values)?;
                     }
                 }
                 MirTerminatorKind::Unreachable => {
@@ -617,9 +596,25 @@ impl Compiler {
                     }
                     self.emit(Instr::Return);
                 }
-                _ => return Err(CompileError::new(
-                    "MIR bytecode lowering for this control-flow terminator is not implemented yet",
-                )),
+                MirTerminatorKind::Await {
+                    future,
+                    result,
+                    resume,
+                } => {
+                    if exits_try_scope {
+                        self.emit(Instr::PopTry);
+                    }
+                    self.compile_mir_operand(future)?;
+                    if let Some(place) = result {
+                        let tmp = self.alloc_temp();
+                        self.emit(Instr::StoreVar(tmp));
+                        self.compile_mir_assign_from_slot(place, tmp)?;
+                    } else {
+                        self.emit(Instr::Pop);
+                    }
+                    let resume_pc = self.emit(Instr::Jump(usize::MAX));
+                    pending_jumps.push((resume_pc, *resume, false));
+                }
             }
         }
 
@@ -719,7 +714,13 @@ impl Compiler {
         pending_jumps: &mut Vec<(usize, BasicBlockId, bool)>,
     ) -> Result<(), CompileError> {
         let MirRvalue::Range { start, step, end } = iterable else {
-            return Err(self.compile_error("MIR for-loop lowering currently requires a range"));
+            return self.compile_mir_for_columns_terminator(
+                binding,
+                iterable,
+                body_block,
+                exit_block,
+                pending_jumps,
+            );
         };
         let binding_slot = self.mir_local_slot(binding)?;
         let init_flag = self.alloc_temp();
@@ -787,6 +788,68 @@ impl Compiler {
         let exit_pc = self.instructions.len();
         self.patch(positive_step_exit, Instr::JumpIfFalse(exit_pc));
         self.patch(negative_step_exit, Instr::JumpIfFalse(exit_pc));
+        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::StoreVar(init_flag));
+        let done = self.emit(Instr::Jump(usize::MAX));
+        pending_jumps.push((done, exit_block, false));
+
+        Ok(())
+    }
+
+    fn compile_mir_for_columns_terminator(
+        &mut self,
+        binding: runmat_mir::MirLocalId,
+        iterable: &MirRvalue,
+        body_block: BasicBlockId,
+        exit_block: BasicBlockId,
+        pending_jumps: &mut Vec<(usize, BasicBlockId, bool)>,
+    ) -> Result<(), CompileError> {
+        let binding_slot = self.mir_local_slot(binding)?;
+        let init_flag = self.alloc_temp();
+        let iterable_slot = self.alloc_temp();
+        let col_slot = self.alloc_temp();
+        let col_count_slot = self.alloc_temp();
+
+        self.emit(Instr::LoadVar(init_flag));
+        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::Equal);
+        let already_initialized = self.emit(Instr::JumpIfFalse(usize::MAX));
+
+        self.compile_mir_rvalue(iterable)?;
+        self.emit(Instr::StoreVar(iterable_slot));
+        self.emit(Instr::LoadVar(iterable_slot));
+        self.emit(Instr::LoadConst(2.0));
+        self.emit(Instr::CallBuiltinMulti("size".to_string(), 2, 1));
+        self.emit(Instr::StoreVar(col_count_slot));
+        self.emit(Instr::LoadConst(1.0));
+        self.emit(Instr::StoreVar(col_slot));
+        self.emit(Instr::LoadConst(1.0));
+        self.emit(Instr::StoreVar(init_flag));
+        let after_update = self.emit(Instr::Jump(usize::MAX));
+
+        let increment_pc = self.instructions.len();
+        self.patch(already_initialized, Instr::JumpIfFalse(increment_pc));
+        self.emit(Instr::LoadVar(col_slot));
+        self.emit(Instr::LoadConst(1.0));
+        self.emit(Instr::Add);
+        self.emit(Instr::StoreVar(col_slot));
+
+        let condition_pc = self.instructions.len();
+        self.patch(after_update, Instr::Jump(condition_pc));
+        self.emit(Instr::LoadVar(col_slot));
+        self.emit(Instr::LoadVar(col_count_slot));
+        self.emit(Instr::LessEqual);
+        let exhausted = self.emit(Instr::JumpIfFalse(usize::MAX));
+
+        self.emit(Instr::LoadVar(iterable_slot));
+        self.emit(Instr::LoadVar(col_slot));
+        self.emit(Instr::IndexSlice(2, 1, 1u32 << 0, 0));
+        self.emit(Instr::StoreVar(binding_slot));
+        let body_jump = self.emit(Instr::Jump(usize::MAX));
+        pending_jumps.push((body_jump, body_block, false));
+
+        let exit_pc = self.instructions.len();
+        self.patch(exhausted, Instr::JumpIfFalse(exit_pc));
         self.emit(Instr::LoadConst(0.0));
         self.emit(Instr::StoreVar(init_flag));
         let done = self.emit(Instr::Jump(usize::MAX));
@@ -1084,6 +1147,7 @@ impl Compiler {
         }
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke)
+            && matches!(call.callee, MirCallee::Static(_))
             && !matches!(
                 call.callee,
                 MirCallee::Static(CallableIdentity::SemanticFunction(_))
@@ -1147,21 +1211,12 @@ impl Compiler {
                         fallback_policy, identity
                     )));
                 }
-                let display_name = self.mir_runtime_name_callee(identity)?;
-                if fallback_policy.allows_vm_name_fallback_for(identity)
-                    && fallback_policy.vm_fallback_name_for(identity).is_none()
-                {
-                    return Err(self.compile_error(
-                        "MIR bytecode lowering for this call callee is not implemented yet",
-                    ));
-                }
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
                     self.emit(Instr::CallFunctionExpandMultiOutput {
                         identity: identity.clone(),
-                        display_name,
                         fallback_policy,
                         specs,
                         out_count: output_count,
@@ -1169,7 +1224,6 @@ impl Compiler {
                 } else {
                     self.emit(Instr::CallFunctionMulti {
                         identity: identity.clone(),
-                        display_name,
                         fallback_policy,
                         arg_count: call.args.len(),
                         out_count: output_count,
@@ -1516,23 +1570,18 @@ impl Compiler {
         }
     }
 
-    fn compile_mir_return(&mut self, terminator: &MirTerminatorKind) -> Result<(), CompileError> {
-        match terminator {
-            MirTerminatorKind::Return(values) => match values.len() {
-                0 => Ok(()),
-                1 => {
-                    self.compile_mir_operand(&values[0])?;
-                    self.emit(Instr::ReturnValue);
-                    Ok(())
-                }
-                _ => {
-                    self.emit(Instr::Return);
-                    Ok(())
-                }
-            },
-            _ => Err(CompileError::new(
-                "MIR bytecode lowering for control-flow terminators is not implemented yet",
-            )),
+    fn compile_mir_return(&mut self, values: &[MirOperand]) -> Result<(), CompileError> {
+        match values.len() {
+            0 => Ok(()),
+            1 => {
+                self.compile_mir_operand(&values[0])?;
+                self.emit(Instr::ReturnValue);
+                Ok(())
+            }
+            _ => {
+                self.emit(Instr::Return);
+                Ok(())
+            }
         }
     }
 
@@ -1642,9 +1691,34 @@ impl Compiler {
                 self.emit(Instr::LoadConst(-0.0));
                 Ok(())
             }
-            _ => {
-                Err(self
-                    .compile_error("MIR bytecode lowering for this rvalue is not implemented yet"))
+            MirRvalue::Future {
+                function,
+                args,
+                requested_outputs,
+                ..
+            } => {
+                let (specs, has_expansion) = self.mir_call_arg_specs(args);
+                for arg in args {
+                    self.compile_mir_call_arg(arg)?;
+                }
+                let out_count = requested_outputs.fixed_count();
+                if has_expansion {
+                    self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
+                        *function, specs, out_count,
+                    ));
+                } else {
+                    self.emit(Instr::CallSemanticFunctionMulti(
+                        *function,
+                        args.len(),
+                        out_count,
+                    ));
+                }
+                Ok(())
+            }
+            MirRvalue::Spawn(operand) => {
+                // Until task handles are materialized in runtime values, keep spawn values in the
+                // same value lane as the lowered future operand.
+                self.compile_mir_operand(operand)
             }
         }
     }
@@ -1695,6 +1769,7 @@ impl Compiler {
 
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
         if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke)
+            && matches!(call.callee, MirCallee::Static(_))
             && !matches!(
                 call.callee,
                 MirCallee::Static(CallableIdentity::SemanticFunction(_))
@@ -1759,21 +1834,12 @@ impl Compiler {
                         fallback_policy, identity
                     )));
                 }
-                let display_name = self.mir_runtime_name_callee(identity)?;
-                if fallback_policy.allows_vm_name_fallback_for(identity)
-                    && fallback_policy.vm_fallback_name_for(identity).is_none()
-                {
-                    return Err(self.compile_error(
-                        "MIR bytecode lowering for this call callee is not implemented yet",
-                    ));
-                }
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
                     self.emit(Instr::CallFunctionExpandMultiOutput {
                         identity: identity.clone(),
-                        display_name: display_name.clone(),
                         fallback_policy,
                         specs,
                         out_count: requested_outputs,
@@ -1781,7 +1847,6 @@ impl Compiler {
                 } else {
                     self.emit(Instr::CallFunctionMulti {
                         identity: identity.clone(),
-                        display_name: display_name.clone(),
                         fallback_policy,
                         arg_count: call.args.len(),
                         out_count: requested_outputs,
@@ -1814,13 +1879,23 @@ impl Compiler {
         callee: &CallableIdentity,
     ) -> Result<Option<String>, CompileError> {
         match callee {
-            CallableIdentity::ExternalName(name) => Ok(name.display_name()),
-            CallableIdentity::DynamicName(name) => Ok(Some(name.0.clone())),
-            CallableIdentity::Imported(path) => {
-                Ok(path.module.display_name().or_else(|| path.display_name()))
+            CallableIdentity::ExternalName(QualifiedName(segments)) => {
+                if segments.is_empty() || segments.iter().any(|segment| segment.0.is_empty()) {
+                    return Ok(None);
+                }
+                Ok(Some(
+                    segments
+                        .iter()
+                        .map(|segment| segment.0.as_str())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                ))
             }
-            CallableIdentity::Method(id) => Ok(Some(id.0.clone())),
-            CallableIdentity::ClassConstructor(class) => Ok(self.class_names.get(class).cloned()),
+            CallableIdentity::DynamicName(name) => {
+                Ok((!name.0.is_empty()).then_some(name.0.clone()))
+            }
+            CallableIdentity::Imported(path) => Ok(path.module.display_name()),
+            CallableIdentity::Method(id) => Ok((!id.0.is_empty()).then_some(id.0.clone())),
             _ => Ok(None),
         }
     }
@@ -1830,14 +1905,12 @@ impl Compiler {
         call: &MirCall,
         has_expansion: bool,
     ) -> Result<(), CompileError> {
-        let identity = match &call.callee {
-            MirCallee::Static(identity) => identity.clone(),
-            _ => {
-                return Err(self.compile_error(
-                    "MIR bytecode lowering for this method callee is not implemented yet",
-                ))
-            }
+        let MirCallee::Static(identity) = &call.callee else {
+            return Err(
+                self.compile_error("internal error: method-call lowering expected a static callee")
+            );
         };
+        let identity = identity.clone();
         let fallback_policy = call.fallback_policy;
         if !fallback_policy.supports_vm_method_or_member_call() {
             return Err(self.compile_error(format!(
@@ -1845,7 +1918,6 @@ impl Compiler {
                 fallback_policy, identity
             )));
         }
-        let display_name = self.mir_runtime_name_callee(&identity)?;
         if call.args.is_empty() {
             return Err(self.compile_error("MIR method calls require a base receiver"));
         }
@@ -1857,7 +1929,6 @@ impl Compiler {
             let output_count = self.resolved_call_output_count(call)?;
             self.emit(Instr::CallMethodOrMemberIndexExpandMultiOutput {
                 identity,
-                display_name,
                 fallback_policy,
                 specs,
                 out_count: output_count,
@@ -1868,7 +1939,6 @@ impl Compiler {
         let output_count = self.resolved_call_output_count(call)?;
         self.emit(Instr::CallMethodOrMemberIndexMulti {
             identity,
-            display_name,
             fallback_policy,
             arg_count: argc,
             out_count: output_count,
@@ -1909,7 +1979,11 @@ impl Compiler {
             MirCallArg::Expansion { base, indices, .. } => {
                 self.compile_mir_operand(base)?;
                 for index in indices {
-                    self.compile_mir_operand(index)?;
+                    if let Some(offset) = self.mir_operand_cell_end_offset(index) {
+                        self.emit(Instr::LoadConst(encode_cell_end_offset(offset)));
+                    } else {
+                        self.compile_mir_operand(index)?;
+                    }
                 }
                 Ok(())
             }
@@ -1964,11 +2038,6 @@ impl Compiler {
                     self.compile_mir_operand(element)?;
                 }
                 self.emit(Instr::CreateCell2D(rows, cols));
-            }
-            MirAggregateKind::Struct | MirAggregateKind::ObjectArray(_) => {
-                return Err(self.compile_error(
-                    "MIR bytecode lowering for this aggregate kind is not implemented yet",
-                ))
             }
         };
         Ok(())
@@ -2308,6 +2377,50 @@ impl Compiler {
             .and_then(|(expr, has_end)| has_end.then_some(expr))
     }
 
+    fn mir_operand_cell_end_offset(&self, operand: &MirOperand) -> Option<isize> {
+        let (expr, has_end) = self.mir_operand_end_expr_internal(operand)?;
+        has_end
+            .then(|| Self::mir_cell_end_offset_from_expr(&expr))
+            .flatten()
+    }
+
+    fn mir_cell_end_offset_from_expr(expr: &EndExpr) -> Option<isize> {
+        match expr {
+            EndExpr::End => Some(0),
+            EndExpr::Pos(inner) => Self::mir_cell_end_offset_from_expr(inner),
+            EndExpr::Add(left, right) => {
+                if matches!(left.as_ref(), EndExpr::End) {
+                    Some(Self::end_expr_nonnegative_int(right)?)
+                } else if matches!(right.as_ref(), EndExpr::End) {
+                    Some(Self::end_expr_nonnegative_int(left)?)
+                } else {
+                    None
+                }
+            }
+            EndExpr::Sub(left, right) if matches!(left.as_ref(), EndExpr::End) => {
+                Some(-Self::end_expr_nonnegative_int(right)?)
+            }
+            _ => None,
+        }
+    }
+
+    fn end_expr_nonnegative_int(expr: &EndExpr) -> Option<isize> {
+        let EndExpr::Const(value) = expr else {
+            return None;
+        };
+        if !value.is_finite() || *value < 0.0 {
+            return None;
+        }
+        let rounded = value.round();
+        if (rounded - value).abs() > f64::EPSILON {
+            return None;
+        }
+        if rounded > isize::MAX as f64 {
+            return None;
+        }
+        Some(rounded as isize)
+    }
+
     fn mir_operand_end_expr_internal(&self, operand: &MirOperand) -> Option<(EndExpr, bool)> {
         match operand {
             MirOperand::Local(local) => self.mir_local_end_expr_internal(*local),
@@ -2412,19 +2525,8 @@ impl Compiler {
     }
 
     fn mir_call_end_expr_internal(&self, call: &MirCall) -> Option<(EndExpr, bool)> {
-        let (identity, display_name) = match &call.callee {
-            MirCallee::Static(identity) => {
-                let display_name = match identity {
-                    CallableIdentity::SemanticFunction(function) => self
-                        .layout
-                        .as_ref()
-                        .and_then(|layout| layout.functions.get(function))
-                        .map(|layout| layout.display_name.clone())
-                        .or_else(|| identity.display_name()),
-                    _ => identity.display_name(),
-                };
-                (identity.clone(), display_name)
-            }
+        let identity = match &call.callee {
+            MirCallee::Static(identity) => identity.clone(),
             MirCallee::Dynamic(_) => return None,
         };
         let mut args = Vec::with_capacity(call.args.len());
@@ -2440,7 +2542,6 @@ impl Compiler {
         let expr = EndExpr::ResolvedCall {
             identity,
             fallback_policy: call.fallback_policy,
-            display_name,
             args,
         };
         Some((expr, has_end))
@@ -2512,13 +2613,12 @@ impl Compiler {
             }
             CallableIdentity::ExternalName(_)
             | CallableIdentity::Imported(_)
-            | CallableIdentity::Method(_)
-            | CallableIdentity::ClassConstructor(_) => {
-                let Some(name) = self.mir_runtime_name_callee(target)? else {
-                    return Err(self.compile_error(
-                        "MIR bytecode lowering for this function handle target is not implemented yet",
-                    ));
-                };
+            | CallableIdentity::Method(_) => {
+                let name = self.mir_runtime_name_callee(target)?.ok_or_else(|| {
+                    self.compile_error(format!(
+                        "missing runtime name for function handle target {target:?}"
+                    ))
+                })?;
                 self.emit(Instr::CreateExternalFunctionHandle(name));
                 Ok(())
             }
@@ -2581,9 +2681,9 @@ impl Compiler {
         match place {
             MirPlace::Local(local) => self.mir_local_slot(*local),
             MirPlace::Binding(binding) => self.binding_slot(*binding),
-            _ => Err(CompileError::new(
-                "MIR bytecode lowering for this assignment place is not implemented yet",
-            )),
+            _ => Err(CompileError::new(format!(
+                "expected local or binding place for slot lookup, got {place:?}",
+            ))),
         }
     }
 

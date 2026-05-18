@@ -98,9 +98,10 @@ pub(crate) fn lower_stmt_with_replacements(
         }],
         HirStmtKind::Return | HirStmtKind::Import(_) => Vec::new(),
         _ => {
-            return Err(SemanticError::new(
-                "MIR lowering for statement is not implemented yet",
-            ))
+            return Err(SemanticError::new(format!(
+                "unexpected statement in stmt-level MIR lowering; control-flow lowering should have handled: {:?}",
+                stmt.kind
+            )))
         }
     })
 }
