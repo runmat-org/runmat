@@ -237,6 +237,38 @@ pub enum ProjectCompositionError {
     DependencyCycle { cycle: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredProjectEntrypoint {
+    pub manifest_path: PathBuf,
+    pub root_package: String,
+    pub project_root: PathBuf,
+    pub entrypoint: ResolvedProjectEntrypoint,
+}
+
+#[derive(Debug, Error)]
+pub enum DiscoverProjectEntrypointError {
+    #[error(
+        "failed to build project composition from discovered manifest {manifest_path}: {source}"
+    )]
+    Composition {
+        manifest_path: PathBuf,
+        #[source]
+        source: ProjectCompositionError,
+    },
+    #[error("project composition for {manifest_path} is missing root package `{package}`")]
+    MissingRootPackage {
+        manifest_path: PathBuf,
+        package: String,
+    },
+    #[error("failed to resolve project entrypoint `{entrypoint}` from {manifest_path}: {source}")]
+    Resolve {
+        manifest_path: PathBuf,
+        entrypoint: String,
+        #[source]
+        source: ProjectEntrypointResolveError,
+    },
+}
+
 impl ProjectManifest {
     pub fn validate(&self, project_root: &Path) -> Result<(), ProjectManifestValidationError> {
         let mut messages = Vec::new();
@@ -487,6 +519,45 @@ pub fn resolve_project_entrypoint(
     }
 
     Ok(None)
+}
+
+pub fn resolve_named_entrypoint_from(
+    start: &Path,
+    entrypoint_name: &str,
+) -> Result<Option<DiscoveredProjectEntrypoint>, DiscoverProjectEntrypointError> {
+    let Some(manifest_path) = discover_project_manifest_from(start) else {
+        return Ok(None);
+    };
+    let composition = build_project_composition_graph(&manifest_path).map_err(|source| {
+        DiscoverProjectEntrypointError::Composition {
+            manifest_path: manifest_path.clone(),
+            source,
+        }
+    })?;
+    let root_package = composition.root_package.clone();
+    let root = composition.packages.get(&root_package).ok_or_else(|| {
+        DiscoverProjectEntrypointError::MissingRootPackage {
+            manifest_path: manifest_path.clone(),
+            package: root_package.clone(),
+        }
+    })?;
+    let Some(entrypoint) =
+        resolve_project_entrypoint(&root.project_root, &root.manifest, entrypoint_name).map_err(
+            |source| DiscoverProjectEntrypointError::Resolve {
+                manifest_path: manifest_path.clone(),
+                entrypoint: entrypoint_name.to_string(),
+                source,
+            },
+        )?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(DiscoveredProjectEntrypoint {
+        manifest_path,
+        root_package,
+        project_root: root.project_root.clone(),
+        entrypoint,
+    }))
 }
 
 pub fn build_project_composition_graph(

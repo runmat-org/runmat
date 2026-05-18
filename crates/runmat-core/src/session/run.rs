@@ -1115,9 +1115,7 @@ fn source_input_text(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn resolve_path_source_input(path: &str) -> std::result::Result<std::path::PathBuf, RunError> {
-    use runmat_config::{
-        build_project_composition_graph, discover_project_manifest_from, resolve_project_entrypoint,
-    };
+    use runmat_config::resolve_named_entrypoint_from;
     use std::path::{Path, PathBuf};
 
     let candidate = PathBuf::from(path);
@@ -1139,59 +1137,24 @@ fn resolve_path_source_input(path: &str) -> std::result::Result<std::path::PathB
         )
     })?;
 
-    let Some(manifest_path) = discover_project_manifest_from(&cwd) else {
-        return Ok(candidate);
-    };
-
-    let composition = build_project_composition_graph(&manifest_path).map_err(|err| {
-        RunError::Runtime(
-            build_runtime_error(format!(
-                "failed to build project composition from discovered project manifest {}: {}",
-                manifest_path.display(),
-                err
-            ))
-            .with_identifier("RunMat:ProjectCompositionResolveFailed")
-            .build(),
-        )
-    })?;
-
-    let root_package = composition
-        .packages
-        .get(&composition.root_package)
-        .ok_or_else(|| {
+    let Some(discovered) =
+        resolve_named_entrypoint_from(&cwd, &entrypoint_name).map_err(|err| {
             RunError::Runtime(
                 build_runtime_error(format!(
-                    "project composition missing root package '{}' for manifest {}",
-                    composition.root_package,
-                    manifest_path.display()
+                    "failed to resolve named project entrypoint '{}' from working directory {}: {}",
+                    entrypoint_name,
+                    cwd.display(),
+                    err
                 ))
-                .with_identifier("RunMat:ProjectCompositionResolveFailed")
+                .with_identifier("RunMat:EntrypointResolveFailed")
                 .build(),
             )
-        })?;
-
-    let Some(resolved) = resolve_project_entrypoint(
-        &root_package.project_root,
-        &root_package.manifest,
-        &entrypoint_name,
-    )
-    .map_err(|err| {
-        RunError::Runtime(
-            build_runtime_error(format!(
-                "failed to resolve project entrypoint '{}' from {}: {}",
-                entrypoint_name,
-                manifest_path.display(),
-                err
-            ))
-            .with_identifier("RunMat:EntrypointResolveFailed")
-            .build(),
-        )
-    })?
+        })?
     else {
         return Ok(candidate);
     };
 
-    Ok(resolved.source_file)
+    Ok(discovered.entrypoint.source_file)
 }
 
 #[cfg(not(target_arch = "wasm32"))]

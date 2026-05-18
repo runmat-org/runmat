@@ -1,9 +1,6 @@
 use anyhow::{Context, Result};
 use log::{info, warn};
-use runmat_config::{
-    build_project_composition_graph, discover_project_manifest_from, resolve_project_entrypoint,
-    ResolvedEntrypointTarget, RunMatConfig,
-};
+use runmat_config::{resolve_named_entrypoint_from, ResolvedEntrypointTarget, RunMatConfig};
 use runmat_core::{
     abi::{DiagnosticSeverity, ExecutionOutcome, RuntimeFlow},
     TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
@@ -55,55 +52,42 @@ fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
     let Some(name) = entrypoint_name_candidate(&script) else {
         return Ok(script);
     };
-    let Some(manifest_path) = discover_project_manifest_from(&cwd) else {
-        return Ok(script);
-    };
-    let composition = build_project_composition_graph(&manifest_path).with_context(|| {
-        format!(
-            "failed to build project composition from discovered project manifest {}",
-            manifest_path.display()
+    let Some(discovered) = resolve_named_entrypoint_from(&cwd, &name).map_err(|err| {
+        anyhow::anyhow!(
+            "failed to resolve named project entrypoint '{}' from working directory {}: {}",
+            name,
+            cwd.display(),
+            err
         )
-    })?;
-    let root_package = composition
-        .packages
-        .get(&composition.root_package)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "project composition missing root package `{}` for manifest {}",
-                composition.root_package,
-                manifest_path.display()
-            )
-        })?;
-    let Some(resolved) =
-        resolve_project_entrypoint(&root_package.project_root, &root_package.manifest, &name)
-            .map_err(|err| {
-                anyhow::anyhow!(
-                    "failed to resolve project entrypoint '{}' from {}: {}",
-                    name,
-                    manifest_path.display(),
-                    err
-                )
-            })?
+    })?
     else {
         return Ok(script);
     };
-    match resolved.target {
+    match discovered.entrypoint.target {
         ResolvedEntrypointTarget::Path => info!(
             "Resolved project entrypoint '{}' via {} path -> {}",
             name,
-            manifest_path.display(),
-            resolved.source_file.display()
+            discovered.manifest_path.display(),
+            discovered.entrypoint.source_file.display()
         ),
         ResolvedEntrypointTarget::ModuleFunction => info!(
             "Resolved project entrypoint '{}' via {} module={} function={} -> {}",
             name,
-            manifest_path.display(),
-            resolved.module.as_deref().unwrap_or("<unknown>"),
-            resolved.function.as_deref().unwrap_or("<unknown>"),
-            resolved.source_file.display()
+            discovered.manifest_path.display(),
+            discovered
+                .entrypoint
+                .module
+                .as_deref()
+                .unwrap_or("<unknown>"),
+            discovered
+                .entrypoint
+                .function
+                .as_deref()
+                .unwrap_or("<unknown>"),
+            discovered.entrypoint.source_file.display()
         ),
     }
-    Ok(resolved.source_file)
+    Ok(discovered.entrypoint.source_file)
 }
 
 fn entrypoint_name_candidate(script: &Path) -> Option<String> {

@@ -17,6 +17,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 5 shared discovered-entrypoint resolver API across config/CLI/core
+  - Added `runmat-config::resolve_named_entrypoint_from(start, entrypoint_name)` to centralize:
+    - manifest discovery
+    - composition graph loading
+    - root package selection
+    - named entrypoint resolution
+  - Added typed discovery/resolve diagnostics:
+    - `DiscoverProjectEntrypointError`
+    - `DiscoveredProjectEntrypoint`
+  - Migrated both consumers to the shared API:
+    - CLI script path resolution in `runmat-cli`
+    - core request path source resolution in `runmat-core`
+  - Added config tests covering discovered resolver success and explicit resolution errors.
+  - Validation: `cargo test -p runmat-config`, `cargo test -p runmat-core source_input_path_`, `cargo test -p runmat --lib`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 5 core ABI path-input manifest entrypoint resolution
   - `runmat-core` `ExecutionRequest` path-source loading now resolves simple named path inputs through discovered project composition/entrypoint metadata before file read.
   - `source_input_text(SourceInput::Path(..))` now:

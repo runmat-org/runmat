@@ -1,7 +1,7 @@
 use runmat_config::{
     build_project_composition_graph, build_project_source_index, discover_project_manifest_from,
-    load_project_manifest, parse_project_manifest_toml, resolve_project_entrypoint,
-    ResolvedEntrypointTarget, PROJECT_MANIFEST_FILENAME,
+    load_project_manifest, parse_project_manifest_toml, resolve_named_entrypoint_from,
+    resolve_project_entrypoint, ResolvedEntrypointTarget, PROJECT_MANIFEST_FILENAME,
 };
 use std::fs;
 use tempfile::TempDir;
@@ -549,4 +549,70 @@ roots = ["src"]
     let err = build_project_composition_graph(&tmp.path().join("runmat.toml"))
         .expect_err("duplicate package names should fail");
     assert!(err.to_string().contains("duplicate package name"));
+}
+
+#[test]
+fn resolve_named_entrypoint_from_discovers_and_resolves() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src/app")).unwrap();
+    fs::write(
+        tmp.path().join("src/app/server.m"),
+        "function y = main(); y = 1; end",
+    )
+    .unwrap();
+    write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "server"
+module = "app.server"
+function = "main"
+"#,
+    );
+
+    let discovered = resolve_named_entrypoint_from(&tmp.path().join("src"), "server")
+        .expect("resolver should succeed")
+        .expect("entrypoint should resolve");
+    assert_eq!(discovered.root_package, "demo");
+    assert_eq!(
+        discovered.entrypoint.target,
+        ResolvedEntrypointTarget::ModuleFunction
+    );
+    assert_eq!(
+        discovered.entrypoint.source_file.canonicalize().unwrap(),
+        tmp.path().join("src/app/server.m").canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn resolve_named_entrypoint_from_reports_resolution_errors() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "server"
+module = "app.server"
+function = "main"
+"#,
+    );
+
+    let err = resolve_named_entrypoint_from(tmp.path(), "server")
+        .expect_err("missing module file should return explicit resolve error");
+    assert!(err
+        .to_string()
+        .contains("failed to resolve project entrypoint"));
 }

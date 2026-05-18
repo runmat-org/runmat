@@ -13,7 +13,8 @@ mod schema;
 pub use loader::ConfigLoader;
 pub use project::{
     build_project_composition_graph, build_project_source_index, discover_project_manifest_from,
-    load_project_manifest, parse_project_manifest_toml, resolve_project_entrypoint,
+    load_project_manifest, parse_project_manifest_toml, resolve_named_entrypoint_from,
+    resolve_project_entrypoint, DiscoverProjectEntrypointError, DiscoveredProjectEntrypoint,
     ProjectCompositionError, ProjectCompositionGraph, ProjectCompositionPackage, ProjectDependency,
     ProjectEntrypoint, ProjectEntrypointResolveError, ProjectManifest, ProjectManifestLoadError,
     ProjectManifestValidationError, ProjectPackage, ProjectSourceFile, ProjectSourceIndex,
