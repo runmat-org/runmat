@@ -2,6 +2,10 @@
 
 Append-only concise log for significant simulation-system changes.
 
+## 2026-05-18
+
+- Expanded EM release-readiness Maxwell posture/trend governance to consume homogeneous/heterogeneous relative permittivity/permeability frequency-scale mean/spread/coverage assertions, including additive policy knobs (`RUNMAT_RELEASE_READINESS_EM_*RELATIVE_*FREQUENCY_*`) plus result/markdown-summary surfacing; updated `scripts.tests.test_release_readiness_nonlinear` for both static-breach and rolling-trend regressions; verified with `python3 -m unittest scripts.tests.test_release_readiness_nonlinear` and `python3 scripts/analysis/governance/release_readiness_nonlinear.py`.
+
 ## 2026-05-17
 
 - Reorganized `docs/detailed-work` around canonical high-signal docs anchored by `GOAL.md`.

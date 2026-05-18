@@ -1,6 +1,6 @@
 # Analysis System Roadmap
 
-Last updated: 2026-05-17
+Last updated: 2026-05-18
 
 ## Planning Principles
 
@@ -325,3 +325,5 @@ Progress update (2026-05-17):
     EM conformance fixtures now emit homogeneous/heterogeneous relative permittivity/permeability spread assertions (`em_*_relative_permittivity_spread_ratio`, `em_*_relative_permeability_spread_ratio`), nonlinear-schema and external-reference validators/baselines now require those metrics, and `release_readiness_nonlinear.py` now enforces profile-tuned posture + trend gates for the same signals with regression coverage in `scripts.tests.test_release_readiness_nonlinear`.
 129. [x] EM frequency-dependent permittivity/permeability constitutive scaling baseline landed:
     additive EM material frequency-response points now support optional relative permittivity/permeability scales, FEA electromagnetic coefficient sampling now interpolates and applies those scales at runtime reference frequency, and conformance/external-reference/nonlinear-schema governance now requires homogeneous/heterogeneous EM frequency-scale mean/spread/coverage assertions for both permittivity and permeability.
+130. [x] EM release-readiness frequency-scale posture/trend gating landed:
+    `release_readiness_nonlinear.py` now enforces homogeneous/heterogeneous relative permittivity/permeability frequency-scale mean/spread/coverage assertion posture gates plus rolling trend gates (drop/increase as appropriate) under additive policy knobs (`RUNMAT_RELEASE_READINESS_EM_*RELATIVE_*FREQUENCY_*`), with regression coverage in `scripts.tests.test_release_readiness_nonlinear`.

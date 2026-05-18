@@ -1,6 +1,6 @@
 # Maxwell EM Track
 
-Last updated: 2026-05-17
+Last updated: 2026-05-18
 
 ## Current Position
 
@@ -64,6 +64,7 @@ Last updated: 2026-05-17
    Baseline increment landed: release-readiness Maxwell posture governance now evaluates sigma(omega) scale-mean thresholds from both homogeneous and heterogeneous assertions (`em_homogeneous_sigma_omega_scale_mean`, `em_heterogeneous_sigma_omega_scale_mean`) under the shared scale-mean posture threshold, closing a heterogeneous-only drift blind spot.
    Baseline increment landed: external-reference and nonlinear schema governance now require homogeneous/heterogeneous relative permittivity/permeability spread comparators (`em_homogeneous_relative_permittivity_spread_ratio`, `em_heterogeneous_relative_permittivity_spread_ratio`, `em_homogeneous_relative_permeability_spread_ratio`, `em_heterogeneous_relative_permeability_spread_ratio`), and release-readiness Maxwell posture/trend governance now enforces the same signals under profile-tuned static and rolling thresholds.
    Baseline increment landed: additive EM material frequency-response points now support optional relative permittivity/permeability scales, electromagnetic coefficient sampling now interpolates and applies those scales at runtime reference frequency, and comparator governance now enforces homogeneous/heterogeneous permittivity/permeability frequency-scale mean/spread/coverage assertions in nonlinear-schema and external-reference validation.
+   Baseline increment landed: release-readiness Maxwell posture/trend governance now also enforces homogeneous/heterogeneous relative permittivity/permeability frequency-scale mean/spread/coverage assertions with profile-tuned static and rolling thresholds, closing branch-readiness gating gaps after comparator/schema enforcement for the new constitutive frequency-scale signals.
    Baseline increment landed: release-readiness key-performance governance now includes non-core EM provider fixtures (sparse-assignments, fallback-heavy, overlap-interference, boundary-kernel) in speedup-floor and slowdown-trend checks, reducing non-core Maxwell scale-regression blind spots.
    Baseline increment landed: release-readiness key-performance governance now also includes `nonlinear_assembly_gpu_provider`, aligning nonlinear-core scale-regression gating with benchmark-schema performance-required fixture coverage.
    Baseline increment landed: release-readiness constitutive governance now also enforces plastic/contact reference-severity assertion posture and trend gates (`plasticity_hardening_reference_*_severity_*`, `contact_frictionless*_severity_*`) under existing severity/reference-trend thresholds, reducing reference-fidelity blind spots in cross-domain readiness policy.

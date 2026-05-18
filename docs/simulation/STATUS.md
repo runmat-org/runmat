@@ -1,6 +1,6 @@
 # Analysis System Status
 
-Last updated: 2026-05-17
+Last updated: 2026-05-18
 
 Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 
@@ -165,4 +165,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - Release-readiness coupled-flow governance now enforces CHT/FSI profile-point and stepping/time-step assertion posture and rolling trend gates (`cht_profile_point_count`, `cht_step_count`, `cht_time_step_s`, `fsi_profile_point_count`, `fsi_step_count`, `fsi_time_step_s`, `fsi_cfd_profile_point_count`) under profile-tuned policy defaults, reducing coupled-flow stepping/profile drift blind spots in branch-readiness gating.
 - Release-readiness coupled-flow governance now also enforces CFD/CHT/FSI profile-property assertion posture gates (`*_reference_density_kg_per_m3`, `*_dynamic_viscosity_pa_s`, `*_inlet_velocity_m_per_s`, `*_turbulence_intensity`) plus CFD profile-point posture (`cfd_profile_point_count`) under profile-tuned policy defaults, reducing coupled-flow profile-property drift blind spots in branch-readiness gating.
 - Release-readiness coupled-flow governance now also enforces rolling worsening trend gates for CFD/CHT/FSI profile-property assertions (`*_reference_density_kg_per_m3`, `*_dynamic_viscosity_pa_s`, `*_inlet_velocity_m_per_s`, `*_turbulence_intensity`) plus CFD profile-point trends (`cfd_profile_point_count`) under profile-tuned policy defaults, reducing coupled-flow profile-property baseline-drift blind spots in branch-readiness gating.
+- Release-readiness Maxwell posture/trend governance now also enforces homogeneous/heterogeneous relative permittivity/permeability frequency-scale assertion signals (`em_*_relative_permittivity_frequency_scale_{mean,spread_ratio}`, `em_*_relative_permittivity_frequency_response_coverage_ratio`, `em_*_relative_permeability_frequency_scale_{mean,spread_ratio}`, `em_*_relative_permeability_frequency_response_coverage_ratio`) with profile-tuned static and rolling thresholds, closing a branch-readiness gap after comparator/schema governance for the new EM constitutive frequency-scale metrics.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.

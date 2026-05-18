@@ -2664,6 +2664,60 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_min_relative_permittivity_frequency_scale_mean_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_MEAN",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_MEAN",
+                "0.85",
+            ),
+        )
+    )
+    em_max_relative_permittivity_frequency_scale_spread_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_SPREAD_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_SPREAD_RATIO",
+                "1.25",
+            ),
+        )
+    )
+    em_min_relative_permittivity_frequency_response_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RELATIVE_PERMITTIVITY_FREQUENCY_RESPONSE_COVERAGE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_RELATIVE_PERMITTIVITY_FREQUENCY_RESPONSE_COVERAGE_RATIO",
+                "0.9",
+            ),
+        )
+    )
+    em_min_relative_permeability_frequency_scale_mean_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_MEAN",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_MEAN",
+                "0.85",
+            ),
+        )
+    )
+    em_max_relative_permeability_frequency_scale_spread_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_SPREAD_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_SPREAD_RATIO",
+                "1.25",
+            ),
+        )
+    )
+    em_min_relative_permeability_frequency_response_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_RELATIVE_PERMEABILITY_FREQUENCY_RESPONSE_COVERAGE_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_RELATIVE_PERMEABILITY_FREQUENCY_RESPONSE_COVERAGE_RATIO",
+                "0.9",
+            ),
+        )
+    )
     em_max_homogeneous_material_heterogeneity_index_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX",
@@ -2847,6 +2901,60 @@ def evaluate_release_readiness(
             "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_RELATIVE_PERMEABILITY_SPREAD_DROP_TREND_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_RELATIVE_PERMEABILITY_SPREAD_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_relative_permittivity_frequency_scale_mean_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_MEAN_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_MEAN_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_relative_permittivity_frequency_scale_spread_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_SPREAD_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_SPREAD_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_relative_permittivity_frequency_response_coverage_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMITTIVITY_FREQUENCY_RESPONSE_COVERAGE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMITTIVITY_FREQUENCY_RESPONSE_COVERAGE_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_relative_permeability_frequency_scale_mean_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_MEAN_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_MEAN_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_relative_permeability_frequency_scale_spread_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_SPREAD_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_SPREAD_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_relative_permeability_frequency_response_coverage_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMEABILITY_FREQUENCY_RESPONSE_COVERAGE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_RELATIVE_PERMEABILITY_FREQUENCY_RESPONSE_COVERAGE_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -4012,6 +4120,12 @@ def evaluate_release_readiness(
     em_min_heterogeneous_relative_permittivity_spread_ratio = None
     em_max_homogeneous_relative_permeability_spread_ratio = None
     em_min_heterogeneous_relative_permeability_spread_ratio = None
+    em_min_relative_permittivity_frequency_scale_mean = None
+    em_max_relative_permittivity_frequency_scale_spread_ratio = None
+    em_min_relative_permittivity_frequency_response_coverage_ratio = None
+    em_min_relative_permeability_frequency_scale_mean = None
+    em_max_relative_permeability_frequency_scale_spread_ratio = None
+    em_min_relative_permeability_frequency_response_coverage_ratio = None
     em_max_homogeneous_material_heterogeneity_index = None
     em_min_heterogeneous_material_heterogeneity_index = None
     em_max_dispersive_loss_scale_mean = None
@@ -4070,6 +4184,12 @@ def evaluate_release_readiness(
     em_heterogeneous_relative_permittivity_spread_drop_trend_ratio = None
     em_homogeneous_relative_permeability_spread_trend_ratio = None
     em_heterogeneous_relative_permeability_spread_drop_trend_ratio = None
+    em_relative_permittivity_frequency_scale_mean_drop_trend_ratio = None
+    em_relative_permittivity_frequency_scale_spread_trend_ratio = None
+    em_relative_permittivity_frequency_response_coverage_drop_trend_ratio = None
+    em_relative_permeability_frequency_scale_mean_drop_trend_ratio = None
+    em_relative_permeability_frequency_scale_spread_trend_ratio = None
+    em_relative_permeability_frequency_response_coverage_drop_trend_ratio = None
     em_homogeneous_material_heterogeneity_trend_ratio = None
     em_heterogeneous_material_heterogeneity_drop_trend_ratio = None
     em_dispersive_loss_scale_trend_ratio = None
@@ -5713,6 +5833,102 @@ def evaluate_release_readiness(
             ),
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_relative_permittivity_frequency_scale_mean",
+                "min",
+                "EM_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_MEAN_LOW",
+                "EM homogeneous relative permittivity frequency-scale mean",
+                em_min_relative_permittivity_frequency_scale_mean_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_relative_permittivity_frequency_scale_mean",
+                "min",
+                "EM_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_MEAN_LOW",
+                "EM heterogeneous relative permittivity frequency-scale mean",
+                em_min_relative_permittivity_frequency_scale_mean_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_relative_permittivity_frequency_scale_spread_ratio",
+                "max",
+                "EM_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_SPREAD_RATIO_HIGH",
+                "EM homogeneous relative permittivity frequency-scale spread ratio",
+                em_max_relative_permittivity_frequency_scale_spread_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_relative_permittivity_frequency_scale_spread_ratio",
+                "max",
+                "EM_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_SPREAD_RATIO_HIGH",
+                "EM heterogeneous relative permittivity frequency-scale spread ratio",
+                em_max_relative_permittivity_frequency_scale_spread_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_relative_permittivity_frequency_response_coverage_ratio",
+                "min",
+                "EM_RELATIVE_PERMITTIVITY_FREQUENCY_RESPONSE_COVERAGE_RATIO_LOW",
+                "EM homogeneous relative permittivity frequency-response coverage ratio",
+                em_min_relative_permittivity_frequency_response_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_relative_permittivity_frequency_response_coverage_ratio",
+                "min",
+                "EM_RELATIVE_PERMITTIVITY_FREQUENCY_RESPONSE_COVERAGE_RATIO_LOW",
+                "EM heterogeneous relative permittivity frequency-response coverage ratio",
+                em_min_relative_permittivity_frequency_response_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_relative_permeability_frequency_scale_mean",
+                "min",
+                "EM_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_MEAN_LOW",
+                "EM homogeneous relative permeability frequency-scale mean",
+                em_min_relative_permeability_frequency_scale_mean_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_relative_permeability_frequency_scale_mean",
+                "min",
+                "EM_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_MEAN_LOW",
+                "EM heterogeneous relative permeability frequency-scale mean",
+                em_min_relative_permeability_frequency_scale_mean_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_relative_permeability_frequency_scale_spread_ratio",
+                "max",
+                "EM_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_SPREAD_RATIO_HIGH",
+                "EM homogeneous relative permeability frequency-scale spread ratio",
+                em_max_relative_permeability_frequency_scale_spread_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_relative_permeability_frequency_scale_spread_ratio",
+                "max",
+                "EM_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_SPREAD_RATIO_HIGH",
+                "EM heterogeneous relative permeability frequency-scale spread ratio",
+                em_max_relative_permeability_frequency_scale_spread_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_relative_permeability_frequency_response_coverage_ratio",
+                "min",
+                "EM_RELATIVE_PERMEABILITY_FREQUENCY_RESPONSE_COVERAGE_RATIO_LOW",
+                "EM homogeneous relative permeability frequency-response coverage ratio",
+                em_min_relative_permeability_frequency_response_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_relative_permeability_frequency_response_coverage_ratio",
+                "min",
+                "EM_RELATIVE_PERMEABILITY_FREQUENCY_RESPONSE_COVERAGE_RATIO_LOW",
+                "EM heterogeneous relative permeability frequency-response coverage ratio",
+                em_min_relative_permeability_frequency_response_coverage_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
                 "em_homogeneous_material_heterogeneity_index",
                 "max",
                 "EM_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX_HIGH",
@@ -6335,6 +6551,54 @@ def evaluate_release_readiness(
                     or observed < em_min_heterogeneous_relative_permeability_spread_ratio
                 ):
                     em_min_heterogeneous_relative_permeability_spread_ratio = observed
+            elif assertion_name.endswith(
+                "relative_permittivity_frequency_scale_mean"
+            ):
+                if (
+                    em_min_relative_permittivity_frequency_scale_mean is None
+                    or observed < em_min_relative_permittivity_frequency_scale_mean
+                ):
+                    em_min_relative_permittivity_frequency_scale_mean = observed
+            elif assertion_name.endswith(
+                "relative_permittivity_frequency_scale_spread_ratio"
+            ):
+                if (
+                    em_max_relative_permittivity_frequency_scale_spread_ratio is None
+                    or observed > em_max_relative_permittivity_frequency_scale_spread_ratio
+                ):
+                    em_max_relative_permittivity_frequency_scale_spread_ratio = observed
+            elif assertion_name.endswith(
+                "relative_permittivity_frequency_response_coverage_ratio"
+            ):
+                if (
+                    em_min_relative_permittivity_frequency_response_coverage_ratio is None
+                    or observed < em_min_relative_permittivity_frequency_response_coverage_ratio
+                ):
+                    em_min_relative_permittivity_frequency_response_coverage_ratio = observed
+            elif assertion_name.endswith(
+                "relative_permeability_frequency_scale_mean"
+            ):
+                if (
+                    em_min_relative_permeability_frequency_scale_mean is None
+                    or observed < em_min_relative_permeability_frequency_scale_mean
+                ):
+                    em_min_relative_permeability_frequency_scale_mean = observed
+            elif assertion_name.endswith(
+                "relative_permeability_frequency_scale_spread_ratio"
+            ):
+                if (
+                    em_max_relative_permeability_frequency_scale_spread_ratio is None
+                    or observed > em_max_relative_permeability_frequency_scale_spread_ratio
+                ):
+                    em_max_relative_permeability_frequency_scale_spread_ratio = observed
+            elif assertion_name.endswith(
+                "relative_permeability_frequency_response_coverage_ratio"
+            ):
+                if (
+                    em_min_relative_permeability_frequency_response_coverage_ratio is None
+                    or observed < em_min_relative_permeability_frequency_response_coverage_ratio
+                ):
+                    em_min_relative_permeability_frequency_response_coverage_ratio = observed
             elif assertion_name.endswith("homogeneous_material_heterogeneity_index"):
                 if (
                     em_max_homogeneous_material_heterogeneity_index is None
@@ -8675,6 +8939,216 @@ def evaluate_release_readiness(
                 )
             )
 
+        relative_permittivity_frequency_scale_mean_trend_candidates = [
+            fixture_assertion_trend_ratio(
+                "em_homogeneous_relative_permittivity_frequency_scale_mean"
+            ),
+            fixture_assertion_trend_ratio(
+                "em_heterogeneous_relative_permittivity_frequency_scale_mean"
+            ),
+        ]
+        relative_permittivity_frequency_scale_mean_trend_candidates = [
+            value
+            for value in relative_permittivity_frequency_scale_mean_trend_candidates
+            if value is not None
+        ]
+        if relative_permittivity_frequency_scale_mean_trend_candidates:
+            em_relative_permittivity_frequency_scale_mean_drop_trend_ratio = max(
+                relative_permittivity_frequency_scale_mean_trend_candidates
+            )
+        if (
+            em_relative_permittivity_frequency_scale_mean_drop_trend_ratio is not None
+            and em_relative_permittivity_frequency_scale_mean_drop_trend_ratio
+            > em_max_relative_permittivity_frequency_scale_mean_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_MEAN_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM relative permittivity frequency-scale mean drop trend ratio "
+                        f"{em_relative_permittivity_frequency_scale_mean_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_relative_permittivity_frequency_scale_mean_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        relative_permittivity_frequency_scale_spread_trend_candidates = [
+            fixture_assertion_trend_ratio(
+                "em_homogeneous_relative_permittivity_frequency_scale_spread_ratio",
+                ratio_mode="increase",
+            ),
+            fixture_assertion_trend_ratio(
+                "em_heterogeneous_relative_permittivity_frequency_scale_spread_ratio",
+                ratio_mode="increase",
+            ),
+        ]
+        relative_permittivity_frequency_scale_spread_trend_candidates = [
+            value
+            for value in relative_permittivity_frequency_scale_spread_trend_candidates
+            if value is not None
+        ]
+        if relative_permittivity_frequency_scale_spread_trend_candidates:
+            em_relative_permittivity_frequency_scale_spread_trend_ratio = max(
+                relative_permittivity_frequency_scale_spread_trend_candidates
+            )
+        if (
+            em_relative_permittivity_frequency_scale_spread_trend_ratio is not None
+            and em_relative_permittivity_frequency_scale_spread_trend_ratio
+            > em_max_relative_permittivity_frequency_scale_spread_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_RELATIVE_PERMITTIVITY_FREQUENCY_SCALE_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM relative permittivity frequency-scale spread trend ratio "
+                        f"{em_relative_permittivity_frequency_scale_spread_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_relative_permittivity_frequency_scale_spread_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        relative_permittivity_frequency_response_coverage_trend_candidates = [
+            fixture_assertion_trend_ratio(
+                "em_homogeneous_relative_permittivity_frequency_response_coverage_ratio"
+            ),
+            fixture_assertion_trend_ratio(
+                "em_heterogeneous_relative_permittivity_frequency_response_coverage_ratio"
+            ),
+        ]
+        relative_permittivity_frequency_response_coverage_trend_candidates = [
+            value
+            for value in relative_permittivity_frequency_response_coverage_trend_candidates
+            if value is not None
+        ]
+        if relative_permittivity_frequency_response_coverage_trend_candidates:
+            em_relative_permittivity_frequency_response_coverage_drop_trend_ratio = max(
+                relative_permittivity_frequency_response_coverage_trend_candidates
+            )
+        if (
+            em_relative_permittivity_frequency_response_coverage_drop_trend_ratio
+            is not None
+            and em_relative_permittivity_frequency_response_coverage_drop_trend_ratio
+            > em_max_relative_permittivity_frequency_response_coverage_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_RELATIVE_PERMITTIVITY_FREQUENCY_RESPONSE_COVERAGE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM relative permittivity frequency-response coverage drop trend ratio "
+                        f"{em_relative_permittivity_frequency_response_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_relative_permittivity_frequency_response_coverage_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        relative_permeability_frequency_scale_mean_trend_candidates = [
+            fixture_assertion_trend_ratio(
+                "em_homogeneous_relative_permeability_frequency_scale_mean"
+            ),
+            fixture_assertion_trend_ratio(
+                "em_heterogeneous_relative_permeability_frequency_scale_mean"
+            ),
+        ]
+        relative_permeability_frequency_scale_mean_trend_candidates = [
+            value
+            for value in relative_permeability_frequency_scale_mean_trend_candidates
+            if value is not None
+        ]
+        if relative_permeability_frequency_scale_mean_trend_candidates:
+            em_relative_permeability_frequency_scale_mean_drop_trend_ratio = max(
+                relative_permeability_frequency_scale_mean_trend_candidates
+            )
+        if (
+            em_relative_permeability_frequency_scale_mean_drop_trend_ratio is not None
+            and em_relative_permeability_frequency_scale_mean_drop_trend_ratio
+            > em_max_relative_permeability_frequency_scale_mean_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_MEAN_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM relative permeability frequency-scale mean drop trend ratio "
+                        f"{em_relative_permeability_frequency_scale_mean_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_relative_permeability_frequency_scale_mean_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        relative_permeability_frequency_scale_spread_trend_candidates = [
+            fixture_assertion_trend_ratio(
+                "em_homogeneous_relative_permeability_frequency_scale_spread_ratio",
+                ratio_mode="increase",
+            ),
+            fixture_assertion_trend_ratio(
+                "em_heterogeneous_relative_permeability_frequency_scale_spread_ratio",
+                ratio_mode="increase",
+            ),
+        ]
+        relative_permeability_frequency_scale_spread_trend_candidates = [
+            value
+            for value in relative_permeability_frequency_scale_spread_trend_candidates
+            if value is not None
+        ]
+        if relative_permeability_frequency_scale_spread_trend_candidates:
+            em_relative_permeability_frequency_scale_spread_trend_ratio = max(
+                relative_permeability_frequency_scale_spread_trend_candidates
+            )
+        if (
+            em_relative_permeability_frequency_scale_spread_trend_ratio is not None
+            and em_relative_permeability_frequency_scale_spread_trend_ratio
+            > em_max_relative_permeability_frequency_scale_spread_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_RELATIVE_PERMEABILITY_FREQUENCY_SCALE_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM relative permeability frequency-scale spread trend ratio "
+                        f"{em_relative_permeability_frequency_scale_spread_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_relative_permeability_frequency_scale_spread_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        relative_permeability_frequency_response_coverage_trend_candidates = [
+            fixture_assertion_trend_ratio(
+                "em_homogeneous_relative_permeability_frequency_response_coverage_ratio"
+            ),
+            fixture_assertion_trend_ratio(
+                "em_heterogeneous_relative_permeability_frequency_response_coverage_ratio"
+            ),
+        ]
+        relative_permeability_frequency_response_coverage_trend_candidates = [
+            value
+            for value in relative_permeability_frequency_response_coverage_trend_candidates
+            if value is not None
+        ]
+        if relative_permeability_frequency_response_coverage_trend_candidates:
+            em_relative_permeability_frequency_response_coverage_drop_trend_ratio = max(
+                relative_permeability_frequency_response_coverage_trend_candidates
+            )
+        if (
+            em_relative_permeability_frequency_response_coverage_drop_trend_ratio
+            is not None
+            and em_relative_permeability_frequency_response_coverage_drop_trend_ratio
+            > em_max_relative_permeability_frequency_response_coverage_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_RELATIVE_PERMEABILITY_FREQUENCY_RESPONSE_COVERAGE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM relative permeability frequency-response coverage drop trend ratio "
+                        f"{em_relative_permeability_frequency_response_coverage_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_relative_permeability_frequency_response_coverage_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         em_homogeneous_material_heterogeneity_trend_ratio = fixture_assertion_trend_ratio(
             "em_homogeneous_material_heterogeneity_index",
             ratio_mode="increase",
@@ -10501,6 +10975,18 @@ def evaluate_release_readiness(
         "em_max_homogeneous_relative_permeability_spread_ratio_threshold": em_max_homogeneous_relative_permeability_spread_ratio_threshold,
         "em_min_heterogeneous_relative_permeability_spread_ratio": em_min_heterogeneous_relative_permeability_spread_ratio,
         "em_min_heterogeneous_relative_permeability_spread_ratio_threshold": em_min_heterogeneous_relative_permeability_spread_ratio_threshold,
+        "em_min_relative_permittivity_frequency_scale_mean": em_min_relative_permittivity_frequency_scale_mean,
+        "em_min_relative_permittivity_frequency_scale_mean_threshold": em_min_relative_permittivity_frequency_scale_mean_threshold,
+        "em_max_relative_permittivity_frequency_scale_spread_ratio": em_max_relative_permittivity_frequency_scale_spread_ratio,
+        "em_max_relative_permittivity_frequency_scale_spread_ratio_threshold": em_max_relative_permittivity_frequency_scale_spread_ratio_threshold,
+        "em_min_relative_permittivity_frequency_response_coverage_ratio": em_min_relative_permittivity_frequency_response_coverage_ratio,
+        "em_min_relative_permittivity_frequency_response_coverage_ratio_threshold": em_min_relative_permittivity_frequency_response_coverage_ratio_threshold,
+        "em_min_relative_permeability_frequency_scale_mean": em_min_relative_permeability_frequency_scale_mean,
+        "em_min_relative_permeability_frequency_scale_mean_threshold": em_min_relative_permeability_frequency_scale_mean_threshold,
+        "em_max_relative_permeability_frequency_scale_spread_ratio": em_max_relative_permeability_frequency_scale_spread_ratio,
+        "em_max_relative_permeability_frequency_scale_spread_ratio_threshold": em_max_relative_permeability_frequency_scale_spread_ratio_threshold,
+        "em_min_relative_permeability_frequency_response_coverage_ratio": em_min_relative_permeability_frequency_response_coverage_ratio,
+        "em_min_relative_permeability_frequency_response_coverage_ratio_threshold": em_min_relative_permeability_frequency_response_coverage_ratio_threshold,
         "em_max_homogeneous_material_heterogeneity_index": em_max_homogeneous_material_heterogeneity_index,
         "em_max_homogeneous_material_heterogeneity_index_threshold": em_max_homogeneous_material_heterogeneity_index_threshold,
         "em_min_heterogeneous_material_heterogeneity_index": em_min_heterogeneous_material_heterogeneity_index,
@@ -10617,6 +11103,18 @@ def evaluate_release_readiness(
         "em_max_homogeneous_relative_permeability_spread_trend_ratio_threshold": em_max_homogeneous_relative_permeability_spread_trend_ratio_threshold,
         "em_heterogeneous_relative_permeability_spread_drop_trend_ratio": em_heterogeneous_relative_permeability_spread_drop_trend_ratio,
         "em_max_heterogeneous_relative_permeability_spread_drop_trend_ratio_threshold": em_max_heterogeneous_relative_permeability_spread_drop_trend_ratio_threshold,
+        "em_relative_permittivity_frequency_scale_mean_drop_trend_ratio": em_relative_permittivity_frequency_scale_mean_drop_trend_ratio,
+        "em_max_relative_permittivity_frequency_scale_mean_drop_trend_ratio_threshold": em_max_relative_permittivity_frequency_scale_mean_drop_trend_ratio_threshold,
+        "em_relative_permittivity_frequency_scale_spread_trend_ratio": em_relative_permittivity_frequency_scale_spread_trend_ratio,
+        "em_max_relative_permittivity_frequency_scale_spread_trend_ratio_threshold": em_max_relative_permittivity_frequency_scale_spread_trend_ratio_threshold,
+        "em_relative_permittivity_frequency_response_coverage_drop_trend_ratio": em_relative_permittivity_frequency_response_coverage_drop_trend_ratio,
+        "em_max_relative_permittivity_frequency_response_coverage_drop_trend_ratio_threshold": em_max_relative_permittivity_frequency_response_coverage_drop_trend_ratio_threshold,
+        "em_relative_permeability_frequency_scale_mean_drop_trend_ratio": em_relative_permeability_frequency_scale_mean_drop_trend_ratio,
+        "em_max_relative_permeability_frequency_scale_mean_drop_trend_ratio_threshold": em_max_relative_permeability_frequency_scale_mean_drop_trend_ratio_threshold,
+        "em_relative_permeability_frequency_scale_spread_trend_ratio": em_relative_permeability_frequency_scale_spread_trend_ratio,
+        "em_max_relative_permeability_frequency_scale_spread_trend_ratio_threshold": em_max_relative_permeability_frequency_scale_spread_trend_ratio_threshold,
+        "em_relative_permeability_frequency_response_coverage_drop_trend_ratio": em_relative_permeability_frequency_response_coverage_drop_trend_ratio,
+        "em_max_relative_permeability_frequency_response_coverage_drop_trend_ratio_threshold": em_max_relative_permeability_frequency_response_coverage_drop_trend_ratio_threshold,
         "em_homogeneous_material_heterogeneity_trend_ratio": em_homogeneous_material_heterogeneity_trend_ratio,
         "em_max_homogeneous_material_heterogeneity_trend_ratio_threshold": em_max_homogeneous_material_heterogeneity_trend_ratio_threshold,
         "em_heterogeneous_material_heterogeneity_drop_trend_ratio": em_heterogeneous_material_heterogeneity_drop_trend_ratio,
@@ -11277,6 +11775,22 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_max_homogeneous_relative_permeability_spread_ratio_threshold') if result.get('em_max_homogeneous_relative_permeability_spread_ratio_threshold') is not None else '-'}`/`{result.get('em_min_heterogeneous_relative_permeability_spread_ratio_threshold') if result.get('em_min_heterogeneous_relative_permeability_spread_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM relative permittivity frequency-scale (mean min / spread max / coverage min): "
+        f"`{result.get('em_min_relative_permittivity_frequency_scale_mean') if result.get('em_min_relative_permittivity_frequency_scale_mean') is not None else '-'}`/`{result.get('em_max_relative_permittivity_frequency_scale_spread_ratio') if result.get('em_max_relative_permittivity_frequency_scale_spread_ratio') is not None else '-'}`/`{result.get('em_min_relative_permittivity_frequency_response_coverage_ratio') if result.get('em_min_relative_permittivity_frequency_response_coverage_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM relative permittivity frequency-scale thresholds (mean min / spread max / coverage min): "
+        f"`{result.get('em_min_relative_permittivity_frequency_scale_mean_threshold') if result.get('em_min_relative_permittivity_frequency_scale_mean_threshold') is not None else '-'}`/`{result.get('em_max_relative_permittivity_frequency_scale_spread_ratio_threshold') if result.get('em_max_relative_permittivity_frequency_scale_spread_ratio_threshold') is not None else '-'}`/`{result.get('em_min_relative_permittivity_frequency_response_coverage_ratio_threshold') if result.get('em_min_relative_permittivity_frequency_response_coverage_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM relative permeability frequency-scale (mean min / spread max / coverage min): "
+        f"`{result.get('em_min_relative_permeability_frequency_scale_mean') if result.get('em_min_relative_permeability_frequency_scale_mean') is not None else '-'}`/`{result.get('em_max_relative_permeability_frequency_scale_spread_ratio') if result.get('em_max_relative_permeability_frequency_scale_spread_ratio') is not None else '-'}`/`{result.get('em_min_relative_permeability_frequency_response_coverage_ratio') if result.get('em_min_relative_permeability_frequency_response_coverage_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM relative permeability frequency-scale thresholds (mean min / spread max / coverage min): "
+        f"`{result.get('em_min_relative_permeability_frequency_scale_mean_threshold') if result.get('em_min_relative_permeability_frequency_scale_mean_threshold') is not None else '-'}`/`{result.get('em_max_relative_permeability_frequency_scale_spread_ratio_threshold') if result.get('em_max_relative_permeability_frequency_scale_spread_ratio_threshold') is not None else '-'}`/`{result.get('em_min_relative_permeability_frequency_response_coverage_ratio_threshold') if result.get('em_min_relative_permeability_frequency_response_coverage_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- EM material heterogeneity (homogeneous max / heterogeneous min): "
         f"`{result.get('em_max_homogeneous_material_heterogeneity_index') if result.get('em_max_homogeneous_material_heterogeneity_index') is not None else '-'}`/`{result.get('em_min_heterogeneous_material_heterogeneity_index') if result.get('em_min_heterogeneous_material_heterogeneity_index') is not None else '-'}`"
     )
@@ -11397,8 +11911,8 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_breach_rate') if result.get('em_breach_rate') is not None else '-'}`/`{result.get('em_max_breach_rate_threshold') if result.get('em_max_breach_rate_threshold') is not None else '-'}`"
     )
     lines.append(
-        "- EM core trend ratios (energy, flux, sigma mean, sigma coverage, heterogeneous sigma spread, homogeneous sigma spread, homogeneous conductivity spread, heterogeneous conductivity spread drop, homogeneous relative permittivity spread, heterogeneous relative permittivity spread drop, homogeneous relative permeability spread, heterogeneous relative permeability spread drop, homogeneous material heterogeneity, heterogeneous material heterogeneity drop, loss scale, loss scale spread, boundary energy, region contrast, core boundary anchor, core dispersive coupling, core source realization, core source coverage, core source material, core assignment coverage, core fallback coefficient, phase attenuation, phase attenuation spread, phase conductivity attenuation): "
-        f"`{result.get('em_energy_imbalance_trend_ratio') if result.get('em_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_flux_divergence_trend_ratio') if result.get('em_flux_divergence_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_mean_drop_trend_ratio') if result.get('em_sigma_omega_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_response_coverage_drop_trend_ratio') if result.get('em_sigma_omega_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_spread_trend_ratio') if result.get('em_sigma_omega_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_sigma_omega_scale_spread_trend_ratio') if result.get('em_homogeneous_sigma_omega_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_conductivity_spread_trend_ratio') if result.get('em_homogeneous_conductivity_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_conductivity_spread_drop_trend_ratio') if result.get('em_heterogeneous_conductivity_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_relative_permittivity_spread_trend_ratio') if result.get('em_homogeneous_relative_permittivity_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_relative_permittivity_spread_drop_trend_ratio') if result.get('em_heterogeneous_relative_permittivity_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_relative_permeability_spread_trend_ratio') if result.get('em_homogeneous_relative_permeability_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_relative_permeability_spread_drop_trend_ratio') if result.get('em_heterogeneous_relative_permeability_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_material_heterogeneity_trend_ratio') if result.get('em_homogeneous_material_heterogeneity_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_material_heterogeneity_drop_trend_ratio') if result.get('em_heterogeneous_material_heterogeneity_drop_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_trend_ratio') if result.get('em_dispersive_loss_scale_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_spread_trend_ratio') if result.get('em_dispersive_loss_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_energy_drop_trend_ratio') if result.get('em_boundary_energy_drop_trend_ratio') is not None else '-'}`/`{result.get('em_region_contrast_drop_trend_ratio') if result.get('em_region_contrast_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_boundary_anchor_drop_trend_ratio') if result.get('em_core_boundary_anchor_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_dispersive_coupling_trend_ratio') if result.get('em_core_dispersive_coupling_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_realization_drop_trend_ratio') if result.get('em_core_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_region_coverage_drop_trend_ratio') if result.get('em_core_source_region_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_material_alignment_drop_trend_ratio') if result.get('em_core_source_material_alignment_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_assignment_coverage_drop_trend_ratio') if result.get('em_core_assignment_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_fallback_coefficient_trend_ratio') if result.get('em_core_fallback_coefficient_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_trend_ratio') if result.get('em_dispersive_phase_attenuation_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_spread_trend_ratio') if result.get('em_dispersive_phase_attenuation_spread_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') if result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') is not None else '-'}`"
+        "- EM core trend ratios (energy, flux, sigma mean, sigma coverage, heterogeneous sigma spread, homogeneous sigma spread, homogeneous conductivity spread, heterogeneous conductivity spread drop, homogeneous relative permittivity spread, heterogeneous relative permittivity spread drop, homogeneous relative permeability spread, heterogeneous relative permeability spread drop, relative permittivity frequency-scale mean drop, relative permittivity frequency-scale spread, relative permittivity frequency-response coverage drop, relative permeability frequency-scale mean drop, relative permeability frequency-scale spread, relative permeability frequency-response coverage drop, homogeneous material heterogeneity, heterogeneous material heterogeneity drop, loss scale, loss scale spread, boundary energy, region contrast, core boundary anchor, core dispersive coupling, core source realization, core source coverage, core source material, core assignment coverage, core fallback coefficient, phase attenuation, phase attenuation spread, phase conductivity attenuation): "
+        f"`{result.get('em_energy_imbalance_trend_ratio') if result.get('em_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_flux_divergence_trend_ratio') if result.get('em_flux_divergence_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_mean_drop_trend_ratio') if result.get('em_sigma_omega_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_response_coverage_drop_trend_ratio') if result.get('em_sigma_omega_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_spread_trend_ratio') if result.get('em_sigma_omega_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_sigma_omega_scale_spread_trend_ratio') if result.get('em_homogeneous_sigma_omega_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_conductivity_spread_trend_ratio') if result.get('em_homogeneous_conductivity_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_conductivity_spread_drop_trend_ratio') if result.get('em_heterogeneous_conductivity_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_relative_permittivity_spread_trend_ratio') if result.get('em_homogeneous_relative_permittivity_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_relative_permittivity_spread_drop_trend_ratio') if result.get('em_heterogeneous_relative_permittivity_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_relative_permeability_spread_trend_ratio') if result.get('em_homogeneous_relative_permeability_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_relative_permeability_spread_drop_trend_ratio') if result.get('em_heterogeneous_relative_permeability_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permittivity_frequency_scale_mean_drop_trend_ratio') if result.get('em_relative_permittivity_frequency_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permittivity_frequency_scale_spread_trend_ratio') if result.get('em_relative_permittivity_frequency_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permittivity_frequency_response_coverage_drop_trend_ratio') if result.get('em_relative_permittivity_frequency_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permeability_frequency_scale_mean_drop_trend_ratio') if result.get('em_relative_permeability_frequency_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permeability_frequency_scale_spread_trend_ratio') if result.get('em_relative_permeability_frequency_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_relative_permeability_frequency_response_coverage_drop_trend_ratio') if result.get('em_relative_permeability_frequency_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_material_heterogeneity_trend_ratio') if result.get('em_homogeneous_material_heterogeneity_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_material_heterogeneity_drop_trend_ratio') if result.get('em_heterogeneous_material_heterogeneity_drop_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_trend_ratio') if result.get('em_dispersive_loss_scale_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_spread_trend_ratio') if result.get('em_dispersive_loss_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_energy_drop_trend_ratio') if result.get('em_boundary_energy_drop_trend_ratio') is not None else '-'}`/`{result.get('em_region_contrast_drop_trend_ratio') if result.get('em_region_contrast_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_boundary_anchor_drop_trend_ratio') if result.get('em_core_boundary_anchor_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_dispersive_coupling_trend_ratio') if result.get('em_core_dispersive_coupling_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_realization_drop_trend_ratio') if result.get('em_core_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_region_coverage_drop_trend_ratio') if result.get('em_core_source_region_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_material_alignment_drop_trend_ratio') if result.get('em_core_source_material_alignment_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_assignment_coverage_drop_trend_ratio') if result.get('em_core_assignment_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_fallback_coefficient_trend_ratio') if result.get('em_core_fallback_coefficient_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_trend_ratio') if result.get('em_dispersive_phase_attenuation_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_spread_trend_ratio') if result.get('em_dispersive_phase_attenuation_spread_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') if result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- EM boundary/phased trend ratios (penalty real, penalty imag, penalty anchor, penalty conditioning, phased overlap, phased interference, phased region coverage, phased energy consistency): "
