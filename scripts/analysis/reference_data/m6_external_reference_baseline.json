@@ -1437,6 +1437,196 @@
       "reference": 0.3414999999999999,
       "tolerance_abs": 0.08,
       "tolerance_rel": 0.25
+    },
+    {
+      "name": "cfd_dynamic_viscosity_pa_s",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_dynamic_viscosity_pa_s",
+      "reference": 1.81e-05,
+      "tolerance_abs": 5e-06,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "cfd_inlet_velocity_m_per_s",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_inlet_velocity_m_per_s",
+      "reference": 5.0,
+      "tolerance_abs": 0.8,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "cfd_turbulence_intensity",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_turbulence_intensity",
+      "reference": 0.06,
+      "tolerance_abs": 0.03,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "cfd_profile_point_count",
+      "fixture_id": "cfd_steady_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_profile_point_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "cht_reference_density_kg_per_m3",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cht_reference_density_kg_per_m3",
+      "reference": 1.225,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 0.05
+    },
+    {
+      "name": "cht_dynamic_viscosity_pa_s",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cht_dynamic_viscosity_pa_s",
+      "reference": 1.81e-05,
+      "tolerance_abs": 5e-06,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "cht_inlet_velocity_m_per_s",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cht_inlet_velocity_m_per_s",
+      "reference": 5.0,
+      "tolerance_abs": 0.8,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "cht_turbulence_intensity",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cht_turbulence_intensity",
+      "reference": 0.06,
+      "tolerance_abs": 0.03,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "cht_profile_point_count",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cht_profile_point_count",
+      "reference": 2.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "cht_step_count",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cht_step_count",
+      "reference": 12.0,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "cht_time_step_s",
+      "fixture_id": "cht_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cht_time_step_s",
+      "reference": 0.001,
+      "tolerance_abs": 0.0003,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "fsi_reference_density_kg_per_m3",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "fsi_reference_density_kg_per_m3",
+      "reference": 1.225,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 0.05
+    },
+    {
+      "name": "fsi_dynamic_viscosity_pa_s",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "fsi_dynamic_viscosity_pa_s",
+      "reference": 1.81e-05,
+      "tolerance_abs": 5e-06,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "fsi_inlet_velocity_m_per_s",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "fsi_inlet_velocity_m_per_s",
+      "reference": 4.0,
+      "tolerance_abs": 0.8,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "fsi_turbulence_intensity",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "fsi_turbulence_intensity",
+      "reference": 0.06,
+      "tolerance_abs": 0.03,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "fsi_profile_point_count",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "fsi_profile_point_count",
+      "reference": 2.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "fsi_step_count",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "fsi_step_count",
+      "reference": 12.0,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "fsi_time_step_s",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "fsi_time_step_s",
+      "reference": 0.001,
+      "tolerance_abs": 0.0003,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "fsi_cfd_profile_point_count",
+      "fixture_id": "fsi_coupled_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "fsi_cfd_profile_point_count",
+      "reference": 2.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 0.5
     }
   ]
 }
