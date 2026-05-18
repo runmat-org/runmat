@@ -199,6 +199,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO": "0.95",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO": "1.6",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_CONDUCTIVITY_SPREAD_RATIO": "9.0",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX": "0.03",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_MATERIAL_HETEROGENEITY_INDEX": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN": "0.2",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MIN_REGION_CONTRAST_INDEX": "5.0",
@@ -212,6 +216,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_CONDUCTIVITY_SPREAD_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_MATERIAL_HETEROGENEITY_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REGION_CONTRAST_DROP_TREND_RATIO": "1.1",
@@ -431,6 +439,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN": "0.85",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO": "0.9",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO": "1.9",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_CONDUCTIVITY_SPREAD_RATIO": "8.0",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX": "0.05",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_MATERIAL_HETEROGENEITY_INDEX": "0.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN": "0.3",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO": "0.25",
             "RUNMAT_RELEASE_READINESS_EM_MIN_REGION_CONTRAST_INDEX": "4.0",
@@ -444,6 +456,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_CONDUCTIVITY_SPREAD_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_MATERIAL_HETEROGENEITY_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REGION_CONTRAST_DROP_TREND_RATIO": "1.2",
@@ -2121,6 +2137,42 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO", "1.9"),
         )
     )
+    em_max_homogeneous_conductivity_spread_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_min_heterogeneous_conductivity_spread_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_CONDUCTIVITY_SPREAD_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_CONDUCTIVITY_SPREAD_RATIO",
+                "8.0",
+            ),
+        )
+    )
+    em_max_homogeneous_material_heterogeneity_index_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX",
+                "0.05",
+            ),
+        )
+    )
+    em_min_heterogeneous_material_heterogeneity_index_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_MATERIAL_HETEROGENEITY_INDEX",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_MATERIAL_HETEROGENEITY_INDEX",
+                "0.25",
+            ),
+        )
+    )
     em_max_dispersive_loss_scale_mean_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN",
@@ -2211,6 +2263,42 @@ def evaluate_release_readiness(
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_homogeneous_conductivity_spread_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_heterogeneous_conductivity_spread_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_CONDUCTIVITY_SPREAD_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_CONDUCTIVITY_SPREAD_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_homogeneous_material_heterogeneity_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    em_max_heterogeneous_material_heterogeneity_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_MATERIAL_HETEROGENEITY_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_MATERIAL_HETEROGENEITY_DROP_TREND_RATIO",
                 "1.2",
             ),
         )
@@ -3293,6 +3381,10 @@ def evaluate_release_readiness(
     em_min_sigma_omega_scale_mean = None
     em_min_sigma_omega_response_coverage_ratio = None
     em_max_sigma_omega_scale_spread_ratio = None
+    em_max_homogeneous_conductivity_spread_ratio = None
+    em_min_heterogeneous_conductivity_spread_ratio = None
+    em_max_homogeneous_material_heterogeneity_index = None
+    em_min_heterogeneous_material_heterogeneity_index = None
     em_max_dispersive_loss_scale_mean = None
     em_max_dispersive_loss_scale_spread_ratio = None
     em_min_boundary_energy_ratio = None
@@ -3340,6 +3432,10 @@ def evaluate_release_readiness(
     em_sigma_omega_scale_mean_drop_trend_ratio = None
     em_sigma_omega_response_coverage_drop_trend_ratio = None
     em_sigma_omega_scale_spread_trend_ratio = None
+    em_homogeneous_conductivity_spread_trend_ratio = None
+    em_heterogeneous_conductivity_spread_drop_trend_ratio = None
+    em_homogeneous_material_heterogeneity_trend_ratio = None
+    em_heterogeneous_material_heterogeneity_drop_trend_ratio = None
     em_dispersive_loss_scale_trend_ratio = None
     em_dispersive_loss_scale_spread_trend_ratio = None
     em_boundary_energy_drop_trend_ratio = None
@@ -4694,6 +4790,38 @@ def evaluate_release_readiness(
                 em_max_sigma_omega_scale_spread_ratio_threshold,
             ),
             (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_conductivity_spread_ratio",
+                "max",
+                "EM_HOMOGENEOUS_CONDUCTIVITY_SPREAD_RATIO_HIGH",
+                "EM homogeneous conductivity spread ratio",
+                em_max_homogeneous_conductivity_spread_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_conductivity_spread_ratio",
+                "min",
+                "EM_HETEROGENEOUS_CONDUCTIVITY_SPREAD_RATIO_LOW",
+                "EM heterogeneous conductivity spread ratio",
+                em_min_heterogeneous_conductivity_spread_ratio_threshold,
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_material_heterogeneity_index",
+                "max",
+                "EM_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX_HIGH",
+                "EM homogeneous material heterogeneity index",
+                em_max_homogeneous_material_heterogeneity_index_threshold,
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_material_heterogeneity_index",
+                "min",
+                "EM_HETEROGENEOUS_MATERIAL_HETEROGENEITY_INDEX_LOW",
+                "EM heterogeneous material heterogeneity index",
+                em_min_heterogeneous_material_heterogeneity_index_threshold,
+            ),
+            (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "em_heterogeneous_sigma_omega_response_coverage_ratio",
                 "min",
@@ -5236,6 +5364,30 @@ def evaluate_release_readiness(
                     or observed > em_max_sigma_omega_scale_spread_ratio
                 ):
                     em_max_sigma_omega_scale_spread_ratio = observed
+            elif assertion_name.endswith("homogeneous_conductivity_spread_ratio"):
+                if (
+                    em_max_homogeneous_conductivity_spread_ratio is None
+                    or observed > em_max_homogeneous_conductivity_spread_ratio
+                ):
+                    em_max_homogeneous_conductivity_spread_ratio = observed
+            elif assertion_name.endswith("heterogeneous_conductivity_spread_ratio"):
+                if (
+                    em_min_heterogeneous_conductivity_spread_ratio is None
+                    or observed < em_min_heterogeneous_conductivity_spread_ratio
+                ):
+                    em_min_heterogeneous_conductivity_spread_ratio = observed
+            elif assertion_name.endswith("homogeneous_material_heterogeneity_index"):
+                if (
+                    em_max_homogeneous_material_heterogeneity_index is None
+                    or observed > em_max_homogeneous_material_heterogeneity_index
+                ):
+                    em_max_homogeneous_material_heterogeneity_index = observed
+            elif assertion_name.endswith("heterogeneous_material_heterogeneity_index"):
+                if (
+                    em_min_heterogeneous_material_heterogeneity_index is None
+                    or observed < em_min_heterogeneous_material_heterogeneity_index
+                ):
+                    em_min_heterogeneous_material_heterogeneity_index = observed
             elif assertion_name.endswith("dispersive_loss_scale_mean"):
                 if (
                     em_max_dispersive_loss_scale_mean is None
@@ -6920,6 +7072,88 @@ def evaluate_release_readiness(
                         f"{em_sigma_omega_scale_spread_trend_ratio:.3f} exceeds threshold "
                         f"{em_max_sigma_omega_scale_spread_trend_ratio_threshold:.3f}"
                     ),
+                    )
+                )
+
+        em_homogeneous_conductivity_spread_trend_ratio = fixture_assertion_trend_ratio(
+            "em_homogeneous_conductivity_spread_ratio",
+            ratio_mode="increase",
+        )
+        if (
+            em_homogeneous_conductivity_spread_trend_ratio is not None
+            and em_homogeneous_conductivity_spread_trend_ratio
+            > em_max_homogeneous_conductivity_spread_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_HOMOGENEOUS_CONDUCTIVITY_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM homogeneous conductivity-spread trend ratio "
+                        f"{em_homogeneous_conductivity_spread_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_homogeneous_conductivity_spread_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_heterogeneous_conductivity_spread_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "em_heterogeneous_conductivity_spread_ratio"
+        )
+        if (
+            em_heterogeneous_conductivity_spread_drop_trend_ratio is not None
+            and em_heterogeneous_conductivity_spread_drop_trend_ratio
+            > em_max_heterogeneous_conductivity_spread_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_HETEROGENEOUS_CONDUCTIVITY_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM heterogeneous conductivity-spread drop trend ratio "
+                        f"{em_heterogeneous_conductivity_spread_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_heterogeneous_conductivity_spread_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_homogeneous_material_heterogeneity_trend_ratio = fixture_assertion_trend_ratio(
+            "em_homogeneous_material_heterogeneity_index",
+            ratio_mode="increase",
+        )
+        if (
+            em_homogeneous_material_heterogeneity_trend_ratio is not None
+            and em_homogeneous_material_heterogeneity_trend_ratio
+            > em_max_homogeneous_material_heterogeneity_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_HOMOGENEOUS_MATERIAL_HETEROGENEITY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM homogeneous material-heterogeneity trend ratio "
+                        f"{em_homogeneous_material_heterogeneity_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_homogeneous_material_heterogeneity_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_heterogeneous_material_heterogeneity_drop_trend_ratio = (
+            fixture_assertion_trend_ratio("em_heterogeneous_material_heterogeneity_index")
+        )
+        if (
+            em_heterogeneous_material_heterogeneity_drop_trend_ratio is not None
+            and em_heterogeneous_material_heterogeneity_drop_trend_ratio
+            > em_max_heterogeneous_material_heterogeneity_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_HETEROGENEOUS_MATERIAL_HETEROGENEITY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM heterogeneous material-heterogeneity drop trend ratio "
+                        f"{em_heterogeneous_material_heterogeneity_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_heterogeneous_material_heterogeneity_drop_trend_ratio_threshold:.3f}"
+                    ),
                 )
             )
 
@@ -8519,6 +8753,14 @@ def evaluate_release_readiness(
         "em_min_sigma_omega_response_coverage_ratio_threshold": em_min_sigma_omega_response_coverage_ratio_threshold,
         "em_max_sigma_omega_scale_spread_ratio": em_max_sigma_omega_scale_spread_ratio,
         "em_max_sigma_omega_scale_spread_ratio_threshold": em_max_sigma_omega_scale_spread_ratio_threshold,
+        "em_max_homogeneous_conductivity_spread_ratio": em_max_homogeneous_conductivity_spread_ratio,
+        "em_max_homogeneous_conductivity_spread_ratio_threshold": em_max_homogeneous_conductivity_spread_ratio_threshold,
+        "em_min_heterogeneous_conductivity_spread_ratio": em_min_heterogeneous_conductivity_spread_ratio,
+        "em_min_heterogeneous_conductivity_spread_ratio_threshold": em_min_heterogeneous_conductivity_spread_ratio_threshold,
+        "em_max_homogeneous_material_heterogeneity_index": em_max_homogeneous_material_heterogeneity_index,
+        "em_max_homogeneous_material_heterogeneity_index_threshold": em_max_homogeneous_material_heterogeneity_index_threshold,
+        "em_min_heterogeneous_material_heterogeneity_index": em_min_heterogeneous_material_heterogeneity_index,
+        "em_min_heterogeneous_material_heterogeneity_index_threshold": em_min_heterogeneous_material_heterogeneity_index_threshold,
         "em_max_dispersive_loss_scale_mean": em_max_dispersive_loss_scale_mean,
         "em_max_dispersive_loss_scale_mean_threshold": em_max_dispersive_loss_scale_mean_threshold,
         "em_max_dispersive_loss_scale_spread_ratio": em_max_dispersive_loss_scale_spread_ratio,
@@ -8613,6 +8855,14 @@ def evaluate_release_readiness(
         "em_max_sigma_omega_response_coverage_drop_trend_ratio_threshold": em_max_sigma_omega_response_coverage_drop_trend_ratio_threshold,
         "em_sigma_omega_scale_spread_trend_ratio": em_sigma_omega_scale_spread_trend_ratio,
         "em_max_sigma_omega_scale_spread_trend_ratio_threshold": em_max_sigma_omega_scale_spread_trend_ratio_threshold,
+        "em_homogeneous_conductivity_spread_trend_ratio": em_homogeneous_conductivity_spread_trend_ratio,
+        "em_max_homogeneous_conductivity_spread_trend_ratio_threshold": em_max_homogeneous_conductivity_spread_trend_ratio_threshold,
+        "em_heterogeneous_conductivity_spread_drop_trend_ratio": em_heterogeneous_conductivity_spread_drop_trend_ratio,
+        "em_max_heterogeneous_conductivity_spread_drop_trend_ratio_threshold": em_max_heterogeneous_conductivity_spread_drop_trend_ratio_threshold,
+        "em_homogeneous_material_heterogeneity_trend_ratio": em_homogeneous_material_heterogeneity_trend_ratio,
+        "em_max_homogeneous_material_heterogeneity_trend_ratio_threshold": em_max_homogeneous_material_heterogeneity_trend_ratio_threshold,
+        "em_heterogeneous_material_heterogeneity_drop_trend_ratio": em_heterogeneous_material_heterogeneity_drop_trend_ratio,
+        "em_max_heterogeneous_material_heterogeneity_drop_trend_ratio_threshold": em_max_heterogeneous_material_heterogeneity_drop_trend_ratio_threshold,
         "em_dispersive_loss_scale_trend_ratio": em_dispersive_loss_scale_trend_ratio,
         "em_max_dispersive_loss_scale_trend_ratio_threshold": em_max_dispersive_loss_scale_trend_ratio_threshold,
         "em_dispersive_loss_scale_spread_trend_ratio": em_dispersive_loss_scale_spread_trend_ratio,
@@ -9196,6 +9446,22 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_max_sigma_omega_scale_spread_ratio_threshold') if result.get('em_max_sigma_omega_scale_spread_ratio_threshold') is not None else '-'}`/`{result.get('em_max_dispersive_loss_scale_mean_threshold') if result.get('em_max_dispersive_loss_scale_mean_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM conductivity spread (homogeneous max / heterogeneous min): "
+        f"`{result.get('em_max_homogeneous_conductivity_spread_ratio') if result.get('em_max_homogeneous_conductivity_spread_ratio') is not None else '-'}`/`{result.get('em_min_heterogeneous_conductivity_spread_ratio') if result.get('em_min_heterogeneous_conductivity_spread_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM conductivity spread thresholds (homogeneous max / heterogeneous min): "
+        f"`{result.get('em_max_homogeneous_conductivity_spread_ratio_threshold') if result.get('em_max_homogeneous_conductivity_spread_ratio_threshold') is not None else '-'}`/`{result.get('em_min_heterogeneous_conductivity_spread_ratio_threshold') if result.get('em_min_heterogeneous_conductivity_spread_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM material heterogeneity (homogeneous max / heterogeneous min): "
+        f"`{result.get('em_max_homogeneous_material_heterogeneity_index') if result.get('em_max_homogeneous_material_heterogeneity_index') is not None else '-'}`/`{result.get('em_min_heterogeneous_material_heterogeneity_index') if result.get('em_min_heterogeneous_material_heterogeneity_index') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM material heterogeneity thresholds (homogeneous max / heterogeneous min): "
+        f"`{result.get('em_max_homogeneous_material_heterogeneity_index_threshold') if result.get('em_max_homogeneous_material_heterogeneity_index_threshold') is not None else '-'}`/`{result.get('em_min_heterogeneous_material_heterogeneity_index_threshold') if result.get('em_min_heterogeneous_material_heterogeneity_index_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- EM boundary-energy/region-contrast: "
         f"`{result.get('em_min_boundary_energy_ratio') if result.get('em_min_boundary_energy_ratio') is not None else '-'}`/`{result.get('em_min_region_contrast_index') if result.get('em_min_region_contrast_index') is not None else '-'}`"
     )
@@ -9300,8 +9566,8 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_breach_rate') if result.get('em_breach_rate') is not None else '-'}`/`{result.get('em_max_breach_rate_threshold') if result.get('em_max_breach_rate_threshold') is not None else '-'}`"
     )
     lines.append(
-        "- EM core trend ratios (energy, flux, sigma mean, sigma coverage, sigma spread, loss scale, loss scale spread, boundary energy, region contrast, core boundary anchor, core dispersive coupling, core source realization, core source coverage, core source material, phase attenuation, phase attenuation spread, phase conductivity attenuation): "
-        f"`{result.get('em_energy_imbalance_trend_ratio') if result.get('em_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_flux_divergence_trend_ratio') if result.get('em_flux_divergence_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_mean_drop_trend_ratio') if result.get('em_sigma_omega_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_response_coverage_drop_trend_ratio') if result.get('em_sigma_omega_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_spread_trend_ratio') if result.get('em_sigma_omega_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_trend_ratio') if result.get('em_dispersive_loss_scale_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_spread_trend_ratio') if result.get('em_dispersive_loss_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_energy_drop_trend_ratio') if result.get('em_boundary_energy_drop_trend_ratio') is not None else '-'}`/`{result.get('em_region_contrast_drop_trend_ratio') if result.get('em_region_contrast_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_boundary_anchor_drop_trend_ratio') if result.get('em_core_boundary_anchor_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_dispersive_coupling_trend_ratio') if result.get('em_core_dispersive_coupling_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_realization_drop_trend_ratio') if result.get('em_core_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_region_coverage_drop_trend_ratio') if result.get('em_core_source_region_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_material_alignment_drop_trend_ratio') if result.get('em_core_source_material_alignment_drop_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_trend_ratio') if result.get('em_dispersive_phase_attenuation_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_spread_trend_ratio') if result.get('em_dispersive_phase_attenuation_spread_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') if result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') is not None else '-'}`"
+        "- EM core trend ratios (energy, flux, sigma mean, sigma coverage, sigma spread, homogeneous conductivity spread, heterogeneous conductivity spread drop, homogeneous material heterogeneity, heterogeneous material heterogeneity drop, loss scale, loss scale spread, boundary energy, region contrast, core boundary anchor, core dispersive coupling, core source realization, core source coverage, core source material, phase attenuation, phase attenuation spread, phase conductivity attenuation): "
+        f"`{result.get('em_energy_imbalance_trend_ratio') if result.get('em_energy_imbalance_trend_ratio') is not None else '-'}`/`{result.get('em_flux_divergence_trend_ratio') if result.get('em_flux_divergence_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_mean_drop_trend_ratio') if result.get('em_sigma_omega_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_response_coverage_drop_trend_ratio') if result.get('em_sigma_omega_response_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_sigma_omega_scale_spread_trend_ratio') if result.get('em_sigma_omega_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_conductivity_spread_trend_ratio') if result.get('em_homogeneous_conductivity_spread_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_conductivity_spread_drop_trend_ratio') if result.get('em_heterogeneous_conductivity_spread_drop_trend_ratio') is not None else '-'}`/`{result.get('em_homogeneous_material_heterogeneity_trend_ratio') if result.get('em_homogeneous_material_heterogeneity_trend_ratio') is not None else '-'}`/`{result.get('em_heterogeneous_material_heterogeneity_drop_trend_ratio') if result.get('em_heterogeneous_material_heterogeneity_drop_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_trend_ratio') if result.get('em_dispersive_loss_scale_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_loss_scale_spread_trend_ratio') if result.get('em_dispersive_loss_scale_spread_trend_ratio') is not None else '-'}`/`{result.get('em_boundary_energy_drop_trend_ratio') if result.get('em_boundary_energy_drop_trend_ratio') is not None else '-'}`/`{result.get('em_region_contrast_drop_trend_ratio') if result.get('em_region_contrast_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_boundary_anchor_drop_trend_ratio') if result.get('em_core_boundary_anchor_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_dispersive_coupling_trend_ratio') if result.get('em_core_dispersive_coupling_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_realization_drop_trend_ratio') if result.get('em_core_source_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_region_coverage_drop_trend_ratio') if result.get('em_core_source_region_coverage_drop_trend_ratio') is not None else '-'}`/`{result.get('em_core_source_material_alignment_drop_trend_ratio') if result.get('em_core_source_material_alignment_drop_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_trend_ratio') if result.get('em_dispersive_phase_attenuation_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_attenuation_spread_trend_ratio') if result.get('em_dispersive_phase_attenuation_spread_trend_ratio') is not None else '-'}`/`{result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') if result.get('em_dispersive_phase_conductivity_attenuation_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- EM boundary/phased trend ratios (penalty real, penalty imag, penalty anchor, penalty conditioning, phased overlap, phased interference, phased region coverage, phased energy consistency): "

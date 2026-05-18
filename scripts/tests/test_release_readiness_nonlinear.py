@@ -304,6 +304,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_CONDUCTIVITY_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_MATERIAL_HETEROGENEITY_INDEX",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_SPREAD_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO",
@@ -318,6 +322,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_CONDUCTIVITY_SPREAD_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_MATERIAL_HETEROGENEITY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO",
@@ -652,6 +660,14 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 0.55,
                     },
                     {
+                        "name": "em_homogeneous_conductivity_spread_ratio",
+                        "observed": 1.35,
+                    },
+                    {
+                        "name": "em_homogeneous_material_heterogeneity_index",
+                        "observed": 0.12,
+                    },
+                    {
                         "name": "em_homogeneous_source_material_alignment_ratio",
                         "observed": 0.1,
                     },
@@ -701,6 +717,14 @@ class ReleaseReadinessTests(unittest.TestCase):
                     {
                         "name": "em_heterogeneous_source_region_coverage_ratio",
                         "observed": 0.1,
+                    },
+                    {
+                        "name": "em_heterogeneous_conductivity_spread_ratio",
+                        "observed": 4.0,
+                    },
+                    {
+                        "name": "em_heterogeneous_material_heterogeneity_index",
+                        "observed": 0.08,
                     },
                 ],
             }
@@ -852,6 +876,18 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO"
         ] = "0.9"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO"] = "2.0"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_RATIO"
+        ] = "1.1"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_CONDUCTIVITY_SPREAD_RATIO"
+        ] = "8.0"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX"
+        ] = "0.03"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_MATERIAL_HETEROGENEITY_INDEX"
+        ] = "0.25"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN"] = "0.5"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_SPREAD_RATIO"] = "1.4"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO"] = "0.3"
@@ -954,6 +990,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_SIGMA_OMEGA_SCALE_MEAN_LOW", codes)
         self.assertIn("EM_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO_LOW", codes)
         self.assertIn("EM_SIGMA_OMEGA_SCALE_SPREAD_RATIO_HIGH", codes)
+        self.assertIn("EM_HOMOGENEOUS_CONDUCTIVITY_SPREAD_RATIO_HIGH", codes)
+        self.assertIn("EM_HETEROGENEOUS_CONDUCTIVITY_SPREAD_RATIO_LOW", codes)
+        self.assertIn("EM_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX_HIGH", codes)
+        self.assertIn("EM_HETEROGENEOUS_MATERIAL_HETEROGENEITY_INDEX_LOW", codes)
         self.assertIn("EM_DISPERSIVE_LOSS_SCALE_MEAN_HIGH", codes)
         self.assertIn("EM_DISPERSIVE_LOSS_SCALE_SPREAD_RATIO_HIGH", codes)
         self.assertIn("EM_BOUNDARY_ENERGY_RATIO_LOW", codes)
@@ -1167,6 +1207,14 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
                         "observed": 0.25,
                     },
+                    {
+                        "name": "em_homogeneous_conductivity_spread_ratio",
+                        "observed": 1.4,
+                    },
+                    {
+                        "name": "em_homogeneous_material_heterogeneity_index",
+                        "observed": 0.12,
+                    },
                 ],
             }
         )
@@ -1214,6 +1262,14 @@ class ReleaseReadinessTests(unittest.TestCase):
                     {
                         "name": "em_heterogeneous_source_material_alignment_ratio",
                         "observed": 0.3,
+                    },
+                    {
+                        "name": "em_heterogeneous_conductivity_spread_ratio",
+                        "observed": 6.0,
+                    },
+                    {
+                        "name": "em_heterogeneous_material_heterogeneity_index",
+                        "observed": 0.15,
                     },
                 ],
             }
@@ -1288,6 +1344,14 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
                         "observed": 0.80,
                     },
+                    {
+                        "name": "em_homogeneous_conductivity_spread_ratio",
+                        "observed": 1.0,
+                    },
+                    {
+                        "name": "em_homogeneous_material_heterogeneity_index",
+                        "observed": 0.01,
+                    },
                 ],
             }
         )
@@ -1336,6 +1400,14 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_heterogeneous_source_material_alignment_ratio",
                         "observed": 0.90,
                     },
+                    {
+                        "name": "em_heterogeneous_conductivity_spread_ratio",
+                        "observed": 10.0,
+                    },
+                    {
+                        "name": "em_heterogeneous_material_heterogeneity_index",
+                        "observed": 0.40,
+                    },
                 ],
             }
         )
@@ -1362,6 +1434,18 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO"
         ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_CONDUCTIVITY_SPREAD_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_MATERIAL_HETEROGENEITY_DROP_TREND_RATIO"
+        ] = "1.2"
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO"
         ] = "1.5"
@@ -1406,6 +1490,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_SIGMA_OMEGA_SCALE_MEAN_TREND_WORSENING", codes)
         self.assertIn("EM_SIGMA_OMEGA_RESPONSE_COVERAGE_TREND_WORSENING", codes)
         self.assertIn("EM_SIGMA_OMEGA_SCALE_SPREAD_TREND_WORSENING", codes)
+        self.assertIn("EM_HOMOGENEOUS_CONDUCTIVITY_SPREAD_TREND_WORSENING", codes)
+        self.assertIn("EM_HETEROGENEOUS_CONDUCTIVITY_SPREAD_TREND_WORSENING", codes)
+        self.assertIn("EM_HOMOGENEOUS_MATERIAL_HETEROGENEITY_TREND_WORSENING", codes)
+        self.assertIn("EM_HETEROGENEOUS_MATERIAL_HETEROGENEITY_TREND_WORSENING", codes)
         self.assertIn("EM_DISPERSIVE_LOSS_SCALE_TREND_WORSENING", codes)
         self.assertIn("EM_DISPERSIVE_LOSS_SCALE_SPREAD_TREND_WORSENING", codes)
         self.assertIn("EM_BOUNDARY_ENERGY_TREND_WORSENING", codes)
