@@ -165,6 +165,16 @@ pub struct Bytecode {
     #[cfg(feature = "native-accel")]
     #[serde(default)]
     pub fusion_groups: Vec<FusionGroup>,
+    #[cfg(feature = "native-accel")]
+    #[serde(default)]
+    pub semantic_fusion_metadata: SemanticFusionMetadata,
+}
+
+#[cfg(feature = "native-accel")]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SemanticFusionMetadata {
+    pub mir_fusion_signal_count: usize,
+    pub mir_fusion_candidate_group_count: usize,
 }
 
 impl Bytecode {
@@ -184,6 +194,8 @@ impl Bytecode {
             accel_graph: None,
             #[cfg(feature = "native-accel")]
             fusion_groups: Vec::new(),
+            #[cfg(feature = "native-accel")]
+            semantic_fusion_metadata: SemanticFusionMetadata::default(),
         }
     }
 
