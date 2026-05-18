@@ -212,7 +212,7 @@ fn cell_brace_empty_assignment_is_not_deletion_uses_semantic_vm() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::StoreIndexCellDelete(_))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::StoreIndexCellDelete { .. })),
         "cell brace assignment should not lower to deletion bytecode"
     );
 
