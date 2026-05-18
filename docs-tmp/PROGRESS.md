@@ -35,8 +35,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added `runmat-config` tests covering parse/load/validation and manifest discovery walking.
   - Validation: `cargo test -p runmat-config`, `cargo fmt --all --check`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
 
+- (pending commit) Plan 5 CLI integration step
+  - `runmat-cli` script execution now resolves named entrypoints from discovered `runmat.toml` manifests when the provided run target is not an existing file.
+  - Path entrypoints are resolved with optional `.m` inference; module/function entrypoints return an explicit "not yet executable from CLI run path" error instead of silently misrouting.
+  - Added `runmat-cli` unit coverage for both path-target resolution and module/function-target rejection.
+  - Validation: `cargo test -p runmat --lib`, `cargo fmt --all --check`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+
 ## Next Resolution Items
 
 - Finish converting remaining legacy test/doc references that imply removed APIs where they block semantic-only confidence.
-- Audit Plan 5 deliverables against concrete project/manifest acceptance criteria and capture pass/fail evidence.
-- Audit Plan 7 deliverables against semantic-fact-driven fusion criteria and capture pass/fail evidence.
+- Plan 5 and Plan 7 evidence audit has been captured in `docs-tmp/DELIVERABLE_AUDIT.md`; follow-up is implementation closeout, not status ambiguity.
+- Wire project-manifest composition into CLI/core entrypoint selection and resolver graph (Plan 5 closeout path).
+- Shift fusion candidate planning source-of-truth from bytecode accel graph to semantic/MIR/analysis products (Plan 7 closeout path).

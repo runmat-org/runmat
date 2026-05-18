@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use log::{info, warn};
-use runmat_config::RunMatConfig;
+use runmat_config::{discover_project_manifest_from, load_project_manifest, RunMatConfig};
 use runmat_core::{
     abi::{DiagnosticSeverity, ExecutionOutcome, RuntimeFlow},
     TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
@@ -35,12 +35,90 @@ pub async fn execute_script_with_args(
     cli: &Cli,
     config: &RunMatConfig,
 ) -> Result<()> {
+    let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
 
     let content = fs::read_to_string(&script)
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
 
     execute_script_contents(script, content, emit_bytecode_path, cli, config).await
+}
+
+fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
+    if script.exists() {
+        return Ok(script);
+    }
+    let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
+    let Some(name) = entrypoint_name_candidate(&script) else {
+        return Ok(script);
+    };
+    let Some(manifest_path) = discover_project_manifest_from(&cwd) else {
+        return Ok(script);
+    };
+    let manifest = load_project_manifest(&manifest_path).with_context(|| {
+        format!(
+            "failed to load discovered project manifest {}",
+            manifest_path.display()
+        )
+    })?;
+    let Some(entrypoint) = manifest.entrypoints.iter().find(|entry| entry.name == name) else {
+        return Ok(script);
+    };
+    if let Some(path) = &entrypoint.path {
+        let project_root = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+        if let Some(resolved) = resolve_entrypoint_file(project_root, path) {
+            info!(
+                "Resolved project entrypoint '{}' via {} -> {}",
+                name,
+                manifest_path.display(),
+                resolved.display()
+            );
+            return Ok(resolved);
+        }
+        return Err(anyhow::anyhow!(
+            "entrypoint '{}' resolved from {} but target path '{}' does not exist",
+            name,
+            manifest_path.display(),
+            path.display()
+        ));
+    }
+    if entrypoint.module.is_some() && entrypoint.function.is_some() {
+        return Err(anyhow::anyhow!(
+            "entrypoint '{}' in {} targets module/function and is not yet executable from CLI `run`",
+            name,
+            manifest_path.display()
+        ));
+    }
+    Ok(script)
+}
+
+fn entrypoint_name_candidate(script: &Path) -> Option<String> {
+    if script.extension().is_some() {
+        return None;
+    }
+    if script.components().count() != 1 {
+        return None;
+    }
+    script
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn resolve_entrypoint_file(project_root: &Path, path: &Path) -> Option<PathBuf> {
+    let direct = project_root.join(path);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    if direct.extension().is_none() {
+        let with_ext = direct.with_extension("m");
+        if with_ext.is_file() {
+            return Some(with_ext);
+        }
+    }
+    None
 }
 
 pub(crate) async fn execute_script_contents(
@@ -347,6 +425,83 @@ async fn export_touched_figures(
     }
 
     exports
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_script_input;
+    use once_cell::sync::Lazy;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    static CWD_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    #[test]
+    fn resolves_named_entrypoint_to_manifest_path_target() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "main"
+path = "src/main"
+"#,
+        )
+        .unwrap();
+
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let resolved = resolve_script_input(PathBuf::from("main")).expect("resolve entrypoint");
+        std::env::set_current_dir(original).unwrap();
+
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            tmp.path().join("src/main.m").canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn rejects_module_function_entrypoint_for_cli_run_path() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "server"
+module = "app.server"
+function = "main"
+"#,
+        )
+        .unwrap();
+
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let err = resolve_script_input(PathBuf::from("server"))
+            .expect_err("module/function entrypoint is not a script path");
+        std::env::set_current_dir(original).unwrap();
+
+        assert!(err
+            .to_string()
+            .contains("not yet executable from CLI `run`"));
+    }
 }
 
 fn outcome_error_code(outcome: &ExecutionOutcome) -> Option<String> {

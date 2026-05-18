@@ -629,6 +629,7 @@ Current ratchet status:
 - Dead builtin compatibility enum surface has been trimmed: `BuiltinCompatibility::RunMatExtended` was removed from `runmat-builtins` after confirming no production usage, keeping compatibility labels scoped to behavior-backed modes.
 - `runmat-gc` stress coverage no longer depends on removed legacy VM/HIR test APIs (`HirProgram`, `runmat_vm::execute`); it now compiles and executes through semantic lowering + MIR + VM bytecode (`lowering.assembly` -> `runmat_mir::lower_assembly` -> `runmat_vm::compile` -> `runmat_vm::interpret`).
 - `runmat-config` now has a dedicated `runmat.toml` project-manifest boundary separate from runtime `.runmat.*` config: typed manifest sections (`package`, `sources`, `dependencies`, `entrypoints`), upward discovery, parse/load helpers, and validation for relative/existing roots + local path dependencies + entrypoint target forms (including `.m` inference for path entrypoints).
+- `runmat-cli` script execution now performs an initial project-manifest integration step for named run targets: when a requested run target is not an existing file, CLI checks the discovered `runmat.toml` entrypoints and resolves path-based entrypoint targets (with optional `.m` inference), while module/function entrypoint targets fail with an explicit not-yet-supported diagnostic.
 
 ## Validation Cadence
 
