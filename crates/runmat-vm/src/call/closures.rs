@@ -59,6 +59,98 @@ async fn try_call_identity_with_policy(
     .await
 }
 
+async fn call_member_index_on_object_like(
+    receiver: Value,
+    class_name: &str,
+    name: String,
+    args: Vec<Value>,
+    requested_outputs: Option<usize>,
+    fallback_policy: CallableFallbackPolicy,
+) -> Result<Value, RuntimeError> {
+    let post_object_fallback = fallback_policy.after_object_dispatch_probe();
+    if let Some((m, _owner)) = lookup_method(class_name, &name) {
+        if m.is_static {
+            return Err(format!(
+                "Method '{}' is static; use classref({}).{}",
+                name, class_name, name
+            )
+            .into());
+        }
+        if m.access == Access::Private {
+            return Err(format!("Method '{}' is private", name).into());
+        }
+        let mut full_args = Vec::with_capacity(1 + args.len());
+        full_args.push(receiver.clone());
+        full_args.extend(args.iter().cloned());
+        return call_identity_with_policy(
+            method_identity(m.function_name.clone()),
+            Some(m.function_name),
+            full_args,
+            requested_outputs,
+            fallback_policy,
+        )
+        .await;
+    }
+
+    let mut method_args = Vec::with_capacity(1 + args.len());
+    method_args.push(receiver.clone());
+    method_args.extend(args.iter().cloned());
+    let qualified_identity = external_qualified_identity(class_name, &name);
+    let qualified_display_name = external_qualified_display_name(class_name, &name);
+    if let Some(v) = try_call_identity_with_policy(
+        qualified_identity.clone(),
+        Some(qualified_display_name.clone()),
+        method_args.clone(),
+        requested_outputs,
+        CallableFallbackPolicy::ObjectDispatch,
+    )
+    .await?
+    {
+        return Ok(v);
+    }
+    if let Some(v) = try_call_identity_with_policy(
+        dynamic_identity(name.clone()),
+        Some(name.clone()),
+        method_args.clone(),
+        requested_outputs,
+        CallableFallbackPolicy::ObjectDispatch,
+    )
+    .await?
+    {
+        return Ok(v);
+    }
+
+    match call_identity_with_policy(
+        qualified_identity,
+        Some(qualified_display_name),
+        method_args.clone(),
+        requested_outputs,
+        post_object_fallback,
+    )
+    .await
+    {
+        Ok(v) => return Ok(v),
+        Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => {}
+        Err(err) => return Err(err),
+    }
+
+    match call_identity_with_policy(
+        dynamic_identity(name.clone()),
+        Some(name.clone()),
+        method_args,
+        requested_outputs,
+        post_object_fallback,
+    )
+    .await
+    {
+        Ok(v) => return Ok(v),
+        Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => {}
+        Err(err) => return Err(err),
+    }
+
+    call_getfield_with_indices(receiver, name, args, requested_outputs).await
+}
+
 pub fn create_closure(
     stack: &mut Vec<Value>,
     func_name: String,
@@ -162,103 +254,28 @@ pub async fn call_method_or_member_index_with_outputs(
         })?;
     match base {
         Value::Object(obj) => {
-            let post_object_fallback = fallback_policy.after_object_dispatch_probe();
-            if let Some((m, _owner)) = lookup_method(&obj.class_name, &name) {
-                if m.is_static {
-                    return Err(format!(
-                        "Method '{}' is static; use classref({}).{}",
-                        name, obj.class_name, name
-                    )
-                    .into());
-                }
-                if m.access == Access::Private {
-                    return Err(format!("Method '{}' is private", name).into());
-                }
-                let mut full_args = Vec::with_capacity(1 + args.len());
-                full_args.push(Value::Object(obj));
-                full_args.extend(args);
-                return call_identity_with_policy(
-                    method_identity(m.function_name.clone()),
-                    Some(m.function_name),
-                    full_args,
-                    requested_outputs,
-                    fallback_policy,
-                )
-                .await;
-            }
-
-            let mut method_args = Vec::with_capacity(1 + args.len());
-            method_args.push(Value::Object(obj.clone()));
-            method_args.extend(args.iter().cloned());
-            let qualified_identity = external_qualified_identity(&obj.class_name, &name);
-            let qualified_display_name = external_qualified_display_name(&obj.class_name, &name);
-            if let Some(v) = try_call_identity_with_policy(
-                qualified_identity.clone(),
-                Some(qualified_display_name.clone()),
-                method_args.clone(),
+            let class_name = obj.class_name.clone();
+            call_member_index_on_object_like(
+                Value::Object(obj),
+                &class_name,
+                name,
+                args,
                 requested_outputs,
-                CallableFallbackPolicy::ObjectDispatch,
-            )
-            .await?
-            {
-                return Ok(v);
-            }
-            if let Some(v) = try_call_identity_with_policy(
-                dynamic_identity(name.clone()),
-                Some(name.clone()),
-                method_args.clone(),
-                requested_outputs,
-                CallableFallbackPolicy::ObjectDispatch,
-            )
-            .await?
-            {
-                return Ok(v);
-            }
-
-            match call_identity_with_policy(
-                qualified_identity,
-                Some(qualified_display_name),
-                method_args.clone(),
-                requested_outputs,
-                post_object_fallback,
+                fallback_policy,
             )
             .await
-            {
-                Ok(v) => return Ok(v),
-                Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => {}
-                Err(err) => return Err(err),
-            }
-
-            match call_identity_with_policy(
-                dynamic_identity(name.clone()),
-                Some(name.clone()),
-                method_args,
-                requested_outputs,
-                post_object_fallback,
-            )
-            .await
-            {
-                Ok(v) => return Ok(v),
-                Err(err) if err.identifier() == Some("RunMat:UndefinedFunction") => {}
-                Err(err) => return Err(err),
-            }
-
-            call_getfield_with_indices(Value::Object(obj), name, args, requested_outputs).await
         }
         Value::HandleObject(handle) => {
-            if let Ok(v) = crate::call::shared::call_object_named_method_with_outputs(
-                Value::HandleObject(handle.clone()),
-                name.clone(),
-                args.clone(),
+            let class_name = handle.class_name.clone();
+            call_member_index_on_object_like(
+                Value::HandleObject(handle),
+                &class_name,
+                name,
+                args,
                 requested_outputs,
+                fallback_policy,
             )
             .await
-            {
-                return Ok(v);
-            }
-
-            call_getfield_with_indices(Value::HandleObject(handle), name, args, requested_outputs)
-                .await
         }
         Value::ClassRef(cls) => {
             let classref_fallback = fallback_policy.after_object_dispatch_probe();

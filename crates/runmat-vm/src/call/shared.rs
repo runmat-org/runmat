@@ -661,7 +661,9 @@ where
                 match base {
                     Value::OutputList(outputs) => outputs,
                     Value::Cell(ca) => expand_all_cell(&ca)?,
-                    other @ Value::Object(_) => expand_object_all(other).await?,
+                    other @ Value::Object(_) | other @ Value::HandleObject(_) => {
+                        expand_object_all(other).await?
+                    }
                     _ => {
                         return Err(crate::interpreter::errors::mex(
                             "InvalidExpandAllTarget",
@@ -674,7 +676,9 @@ where
                     (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
                         expand_cell_indices(&ca, &indices)?
                     }
-                    (other @ Value::Object(_), _) => expand_object_indices(other, indices).await?,
+                    (other @ Value::Object(_), _) | (other @ Value::HandleObject(_), _) => {
+                        expand_object_indices(other, indices).await?
+                    }
                     _ => {
                         return Err(crate::interpreter::errors::mex(
                             "ExpandError",
@@ -697,14 +701,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        build_object_paren_expr_selector_values, build_object_paren_selector_values,
-        normalize_method_outputs, ObjectIndexDescriptor, ObjectIndexOp, ObjectIndexSelector,
-        OBJECT_END_RANGE_TAG, OBJECT_PROTOCOL_KIND_BRACE, OBJECT_PROTOCOL_KIND_MEMBER,
-        OBJECT_PROTOCOL_SUBSASGN, OBJECT_PROTOCOL_SUBSREF, OBJECT_SELECTOR_COLON,
-        OBJECT_SELECTOR_END,
+        build_expanded_args_from_specs, build_object_paren_expr_selector_values,
+        build_object_paren_selector_values, normalize_method_outputs, ObjectIndexDescriptor,
+        ObjectIndexOp, ObjectIndexSelector, OBJECT_END_RANGE_TAG, OBJECT_PROTOCOL_KIND_BRACE,
+        OBJECT_PROTOCOL_KIND_MEMBER, OBJECT_PROTOCOL_SUBSASGN, OBJECT_PROTOCOL_SUBSREF,
+        OBJECT_SELECTOR_COLON, OBJECT_SELECTOR_END,
     };
+    use crate::bytecode::ArgSpec;
     use crate::bytecode::EndExpr;
-    use runmat_builtins::Value;
+    use futures::executor::block_on;
+    use runmat_builtins::{HandleRef, Value};
 
     #[test]
     fn object_index_descriptor_serializes_protocol_args_once() {
@@ -855,5 +861,36 @@ mod tests {
     fn normalize_method_outputs_preserves_output_list_for_multi_request() {
         let value = normalize_method_outputs(Value::OutputList(vec![Value::Num(7.0)]), 2);
         assert_eq!(value, Value::OutputList(vec![Value::Num(7.0)]));
+    }
+
+    #[test]
+    fn build_expanded_args_from_specs_accepts_handle_object_expansion() {
+        let target = runmat_gc::gc_allocate(Value::Num(7.0)).expect("handle target");
+        let handle = HandleRef {
+            class_name: "HandleThing".to_string(),
+            target,
+            valid: true,
+        };
+        let mut stack = vec![Value::HandleObject(handle)];
+        let specs = vec![ArgSpec {
+            is_expand: true,
+            num_indices: 0,
+            expand_all: true,
+        }];
+        let expanded = block_on(build_expanded_args_from_specs(
+            &mut stack,
+            &specs,
+            "expand-all failed",
+            "expand-indices failed",
+            |base| async move {
+                match base {
+                    Value::HandleObject(_) => Ok(vec![Value::Num(42.0)]),
+                    other => panic!("expected handle object expansion path, got {other:?}"),
+                }
+            },
+            |_base, _indices| async move { Ok(vec![]) },
+        ))
+        .expect("expanded args");
+        assert_eq!(expanded, vec![Value::Num(42.0)]);
     }
 }
