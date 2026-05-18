@@ -5080,6 +5080,14 @@ def evaluate_release_readiness(
     thermal_min_monotonic_response_fraction = None
     thermal_min_response_realization_ratio = None
     thermal_max_response_realization_ratio = None
+    thermal_assertion_max_residual_norm = None
+    thermal_assertion_min_temperature_k = None
+    thermal_assertion_max_temperature_k = None
+    thermal_assertion_max_conductivity_spread_ratio = None
+    thermal_assertion_max_heat_capacity_spread_ratio = None
+    thermal_assertion_max_spatial_gradient_index = None
+    thermal_assertion_min_monotonic_response_fraction = None
+    thermal_assertion_min_response_realization_ratio = None
     thermal_spread_breach_rate = None
     thermal_spread_trend_ratio = None
     thermal_residual_norm_trend_ratio = None
@@ -5088,6 +5096,12 @@ def evaluate_release_readiness(
     thermal_spatial_gradient_trend_ratio = None
     thermal_monotonic_response_drop_trend_ratio = None
     thermal_response_realization_drop_trend_ratio = None
+    thermal_assertion_residual_norm_trend_ratio = None
+    thermal_assertion_conductivity_spread_trend_ratio = None
+    thermal_assertion_heat_capacity_spread_trend_ratio = None
+    thermal_assertion_spatial_gradient_trend_ratio = None
+    thermal_assertion_monotonic_response_drop_trend_ratio = None
+    thermal_assertion_response_realization_drop_trend_ratio = None
     electro_coupling_enabled_rate = None
     electro_max_transient_severity = None
     electro_max_nonlinear_severity = None
@@ -5648,6 +5662,141 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
+
+        thermal_assertion_records = [
+            rec
+            for rec in report_records(latest)
+            if rec.get("fixture_id") == "thermal_standalone_ramp_gpu_provider"
+        ]
+        thermal_assertion_specs = [
+            (
+                "thermal_standalone_max_residual_norm",
+                "max",
+                thermal_max_residual_norm_threshold,
+                "THERMAL_ASSERTION_RESIDUAL_NORM_HIGH",
+                "standalone thermal residual norm",
+                "thermal_max_residual_norm",
+            ),
+            (
+                "thermal_standalone_min_temperature_k",
+                "min",
+                thermal_min_temperature_k_threshold,
+                "THERMAL_ASSERTION_MIN_TEMPERATURE_LOW",
+                "standalone thermal min temperature",
+                "thermal_min_temperature_k",
+            ),
+            (
+                "thermal_standalone_max_temperature_k",
+                "max",
+                thermal_max_temperature_k_threshold,
+                "THERMAL_ASSERTION_MAX_TEMPERATURE_HIGH",
+                "standalone thermal max temperature",
+                "thermal_max_temperature_k",
+            ),
+            (
+                "thermal_standalone_conductivity_spread_ratio",
+                "max",
+                thermal_max_conductivity_spread_ratio_threshold,
+                "THERMAL_ASSERTION_CONDUCTIVITY_SPREAD_RATIO_HIGH",
+                "standalone thermal conductivity spread ratio",
+                "thermal_conductivity_spread_ratio",
+            ),
+            (
+                "thermal_standalone_heat_capacity_spread_ratio",
+                "max",
+                thermal_max_heat_capacity_spread_ratio_threshold,
+                "THERMAL_ASSERTION_HEAT_CAPACITY_SPREAD_RATIO_HIGH",
+                "standalone thermal heat-capacity spread ratio",
+                "thermal_heat_capacity_spread_ratio",
+            ),
+            (
+                "thermal_standalone_spatial_gradient_index",
+                "max",
+                thermal_max_spatial_gradient_index_threshold,
+                "THERMAL_ASSERTION_SPATIAL_GRADIENT_HIGH",
+                "standalone thermal spatial gradient index",
+                "thermal_spatial_gradient_index",
+            ),
+            (
+                "thermal_standalone_monotonic_response_fraction",
+                "min",
+                thermal_min_monotonic_response_fraction_threshold,
+                "THERMAL_ASSERTION_MONOTONIC_RESPONSE_LOW",
+                "standalone thermal monotonic response fraction",
+                "thermal_monotonic_response_fraction",
+            ),
+            (
+                "thermal_standalone_response_realization_ratio",
+                "min",
+                thermal_min_response_realization_ratio_threshold,
+                "THERMAL_ASSERTION_RESPONSE_REALIZATION_RATIO_LOW",
+                "standalone thermal response realization ratio",
+                "thermal_response_realization_ratio",
+            ),
+        ]
+        missing_thermal_assertion_fields = []
+        for (
+            assertion_name,
+            mode,
+            threshold,
+            code,
+            label,
+            fallback_field,
+        ) in thermal_assertion_specs:
+            values = []
+            for rec in thermal_assertion_records:
+                observed = threshold_assertion_observed(rec, assertion_name)
+                if observed is not None:
+                    values.append(observed)
+                    continue
+                fallback_raw = rec.get(fallback_field)
+                if isinstance(fallback_raw, (int, float)):
+                    fallback_value = float(fallback_raw)
+                    if math.isfinite(fallback_value):
+                        values.append(fallback_value)
+            if not values:
+                missing_thermal_assertion_fields.append(assertion_name)
+                continue
+            observed = max(values) if mode == "max" else min(values)
+            if assertion_name == "thermal_standalone_max_residual_norm":
+                thermal_assertion_max_residual_norm = observed
+            elif assertion_name == "thermal_standalone_min_temperature_k":
+                thermal_assertion_min_temperature_k = observed
+            elif assertion_name == "thermal_standalone_max_temperature_k":
+                thermal_assertion_max_temperature_k = observed
+            elif assertion_name == "thermal_standalone_conductivity_spread_ratio":
+                thermal_assertion_max_conductivity_spread_ratio = observed
+            elif assertion_name == "thermal_standalone_heat_capacity_spread_ratio":
+                thermal_assertion_max_heat_capacity_spread_ratio = observed
+            elif assertion_name == "thermal_standalone_spatial_gradient_index":
+                thermal_assertion_max_spatial_gradient_index = observed
+            elif assertion_name == "thermal_standalone_monotonic_response_fraction":
+                thermal_assertion_min_monotonic_response_fraction = observed
+            elif assertion_name == "thermal_standalone_response_realization_ratio":
+                thermal_assertion_min_response_realization_ratio = observed
+            breached = observed > threshold if mode == "max" else observed < threshold
+            if breached:
+                comparator = "exceeds" if mode == "max" else "below"
+                reasons.append(
+                    Reason(
+                        code=code,
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"{label} {observed:.3f} {comparator} threshold {threshold:.3f}"
+                        ),
+                    )
+                )
+        if missing_thermal_assertion_fields and (protected or thermal_require_metrics):
+            reasons.append(
+                Reason(
+                    code="THERMAL_ASSERTION_METRICS_MISSING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "standalone thermal threshold assertions missing required fields: "
+                        + ", ".join(sorted(set(missing_thermal_assertion_fields)))
+                    ),
+                )
+            )
 
     if not thermo_records:
         if protected or thermo_require_metrics:
@@ -9834,6 +9983,132 @@ def evaluate_release_readiness(
                 )
             )
 
+        thermal_assertion_residual_norm_trend_ratio = fixture_assertion_trend_ratio_for_fixtures(
+            ("thermal_standalone_ramp_gpu_provider",),
+            "thermal_standalone_max_residual_norm",
+            ratio_mode="increase",
+        )
+        if (
+            thermal_assertion_residual_norm_trend_ratio is not None
+            and thermal_assertion_residual_norm_trend_ratio
+            > thermal_max_residual_norm_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMAL_ASSERTION_RESIDUAL_NORM_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"standalone thermal residual norm trend ratio {thermal_assertion_residual_norm_trend_ratio:.3f} exceeds "
+                        f"threshold {thermal_max_residual_norm_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        thermal_assertion_conductivity_spread_trend_ratio = fixture_assertion_trend_ratio_for_fixtures(
+            ("thermal_standalone_ramp_gpu_provider",),
+            "thermal_standalone_conductivity_spread_ratio",
+            ratio_mode="increase",
+        )
+        if (
+            thermal_assertion_conductivity_spread_trend_ratio is not None
+            and thermal_assertion_conductivity_spread_trend_ratio
+            > thermal_max_conductivity_spread_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMAL_ASSERTION_CONDUCTIVITY_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"standalone thermal conductivity spread trend ratio {thermal_assertion_conductivity_spread_trend_ratio:.3f} exceeds "
+                        f"threshold {thermal_max_conductivity_spread_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        thermal_assertion_heat_capacity_spread_trend_ratio = fixture_assertion_trend_ratio_for_fixtures(
+            ("thermal_standalone_ramp_gpu_provider",),
+            "thermal_standalone_heat_capacity_spread_ratio",
+            ratio_mode="increase",
+        )
+        if (
+            thermal_assertion_heat_capacity_spread_trend_ratio is not None
+            and thermal_assertion_heat_capacity_spread_trend_ratio
+            > thermal_max_heat_capacity_spread_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMAL_ASSERTION_HEAT_CAPACITY_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"standalone thermal heat-capacity spread trend ratio {thermal_assertion_heat_capacity_spread_trend_ratio:.3f} exceeds "
+                        f"threshold {thermal_max_heat_capacity_spread_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        thermal_assertion_spatial_gradient_trend_ratio = fixture_assertion_trend_ratio_for_fixtures(
+            ("thermal_standalone_ramp_gpu_provider",),
+            "thermal_standalone_spatial_gradient_index",
+            ratio_mode="increase",
+        )
+        if (
+            thermal_assertion_spatial_gradient_trend_ratio is not None
+            and thermal_assertion_spatial_gradient_trend_ratio
+            > thermal_max_spatial_gradient_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMAL_ASSERTION_SPATIAL_GRADIENT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"standalone thermal spatial gradient trend ratio {thermal_assertion_spatial_gradient_trend_ratio:.3f} exceeds "
+                        f"threshold {thermal_max_spatial_gradient_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        thermal_assertion_monotonic_response_drop_trend_ratio = fixture_assertion_trend_ratio_for_fixtures(
+            ("thermal_standalone_ramp_gpu_provider",),
+            "thermal_standalone_monotonic_response_fraction",
+            ratio_mode="drop",
+        )
+        if (
+            thermal_assertion_monotonic_response_drop_trend_ratio is not None
+            and thermal_assertion_monotonic_response_drop_trend_ratio
+            > thermal_max_monotonic_response_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMAL_ASSERTION_MONOTONIC_RESPONSE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"standalone thermal monotonic response drop trend ratio {thermal_assertion_monotonic_response_drop_trend_ratio:.3f} exceeds "
+                        f"threshold {thermal_max_monotonic_response_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        thermal_assertion_response_realization_drop_trend_ratio = fixture_assertion_trend_ratio_for_fixtures(
+            ("thermal_standalone_ramp_gpu_provider",),
+            "thermal_standalone_response_realization_ratio",
+            ratio_mode="drop",
+        )
+        if (
+            thermal_assertion_response_realization_drop_trend_ratio is not None
+            and thermal_assertion_response_realization_drop_trend_ratio
+            > thermal_max_response_realization_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMAL_ASSERTION_RESPONSE_REALIZATION_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"standalone thermal response realization drop trend ratio {thermal_assertion_response_realization_drop_trend_ratio:.3f} exceeds "
+                        f"threshold {thermal_max_response_realization_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         coverage_drop_ratios = []
         extrapolation_trend_ratios = []
         for fixture_id, latest_rec in latest_by_fixture.items():
@@ -13950,6 +14225,14 @@ def evaluate_release_readiness(
         "thermal_min_response_realization_ratio_threshold": thermal_min_response_realization_ratio_threshold,
         "thermal_max_response_realization_ratio": thermal_max_response_realization_ratio,
         "thermal_max_response_realization_ratio_threshold": thermal_max_response_realization_ratio_threshold,
+        "thermal_assertion_max_residual_norm": thermal_assertion_max_residual_norm,
+        "thermal_assertion_min_temperature_k": thermal_assertion_min_temperature_k,
+        "thermal_assertion_max_temperature_k": thermal_assertion_max_temperature_k,
+        "thermal_assertion_max_conductivity_spread_ratio": thermal_assertion_max_conductivity_spread_ratio,
+        "thermal_assertion_max_heat_capacity_spread_ratio": thermal_assertion_max_heat_capacity_spread_ratio,
+        "thermal_assertion_max_spatial_gradient_index": thermal_assertion_max_spatial_gradient_index,
+        "thermal_assertion_min_monotonic_response_fraction": thermal_assertion_min_monotonic_response_fraction,
+        "thermal_assertion_min_response_realization_ratio": thermal_assertion_min_response_realization_ratio,
         "thermal_spread_breach_rate": thermal_spread_breach_rate,
         "thermal_max_spread_breach_rate_threshold": thermal_max_spread_breach_rate_threshold,
         "thermal_spread_trend_ratio": thermal_spread_trend_ratio,
@@ -13966,6 +14249,12 @@ def evaluate_release_readiness(
         "thermal_max_monotonic_response_drop_trend_ratio_threshold": thermal_max_monotonic_response_drop_trend_ratio_threshold,
         "thermal_response_realization_drop_trend_ratio": thermal_response_realization_drop_trend_ratio,
         "thermal_max_response_realization_drop_trend_ratio_threshold": thermal_max_response_realization_drop_trend_ratio_threshold,
+        "thermal_assertion_residual_norm_trend_ratio": thermal_assertion_residual_norm_trend_ratio,
+        "thermal_assertion_conductivity_spread_trend_ratio": thermal_assertion_conductivity_spread_trend_ratio,
+        "thermal_assertion_heat_capacity_spread_trend_ratio": thermal_assertion_heat_capacity_spread_trend_ratio,
+        "thermal_assertion_spatial_gradient_trend_ratio": thermal_assertion_spatial_gradient_trend_ratio,
+        "thermal_assertion_monotonic_response_drop_trend_ratio": thermal_assertion_monotonic_response_drop_trend_ratio,
+        "thermal_assertion_response_realization_drop_trend_ratio": thermal_assertion_response_realization_drop_trend_ratio,
         "electro_coupling_enabled_rate": electro_coupling_enabled_rate,
         "electro_max_transient_severity": electro_max_transient_severity,
         "electro_max_nonlinear_severity": electro_max_nonlinear_severity,
@@ -14900,12 +15189,20 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('thermal_max_spread_trend_ratio_threshold') if result.get('thermal_max_spread_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- Thermal standalone assertion posture (residual, min temp, max temp, conductivity spread, heat-capacity spread, spatial gradient, monotonic fraction, response realization): "
+        f"`{result.get('thermal_assertion_max_residual_norm') if result.get('thermal_assertion_max_residual_norm') is not None else '-'}`/`{result.get('thermal_assertion_min_temperature_k') if result.get('thermal_assertion_min_temperature_k') is not None else '-'}`/`{result.get('thermal_assertion_max_temperature_k') if result.get('thermal_assertion_max_temperature_k') is not None else '-'}`/`{result.get('thermal_assertion_max_conductivity_spread_ratio') if result.get('thermal_assertion_max_conductivity_spread_ratio') is not None else '-'}`/`{result.get('thermal_assertion_max_heat_capacity_spread_ratio') if result.get('thermal_assertion_max_heat_capacity_spread_ratio') is not None else '-'}`/`{result.get('thermal_assertion_max_spatial_gradient_index') if result.get('thermal_assertion_max_spatial_gradient_index') is not None else '-'}`/`{result.get('thermal_assertion_min_monotonic_response_fraction') if result.get('thermal_assertion_min_monotonic_response_fraction') is not None else '-'}`/`{result.get('thermal_assertion_min_response_realization_ratio') if result.get('thermal_assertion_min_response_realization_ratio') is not None else '-'}`"
+    )
+    lines.append(
         "- Thermal trend ratios (residual, conductivity spread, heat-capacity spread, spatial gradient, monotonic drop, response-realization drop): "
         f"`{result.get('thermal_residual_norm_trend_ratio') if result.get('thermal_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('thermal_conductivity_spread_trend_ratio') if result.get('thermal_conductivity_spread_trend_ratio') is not None else '-'}`/`{result.get('thermal_heat_capacity_spread_trend_ratio') if result.get('thermal_heat_capacity_spread_trend_ratio') is not None else '-'}`/`{result.get('thermal_spatial_gradient_trend_ratio') if result.get('thermal_spatial_gradient_trend_ratio') is not None else '-'}`/`{result.get('thermal_monotonic_response_drop_trend_ratio') if result.get('thermal_monotonic_response_drop_trend_ratio') is not None else '-'}`/`{result.get('thermal_response_realization_drop_trend_ratio') if result.get('thermal_response_realization_drop_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- Thermal trend thresholds (residual, conductivity spread, heat-capacity spread, spatial gradient, monotonic drop, response-realization drop): "
         f"`{result.get('thermal_max_residual_norm_trend_ratio_threshold') if result.get('thermal_max_residual_norm_trend_ratio_threshold') is not None else '-'}`/`{result.get('thermal_max_conductivity_spread_trend_ratio_threshold') if result.get('thermal_max_conductivity_spread_trend_ratio_threshold') is not None else '-'}`/`{result.get('thermal_max_heat_capacity_spread_trend_ratio_threshold') if result.get('thermal_max_heat_capacity_spread_trend_ratio_threshold') is not None else '-'}`/`{result.get('thermal_max_spatial_gradient_trend_ratio_threshold') if result.get('thermal_max_spatial_gradient_trend_ratio_threshold') is not None else '-'}`/`{result.get('thermal_max_monotonic_response_drop_trend_ratio_threshold') if result.get('thermal_max_monotonic_response_drop_trend_ratio_threshold') is not None else '-'}`/`{result.get('thermal_max_response_realization_drop_trend_ratio_threshold') if result.get('thermal_max_response_realization_drop_trend_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal standalone assertion trend ratios (residual, conductivity spread, heat-capacity spread, spatial gradient, monotonic drop, response-realization drop): "
+        f"`{result.get('thermal_assertion_residual_norm_trend_ratio') if result.get('thermal_assertion_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('thermal_assertion_conductivity_spread_trend_ratio') if result.get('thermal_assertion_conductivity_spread_trend_ratio') is not None else '-'}`/`{result.get('thermal_assertion_heat_capacity_spread_trend_ratio') if result.get('thermal_assertion_heat_capacity_spread_trend_ratio') is not None else '-'}`/`{result.get('thermal_assertion_spatial_gradient_trend_ratio') if result.get('thermal_assertion_spatial_gradient_trend_ratio') is not None else '-'}`/`{result.get('thermal_assertion_monotonic_response_drop_trend_ratio') if result.get('thermal_assertion_monotonic_response_drop_trend_ratio') is not None else '-'}`/`{result.get('thermal_assertion_response_realization_drop_trend_ratio') if result.get('thermal_assertion_response_realization_drop_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Nonlinear Core Posture")

@@ -4307,6 +4307,74 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMAL_MONOTONIC_RESPONSE_TREND_WORSENING", codes)
 
+    def test_thermal_assertion_metrics_missing_reason_is_emitted_when_required(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermal_max_residual_norm=1.0,
+            thermal_conductivity_spread_ratio=1.1,
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "thermal_standalone_ramp_gpu_provider",
+                "publishable": True,
+                "threshold_assertions": [],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMAL_ASSERTION_METRICS_MISSING", codes)
+
+    def test_thermal_assertion_monotonic_trend_worsening_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermal_max_residual_norm=1.0,
+            thermal_conductivity_spread_ratio=1.1,
+            thermal_heat_capacity_spread_ratio=1.1,
+            thermal_spatial_gradient_index=1.0,
+            thermal_monotonic_response_fraction=0.95,
+            thermal_response_realization_ratio=0.95,
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "thermal_standalone_ramp_gpu_provider",
+                "publishable": True,
+                "threshold_assertions": [
+                    {
+                        "name": "thermal_standalone_monotonic_response_fraction",
+                        "observed": 0.40,
+                    }
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "thermal_standalone_ramp_gpu_provider",
+                "publishable": True,
+                "threshold_assertions": [
+                    {
+                        "name": "thermal_standalone_monotonic_response_fraction",
+                        "observed": 0.90,
+                    }
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_MONOTONIC_RESPONSE_DROP_TREND_RATIO"
+        ] = "1.2"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMAL_ASSERTION_MONOTONIC_RESPONSE_TREND_WORSENING", codes)
+
     def test_electro_transient_severity_high_reason_is_emitted(self):
         latest = report(
             passed=True,
