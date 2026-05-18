@@ -282,17 +282,6 @@ pub async fn call_feval_async(args: &[Value]) -> Result<Value, RuntimeError> {
     call_builtin_async_impl("feval", args, None).await
 }
 
-pub async fn call_method_async(args: &[Value]) -> Result<Value, RuntimeError> {
-    call_builtin_async_impl("call_method", args, None).await
-}
-
-pub async fn call_method_async_with_outputs(
-    args: &[Value],
-    output_count: usize,
-) -> Result<Value, RuntimeError> {
-    call_builtin_async_impl("call_method", args, Some(output_count)).await
-}
-
 pub async fn call_builtin_async_with_outputs(
     name: &str,
     args: &[Value],
