@@ -49,17 +49,6 @@ pub(crate) fn object_property_setter_name(field: &str) -> String {
     format!("set.{field}")
 }
 
-pub(crate) async fn object_subsref_brace(
-    base: Value,
-    values: Vec<Value>,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-        base,
-        ObjectIndexSelector::IndexValues { values },
-    ))
-    .await
-}
-
 pub(crate) async fn expand_brace_values(
     base: Value,
     raw_indices: &[Value],
@@ -77,12 +66,24 @@ pub(crate) async fn expand_brace_values(
                 expand_cell_indices(&ca, raw_indices)?
             }
         }
-        Value::Object(obj) => {
-            vec![object_subsref_brace(Value::Object(obj), raw_indices.to_vec()).await?]
-        }
-        Value::HandleObject(handle) => {
-            vec![object_subsref_brace(Value::HandleObject(handle), raw_indices.to_vec()).await?]
-        }
+        Value::Object(obj) => vec![
+            call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+                Value::Object(obj),
+                ObjectIndexSelector::IndexValues {
+                    values: raw_indices.to_vec(),
+                },
+            ))
+            .await?,
+        ],
+        Value::HandleObject(handle) => vec![
+            call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+                Value::HandleObject(handle),
+                ObjectIndexSelector::IndexValues {
+                    values: raw_indices.to_vec(),
+                },
+            ))
+            .await?,
+        ],
         _ => {
             return Err(crate::interpreter::errors::mex(
                 "CellExpansionOnNonCell",

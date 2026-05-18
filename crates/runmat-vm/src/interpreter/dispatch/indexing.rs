@@ -1,8 +1,7 @@
 use crate::bytecode::EndExpr;
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::shared::{
-    call_object_index_descriptor_method, expand_brace_values, object_subsref_brace,
-    ObjectIndexDescriptor,
+    call_object_index_descriptor_method, expand_brace_values, ObjectIndexDescriptor,
 };
 use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
@@ -188,10 +187,22 @@ async fn execute_brace_operation(
         BraceIndexOperation::ReadSingle => {
             let value = match base {
                 Value::Object(obj) => {
-                    object_subsref_brace(Value::Object(obj), raw_indices.to_vec()).await?
+                    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+                        Value::Object(obj),
+                        crate::call::shared::ObjectIndexSelector::IndexValues {
+                            values: raw_indices.to_vec(),
+                        },
+                    ))
+                    .await?
                 }
                 Value::HandleObject(handle) => {
-                    object_subsref_brace(Value::HandleObject(handle), raw_indices.to_vec()).await?
+                    call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
+                        Value::HandleObject(handle),
+                        crate::call::shared::ObjectIndexSelector::IndexValues {
+                            values: raw_indices.to_vec(),
+                        },
+                    ))
+                    .await?
                 }
                 Value::Cell(ca) => {
                     let indices = resolve_cell_indices(raw_indices, ca.rows, ca.cols)?;
