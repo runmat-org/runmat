@@ -28,6 +28,7 @@ mod tests {
     const SIMPLE_OBJ: &str = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\nf -4 -3 -2\n";
     const SIMPLE_PLY: &str = "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n1 1 0\n0 1 0\n4 0 1 2 3\n3 0 2 3\n";
     const SIMPLE_GLTF: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0],[0,1,0]]\n          },\n          \"indices\": [0,1,2,0,2,3]\n        }\n      ]\n    }\n  ]\n}\n";
+    const NON_TRIANGLE_GLTF: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"mode\": 1,\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0]]\n          },\n          \"indices\": [0,1,2]\n        }\n      ]\n    }\n  ]\n}\n";
     const SIMPLE_GLB_HEADER: &[u8] = b"glTF\x02\x00\x00\x00";
 
     fn import(path: &str, bytes: &[u8], options: GeometryImportOptions) -> ImportResult {
@@ -283,6 +284,22 @@ mod tests {
         .expect_err("GLB payload should fail with typed parse error");
         assert!(
             error.to_string().contains("GLB payloads are not supported"),
+            "unexpected error message: {error}"
+        );
+    }
+
+    #[test]
+    fn gltf_non_triangle_mode_reports_typed_parse_error() {
+        let error = import_geometry(
+            "/bad-mode.gltf",
+            NON_TRIANGLE_GLTF.as_bytes(),
+            GeometryImportOptions::default(),
+        )
+        .expect_err("non-triangle GLTF mode should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("primitive mode 1 is not supported"),
             "unexpected error message: {error}"
         );
     }

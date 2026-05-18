@@ -58,6 +58,13 @@ pub(super) fn import_gltf(
                 GeometryImportError::ParseFailed("GLTF mesh.primitives[] is required".to_string())
             })?;
         for primitive in primitives {
+            let mode = primitive.get("mode").and_then(Value::as_u64).unwrap_or(4);
+            if mode != 4 {
+                return Err(GeometryImportError::ParseFailed(format!(
+                    "GLTF primitive mode {} is not supported; only mode 4 (TRIANGLES) is allowed",
+                    mode
+                )));
+            }
             let positions = parse_inline_positions(primitive)?;
             let base_vertex = all_positions.len();
             all_positions.extend_from_slice(&positions);

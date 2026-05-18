@@ -267,3 +267,5 @@ Progress update (2026-05-17):
     STL importer now supports deterministic binary STL parsing (80-byte header + little-endian triangle payload) with existing degenerate-triangle pruning diagnostics, and geometry format sniffing now identifies extension-less binary STL payloads from structural signatures so `geometry.inspect/v1` + `geometry.load/v1` route STL import instead of unsupported-format failures.
 100. [x] CAD mesh-import count diagnostics standardized across supported mesh formats:
     STL/OBJ/PLY/GLTF importers now emit additive machine-readable count diagnostics (`GEOMETRY_IMPORT_VERTEX_COUNT`, `GEOMETRY_IMPORT_TRIANGLE_COUNT`) alongside existing normalization signals, and runtime geometry coverage asserts diagnostic propagation through versioned load contracts.
+101. [x] CAD GLTF primitive-mode validation hardened for inline mesh ingestion:
+    GLTF inline importer now enforces triangle primitive mode (`mode=4`) with deterministic typed parse failures for unsupported primitive modes, preventing non-triangle primitive payloads from silently flowing through triangle-only ingestion logic.

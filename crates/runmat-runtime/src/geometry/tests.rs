@@ -5,6 +5,7 @@ const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nEND
 const SIMPLE_OBJ: &str = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\n";
 const SIMPLE_PLY: &str = "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n1 1 0\n0 1 0\n4 0 1 2 3\n";
 const SIMPLE_GLTF: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0],[0,1,0]]\n          },\n          \"indices\": [0,1,2,0,2,3]\n        }\n      ]\n    }\n  ]\n}\n";
+const NON_TRIANGLE_GLTF: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"mode\": 1,\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0]]\n          },\n          \"indices\": [0,1,2]\n        }\n      ]\n    }\n  ]\n}\n";
 const SIMPLE_GLB_HEADER: &[u8] = b"glTF\x02\x00\x00\x00";
 
 fn binary_triangle_stl() -> Vec<u8> {
@@ -209,6 +210,18 @@ fn load_op_maps_parse_error_for_glb_payload() {
     .expect_err("GLB payload should fail parse");
     assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
     assert!(error.message.contains("GLB payloads are not supported"));
+}
+
+#[test]
+fn load_op_maps_parse_error_for_non_triangle_gltf_mode() {
+    let error = geometry_load_op(
+        "/mesh.gltf",
+        NON_TRIANGLE_GLTF.as_bytes(),
+        OperationContext::new(None, None),
+    )
+    .expect_err("non-triangle GLTF mode should fail parse");
+    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert!(error.message.contains("mode 1 is not supported"));
 }
 
 #[test]
