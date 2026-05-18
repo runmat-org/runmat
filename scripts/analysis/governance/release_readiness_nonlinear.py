@@ -1537,6 +1537,11 @@ def evaluate_release_readiness(
         solve_hist = {fixture: [] for fixture in key_perf_records}
         speedup_hist = {fixture: [] for fixture in key_perf_records}
         for report in rolling:
+            if report.get("passed", True) is not True:
+                continue
+            report_publishable = report.get("publishable")
+            if report_publishable is not None and report_publishable is not True:
+                continue
             for fixture, rec in records_for_fixtures(report, set(hist.keys())).items():
                 if rec.get("publishable") is not True:
                     continue

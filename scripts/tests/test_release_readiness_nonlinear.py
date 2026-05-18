@@ -910,6 +910,71 @@ class ReleaseReadinessTests(unittest.TestCase):
         ]
         self.assertTrue(matches)
 
+    def test_key_perf_trend_baselines_ignore_non_publishable_rolling_reports(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 120.0,
+                "gpu_speedup_ratio": 1.1,
+                "gpu_solver_solve_ms": 100.0,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["publishable"] = False
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 110.0,
+                "gpu_speedup_ratio": 1.2,
+                "gpu_solver_solve_ms": 90.0,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES"] = "true"
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_TREND_BASELINE_SAMPLES"] = "1"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        matches = [
+            reason
+            for reason in result["reasons"]
+            if reason["code"] == "KEY_PERF_TREND_BASELINE_MISSING"
+            and "cfd_steady_gpu_provider" in reason["detail"]
+        ]
+        self.assertTrue(matches)
+
+    def test_key_perf_trend_baselines_ignore_failed_rolling_reports(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 120.0,
+                "gpu_speedup_ratio": 1.1,
+                "gpu_solver_solve_ms": 100.0,
+            }
+        )
+        rolling = [report(passed=False, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 110.0,
+                "gpu_speedup_ratio": 1.2,
+                "gpu_solver_solve_ms": 90.0,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES"] = "true"
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_TREND_BASELINE_SAMPLES"] = "1"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        matches = [
+            reason
+            for reason in result["reasons"]
+            if reason["code"] == "KEY_PERF_TREND_BASELINE_MISSING"
+            and "cfd_steady_gpu_provider" in reason["detail"]
+        ]
+        self.assertTrue(matches)
+
     def test_key_perf_trend_reasons_use_publishable_rolling_records(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
