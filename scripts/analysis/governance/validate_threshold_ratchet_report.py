@@ -10,6 +10,7 @@ REQUIRED_THRESHOLD_KEYS = {
     "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO",
     "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO",
 }
+EXPECTED_RATIONALE = "rolling_median_reference_fixtures"
 
 
 def _is_true(value: str) -> bool:
@@ -46,6 +47,8 @@ def main() -> int:
         errors.append(
             "governance_profile must be one of: release, development, feature"
         )
+    if rationale != EXPECTED_RATIONALE:
+        errors.append(f"rationale must be {EXPECTED_RATIONALE}")
     if not isinstance(entries, list) or not entries:
         errors.append("ratchet report has no entries")
         entries = []
@@ -68,6 +71,11 @@ def main() -> int:
             errors.append("entries[].threshold_key must be non-empty string")
             continue
         threshold_key_counts[key] = threshold_key_counts.get(key, 0) + 1
+        entry_profile = entry.get("profile")
+        if entry_profile != profile:
+            errors.append(
+                f"{key}: entry profile must match governance_profile ({profile})"
+            )
 
     present_threshold_keys = set(threshold_key_counts.keys())
     missing_threshold_keys = sorted(REQUIRED_THRESHOLD_KEYS - present_threshold_keys)

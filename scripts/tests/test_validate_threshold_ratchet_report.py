@@ -11,10 +11,11 @@ from scripts.analysis.governance.validate_threshold_ratchet_report import (
 
 
 class ValidateThresholdRatchetReportTests(unittest.TestCase):
-    def _release_entries(self):
+    def _release_entries(self, profile: str = "release"):
         return [
             {
                 "threshold_key": key,
+                "profile": profile,
                 "status": "unchanged",
                 "old": 1.1,
                 "new": 1.1,
@@ -23,10 +24,11 @@ class ValidateThresholdRatchetReportTests(unittest.TestCase):
             for key in sorted(REQUIRED_THRESHOLD_KEYS)
         ]
 
-    def _non_release_entries(self):
+    def _non_release_entries(self, profile: str = "development"):
         return [
             {
                 "threshold_key": key,
+                "profile": profile,
                 "status": "ratcheted",
                 "old": 1.2,
                 "new": 1.1,
@@ -45,7 +47,7 @@ class ValidateThresholdRatchetReportTests(unittest.TestCase):
                         "rationale": "rolling_median_reference_fixtures",
                         "rolling_report_count": 6,
                         "rolling_trusted_report_count": 4,
-                        "entries": self._non_release_entries(),
+                        "entries": self._non_release_entries("development"),
                     }
                 )
             )
@@ -72,11 +74,12 @@ class ValidateThresholdRatchetReportTests(unittest.TestCase):
                         "entries": [
                             {
                                 "threshold_key": sorted(REQUIRED_THRESHOLD_KEYS)[0],
+                                "profile": "feature",
                                 "status": "unchanged",
                                 "old": 1.2,
                                 "new": 1.2,
                             },
-                            *self._non_release_entries()[1:],
+                            *self._non_release_entries("feature")[1:],
                         ],
                     }
                 )
@@ -128,6 +131,7 @@ class ValidateThresholdRatchetReportTests(unittest.TestCase):
                         "entries": [
                             {
                                 "threshold_key": sorted(REQUIRED_THRESHOLD_KEYS)[0],
+                                "profile": "release",
                                 "status": "unchanged",
                                 "old": 1.1,
                                 "new": 1.2,
@@ -161,6 +165,7 @@ class ValidateThresholdRatchetReportTests(unittest.TestCase):
                         "entries": [
                             {
                                 "threshold_key": sorted(REQUIRED_THRESHOLD_KEYS)[0],
+                                "profile": "release",
                                 "status": "unchanged",
                                 "old": 1.1,
                                 "new": 1.1,
@@ -287,6 +292,56 @@ class ValidateThresholdRatchetReportTests(unittest.TestCase):
             path = Path(tmp) / "ratchet.json"
             entries = self._release_entries()
             entries[-1]["threshold_key"] = entries[0]["threshold_key"]
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "threshold-ratchet-report/v1",
+                        "governance_profile": "release",
+                        "rationale": "rolling_median_reference_fixtures",
+                        "rolling_report_count": 3,
+                        "rolling_trusted_report_count": 3,
+                        "entries": entries,
+                    }
+                )
+            )
+            os.environ["RUNMAT_THRESHOLD_RATCHET_REPORT"] = str(path)
+            os.environ["RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE"] = "true"
+            try:
+                rc = main()
+            finally:
+                os.environ.pop("RUNMAT_THRESHOLD_RATCHET_REPORT", None)
+                os.environ.pop("RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE", None)
+            self.assertEqual(rc, 1)
+
+    def test_fails_for_invalid_rationale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ratchet.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "threshold-ratchet-report/v1",
+                        "governance_profile": "release",
+                        "rationale": "custom_rationale",
+                        "rolling_report_count": 3,
+                        "rolling_trusted_report_count": 3,
+                        "entries": self._release_entries(),
+                    }
+                )
+            )
+            os.environ["RUNMAT_THRESHOLD_RATCHET_REPORT"] = str(path)
+            os.environ["RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE"] = "true"
+            try:
+                rc = main()
+            finally:
+                os.environ.pop("RUNMAT_THRESHOLD_RATCHET_REPORT", None)
+                os.environ.pop("RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE", None)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_entry_profile_mismatches_report_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ratchet.json"
+            entries = self._release_entries()
+            entries[0]["profile"] = "feature"
             path.write_text(
                 json.dumps(
                     {
