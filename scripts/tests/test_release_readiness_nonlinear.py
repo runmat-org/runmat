@@ -1,5 +1,6 @@
 import unittest
 import os
+import inspect
 
 from scripts.analysis.governance.release_readiness_nonlinear import (
     KEY_PERFORMANCE_FIXTURES,
@@ -607,6 +608,18 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("CONFORMANCE_FAILED", codes)
         self.assertIn("NONLINEAR_FIXTURE_UNPUBLISHABLE", codes)
+
+    def test_protected_gated_reasons_do_not_use_fixed_warn_severity(self):
+        lines = inspect.getsource(evaluate_release_readiness).splitlines()
+        for index, line in enumerate(lines):
+            if "if protected or " not in line:
+                continue
+            follow = "\n".join(lines[index + 1 : index + 25])
+            self.assertNotIn(
+                'severity="warn"',
+                follow,
+                msg=f"fixed warn severity found after guarded branch: {line.strip()}",
+            )
 
     def test_warn_on_non_protected_slowdown(self):
         latest = report(passed=True, publishable=True, gpu_ms=200.0)
