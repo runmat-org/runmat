@@ -289,3 +289,5 @@ Progress update (2026-05-17):
     accessor-backed `gltf/v1` decoding now rejects unsupported GLTF accessor semantics (`normalized=true` and `sparse` accessors) with typed parse failures, preventing silent acceptance of payloads whose decode semantics are outside the current deterministic import baseline.
 111. [x] CAD GLTF accessor stride and declared-span guardrails hardened:
     accessor-backed `gltf/v1` decoding now enforces component-aligned accessor `byteStride`, minimum stride for accessor element size, and declared `count`/`stride` span containment within the `bufferView` range before decode traversal, with typed parse failures for misaligned or out-of-range accessor declarations.
+112. [x] EM dispersive phase-attenuation comparator depth expanded:
+    EM conformance fixtures now emit threshold assertions for homogeneous/heterogeneous dispersive phase-attenuation spread (`em_homogeneous_dispersive_phase_attenuation_spread_ratio`, `em_heterogeneous_dispersive_phase_attenuation_spread_ratio`), and nonlinear-schema plus external-reference validators now require these metrics so partial EM phase-fidelity comparator payloads fail enforce-mode governance.
