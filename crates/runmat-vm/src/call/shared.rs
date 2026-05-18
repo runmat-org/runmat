@@ -296,32 +296,6 @@ fn build_protocol_index_cell(values: Vec<Value>) -> Result<Value, RuntimeError> 
     Ok(Value::Cell(cell))
 }
 
-async fn call_runtime_method(
-    args: &[Value],
-    requested_outputs: Option<usize>,
-) -> Result<Value, RuntimeError> {
-    let result = match requested_outputs {
-        Some(count) => runmat_runtime::call_method_async_with_outputs(args, count).await?,
-        None => runmat_runtime::call_method_async(args).await?,
-    };
-    Ok(normalize_method_outputs(
-        result,
-        requested_outputs.unwrap_or(1),
-    ))
-}
-
-fn normalize_method_outputs(value: Value, requested_outputs: usize) -> Value {
-    // Preserve values for non-singleton requests (including zero). Higher layers
-    // decide whether statement-context calls become public/displayed results.
-    if requested_outputs != 1 {
-        return value;
-    }
-    match value {
-        Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
-        other => other,
-    }
-}
-
 pub(crate) async fn call_getfield_with_indices(
     base: Value,
     field: String,
@@ -446,7 +420,32 @@ pub(crate) fn class_defines_member_subsasgn(class: &runmat_builtins::ClassDef) -
 pub(crate) async fn call_object_index_descriptor_method(
     descriptor: ObjectIndexDescriptor,
 ) -> Result<Value, RuntimeError> {
-    call_runtime_method(&descriptor.into_runtime_method_args()?, None).await
+    let mut args = descriptor.into_runtime_method_args()?;
+    if args.len() < 2 {
+        return Err(crate::interpreter::errors::mex(
+            "ObjectIndexDescriptorError",
+            "object index descriptor requires base and method name",
+        ));
+    }
+    let base = args.remove(0);
+    let method = match args.remove(0) {
+        Value::String(name) => name,
+        other => {
+            return Err(crate::interpreter::errors::mex(
+                "ObjectIndexDescriptorError",
+                &format!("object index descriptor method name must be string, got {other:?}"),
+            ))
+        }
+    };
+    crate::call::closures::call_method_or_member_index_with_outputs(
+        base,
+        CallableIdentity::DynamicName(SymbolName(method.clone())),
+        Some(method),
+        args,
+        None,
+        CallableFallbackPolicy::ObjectDispatch,
+    )
+    .await
 }
 
 fn encode_end_expr_value(expr: &EndExpr) -> Result<Value, RuntimeError> {
@@ -777,8 +776,8 @@ where
 mod tests {
     use super::{
         build_expanded_args_from_specs, build_object_paren_expr_selector_values,
-        build_object_paren_selector_values, normalize_method_outputs, ObjectIndexDescriptor,
-        ObjectIndexOp, ObjectIndexSelector, OBJECT_END_RANGE_TAG, OBJECT_PROTOCOL_KIND_BRACE,
+        build_object_paren_selector_values, ObjectIndexDescriptor, ObjectIndexOp,
+        ObjectIndexSelector, OBJECT_END_RANGE_TAG, OBJECT_PROTOCOL_KIND_BRACE,
         OBJECT_PROTOCOL_KIND_MEMBER, OBJECT_PROTOCOL_SUBSASGN, OBJECT_PROTOCOL_SUBSREF,
         OBJECT_SELECTOR_COLON, OBJECT_SELECTOR_END,
     };
@@ -924,24 +923,6 @@ mod tests {
         )
         .expect_err("duplicate range dimensions should fail");
         assert_eq!(err.identifier(), Some("RunMat:DuplicateRangeSelectorDim"));
-    }
-
-    #[test]
-    fn normalize_method_outputs_collapses_singleton_output_list_for_single_request() {
-        let value = normalize_method_outputs(Value::OutputList(vec![Value::Num(7.0)]), 1);
-        assert_eq!(value, Value::Num(7.0));
-    }
-
-    #[test]
-    fn normalize_method_outputs_preserves_output_list_for_multi_request() {
-        let value = normalize_method_outputs(Value::OutputList(vec![Value::Num(7.0)]), 2);
-        assert_eq!(value, Value::OutputList(vec![Value::Num(7.0)]));
-    }
-
-    #[test]
-    fn normalize_method_outputs_preserves_scalar_for_zero_request() {
-        let value = normalize_method_outputs(Value::Num(7.0), 0);
-        assert_eq!(value, Value::Num(7.0));
     }
 
     #[test]

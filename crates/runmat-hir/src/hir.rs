@@ -1317,11 +1317,11 @@ mod tests {
             SymbolName("plus".into()),
         ]));
 
-        assert!(CallableFallbackPolicy::RuntimeNameResolution
-            .allows_vm_name_fallback_for(&dynamic));
+        assert!(CallableFallbackPolicy::RuntimeNameResolution.allows_vm_name_fallback_for(&dynamic));
         assert!(!CallableFallbackPolicy::ExternalBoundary.allows_vm_name_fallback_for(&dynamic));
-        assert!(!CallableFallbackPolicy::ExternalBoundary
-            .allows_vm_name_fallback_for(&single_external));
+        assert!(
+            !CallableFallbackPolicy::ExternalBoundary.allows_vm_name_fallback_for(&single_external)
+        );
         assert!(CallableFallbackPolicy::ExternalBoundary
             .allows_vm_name_fallback_for(&qualified_external));
     }
