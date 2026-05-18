@@ -238,6 +238,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "em_homogeneous_dispersive_loss_scale_spread_ratio",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
             "name": "em_homogeneous_dispersive_phase_attenuation_mean",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 0.9996,
@@ -368,6 +375,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 0.12,
             "reference": 0.13,
+            "pass": True,
+        },
+        {
+            "name": "em_heterogeneous_dispersive_loss_scale_spread_ratio",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 1.21,
+            "reference": 1.21,
             "pass": True,
         },
         {
