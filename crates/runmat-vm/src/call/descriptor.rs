@@ -1,7 +1,7 @@
 use crate::bytecode::SemanticFunctionRegistry;
 use crate::call::feval::forward_builtin_feval;
 use runmat_builtins::{Closure, Value};
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId, SymbolName};
+use runmat_hir::{BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId, SymbolName};
 use runmat_runtime::RuntimeError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,6 +134,45 @@ impl CallableDescriptor {
         )
     }
 
+    fn feval_resolved_name(
+        identity: CallableIdentity,
+        name: String,
+        fallback_policy: CallableFallbackPolicy,
+        args: Vec<Value>,
+        requested_outputs: usize,
+    ) -> Self {
+        Self::resolved_inner(
+            identity,
+            Some(name.clone()),
+            fallback_policy,
+            args,
+            requested_outputs,
+            CallableMetadata::feval(Some(name)),
+        )
+    }
+
+    fn resolve_named_target(
+        name: &str,
+        semantic_registry: &SemanticFunctionRegistry,
+    ) -> (CallableIdentity, CallableFallbackPolicy) {
+        if let Some(function) = semantic_registry.resolve_name(name) {
+            return (
+                CallableIdentity::SemanticFunction(function),
+                CallableFallbackPolicy::None,
+            );
+        }
+        if runmat_builtins::builtin_function_by_name(name).is_some() {
+            return (
+                CallableIdentity::Builtin(BuiltinId(name.to_string())),
+                CallableFallbackPolicy::None,
+            );
+        }
+        (
+            CallableIdentity::DynamicName(SymbolName(name.to_string())),
+            CallableFallbackPolicy::RuntimeNameResolution,
+        )
+    }
+
     fn feval_forward(func_value: Value, args: Vec<Value>, requested_outputs: usize) -> Self {
         Self {
             target: CallableTarget::FevalForward(func_value),
@@ -141,27 +180,6 @@ impl CallableDescriptor {
             requested_outputs,
             metadata: CallableMetadata::feval(None),
         }
-    }
-
-    pub(crate) fn dynamic_named(
-        name: String,
-        args: Vec<Value>,
-        requested_outputs: usize,
-        fallback_policy: CallableFallbackPolicy,
-        call_kind: CallableCallKind,
-    ) -> Self {
-        Self::resolved_inner(
-            CallableIdentity::DynamicName(SymbolName(name.clone())),
-            Some(name.clone()),
-            fallback_policy,
-            args,
-            requested_outputs,
-            CallableMetadata {
-                call_kind,
-                display_name: Some(name),
-                ..CallableMetadata::default()
-            },
-        )
     }
 
     pub(crate) fn resolved(
@@ -200,21 +218,14 @@ impl CallableDescriptor {
         match func_val {
             Value::String(text) => {
                 if let Some(name) = Self::parse_at_handle_name(&text) {
-                    if let Some(function) = semantic_registry.resolve_name(&name) {
-                        return Self::feval_semantic(
-                            function.0,
-                            name,
-                            CallableFallbackPolicy::None,
-                            args,
-                            requested_outputs,
-                        );
-                    }
-                    return Self::dynamic_named(
+                    let (identity, fallback_policy) =
+                        Self::resolve_named_target(&name, semantic_registry);
+                    return Self::feval_resolved_name(
+                        identity,
                         name,
+                        fallback_policy,
                         args,
                         requested_outputs,
-                        CallableFallbackPolicy::RuntimeNameResolution,
-                        CallableCallKind::Feval,
                     );
                 }
                 Self::feval_forward(Value::String(text), args, requested_outputs)
@@ -222,21 +233,14 @@ impl CallableDescriptor {
             Value::CharArray(ca) if ca.rows == 1 => {
                 let text: String = ca.data.iter().collect();
                 if let Some(name) = Self::parse_at_handle_name(&text) {
-                    if let Some(function) = semantic_registry.resolve_name(&name) {
-                        return Self::feval_semantic(
-                            function.0,
-                            name,
-                            CallableFallbackPolicy::None,
-                            args,
-                            requested_outputs,
-                        );
-                    }
-                    return Self::dynamic_named(
+                    let (identity, fallback_policy) =
+                        Self::resolve_named_target(&name, semantic_registry);
+                    return Self::feval_resolved_name(
+                        identity,
                         name,
+                        fallback_policy,
                         args,
                         requested_outputs,
-                        CallableFallbackPolicy::RuntimeNameResolution,
-                        CallableCallKind::Feval,
                     );
                 }
                 Self::feval_forward(Value::CharArray(ca), args, requested_outputs)
@@ -245,22 +249,9 @@ impl CallableDescriptor {
                 Self::from_closure(closure, args, requested_outputs, semantic_registry)
             }
             Value::FunctionHandle(name) => {
-                if let Some(function) = semantic_registry.resolve_name(&name) {
-                    return Self::feval_semantic(
-                        function.0,
-                        name,
-                        CallableFallbackPolicy::None,
-                        args,
-                        requested_outputs,
-                    );
-                }
-                Self::dynamic_named(
-                    name,
-                    args,
-                    requested_outputs,
-                    CallableFallbackPolicy::RuntimeNameResolution,
-                    CallableCallKind::Feval,
-                )
+                let (identity, fallback_policy) =
+                    Self::resolve_named_target(&name, semantic_registry);
+                Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
             }
             Value::SemanticFunctionHandle { name, function } => Self::feval_semantic(
                 function,
@@ -300,12 +291,13 @@ impl CallableDescriptor {
                 requested_outputs,
             );
         }
-        Self::dynamic_named(
+        let (identity, fallback_policy) = Self::resolve_named_target(&name, semantic_registry);
+        Self::feval_resolved_name(
+            identity,
             name,
+            fallback_policy,
             call_args,
             requested_outputs,
-            CallableFallbackPolicy::RuntimeNameResolution,
-            CallableCallKind::Feval,
         )
     }
 }
@@ -544,11 +536,13 @@ pub(crate) async fn try_execute_callable_descriptor(
 #[cfg(test)]
 mod tests {
     use super::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
+    use crate::bytecode::SemanticFunctionRegistry;
     use futures::executor::block_on;
     use runmat_builtins::{Tensor, Value};
     use runmat_hir::{
         BuiltinId, CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName,
     };
+    use std::sync::Arc;
 
     #[test]
     fn builtin_descriptor_uses_requested_outputs_for_multi_result_calls() {
@@ -614,6 +608,28 @@ mod tests {
         );
         let value = block_on(execute_callable_descriptor(descriptor))
             .expect("dynamic runtime name resolution should reach builtin");
+        assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
+    fn feval_function_handle_builtin_prefers_builtin_identity_over_runtime_resolver() {
+        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
+            Some(Arc::new(|name| (name == "sqrt").then_some(4242))),
+        );
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, _args, _requested_outputs| {
+                assert_eq!(function, 4242);
+                Box::pin(async { Ok(Value::Num(123.0)) })
+            })),
+        );
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::FunctionHandle("sqrt".to_string()),
+            vec![Value::Num(9.0)],
+            1,
+            &SemanticFunctionRegistry::default(),
+        );
+        let value = block_on(execute_callable_descriptor(descriptor))
+            .expect("builtin handle feval should execute");
         assert_eq!(value, Value::Num(3.0));
     }
 }
