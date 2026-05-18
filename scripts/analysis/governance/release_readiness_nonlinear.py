@@ -436,6 +436,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES": "true",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_TREND_BASELINE_SAMPLES": "3",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS": "true",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "true",
         },
@@ -762,6 +763,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.45",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES": "false",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_TREND_BASELINE_SAMPLES": "1",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS": "false",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "false",
         },
@@ -1070,6 +1072,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.8",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO": "1.5",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES": "false",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_TREND_BASELINE_SAMPLES": "1",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS": "false",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "false",
         },
@@ -1336,6 +1339,17 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES", "false"),
         )
     )
+    key_perf_min_trend_baseline_samples = max(
+        1,
+        env_u64(
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_TREND_BASELINE_SAMPLES",
+            int(
+                profile_default(
+                    "RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_TREND_BASELINE_SAMPLES", "1"
+                )
+            ),
+        ),
+    )
     key_perf_max_run_ms = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS",
@@ -1480,7 +1494,8 @@ def evaluate_release_readiness(
                         severity="fail" if protected else "warn",
                         detail=(
                             f"{fixture} missing key-performance trend baselines for: "
-                            f"{', '.join(missing_trend_baselines)}"
+                            f"{', '.join(missing_trend_baselines)} "
+                            f"(require >= {key_perf_min_trend_baseline_samples} samples)"
                         ),
                     )
                 )
@@ -1507,21 +1522,22 @@ def evaluate_release_readiness(
                 if (
                     isinstance(run_ms_value, (int, float))
                     and run_ms_value > 0
-                    and not hist.get(fixture, [])
+                    and len(hist.get(fixture, [])) < key_perf_min_trend_baseline_samples
                 ):
                     missing_trend_baselines.append("gpu_run_ms")
                 solve_ms_value = rec.get("gpu_solver_solve_ms")
                 if (
                     isinstance(solve_ms_value, (int, float))
                     and solve_ms_value > 0
-                    and not solve_hist.get(fixture, [])
+                    and len(solve_hist.get(fixture, [])) < key_perf_min_trend_baseline_samples
                 ):
                     missing_trend_baselines.append("gpu_solver_solve_ms")
                 speedup_value = rec.get("gpu_speedup_ratio")
                 if (
                     isinstance(speedup_value, (int, float))
                     and speedup_value > 0
-                    and not speedup_hist.get(fixture, [])
+                    and len(speedup_hist.get(fixture, []))
+                    < key_perf_min_trend_baseline_samples
                 ):
                     missing_trend_baselines.append("gpu_speedup_ratio")
                 if missing_trend_baselines:
@@ -1531,7 +1547,8 @@ def evaluate_release_readiness(
                             severity="fail" if protected else "warn",
                             detail=(
                                 f"{fixture} missing key-performance trend baselines for: "
-                                f"{', '.join(missing_trend_baselines)}"
+                                f"{', '.join(missing_trend_baselines)} "
+                                f"(require >= {key_perf_min_trend_baseline_samples} samples)"
                             ),
                         )
                     )
