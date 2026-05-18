@@ -54,8 +54,9 @@ This audit maps the active objective to concrete repository evidence and marks e
   - module/function entrypoint resolution now uses source-index qualified-name matching (`build_project_source_index`) instead of a direct dotted-path file heuristic, including support for class-folder targets (`+pkg/@ClassName/method.m`).
   - CLI run-path integration in [script.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-cli/src/commands/script.rs) now builds a project composition graph and resolves manifest entrypoint names by delegating to the shared config-layer resolver for both path targets and module/function targets.
   - config-layer composition graph loading now exists in [project.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/src/project.rs) via `build_project_composition_graph`, including local path dependency manifest loading and per-package source indexes.
+  - core request-path source loading in [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) now resolves simple named path inputs through discovered project composition + entrypoint metadata before source read.
 - Gap:
-  - core/session-level execution and resolver consumers are not yet wired end-to-end to consume the composition graph as source-of-truth for entrypoint/import resolution.
+  - core/session-level execution now resolves named entrypoint path inputs through composition metadata, but resolver/import consumers are not yet wired end-to-end to consume the composition graph as source-of-truth.
   - source-index discovery, shared entrypoint resolution, and composition-graph loading now exist at config-layer, but downstream resolver consumers have not yet switched to composition-graph/source-index ownership end-to-end.
 
 ### 5) Unified nominal class/builtin metadata (`partial`)

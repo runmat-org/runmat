@@ -1087,14 +1087,18 @@ fn source_input_text(
         crate::abi::SourceInput::Path(path) => {
             #[cfg(not(target_arch = "wasm32"))]
             {
-                let text = std::fs::read_to_string(&path).map_err(|err| {
+                let resolved_path = resolve_path_source_input(&path)?;
+                let text = std::fs::read_to_string(&resolved_path).map_err(|err| {
                     RunError::Runtime(
-                        build_runtime_error(format!("failed to read source path '{path}': {err}"))
-                            .with_identifier("RunMat:SourceReadFailed")
-                            .build(),
+                        build_runtime_error(format!(
+                            "failed to read source path '{}': {err}",
+                            resolved_path.display()
+                        ))
+                        .with_identifier("RunMat:SourceReadFailed")
+                        .build(),
                     )
                 })?;
-                Ok((path, text))
+                Ok((resolved_path.to_string_lossy().to_string(), text))
             }
 
             #[cfg(target_arch = "wasm32")]
@@ -1106,5 +1110,186 @@ fn source_input_text(
                 ))
             }
         }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn resolve_path_source_input(path: &str) -> std::result::Result<std::path::PathBuf, RunError> {
+    use runmat_config::{
+        build_project_composition_graph, discover_project_manifest_from, resolve_project_entrypoint,
+    };
+    use std::path::{Path, PathBuf};
+
+    let candidate = PathBuf::from(path);
+    if candidate.is_file() {
+        return Ok(candidate);
+    }
+
+    let Some(entrypoint_name) = entrypoint_name_candidate(Path::new(path)) else {
+        return Ok(candidate);
+    };
+
+    let cwd = std::env::current_dir().map_err(|err| {
+        RunError::Runtime(
+            build_runtime_error(format!(
+                "failed to resolve current working directory while resolving source path '{path}': {err}"
+            ))
+            .with_identifier("RunMat:SourceResolveFailed")
+            .build(),
+        )
+    })?;
+
+    let Some(manifest_path) = discover_project_manifest_from(&cwd) else {
+        return Ok(candidate);
+    };
+
+    let composition = build_project_composition_graph(&manifest_path).map_err(|err| {
+        RunError::Runtime(
+            build_runtime_error(format!(
+                "failed to build project composition from discovered project manifest {}: {}",
+                manifest_path.display(),
+                err
+            ))
+            .with_identifier("RunMat:ProjectCompositionResolveFailed")
+            .build(),
+        )
+    })?;
+
+    let root_package = composition
+        .packages
+        .get(&composition.root_package)
+        .ok_or_else(|| {
+            RunError::Runtime(
+                build_runtime_error(format!(
+                    "project composition missing root package '{}' for manifest {}",
+                    composition.root_package,
+                    manifest_path.display()
+                ))
+                .with_identifier("RunMat:ProjectCompositionResolveFailed")
+                .build(),
+            )
+        })?;
+
+    let Some(resolved) = resolve_project_entrypoint(
+        &root_package.project_root,
+        &root_package.manifest,
+        &entrypoint_name,
+    )
+    .map_err(|err| {
+        RunError::Runtime(
+            build_runtime_error(format!(
+                "failed to resolve project entrypoint '{}' from {}: {}",
+                entrypoint_name,
+                manifest_path.display(),
+                err
+            ))
+            .with_identifier("RunMat:EntrypointResolveFailed")
+            .build(),
+        )
+    })?
+    else {
+        return Ok(candidate);
+    };
+
+    Ok(resolved.source_file)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn entrypoint_name_candidate(path: &std::path::Path) -> Option<String> {
+    if path.extension().is_some() {
+        return None;
+    }
+    if path.components().count() != 1 {
+        return None;
+    }
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    use super::source_input_text;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::abi::SourceInput;
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::fs;
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::sync::Mutex;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    static CWD_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn source_input_path_resolves_named_manifest_entrypoint() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "main"
+path = "src/main"
+"#,
+        )
+        .unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let (source_name, source_text) = source_input_text(SourceInput::Path("main".to_string()))
+            .expect("named entrypoint should resolve");
+        std::env::set_current_dir(original).unwrap();
+        let resolved = std::path::PathBuf::from(source_name)
+            .canonicalize()
+            .unwrap();
+        let expected = tmp.path().join("src/main.m").canonicalize().unwrap();
+        assert_eq!(
+            resolved, expected,
+            "resolved source path should match manifest entrypoint target"
+        );
+        assert_eq!(source_text, "x = 1;");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn source_input_path_errors_for_invalid_named_entrypoint_target() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "server"
+module = "app.server"
+function = "main"
+"#,
+        )
+        .unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let err = source_input_text(SourceInput::Path("server".to_string()))
+            .expect_err("invalid module/function entrypoint should report resolve error");
+        std::env::set_current_dir(original).unwrap();
+        assert!(err
+            .to_string()
+            .contains("failed to resolve project entrypoint"));
     }
 }
