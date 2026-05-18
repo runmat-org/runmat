@@ -4732,6 +4732,21 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("ELECTRO_SPREAD_TREND_WORSENING", codes)
 
+    def test_nonlinear_core_metrics_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"] = []
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "NONLINEAR_CORE_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
     def test_nonlinear_core_assertion_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
@@ -5296,6 +5311,20 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("ACOUSTIC_MODE_COUNT_LOW", codes)
         self.assertIn("ACOUSTIC_RESIDUAL_WARN_THRESHOLD_HIGH", codes)
 
+    def test_acoustic_metrics_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "ACOUSTIC_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
     def test_acoustic_trend_worsening_reasons_are_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
@@ -5383,6 +5412,20 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("MODAL_MAX_M_ORTHOGONALITY_OFFDIAG_HIGH", codes)
         self.assertIn("MODAL_MIN_RELATIVE_FREQUENCY_SEPARATION_LOW", codes)
+
+    def test_modal_metrics_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "MODAL_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
 
     def test_modal_trend_worsening_reasons_are_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

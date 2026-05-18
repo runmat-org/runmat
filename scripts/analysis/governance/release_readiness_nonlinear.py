@@ -6550,7 +6550,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="ACOUSTIC_METRICS_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="acoustic posture metrics missing from report records",
                 )
             )
@@ -6645,7 +6645,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="MODAL_METRICS_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="modal posture metrics missing from report records",
                 )
             )
@@ -6721,7 +6721,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="NONLINEAR_CORE_METRICS_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="nonlinear core posture metrics missing from report records",
                 )
             )
