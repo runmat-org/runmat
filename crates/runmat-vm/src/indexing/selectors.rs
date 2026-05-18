@@ -237,3 +237,21 @@ pub async fn build_slice_selectors(
     }
     Ok(selectors)
 }
+
+pub async fn build_cell_scalar_selectors(raw_indices: &[Value]) -> VmResult<Vec<SliceSelector>> {
+    let mut selectors = Vec::with_capacity(raw_indices.len());
+    for value in raw_indices {
+        let idx_val = index_scalar_from_value(value).await?.ok_or_else(|| {
+            mex(
+                "ScalarIndexRequired",
+                "Cell indexing requires scalar numeric indices",
+            )
+        })?;
+        selectors.push(SliceSelector::Scalar(if idx_val <= 0 {
+            0
+        } else {
+            idx_val as usize
+        }));
+    }
+    Ok(selectors)
+}

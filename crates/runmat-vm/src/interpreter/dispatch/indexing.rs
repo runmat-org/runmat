@@ -7,7 +7,9 @@ use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
 use crate::indexing::read_linear as idx_read_linear;
 use crate::indexing::read_slice as idx_read_slice;
-use crate::indexing::selectors::{build_slice_selectors, index_scalar_from_value, SliceSelector};
+use crate::indexing::selectors::{
+    build_cell_scalar_selectors, build_slice_selectors, index_scalar_from_value, SliceSelector,
+};
 use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
 use runmat_builtins::{CellArray, Value};
@@ -110,26 +112,6 @@ fn gather_cell_with_plan(
 ) -> Result<Value, RuntimeError> {
     let indices: Vec<usize> = plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
     crate::ops::cells::gather_cell_paren_linear_indices(ca, &indices, &plan.output_shape)
-}
-
-async fn build_cell_scalar_selectors(
-    raw_indices: &[Value],
-) -> Result<Vec<SliceSelector>, RuntimeError> {
-    let mut selectors = Vec::with_capacity(raw_indices.len());
-    for value in raw_indices {
-        let idx_val = index_scalar_from_value(value).await?.ok_or_else(|| {
-            crate::interpreter::errors::mex(
-                "ScalarIndexRequired",
-                "Cell indexing requires scalar numeric indices",
-            )
-        })?;
-        selectors.push(SliceSelector::Scalar(if idx_val <= 0 {
-            0
-        } else {
-            idx_val as usize
-        }));
-    }
-    Ok(selectors)
 }
 
 fn pop_index_values(stack: &mut Vec<Value>, count: usize) -> Result<Vec<Value>, RuntimeError> {
