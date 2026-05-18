@@ -917,6 +917,70 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertNotIn("KEY_PERF_TREND_BASELINE_MISSING", codes)
 
+    def test_key_perf_trend_baseline_policy_defaults_are_strict_on_release(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 120.0,
+                "gpu_speedup_ratio": 1.1,
+                "gpu_solver_solve_ms": 100.0,
+            }
+        )
+        rolling = [
+            report(passed=True, publishable=True, gpu_ms=95.0),
+            report(passed=True, publishable=True, gpu_ms=96.0),
+        ]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 110.0,
+                "gpu_speedup_ratio": 1.2,
+                "gpu_solver_solve_ms": 90.0,
+            }
+        )
+        rolling[1]["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 108.0,
+                "gpu_speedup_ratio": 1.25,
+                "gpu_solver_solve_ms": 88.0,
+            }
+        )
+        os.environ["GITHUB_REF_NAME"] = "main"
+        result = evaluate_release_readiness(latest, rolling, protected=True)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("KEY_PERF_TREND_BASELINE_MISSING", codes)
+
+    def test_key_perf_trend_baseline_policy_defaults_are_relaxed_on_development(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 120.0,
+                "gpu_speedup_ratio": 1.1,
+                "gpu_solver_solve_ms": 100.0,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 110.0,
+                "gpu_speedup_ratio": 1.2,
+                "gpu_solver_solve_ms": 90.0,
+            }
+        )
+        os.environ["GITHUB_REF_NAME"] = "dev"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertNotIn("KEY_PERF_TREND_BASELINE_MISSING", codes)
+
     def test_key_perf_speedup_low_reason_is_emitted_for_thermo_fixture(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
