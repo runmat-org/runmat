@@ -29,7 +29,7 @@ pub async fn load_member(
                     if let Ok(v) = call_object_property_getter_with_outputs(
                         Value::Object(obj.clone()),
                         &field,
-                        None,
+                        1,
                     )
                     .await
                     {
@@ -180,7 +180,7 @@ where
                         Value::Object(obj.clone()),
                         &field,
                         rhs.clone(),
-                        None,
+                        1,
                     )
                     .await
                     {

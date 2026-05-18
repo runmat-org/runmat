@@ -300,7 +300,6 @@ pub async fn handle_method_or_member_index_multi_call(
         display_name,
         fallback_policy,
         arg_count,
-        Some(out_count),
         out_count,
     )
     .await
@@ -312,11 +311,10 @@ async fn handle_method_or_member_index_call_inner(
     display_name: Option<String>,
     fallback_policy: CallableFallbackPolicy,
     arg_count: usize,
-    requested_outputs: Option<usize>,
-    output_hint: usize,
+    requested_outputs: usize,
 ) -> Result<MethodHandling, RuntimeError> {
     let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
-    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
+    let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
     let value = call_closures::call_method_or_member_index_with_outputs(
         base,
         identity,
@@ -326,7 +324,7 @@ async fn handle_method_or_member_index_call_inner(
         fallback_policy,
     )
     .await?;
-    stack.push(normalize_requested_outputs(value, output_hint));
+    stack.push(normalize_requested_outputs(value, requested_outputs));
     Ok(MethodHandling::Completed)
 }
 
@@ -336,8 +334,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     display_name: Option<String>,
     fallback_policy: CallableFallbackPolicy,
     specs: &[ArgSpec],
-    requested_outputs: Option<usize>,
-    output_hint: usize,
+    requested_outputs: usize,
 ) -> Result<MethodHandling, RuntimeError> {
     let mut args = build_user_function_expand_multi_args(stack, specs).await?;
     if args.is_empty() {
@@ -347,7 +344,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
         ));
     }
     let base = args.remove(0);
-    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
+    let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
     let value = call_closures::call_method_or_member_index_with_outputs(
         base,
         identity,
@@ -357,7 +354,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
         fallback_policy,
     )
     .await?;
-    stack.push(normalize_requested_outputs(value, output_hint));
+    stack.push(normalize_requested_outputs(value, requested_outputs));
     Ok(MethodHandling::Completed)
 }
 

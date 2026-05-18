@@ -696,7 +696,6 @@ pub async fn dispatch_instruction(
                 display_name.clone(),
                 *fallback_policy,
                 specs,
-                Some(*out_count),
                 *out_count,
             )
             .await?;

@@ -11,10 +11,6 @@ use runmat_builtins::{builtin_functions, lookup_method, Access, Closure, Value};
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity, SymbolName};
 use runmat_runtime::RuntimeError;
 
-fn requested_output_arity(requested_outputs: Option<usize>) -> usize {
-    requested_outputs.unwrap_or(1)
-}
-
 fn dynamic_identity(name: String) -> CallableIdentity {
     CallableIdentity::DynamicName(SymbolName(name))
 }
@@ -23,14 +19,14 @@ async fn call_identity_with_policy(
     identity: CallableIdentity,
     display_name: Option<String>,
     args: Vec<Value>,
-    requested_outputs: Option<usize>,
+    requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
     execute_callable_descriptor(CallableDescriptor::resolved(
         identity,
         display_name,
         args,
-        requested_output_arity(requested_outputs),
+        requested_outputs,
         fallback_policy,
         CallableCallKind::Direct,
     ))
@@ -41,14 +37,14 @@ async fn try_call_identity_with_policy(
     identity: CallableIdentity,
     display_name: Option<String>,
     args: Vec<Value>,
-    requested_outputs: Option<usize>,
+    requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Option<Value>, RuntimeError> {
     try_execute_callable_descriptor(CallableDescriptor::resolved(
         identity,
         display_name,
         args,
-        requested_output_arity(requested_outputs),
+        requested_outputs,
         fallback_policy,
         CallableCallKind::Direct,
     ))
@@ -60,7 +56,7 @@ async fn call_member_index_on_object_like(
     class_name: &str,
     name: String,
     args: Vec<Value>,
-    requested_outputs: Option<usize>,
+    requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
     let post_object_fallback = fallback_policy.post_object_dispatch();
@@ -237,7 +233,7 @@ pub async fn call_method_or_member_index_with_outputs(
     identity: CallableIdentity,
     display_name: Option<String>,
     args: Vec<Value>,
-    requested_outputs: Option<usize>,
+    requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
     let name = display_name
@@ -330,7 +326,7 @@ mod tests {
             CallableIdentity::DynamicName(SymbolName("remote_inc".to_string())),
             Some("remote_inc".to_string()),
             vec![Value::Num(2.0)],
-            Some(1),
+            1,
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect("classref external call should resolve through semantic resolver");
@@ -344,7 +340,7 @@ mod tests {
             CallableIdentity::DynamicName(SymbolName("sqrt".to_string())),
             Some("sqrt".to_string()),
             vec![Value::Num(9.0)],
-            Some(1),
+            1,
             CallableFallbackPolicy::ObjectDispatch,
         ))
         .expect_err("classref external call should not fallback to builtin name resolution");

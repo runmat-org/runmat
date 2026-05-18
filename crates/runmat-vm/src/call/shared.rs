@@ -66,7 +66,7 @@ pub(crate) async fn expand_brace_values(
                     values: raw_indices.to_vec(),
                 },
             ),
-            pad_to_outputs,
+            pad_to_outputs.unwrap_or(1),
         )
         .await?;
         Ok(match value {
@@ -308,7 +308,7 @@ pub(crate) async fn call_getfield_with_indices(
     base: Value,
     field: String,
     indices: Vec<Value>,
-    requested_outputs: Option<usize>,
+    requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
     let mut getfield_args = Vec::with_capacity(3);
     getfield_args.push(base);
@@ -319,11 +319,15 @@ pub(crate) async fn call_getfield_with_indices(
             .map_err(|e| format!("getfield idx build: {e}"))?;
         getfield_args.push(Value::Cell(idx_cell));
     }
-    match requested_outputs {
-        Some(count) => {
-            runmat_runtime::call_builtin_async_with_outputs("getfield", &getfield_args, count).await
-        }
-        None => runmat_runtime::call_builtin_async("getfield", &getfield_args).await,
+    if requested_outputs == 1 {
+        runmat_runtime::call_builtin_async("getfield", &getfield_args).await
+    } else {
+        runmat_runtime::call_builtin_async_with_outputs(
+            "getfield",
+            &getfield_args,
+            requested_outputs,
+        )
+        .await
     }
 }
 
@@ -337,7 +341,7 @@ pub(crate) async fn call_object_operator_method(
         CallableIdentity::DynamicName(SymbolName(method.to_string())),
         Some(method.to_string()),
         vec![arg],
-        None,
+        1,
         CallableFallbackPolicy::ObjectDispatch,
     )
     .await
@@ -347,7 +351,7 @@ pub(crate) async fn call_object_named_method_with_outputs(
     base: Value,
     method: String,
     args: Vec<Value>,
-    requested_outputs: Option<usize>,
+    requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
     crate::call::closures::call_method_or_member_index_with_outputs(
         base,
@@ -363,7 +367,7 @@ pub(crate) async fn call_object_named_method_with_outputs(
 pub(crate) async fn call_object_property_getter_with_outputs(
     base: Value,
     field: &str,
-    requested_outputs: Option<usize>,
+    requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
     call_object_named_method_with_outputs(
         base,
@@ -378,7 +382,7 @@ pub(crate) async fn call_object_property_setter_with_outputs(
     base: Value,
     field: &str,
     value: Value,
-    requested_outputs: Option<usize>,
+    requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
     call_object_named_method_with_outputs(
         base,
@@ -428,12 +432,12 @@ pub(crate) fn class_defines_member_subsasgn(class: &runmat_builtins::ClassDef) -
 pub(crate) async fn call_object_index_descriptor_method(
     descriptor: ObjectIndexDescriptor,
 ) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method_with_outputs(descriptor, None).await
+    call_object_index_descriptor_method_with_outputs(descriptor, 1).await
 }
 
 pub(crate) async fn call_object_index_descriptor_method_with_outputs(
     descriptor: ObjectIndexDescriptor,
-    requested_outputs: Option<usize>,
+    requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
     let (base, method, args) = descriptor.into_method_invocation()?;
     crate::call::closures::call_method_or_member_index_with_outputs(
