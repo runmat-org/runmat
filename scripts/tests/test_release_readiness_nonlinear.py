@@ -4831,6 +4831,8 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
+                    {"name": "transient_prepared_cache_hit_ratio", "observed": 0.5},
+                    {"name": "transient_prepared_cache_misses", "observed": 4.0},
                     {"name": "transient_adapt_scale_min", "observed": 0.20},
                     {"name": "transient_adapt_scale_max", "observed": 2.2},
                     {"name": "transient_adapt_scale_mean", "observed": 0.30},
@@ -4847,11 +4849,19 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
+                    {"name": "transient_prepared_cache_hit_ratio", "observed": 0.4},
+                    {"name": "transient_prepared_cache_misses", "observed": 5.0},
                     {"name": "transient_shock_physics_jump_ratio", "observed": 0.03},
                     {"name": "transient_shock_physics_nonfinite_count", "observed": 1.0},
                 ],
             }
         )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO"
+        ] = "0.9"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES"
+        ] = "2.0"
         os.environ[
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_ADAPT_SCALE_MIN"
         ] = "0.5"
@@ -4882,6 +4892,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             protected=False,
         )
         codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("TRANSIENT_PROVIDER_CACHE_HIT_RATIO_LOW", codes)
+        self.assertIn("TRANSIENT_PROVIDER_CACHE_MISSES_HIGH", codes)
         self.assertIn("TRANSIENT_PROVIDER_ADAPT_SCALE_MIN_LOW", codes)
         self.assertIn("TRANSIENT_PROVIDER_ADAPT_SCALE_MAX_HIGH", codes)
         self.assertIn("TRANSIENT_PROVIDER_ADAPT_SCALE_MEAN_LOW", codes)
@@ -4911,6 +4923,8 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
+                    {"name": "transient_prepared_cache_hit_ratio", "observed": 0.6},
+                    {"name": "transient_prepared_cache_misses", "observed": 4.0},
                     {"name": "transient_adapt_scale_min", "observed": 0.5},
                     {"name": "transient_adapt_scale_max", "observed": 1.6},
                     {"name": "transient_adapt_scale_mean", "observed": 0.6},
@@ -4927,6 +4941,8 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
+                    {"name": "transient_prepared_cache_hit_ratio", "observed": 0.55},
+                    {"name": "transient_prepared_cache_misses", "observed": 3.0},
                     {"name": "transient_shock_physics_jump_ratio", "observed": 0.003},
                     {"name": "transient_shock_physics_nonfinite_count", "observed": 1.0},
                 ],
@@ -4940,6 +4956,8 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
+                    {"name": "transient_prepared_cache_hit_ratio", "observed": 0.95},
+                    {"name": "transient_prepared_cache_misses", "observed": 1.0},
                     {"name": "transient_adapt_scale_min", "observed": 1.0},
                     {"name": "transient_adapt_scale_max", "observed": 1.0},
                     {"name": "transient_adapt_scale_mean", "observed": 1.0},
@@ -4956,11 +4974,19 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.1,
                 "threshold_assertions": [
+                    {"name": "transient_prepared_cache_hit_ratio", "observed": 0.9},
+                    {"name": "transient_prepared_cache_misses", "observed": 0.0},
                     {"name": "transient_shock_physics_jump_ratio", "observed": 0.001},
                     {"name": "transient_shock_physics_nonfinite_count", "observed": 0.0},
                 ],
             }
         )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_HIT_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES_TREND_RATIO"
+        ] = "1.2"
         os.environ[
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ADAPT_SCALE_MIN_DROP_TREND_RATIO"
         ] = "1.2"
@@ -4987,6 +5013,8 @@ class ReleaseReadinessTests(unittest.TestCase):
         ] = "1.0"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("TRANSIENT_PROVIDER_CACHE_HIT_TREND_WORSENING", codes)
+        self.assertIn("TRANSIENT_PROVIDER_CACHE_MISSES_TREND_WORSENING", codes)
         self.assertIn("TRANSIENT_PROVIDER_ADAPT_SCALE_MIN_TREND_WORSENING", codes)
         self.assertIn("TRANSIENT_PROVIDER_ADAPT_SCALE_MAX_TREND_WORSENING", codes)
         self.assertIn("TRANSIENT_PROVIDER_ADAPT_SCALE_MEAN_TREND_WORSENING", codes)

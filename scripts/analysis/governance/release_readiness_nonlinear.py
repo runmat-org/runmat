@@ -4740,6 +4740,8 @@ def evaluate_release_readiness(
     coupled_flow_max_transient_physics_nonfinite_count = None
     coupled_flow_max_transient_shock_physics_jump_ratio = None
     coupled_flow_max_transient_shock_physics_nonfinite_count = None
+    transient_provider_min_cache_hit_ratio = None
+    transient_provider_max_cache_misses = None
     coupled_flow_transient_residual_norm_trend_ratio = None
     coupled_flow_transient_energy_growth_trend_ratio = None
     coupled_flow_transient_cache_hit_drop_trend_ratio = None
@@ -4752,6 +4754,8 @@ def evaluate_release_readiness(
     coupled_flow_transient_physics_nonfinite_count_trend_ratio = None
     coupled_flow_transient_shock_physics_jump_ratio_trend_ratio = None
     coupled_flow_transient_shock_physics_nonfinite_count_trend_ratio = None
+    transient_provider_cache_hit_drop_trend_ratio = None
+    transient_provider_cache_misses_trend_ratio = None
     em_max_energy_imbalance_ratio = None
     em_max_flux_divergence_proxy = None
     em_max_real_residual_norm = None
@@ -6490,6 +6494,22 @@ def evaluate_release_readiness(
             transient_provider_specs = [
                 (
                     "transient_long_gpu_provider",
+                    "transient_prepared_cache_hit_ratio",
+                    coupled_flow_min_transient_cache_hit_ratio_threshold,
+                    "min",
+                    "TRANSIENT_PROVIDER_CACHE_HIT_RATIO_LOW",
+                    "transient-provider prepared-cache hit ratio",
+                ),
+                (
+                    "transient_long_gpu_provider",
+                    "transient_prepared_cache_misses",
+                    coupled_flow_max_transient_cache_misses_threshold,
+                    "max",
+                    "TRANSIENT_PROVIDER_CACHE_MISSES_HIGH",
+                    "transient-provider prepared-cache misses",
+                ),
+                (
+                    "transient_long_gpu_provider",
                     "transient_adapt_scale_min",
                     coupled_flow_min_transient_adapt_scale_min_threshold,
                     "min",
@@ -6538,6 +6558,22 @@ def evaluate_release_readiness(
                 ),
                 (
                     "transient_shock_gpu_provider",
+                    "transient_prepared_cache_hit_ratio",
+                    coupled_flow_min_transient_cache_hit_ratio_threshold,
+                    "min",
+                    "TRANSIENT_PROVIDER_CACHE_HIT_RATIO_LOW",
+                    "transient-provider prepared-cache hit ratio",
+                ),
+                (
+                    "transient_shock_gpu_provider",
+                    "transient_prepared_cache_misses",
+                    coupled_flow_max_transient_cache_misses_threshold,
+                    "max",
+                    "TRANSIENT_PROVIDER_CACHE_MISSES_HIGH",
+                    "transient-provider prepared-cache misses",
+                ),
+                (
+                    "transient_shock_gpu_provider",
                     "transient_shock_physics_jump_ratio",
                     coupled_flow_max_transient_shock_physics_jump_ratio_threshold,
                     "max",
@@ -6583,6 +6619,20 @@ def evaluate_release_readiness(
                     coupled_flow_min_transient_adapt_scale_mean = observed
                 elif assertion_name == "transient_adapt_decrease_steps":
                     coupled_flow_max_transient_adapt_decrease_steps = observed
+                elif assertion_name == "transient_prepared_cache_hit_ratio":
+                    if transient_provider_min_cache_hit_ratio is None:
+                        transient_provider_min_cache_hit_ratio = observed
+                    else:
+                        transient_provider_min_cache_hit_ratio = min(
+                            transient_provider_min_cache_hit_ratio, observed
+                        )
+                elif assertion_name == "transient_prepared_cache_misses":
+                    if transient_provider_max_cache_misses is None:
+                        transient_provider_max_cache_misses = observed
+                    else:
+                        transient_provider_max_cache_misses = max(
+                            transient_provider_max_cache_misses, observed
+                        )
                 elif assertion_name == "transient_physics_jump_ratio":
                     coupled_flow_max_transient_physics_jump_ratio = observed
                 elif assertion_name == "transient_physics_nonfinite_count":
@@ -8912,6 +8962,42 @@ def evaluate_release_readiness(
                 return None
             return max(ratios)
 
+        def fixture_assertion_trend_ratio_for_fixtures(
+            fixture_ids: tuple[str, ...], assertion_name: str, ratio_mode="drop"
+        ):
+            ratios = []
+            for fixture_id in fixture_ids:
+                latest_rec = latest_by_fixture.get(fixture_id)
+                baseline_records = rolling_by_fixture.get(fixture_id, [])
+                if latest_rec is None or not baseline_records:
+                    continue
+                latest_value = threshold_assertion_observed(latest_rec, assertion_name)
+                if latest_value is None:
+                    continue
+                baseline_values = []
+                for rec in baseline_records:
+                    observed = threshold_assertion_observed(rec, assertion_name)
+                    if observed is not None:
+                        baseline_values.append(observed)
+                if not baseline_values:
+                    continue
+                baseline_value = statistics.median(baseline_values)
+                if ratio_mode == "increase":
+                    if baseline_value < 0 or latest_value < 0:
+                        continue
+                    if baseline_value == 0:
+                        if latest_value > 0:
+                            ratios.append(float("inf"))
+                        continue
+                    ratios.append(latest_value / baseline_value)
+                    continue
+                if baseline_value <= 0 or latest_value <= 0:
+                    continue
+                ratios.append(baseline_value / latest_value)
+            if not ratios:
+                return None
+            return max(ratios)
+
         thermo_spread_trend_ratio = fixture_trend_ratio(
             "thermo_constitutive_material_spread_ratio"
         )
@@ -10220,6 +10306,57 @@ def evaluate_release_readiness(
                     detail=(
                         "coupled-flow transient prepared-cache-misses trend ratio "
                         f"{coupled_flow_transient_cache_misses_trend_ratio:.3f} exceeds threshold "
+                        f"{coupled_flow_max_transient_cache_misses_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        transient_provider_fixture_ids = (
+            "transient_long_gpu_provider",
+            "transient_shock_gpu_provider",
+        )
+        transient_provider_cache_hit_drop_trend_ratio = (
+            fixture_assertion_trend_ratio_for_fixtures(
+                transient_provider_fixture_ids,
+                "transient_prepared_cache_hit_ratio",
+            )
+        )
+        if (
+            transient_provider_cache_hit_drop_trend_ratio is not None
+            and transient_provider_cache_hit_drop_trend_ratio
+            > coupled_flow_max_transient_cache_hit_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="TRANSIENT_PROVIDER_CACHE_HIT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "transient-provider prepared-cache-hit drop trend ratio "
+                        f"{transient_provider_cache_hit_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{coupled_flow_max_transient_cache_hit_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        transient_provider_cache_misses_trend_ratio = (
+            fixture_assertion_trend_ratio_for_fixtures(
+                transient_provider_fixture_ids,
+                "transient_prepared_cache_misses",
+                ratio_mode="increase",
+            )
+        )
+        if (
+            transient_provider_cache_misses_trend_ratio is not None
+            and transient_provider_cache_misses_trend_ratio
+            > coupled_flow_max_transient_cache_misses_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="TRANSIENT_PROVIDER_CACHE_MISSES_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "transient-provider prepared-cache-misses trend ratio "
+                        f"{transient_provider_cache_misses_trend_ratio:.3f} exceeds threshold "
                         f"{coupled_flow_max_transient_cache_misses_trend_ratio_threshold:.3f}"
                     ),
                 )
@@ -13176,6 +13313,10 @@ def evaluate_release_readiness(
         "coupled_flow_min_transient_cache_hit_ratio_threshold": coupled_flow_min_transient_cache_hit_ratio_threshold,
         "coupled_flow_max_transient_cache_misses": coupled_flow_max_transient_cache_misses,
         "coupled_flow_max_transient_cache_misses_threshold": coupled_flow_max_transient_cache_misses_threshold,
+        "transient_provider_min_cache_hit_ratio": transient_provider_min_cache_hit_ratio,
+        "transient_provider_min_cache_hit_ratio_threshold": coupled_flow_min_transient_cache_hit_ratio_threshold,
+        "transient_provider_max_cache_misses": transient_provider_max_cache_misses,
+        "transient_provider_max_cache_misses_threshold": coupled_flow_max_transient_cache_misses_threshold,
         "coupled_flow_min_transient_adapt_scale_min": coupled_flow_min_transient_adapt_scale_min,
         "coupled_flow_min_transient_adapt_scale_min_threshold": coupled_flow_min_transient_adapt_scale_min_threshold,
         "coupled_flow_max_transient_adapt_scale_max": coupled_flow_max_transient_adapt_scale_max,
@@ -13200,6 +13341,10 @@ def evaluate_release_readiness(
         "coupled_flow_max_transient_cache_hit_drop_trend_ratio_threshold": coupled_flow_max_transient_cache_hit_drop_trend_ratio_threshold,
         "coupled_flow_transient_cache_misses_trend_ratio": coupled_flow_transient_cache_misses_trend_ratio,
         "coupled_flow_max_transient_cache_misses_trend_ratio_threshold": coupled_flow_max_transient_cache_misses_trend_ratio_threshold,
+        "transient_provider_cache_hit_drop_trend_ratio": transient_provider_cache_hit_drop_trend_ratio,
+        "transient_provider_max_cache_hit_drop_trend_ratio_threshold": coupled_flow_max_transient_cache_hit_drop_trend_ratio_threshold,
+        "transient_provider_cache_misses_trend_ratio": transient_provider_cache_misses_trend_ratio,
+        "transient_provider_max_cache_misses_trend_ratio_threshold": coupled_flow_max_transient_cache_misses_trend_ratio_threshold,
         "coupled_flow_transient_adapt_scale_min_drop_trend_ratio": coupled_flow_transient_adapt_scale_min_drop_trend_ratio,
         "coupled_flow_max_transient_adapt_scale_min_drop_trend_ratio_threshold": coupled_flow_max_transient_adapt_scale_min_drop_trend_ratio_threshold,
         "coupled_flow_transient_adapt_scale_max_trend_ratio": coupled_flow_transient_adapt_scale_max_trend_ratio,
@@ -14091,7 +14236,9 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('coupled_flow_transient_residual_norm_trend_ratio') if result.get('coupled_flow_transient_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_energy_growth_trend_ratio') if result.get('coupled_flow_transient_energy_growth_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_cache_hit_drop_trend_ratio') if result.get('coupled_flow_transient_cache_hit_drop_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_cache_misses_trend_ratio') if result.get('coupled_flow_transient_cache_misses_trend_ratio') is not None else '-'}`"
     )
     lines.append(
-        "- Transient-provider adaptivity/physics assertions (adapt min, adapt max, adapt mean, adapt decreases, physics jump, physics nonfinite, shock jump, shock nonfinite): "
+        "- Transient-provider assertions (cache hit, cache misses, adapt min, adapt max, adapt mean, adapt decreases, physics jump, physics nonfinite, shock jump, shock nonfinite): "
+        f"`{result.get('transient_provider_min_cache_hit_ratio') if result.get('transient_provider_min_cache_hit_ratio') is not None else '-'}`/`{result.get('transient_provider_min_cache_hit_ratio_threshold') if result.get('transient_provider_min_cache_hit_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('transient_provider_max_cache_misses') if result.get('transient_provider_max_cache_misses') is not None else '-'}`/`{result.get('transient_provider_max_cache_misses_threshold') if result.get('transient_provider_max_cache_misses_threshold') is not None else '-'}`; "
         f"`{result.get('coupled_flow_min_transient_adapt_scale_min') if result.get('coupled_flow_min_transient_adapt_scale_min') is not None else '-'}`/`{result.get('coupled_flow_min_transient_adapt_scale_min_threshold') if result.get('coupled_flow_min_transient_adapt_scale_min_threshold') is not None else '-'}`; "
         f"`{result.get('coupled_flow_max_transient_adapt_scale_max') if result.get('coupled_flow_max_transient_adapt_scale_max') is not None else '-'}`/`{result.get('coupled_flow_max_transient_adapt_scale_max_threshold') if result.get('coupled_flow_max_transient_adapt_scale_max_threshold') is not None else '-'}`; "
         f"`{result.get('coupled_flow_min_transient_adapt_scale_mean') if result.get('coupled_flow_min_transient_adapt_scale_mean') is not None else '-'}`/`{result.get('coupled_flow_min_transient_adapt_scale_mean_threshold') if result.get('coupled_flow_min_transient_adapt_scale_mean_threshold') is not None else '-'}`; "
@@ -14102,8 +14249,8 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('coupled_flow_max_transient_shock_physics_nonfinite_count') if result.get('coupled_flow_max_transient_shock_physics_nonfinite_count') is not None else '-'}`/`{result.get('coupled_flow_max_transient_shock_physics_nonfinite_count_threshold') if result.get('coupled_flow_max_transient_shock_physics_nonfinite_count_threshold') is not None else '-'}`"
     )
     lines.append(
-        "- Transient-provider adaptivity/physics trend ratios (adapt-min drop, adapt-max, adapt-mean drop, adapt-decrease steps, physics jump, physics nonfinite, shock jump, shock nonfinite): "
-        f"`{result.get('coupled_flow_transient_adapt_scale_min_drop_trend_ratio') if result.get('coupled_flow_transient_adapt_scale_min_drop_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_adapt_scale_max_trend_ratio') if result.get('coupled_flow_transient_adapt_scale_max_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_adapt_scale_mean_drop_trend_ratio') if result.get('coupled_flow_transient_adapt_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_adapt_decrease_steps_trend_ratio') if result.get('coupled_flow_transient_adapt_decrease_steps_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_physics_jump_ratio_trend_ratio') if result.get('coupled_flow_transient_physics_jump_ratio_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_physics_nonfinite_count_trend_ratio') if result.get('coupled_flow_transient_physics_nonfinite_count_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_shock_physics_jump_ratio_trend_ratio') if result.get('coupled_flow_transient_shock_physics_jump_ratio_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_shock_physics_nonfinite_count_trend_ratio') if result.get('coupled_flow_transient_shock_physics_nonfinite_count_trend_ratio') is not None else '-'}`"
+        "- Transient-provider trend ratios (cache-hit drop, cache misses, adapt-min drop, adapt-max, adapt-mean drop, adapt-decrease steps, physics jump, physics nonfinite, shock jump, shock nonfinite): "
+        f"`{result.get('transient_provider_cache_hit_drop_trend_ratio') if result.get('transient_provider_cache_hit_drop_trend_ratio') is not None else '-'}`/`{result.get('transient_provider_cache_misses_trend_ratio') if result.get('transient_provider_cache_misses_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_adapt_scale_min_drop_trend_ratio') if result.get('coupled_flow_transient_adapt_scale_min_drop_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_adapt_scale_max_trend_ratio') if result.get('coupled_flow_transient_adapt_scale_max_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_adapt_scale_mean_drop_trend_ratio') if result.get('coupled_flow_transient_adapt_scale_mean_drop_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_adapt_decrease_steps_trend_ratio') if result.get('coupled_flow_transient_adapt_decrease_steps_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_physics_jump_ratio_trend_ratio') if result.get('coupled_flow_transient_physics_jump_ratio_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_physics_nonfinite_count_trend_ratio') if result.get('coupled_flow_transient_physics_nonfinite_count_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_shock_physics_jump_ratio_trend_ratio') if result.get('coupled_flow_transient_shock_physics_jump_ratio_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_shock_physics_nonfinite_count_trend_ratio') if result.get('coupled_flow_transient_shock_physics_nonfinite_count_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### EM Posture")
