@@ -61,6 +61,17 @@ fn inspect_and_load_obj_work() {
 }
 
 #[test]
+fn inspect_and_load_obj_work_without_extension() {
+    let inspect =
+        geometry_inspect("/part.dat", SIMPLE_OBJ.as_bytes()).expect("inspect should work");
+    assert_eq!(inspect.format, "obj");
+
+    let asset = geometry_load("/part.dat", SIMPLE_OBJ.as_bytes()).expect("load should work");
+    assert_eq!(asset.source.importer_version, "obj/v1");
+    assert_eq!(asset.meshes[0].element_count, 2);
+}
+
+#[test]
 fn inspect_and_load_ply_work() {
     let inspect =
         geometry_inspect("/part.ply", SIMPLE_PLY.as_bytes()).expect("inspect should work");
@@ -71,6 +82,17 @@ fn inspect_and_load_ply_work() {
     assert_eq!(asset.meshes.len(), 1);
     assert_eq!(asset.meshes[0].element_count, 2);
     assert_eq!(asset.meshes[0].vertex_count, 4);
+}
+
+#[test]
+fn inspect_and_load_ply_work_without_extension() {
+    let inspect =
+        geometry_inspect("/part.mesh", SIMPLE_PLY.as_bytes()).expect("inspect should work");
+    assert_eq!(inspect.format, "ply");
+
+    let asset = geometry_load("/part.mesh", SIMPLE_PLY.as_bytes()).expect("load should work");
+    assert_eq!(asset.source.importer_version, "ply/v1");
+    assert_eq!(asset.meshes[0].element_count, 2);
 }
 
 #[test]

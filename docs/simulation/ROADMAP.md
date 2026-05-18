@@ -255,3 +255,5 @@ Progress update (2026-05-17):
     `runmat-geometry-io` now supports additive deterministic OBJ ingestion (`obj/v1`) with polygon-face triangulation (including negative-index references), degenerate-face pruning diagnostics, and runtime geometry contract coverage so `.obj` assets load through `geometry.load/v1` without unsupported-format fallbacks.
 94. [x] CAD interop ingestion depth expanded with PLY import baseline:
     `runmat-geometry-io` now supports additive deterministic ASCII PLY ingestion (`ply/v1`) with polygon-face triangulation and degenerate-face pruning diagnostics, and runtime geometry contract coverage confirms `.ply` assets pass through `geometry.inspect/v1` + `geometry.load/v1` without unsupported-format fallbacks.
+95. [x] CAD interop format detection robustness expanded for extension-less OBJ/PLY payloads:
+    geometry format sniffing now identifies OBJ and ASCII PLY payloads from header/content signatures even when file extensions are non-canonical, allowing `geometry.inspect/v1` and `geometry.load/v1` to route supported importers instead of producing unsupported-format errors for extension-less CAD mesh inputs.
