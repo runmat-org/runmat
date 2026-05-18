@@ -1162,6 +1162,19 @@ fn expand_all_elements_in_args() {
 }
 
 #[test]
+fn mixed_cell_colon_expansion_in_call_args() {
+    let program = r#"
+        C = {1,2;3,4};
+        [a,b] = deal(C{:,2});
+        z = a + b;
+    "#;
+    let vars = execute_semantic_source(program);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-6.0).abs()<1e-9)));
+}
+
+#[test]
 fn builtin_expand_multi_output_uses_typed_instruction() {
     let source = "C = deal(7,3); [a,b] = deal(C{:}); s = a + b;";
     let bytecode = compile_semantic_source(source).expect("compile builtin expand multi-output");

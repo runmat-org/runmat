@@ -170,17 +170,27 @@ fn lower_call_arg(
         }
         let base = lower_operand_with_replacements(ctx, base, temps, await_replacements)?;
         let mut indices = Vec::new();
-        let mut expand_all = false;
+        let mut saw_colon = false;
+        let mut saw_non_colon = false;
         for component in &indexing.components {
             match component {
-                IndexComponent::Colon => expand_all = true,
-                IndexComponent::Expr(expr) => indices.push(lower_operand_with_replacements(
-                    ctx,
-                    expr,
-                    temps,
-                    await_replacements,
-                )?),
+                IndexComponent::Colon => {
+                    saw_colon = true;
+                    indices.push(MirOperand::Constant(MirConstant::String(StringLiteral(
+                        ":".to_string(),
+                    ))));
+                }
+                IndexComponent::Expr(expr) => {
+                    saw_non_colon = true;
+                    indices.push(lower_operand_with_replacements(
+                        ctx,
+                        expr,
+                        temps,
+                        await_replacements,
+                    )?);
+                }
                 IndexComponent::End { offset, .. } if *offset == 0 => {
+                    saw_non_colon = true;
                     let local = ctx.fresh_temp(arg.span, Some(arg.id));
                     temps.push(MirStmt {
                         kind: MirStmtKind::Assign {
@@ -197,6 +207,10 @@ fn lower_call_arg(
                     ))
                 }
             }
+        }
+        let expand_all = saw_colon && !saw_non_colon;
+        if expand_all {
+            indices.clear();
         }
         Ok(MirCallArg::Expansion {
             base,
