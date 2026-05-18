@@ -633,7 +633,7 @@ fn method_syntax_with_semantic_function_callee_executes_directly() {
     assert!(bytecode
         .instructions
         .iter()
-        .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunction(_, 2))));
+        .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 2, 1))));
     let vars = interpret(&bytecode).expect("semantic method-style call executes");
     assert!(vars
         .iter()

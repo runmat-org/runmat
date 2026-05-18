@@ -815,11 +815,6 @@ impl TurbineEngine {
                         Some(*out_count),
                     );
                 }
-                Instr::CallSemanticFunction(function, argc) => {
-                    "CallSemanticFunction".hash(&mut hasher);
-                    function.0.hash(&mut hasher);
-                    argc.hash(&mut hasher);
-                }
                 Instr::CallSemanticFunctionMulti(function, argc, out_count) => {
                     "CallSemanticFunctionMulti".hash(&mut hasher);
                     function.0.hash(&mut hasher);

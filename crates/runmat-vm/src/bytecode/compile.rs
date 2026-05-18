@@ -377,10 +377,6 @@ mod tests {
             .instructions
             .iter()
             .any(|instr| matches!(instr, Instr::CallSemanticFunctionMulti(_, _, 0))));
-        assert!(!bytecode
-            .instructions
-            .iter()
-            .any(|instr| matches!(instr, Instr::CallSemanticFunction(_, _))));
     }
 
     #[test]
@@ -778,10 +774,10 @@ mod tests {
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
-        assert!(bytecode
-            .instructions
-            .iter()
-            .any(|instr| matches!(instr, Instr::CallSemanticFunction(FunctionId(9001), 1))));
+        assert!(bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            Instr::CallSemanticFunctionMulti(FunctionId(9001), 1, 1)
+        )));
 
         let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
             Some(Arc::new(|name| {

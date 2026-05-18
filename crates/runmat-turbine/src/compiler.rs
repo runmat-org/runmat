@@ -619,42 +619,41 @@ impl BytecodeCompiler {
                             .brif(is_false, false_block, &[], true_block, &[]);
                         block_terminated = true;
                     }
-                    Instr::CallSemanticFunction(function, arg_count) => {
-                        let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
-
-                        let result = Self::call_semantic_function_jit(
-                            builder,
-                            ctx.module,
-                            ctx.runmat_call_semantic_function_id,
-                            function.0,
-                            &args,
-                        )?;
-                        local_stack.push(result);
-                    }
                     Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => {
-                        match instructions.get(pc + 1) {
-                            Some(Instr::Unpack(count)) if count == out_count => {}
-                            _ => {
-                                return Err(execution_error(
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => return Err(execution_error(
                                     "Semantic multi-output JIT calls require a following Unpack",
-                                ))
+                                )),
                             }
                         }
 
                         let args = Self::pop_call_args(&mut local_stack, *arg_count)?;
 
-                        let results = Self::call_semantic_function_multi_jit(
-                            builder,
-                            ctx.module,
-                            ctx.runmat_call_semantic_function_outputs_id,
-                            function.0,
-                            &args,
-                            *out_count,
-                        )?;
-                        for result in results {
+                        if *out_count == 1 {
+                            let result = Self::call_semantic_function_jit(
+                                builder,
+                                ctx.module,
+                                ctx.runmat_call_semantic_function_id,
+                                function.0,
+                                &args,
+                            )?;
                             local_stack.push(result);
+                        } else {
+                            let results = Self::call_semantic_function_multi_jit(
+                                builder,
+                                ctx.module,
+                                ctx.runmat_call_semantic_function_outputs_id,
+                                function.0,
+                                &args,
+                                *out_count,
+                            )?;
+                            for result in results {
+                                local_stack.push(result);
+                            }
+                            pc += 1;
                         }
-                        pc += 1;
                     }
                     Instr::CallFunctionMulti {
                         display_name,

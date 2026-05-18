@@ -12,6 +12,7 @@ use crate::indexing::selectors::{
 };
 use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
+use crate::interpreter::dispatch::calls::normalize_requested_outputs;
 use runmat_builtins::{CellArray, Value};
 use runmat_runtime::RuntimeError;
 use std::future::Future;
@@ -394,7 +395,10 @@ async fn resolve_range_end_index(
                         CallableCallKind::EndExpr,
                     )
                     .with_call_kind(CallableCallKind::EndExpr);
-                    let v = execute_callable_descriptor(descriptor).await?;
+                    let v = normalize_requested_outputs(
+                        execute_callable_descriptor(descriptor).await?,
+                        1,
+                    );
                     idx_end_expr::value_to_f64(&v).map_err(|_| {
                         crate::interpreter::errors::mex(
                             "UnsupportedIndexType",

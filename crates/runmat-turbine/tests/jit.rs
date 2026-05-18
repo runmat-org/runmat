@@ -1044,7 +1044,7 @@ fn test_jit_direct_semantic_function_call() {
         ..Bytecode::with_instructions(
             vec![
                 Instr::LoadConst(41.0),
-                Instr::CallSemanticFunction(function, 1),
+                Instr::CallSemanticFunctionMulti(function, 1, 1),
                 Instr::StoreVar(0),
             ],
             1,
@@ -1820,7 +1820,7 @@ fn test_jit_nested_function_calls_compilation() {
                 Instr::LoadVar(0),
                 Instr::LoadConst(3.0),
                 Instr::Mul,
-                Instr::CallSemanticFunction(add, 2),
+                Instr::CallSemanticFunctionMulti(add, 2, 1),
                 Instr::StoreVar(1),
             ],
             instr_spans: Vec::new(),

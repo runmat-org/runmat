@@ -2192,7 +2192,7 @@ fn direct_session_function_call_uses_semantic_registry() {
             .bytecode
             .instructions
             .iter()
-            .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunction(_, 1))),
+            .any(|instr| matches!(instr, runmat_vm::Instr::CallSemanticFunctionMulti(_, 1, 1))),
         "direct call should lower to semantic function bytecode"
     );
     let outcome = block_on(session.execute_outcome("y = inc(2);")).expect("exec succeeds");

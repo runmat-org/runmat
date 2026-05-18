@@ -479,38 +479,6 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::CallSemanticFunction(function, arg_count) => {
-            match handle_user_function_call(
-                calls::UserCallContext {
-                    stack,
-                    identity: runmat_hir::CallableIdentity::SemanticFunction(*function),
-                    display_name: None,
-                    fallback_policy: runmat_hir::CallableFallbackPolicy::None,
-                    out_count: 1,
-                    exception: calls::ExceptionRouteContext {
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                    },
-                },
-                *arg_count,
-                refresh_workspace_state,
-            )
-            .await?
-            {
-                UserCallHandling::Completed => {}
-                UserCallHandling::Caught => {
-                    return Ok(Some(DispatchHandled::Generic(
-                        DispatchDecision::ContinueLoop,
-                    )))
-                }
-                UserCallHandling::Uncaught(err) => return Err(*err),
-            }
-            Ok(Some(DispatchHandled::Generic(
-                DispatchDecision::FallThrough,
-            )))
-        }
         Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => {
             match handle_user_function_call(
                 calls::UserCallContext {

@@ -1104,15 +1104,11 @@ impl Compiler {
                     ));
                     return Ok(());
                 }
-                if output_count == 1 {
-                    self.emit(Instr::CallSemanticFunction(*function, call.args.len()));
-                } else {
-                    self.emit(Instr::CallSemanticFunctionMulti(
-                        *function,
-                        call.args.len(),
-                        output_count,
-                    ));
-                }
+                self.emit(Instr::CallSemanticFunctionMulti(
+                    *function,
+                    call.args.len(),
+                    output_count,
+                ));
             }
             MirCallee::Dynamic(_) => {
                 self.compile_mir_operand(match &call.callee {
@@ -1715,8 +1711,6 @@ impl Compiler {
                         specs,
                         requested_outputs,
                     ));
-                } else if requested_outputs == 1 {
-                    self.emit(Instr::CallSemanticFunction(*function, call.args.len()));
                 } else {
                     self.emit(Instr::CallSemanticFunctionMulti(
                         *function,

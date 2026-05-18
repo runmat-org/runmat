@@ -218,7 +218,6 @@ fn remap_semantic_function_instr(
     match instr {
         runmat_vm::Instr::CreateSemanticClosure(function, _, _)
         | runmat_vm::Instr::CreateSemanticFunctionHandle(function, _)
-        | runmat_vm::Instr::CallSemanticFunction(function, _)
         | runmat_vm::Instr::CallSemanticFunctionMulti(function, _, _)
         | runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(function, _, _) => {
             if let Some(new_id) = remap.get(function).copied() {
