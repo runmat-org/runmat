@@ -4840,6 +4840,14 @@ def evaluate_release_readiness(
                 em_min_sigma_omega_scale_mean_threshold,
             ),
             (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_sigma_omega_scale_mean",
+                "min",
+                "EM_SIGMA_OMEGA_SCALE_MEAN_LOW",
+                "EM heterogeneous sigma(omega) scale mean",
+                em_min_sigma_omega_scale_mean_threshold,
+            ),
+            (
                 "electromagnetic_reference_homogeneous_gpu_provider",
                 "em_homogeneous_sigma_omega_response_coverage_ratio",
                 "min",

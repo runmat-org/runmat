@@ -1224,6 +1224,24 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_CORE_SOURCE_REALIZATION_TREND_WORSENING", codes)
 
+    def test_em_sigma_omega_scale_mean_posture_uses_heterogeneous_assertion(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "threshold_assertions": [
+                    {"name": "em_heterogeneous_sigma_omega_scale_mean", "observed": 0.3}
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_SCALE_MEAN"] = "0.8"
+        result = evaluate_release_readiness(latest, [], protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_SIGMA_OMEGA_SCALE_MEAN_LOW", codes)
+
     def test_em_sigma_omega_scale_mean_trend_uses_heterogeneous_assertion(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
