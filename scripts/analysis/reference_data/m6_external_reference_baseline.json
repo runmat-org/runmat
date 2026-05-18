@@ -367,6 +367,30 @@
       "tolerance_rel": 5.0
     },
     {
+      "name": "electromagnetic_source_realization_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_source_realization_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_source_region_coverage_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_source_region_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_source_material_alignment_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_source_material_alignment_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
       "name": "electromagnetic_energy_imbalance_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "electromagnetic_energy_imbalance_ratio",
@@ -779,6 +803,30 @@
       "reference": 0.0,
       "tolerance_abs": 0.05,
       "tolerance_rel": 1.0
+    },
+    {
+      "name": "electromagnetic_source_realization_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_source_realization_ratio",
+      "reference": 0.6666666666666666,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.4
+    },
+    {
+      "name": "electromagnetic_source_region_coverage_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_source_region_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_source_material_alignment_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_source_material_alignment_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
     },
     {
       "name": "electromagnetic_energy_imbalance_ratio",

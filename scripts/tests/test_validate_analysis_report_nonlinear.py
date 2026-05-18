@@ -376,6 +376,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electromagnetic_boundary_condition_localization_ratio": 1.0,
                 "electromagnetic_ground_anchor_effectiveness_ratio": 1.0,
                 "electromagnetic_source_interference_index": 0.001,
+                "electromagnetic_source_realization_ratio": 1.0,
+                "electromagnetic_source_region_coverage_ratio": 1.0,
+                "electromagnetic_source_material_alignment_ratio": 1.0,
                 "electromagnetic_energy_imbalance_ratio": 4.2e-5,
                 "electromagnetic_flux_divergence_proxy": 0.23,
                 "electromagnetic_real_residual_norm": 1.0e-10,
@@ -428,6 +431,9 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 "electromagnetic_boundary_condition_localization_ratio": 1.0,
                 "electromagnetic_ground_anchor_effectiveness_ratio": 1.0,
                 "electromagnetic_source_interference_index": 0.0,
+                "electromagnetic_source_realization_ratio": 0.667,
+                "electromagnetic_source_region_coverage_ratio": 1.0,
+                "electromagnetic_source_material_alignment_ratio": 1.0,
                 "electromagnetic_energy_imbalance_ratio": 0.253,
                 "electromagnetic_flux_divergence_proxy": 0.143,
                 "electromagnetic_real_residual_norm": 1.0e-18,
@@ -686,6 +692,18 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             for record in records:
                 if record["fixture_id"] == "electromagnetic_reference_homogeneous_gpu_provider":
                     record.pop("electromagnetic_source_interference_index", None)
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_em_source_fidelity_field_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "electromagnetic_reference_homogeneous_gpu_provider":
+                    record.pop("electromagnetic_source_realization_ratio", None)
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))

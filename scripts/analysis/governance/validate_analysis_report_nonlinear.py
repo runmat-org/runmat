@@ -346,6 +346,12 @@ EM_SOURCE_INTERFERENCE_REQUIRED_FIELDS = {
     "electromagnetic_source_interference_index",
 }
 
+EM_SOURCE_FIDELITY_REQUIRED_FIELDS = {
+    "electromagnetic_source_realization_ratio",
+    "electromagnetic_source_region_coverage_ratio",
+    "electromagnetic_source_material_alignment_ratio",
+}
+
 EM_RESIDUAL_REQUIRED_FIELDS = {
     "electromagnetic_real_residual_norm",
     "electromagnetic_imag_residual_norm",
@@ -709,6 +715,17 @@ def main() -> int:
                 errors.append(
                     "fixture "
                     f"{fixture_id} missing finite EM source-interference fields: "
+                    + ", ".join(missing_fields)
+                )
+            missing_fields = []
+            for field in sorted(EM_SOURCE_FIDELITY_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM source-fidelity fields: "
                     + ", ".join(missing_fields)
                 )
             missing_fields = []
