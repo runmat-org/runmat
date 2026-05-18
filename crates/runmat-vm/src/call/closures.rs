@@ -162,6 +162,7 @@ pub async fn call_method_or_member_index_with_outputs(
         })?;
     match base {
         Value::Object(obj) => {
+            let post_object_fallback = fallback_policy.after_object_dispatch_probe();
             if let Some((m, _owner)) = lookup_method(&obj.class_name, &name) {
                 if m.is_static {
                     return Err(format!(
@@ -219,7 +220,7 @@ pub async fn call_method_or_member_index_with_outputs(
                 Some(qualified_display_name),
                 method_args.clone(),
                 requested_outputs,
-                fallback_policy,
+                post_object_fallback,
             )
             .await
             {
@@ -233,7 +234,7 @@ pub async fn call_method_or_member_index_with_outputs(
                 Some(name.clone()),
                 method_args,
                 requested_outputs,
-                fallback_policy,
+                post_object_fallback,
             )
             .await
             {

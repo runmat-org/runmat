@@ -151,8 +151,12 @@ pub async fn try_call_semantic_descriptor(
         return try_call_semantic_function(function.0, &request.args, request.requested_outputs)
             .await;
     }
-    if !request.fallback_policy.allows_runtime_name_resolution() {
-        return None;
+    match request.fallback_policy {
+        CallableFallbackPolicy::RuntimeNameResolution
+        | CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution => {}
+        CallableFallbackPolicy::None
+        | CallableFallbackPolicy::ObjectDispatch
+        | CallableFallbackPolicy::ExternalBoundary => return None,
     }
     let name = request.identity.display_name()?;
     try_call_semantic_function_by_name(&name, &request.args, request.requested_outputs).await

@@ -379,10 +379,14 @@ async fn forward_named_fallback(
     requested_outputs: usize,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
-    if fallback_policy.allows_runtime_name_resolution() {
-        forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
-    } else {
-        unreachable!()
+    match fallback_policy {
+        CallableFallbackPolicy::RuntimeNameResolution
+        | CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution => {
+            forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
+        }
+        CallableFallbackPolicy::None
+        | CallableFallbackPolicy::ObjectDispatch
+        | CallableFallbackPolicy::ExternalBoundary => unreachable!(),
     }
 }
 
@@ -407,8 +411,9 @@ async fn execute_resolved_callable(
             }
             Err(semantic_unavailable_error(function.0, &metadata))
         }
-        other => {
-            if fallback_policy.allows_runtime_name_resolution() {
+        other => match fallback_policy {
+            CallableFallbackPolicy::RuntimeNameResolution
+            | CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution => {
                 let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
                     other.clone(),
                     fallback_policy,
@@ -425,13 +430,16 @@ async fn execute_resolved_callable(
                     return Err(undefined_name_error("<unnamed callable>", &metadata));
                 };
                 forward_named_fallback(name, args, requested_outputs, fallback_policy).await
-            } else {
+            }
+            CallableFallbackPolicy::None
+            | CallableFallbackPolicy::ObjectDispatch
+            | CallableFallbackPolicy::ExternalBoundary => {
                 let name = other
                     .display_name()
                     .unwrap_or_else(|| "<unnamed callable>".into());
                 Err(undefined_name_error(&name, &metadata))
             }
-        }
+        },
     }
 }
 
@@ -458,8 +466,9 @@ async fn try_execute_resolved_callable(
             }
             Ok(None)
         }
-        other => {
-            if fallback_policy.allows_runtime_name_resolution() {
+        other => match fallback_policy {
+            CallableFallbackPolicy::RuntimeNameResolution
+            | CallableFallbackPolicy::ObjectDispatchThenRuntimeNameResolution => {
                 let request = runmat_runtime::user_functions::SemanticCallableRequest::resolved(
                     other.clone(),
                     fallback_policy,
@@ -478,13 +487,11 @@ async fn try_execute_resolved_callable(
                 forward_named_fallback(name, args, requested_outputs, fallback_policy)
                     .await
                     .map(Some)
-            } else if matches!(fallback_policy, CallableFallbackPolicy::ObjectDispatch) {
-                let _ = (other, args, requested_outputs);
-                Ok(None)
-            } else {
-                Ok(None)
             }
-        }
+            CallableFallbackPolicy::None
+            | CallableFallbackPolicy::ObjectDispatch
+            | CallableFallbackPolicy::ExternalBoundary => Ok(None),
+        },
     }
 }
 
