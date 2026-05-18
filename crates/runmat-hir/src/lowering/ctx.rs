@@ -173,6 +173,7 @@ impl SemanticCtx {
                 ctx.assembly.modules[ctx.module.0].imports.push(import);
             }
         }
+        validate_semantic_imports(&ctx.assembly.modules[ctx.module.0].imports)?;
 
         let executable: Vec<_> = prog
             .body
@@ -1748,6 +1749,53 @@ impl SemanticCtx {
             name.to_string(),
         )))
     }
+}
+
+fn validate_semantic_imports(imports: &[HirImport]) -> Result<(), SemanticError> {
+    let mut seen_exact: HashSet<(String, bool)> = HashSet::new();
+    for import in imports {
+        let path = import
+            .path
+            .0
+            .iter()
+            .map(|segment| segment.0.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
+        if !seen_exact.insert((path.clone(), import.wildcard)) {
+            return Err(SemanticError::new(format!(
+                "duplicate import '{}{}'",
+                path,
+                if import.wildcard { ".*" } else { "" }
+            )));
+        }
+    }
+
+    let mut by_unqualified: HashMap<String, Vec<String>> = HashMap::new();
+    for import in imports {
+        if import.wildcard {
+            continue;
+        }
+        let segments = &import.path.0;
+        let Some(last) = segments.last() else {
+            continue;
+        };
+        let path = segments
+            .iter()
+            .map(|segment| segment.0.as_str())
+            .collect::<Vec<_>>()
+            .join(".");
+        by_unqualified.entry(last.0.clone()).or_default().push(path);
+    }
+    for (name, sources) in by_unqualified {
+        if sources.len() > 1 {
+            return Err(SemanticError::new(format!(
+                "ambiguous import for '{}': {}",
+                name,
+                sources.join(", ")
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn def_path_for_import_path(path: &QualifiedName) -> DefPath {
