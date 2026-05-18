@@ -220,6 +220,12 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM",
@@ -248,6 +254,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION",
@@ -2349,6 +2359,189 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("NONLINEAR_SOFTENING_SPIKE_COUNT_HIGH", codes)
         self.assertIn("NONLINEAR_SOFTENING_BACKTRACK_BURSTS_HIGH", codes)
 
+    def test_pathological_thermo_electro_assertion_breaches_emit_reasons(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "thermo_gradient_pathological_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {"name": "thermo_gradient_pathological_spread_ratio", "observed": 1.9},
+                    {
+                        "name": "thermo_gradient_pathological_temporal_variation",
+                        "observed": 0.9,
+                    },
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "thermo_shock_oscillatory_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {
+                        "name": "thermo_shock_oscillatory_temporal_variation",
+                        "observed": 0.8,
+                    }
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {
+                        "name": "electro_thermal_pathological_conductivity_spread_ratio",
+                        "observed": 4.0,
+                    },
+                    {
+                        "name": "electro_thermal_pathological_temporal_variation",
+                        "observed": 0.9,
+                    },
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO"] = "1.5"
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION"] = (
+            "0.6"
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION"] = "0.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_RATIO"
+        ] = "3.0"
+        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION"] = (
+            "0.6"
+        )
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_PATHOLOGICAL_SPREAD_RATIO_HIGH", codes)
+        self.assertIn("THERMO_PATHOLOGICAL_TEMPORAL_VARIATION_HIGH", codes)
+        self.assertIn("THERMO_SHOCK_TEMPORAL_VARIATION_HIGH", codes)
+        self.assertIn("ELECTRO_PATHOLOGICAL_CONDUCTIVITY_SPREAD_RATIO_HIGH", codes)
+        self.assertIn("ELECTRO_PATHOLOGICAL_TEMPORAL_VARIATION_HIGH", codes)
+
+    def test_pathological_thermo_electro_assertion_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "thermo_gradient_pathological_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {"name": "thermo_gradient_pathological_spread_ratio", "observed": 2.0},
+                    {
+                        "name": "thermo_gradient_pathological_temporal_variation",
+                        "observed": 0.6,
+                    },
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "thermo_shock_oscillatory_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {
+                        "name": "thermo_shock_oscillatory_temporal_variation",
+                        "observed": 0.7,
+                    }
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {
+                        "name": "electro_thermal_pathological_conductivity_spread_ratio",
+                        "observed": 2.5,
+                    },
+                    {
+                        "name": "electro_thermal_pathological_temporal_variation",
+                        "observed": 0.7,
+                    },
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "thermo_gradient_pathological_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 95.0,
+                "threshold_assertions": [
+                    {"name": "thermo_gradient_pathological_spread_ratio", "observed": 1.0},
+                    {
+                        "name": "thermo_gradient_pathological_temporal_variation",
+                        "observed": 0.2,
+                    },
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "thermo_shock_oscillatory_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 95.0,
+                "threshold_assertions": [
+                    {
+                        "name": "thermo_shock_oscillatory_temporal_variation",
+                        "observed": 0.2,
+                    }
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 95.0,
+                "threshold_assertions": [
+                    {
+                        "name": "electro_thermal_pathological_conductivity_spread_ratio",
+                        "observed": 1.0,
+                    },
+                    {
+                        "name": "electro_thermal_pathological_temporal_variation",
+                        "observed": 0.2,
+                    },
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO"
+        ] = "1.2"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_PATHOLOGICAL_SPREAD_TREND_WORSENING", codes)
+        self.assertIn("THERMO_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_WORSENING", codes)
+        self.assertIn("THERMO_SHOCK_TEMPORAL_VARIATION_TREND_WORSENING", codes)
+        self.assertIn("ELECTRO_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_WORSENING", codes)
+        self.assertIn("ELECTRO_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_WORSENING", codes)
+
     def test_acoustic_metric_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
@@ -3460,6 +3653,13 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Thermo field clamp breach rate", summary)
         self.assertIn("Thermo spread trend ratio", summary)
         self.assertIn("Thermo heterogeneity trend ratio", summary)
+        self.assertIn("Thermo pathological spread assertion/threshold", summary)
+        self.assertIn("Thermo pathological temporal variation assertion/threshold", summary)
+        self.assertIn("Thermo shock temporal variation assertion/threshold", summary)
+        self.assertIn(
+            "Thermo pathological trend ratios (spread, temporal variation, shock temporal variation)",
+            summary,
+        )
         self.assertIn("### Thermal Posture", summary)
         self.assertIn("Max thermal residual norm", summary)
         self.assertIn("Max thermal conductivity spread ratio", summary)
@@ -3472,6 +3672,16 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Electro-thermal time-scale thresholds (min/max)", summary)
         self.assertIn("Electro-thermal time-scale breach rate", summary)
         self.assertIn("Electro-thermal time-scale trend ratio", summary)
+        self.assertIn(
+            "Electro-thermal pathological conductivity spread assertion/threshold", summary
+        )
+        self.assertIn(
+            "Electro-thermal pathological temporal variation assertion/threshold", summary
+        )
+        self.assertIn(
+            "Electro-thermal pathological trend ratios (conductivity spread, temporal variation)",
+            summary,
+        )
         self.assertIn("### Acoustic Posture", summary)
         self.assertIn("Acoustic mode count/threshold", summary)
         self.assertIn("Acoustic trend ratios (orthogonality, frequency separation, mode count, residual threshold)", summary)

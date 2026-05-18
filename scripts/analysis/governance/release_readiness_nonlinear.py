@@ -128,6 +128,16 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN": "1.25",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO": "1.15",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO": "1.6",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION": "0.65",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION": "0.6",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_RATIO": "3.0",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION": "0.6",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG": "0.02",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION": "0.01",
@@ -338,6 +348,16 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN": "1.3",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO": "1.8",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION": "0.7",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION": "0.65",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_RATIO": "3.2",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION": "0.65",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG": "0.03",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION": "0.008",
@@ -548,6 +568,16 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN": "1.5",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO": "2.0",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION": "0.8",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION": "0.75",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_RATIO": "3.5",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION": "0.75",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MAX_M_ORTHOGONALITY_OFFDIAG": "0.05",
             "RUNMAT_RELEASE_READINESS_ACOUSTIC_MIN_RELATIVE_FREQUENCY_SEPARATION": "0.005",
@@ -1596,6 +1626,90 @@ def evaluate_release_readiness(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO",
             profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO", "1.2"),
+        )
+    )
+    thermo_max_pathological_spread_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_RATIO", "1.8"),
+        )
+    )
+    thermo_max_pathological_temporal_variation_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION",
+                "0.7",
+            ),
+        )
+    )
+    thermo_max_shock_temporal_variation_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION", "0.65"),
+        )
+    )
+    electro_max_pathological_conductivity_spread_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_RATIO",
+                "3.2",
+            ),
+        )
+    )
+    electro_max_pathological_temporal_variation_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION",
+                "0.65",
+            ),
+        )
+    )
+    thermo_max_pathological_spread_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_SPREAD_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    thermo_max_pathological_temporal_variation_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    thermo_max_shock_temporal_variation_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMO_MAX_SHOCK_TEMPORAL_VARIATION_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    electro_max_pathological_conductivity_spread_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    electro_max_pathological_temporal_variation_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_RATIO",
+                "1.2",
+            ),
         )
     )
     acoustic_require_metrics = is_true(
@@ -2914,6 +3028,12 @@ def evaluate_release_readiness(
     thermo_field_clamp_breach_rate = None
     thermo_spread_trend_ratio = None
     thermo_heterogeneity_trend_ratio = None
+    thermo_max_pathological_spread_assertion = None
+    thermo_max_pathological_temporal_variation_assertion = None
+    thermo_max_shock_temporal_variation_assertion = None
+    thermo_pathological_spread_trend_ratio = None
+    thermo_pathological_temporal_variation_trend_ratio = None
+    thermo_shock_temporal_variation_trend_ratio = None
     thermal_max_residual_norm = None
     thermal_min_temperature_k = None
     thermal_max_temperature_k = None
@@ -2938,6 +3058,10 @@ def evaluate_release_readiness(
     electro_joule_trend_ratio = None
     electro_spread_trend_ratio = None
     electro_time_scale_trend_ratio = None
+    electro_max_pathological_conductivity_spread_assertion = None
+    electro_max_pathological_temporal_variation_assertion = None
+    electro_pathological_conductivity_spread_trend_ratio = None
+    electro_pathological_temporal_variation_trend_ratio = None
     acoustic_max_m_orthogonality_offdiag = None
     acoustic_min_relative_frequency_separation = None
     acoustic_min_mode_count = None
@@ -3752,6 +3876,121 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
+
+    thermo_assertion_specs = [
+        (
+            "thermo_gradient_pathological_gpu_provider",
+            "thermo_gradient_pathological_spread_ratio",
+            thermo_max_pathological_spread_ratio_threshold,
+            "THERMO_PATHOLOGICAL_SPREAD_RATIO_HIGH",
+            "thermo pathological spread ratio",
+        ),
+        (
+            "thermo_gradient_pathological_gpu_provider",
+            "thermo_gradient_pathological_temporal_variation",
+            thermo_max_pathological_temporal_variation_threshold,
+            "THERMO_PATHOLOGICAL_TEMPORAL_VARIATION_HIGH",
+            "thermo pathological temporal variation",
+        ),
+        (
+            "thermo_shock_oscillatory_gpu_provider",
+            "thermo_shock_oscillatory_temporal_variation",
+            thermo_max_shock_temporal_variation_threshold,
+            "THERMO_SHOCK_TEMPORAL_VARIATION_HIGH",
+            "thermo shock oscillatory temporal variation",
+        ),
+    ]
+    missing_thermo_assertion_fields = []
+    for fixture_id, assertion_name, threshold, code, label in thermo_assertion_specs:
+        values = []
+        for rec in report_records(latest):
+            if rec.get("fixture_id") != fixture_id:
+                continue
+            observed = threshold_assertion_observed(rec, assertion_name)
+            if observed is not None:
+                values.append(observed)
+        if not values:
+            missing_thermo_assertion_fields.append(f"{fixture_id}.{assertion_name}")
+            continue
+        observed = max(values)
+        if assertion_name == "thermo_gradient_pathological_spread_ratio":
+            thermo_max_pathological_spread_assertion = observed
+        elif assertion_name == "thermo_gradient_pathological_temporal_variation":
+            thermo_max_pathological_temporal_variation_assertion = observed
+        elif assertion_name == "thermo_shock_oscillatory_temporal_variation":
+            thermo_max_shock_temporal_variation_assertion = observed
+        if observed > threshold:
+            reasons.append(
+                Reason(
+                    code=code,
+                    severity="fail" if protected else "warn",
+                    detail=f"{label} {observed:.3f} exceeds threshold {threshold:.3f}",
+                )
+            )
+    if missing_thermo_assertion_fields and (protected or thermo_require_metrics):
+        reasons.append(
+            Reason(
+                code="THERMO_ASSERTION_METRICS_MISSING",
+                severity="fail" if protected else "warn",
+                detail=(
+                    "thermo threshold assertions missing required fields: "
+                    + ", ".join(sorted(set(missing_thermo_assertion_fields)))
+                ),
+            )
+        )
+
+    electro_assertion_specs = [
+        (
+            "electro_thermal_joule_pathological_gpu_provider",
+            "electro_thermal_pathological_conductivity_spread_ratio",
+            electro_max_pathological_conductivity_spread_ratio_threshold,
+            "ELECTRO_PATHOLOGICAL_CONDUCTIVITY_SPREAD_RATIO_HIGH",
+            "electro-thermal pathological conductivity spread ratio",
+        ),
+        (
+            "electro_thermal_joule_pathological_gpu_provider",
+            "electro_thermal_pathological_temporal_variation",
+            electro_max_pathological_temporal_variation_threshold,
+            "ELECTRO_PATHOLOGICAL_TEMPORAL_VARIATION_HIGH",
+            "electro-thermal pathological temporal variation",
+        ),
+    ]
+    missing_electro_assertion_fields = []
+    for fixture_id, assertion_name, threshold, code, label in electro_assertion_specs:
+        values = []
+        for rec in report_records(latest):
+            if rec.get("fixture_id") != fixture_id:
+                continue
+            observed = threshold_assertion_observed(rec, assertion_name)
+            if observed is not None:
+                values.append(observed)
+        if not values:
+            missing_electro_assertion_fields.append(f"{fixture_id}.{assertion_name}")
+            continue
+        observed = max(values)
+        if assertion_name == "electro_thermal_pathological_conductivity_spread_ratio":
+            electro_max_pathological_conductivity_spread_assertion = observed
+        elif assertion_name == "electro_thermal_pathological_temporal_variation":
+            electro_max_pathological_temporal_variation_assertion = observed
+        if observed > threshold:
+            reasons.append(
+                Reason(
+                    code=code,
+                    severity="fail" if protected else "warn",
+                    detail=f"{label} {observed:.3f} exceeds threshold {threshold:.3f}",
+                )
+            )
+    if missing_electro_assertion_fields and (protected or electro_require_metrics):
+        reasons.append(
+            Reason(
+                code="ELECTRO_ASSERTION_METRICS_MISSING",
+                severity="fail" if protected else "warn",
+                detail=(
+                    "electro threshold assertions missing required fields: "
+                    + ", ".join(sorted(set(missing_electro_assertion_fields)))
+                ),
+            )
+        )
 
     acoustic_records = [
         rec
@@ -5723,6 +5962,111 @@ def evaluate_release_readiness(
                     )
                 )
 
+        thermo_pathological_spread_trend_ratio = fixture_assertion_trend_ratio(
+            "thermo_gradient_pathological_spread_ratio",
+            ratio_mode="increase",
+        )
+        if (
+            thermo_pathological_spread_trend_ratio is not None
+            and thermo_pathological_spread_trend_ratio
+            > thermo_max_pathological_spread_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMO_PATHOLOGICAL_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "thermo pathological spread trend ratio "
+                        f"{thermo_pathological_spread_trend_ratio:.3f} exceeds threshold "
+                        f"{thermo_max_pathological_spread_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        thermo_pathological_temporal_variation_trend_ratio = fixture_assertion_trend_ratio(
+            "thermo_gradient_pathological_temporal_variation",
+            ratio_mode="increase",
+        )
+        if (
+            thermo_pathological_temporal_variation_trend_ratio is not None
+            and thermo_pathological_temporal_variation_trend_ratio
+            > thermo_max_pathological_temporal_variation_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMO_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "thermo pathological temporal-variation trend ratio "
+                        f"{thermo_pathological_temporal_variation_trend_ratio:.3f} exceeds threshold "
+                        f"{thermo_max_pathological_temporal_variation_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        thermo_shock_temporal_variation_trend_ratio = fixture_assertion_trend_ratio(
+            "thermo_shock_oscillatory_temporal_variation",
+            ratio_mode="increase",
+        )
+        if (
+            thermo_shock_temporal_variation_trend_ratio is not None
+            and thermo_shock_temporal_variation_trend_ratio
+            > thermo_max_shock_temporal_variation_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMO_SHOCK_TEMPORAL_VARIATION_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "thermo shock temporal-variation trend ratio "
+                        f"{thermo_shock_temporal_variation_trend_ratio:.3f} exceeds threshold "
+                        f"{thermo_max_shock_temporal_variation_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        electro_pathological_conductivity_spread_trend_ratio = fixture_assertion_trend_ratio(
+            "electro_thermal_pathological_conductivity_spread_ratio",
+            ratio_mode="increase",
+        )
+        if (
+            electro_pathological_conductivity_spread_trend_ratio is not None
+            and electro_pathological_conductivity_spread_trend_ratio
+            > electro_max_pathological_conductivity_spread_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="ELECTRO_PATHOLOGICAL_CONDUCTIVITY_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "electro-thermal pathological conductivity-spread trend ratio "
+                        f"{electro_pathological_conductivity_spread_trend_ratio:.3f} exceeds threshold "
+                        f"{electro_max_pathological_conductivity_spread_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        electro_pathological_temporal_variation_trend_ratio = fixture_assertion_trend_ratio(
+            "electro_thermal_pathological_temporal_variation",
+            ratio_mode="increase",
+        )
+        if (
+            electro_pathological_temporal_variation_trend_ratio is not None
+            and electro_pathological_temporal_variation_trend_ratio
+            > electro_max_pathological_temporal_variation_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="ELECTRO_PATHOLOGICAL_TEMPORAL_VARIATION_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "electro-thermal pathological temporal-variation trend ratio "
+                        f"{electro_pathological_temporal_variation_trend_ratio:.3f} exceeds threshold "
+                        f"{electro_max_pathological_temporal_variation_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         acoustic_m_orthogonality_offdiag_trend_ratio = fixture_assertion_trend_ratio(
             "acoustic_max_m_orthogonality_offdiag",
             ratio_mode="increase",
@@ -7361,6 +7705,18 @@ def evaluate_release_readiness(
         "thermo_max_field_clamp_breach_rate_threshold": thermo_max_field_clamp_breach_rate_threshold,
         "thermo_spread_trend_ratio": thermo_spread_trend_ratio,
         "thermo_heterogeneity_trend_ratio": thermo_heterogeneity_trend_ratio,
+        "thermo_max_pathological_spread_assertion": thermo_max_pathological_spread_assertion,
+        "thermo_max_pathological_spread_ratio_threshold": thermo_max_pathological_spread_ratio_threshold,
+        "thermo_max_pathological_temporal_variation_assertion": thermo_max_pathological_temporal_variation_assertion,
+        "thermo_max_pathological_temporal_variation_threshold": thermo_max_pathological_temporal_variation_threshold,
+        "thermo_max_shock_temporal_variation_assertion": thermo_max_shock_temporal_variation_assertion,
+        "thermo_max_shock_temporal_variation_threshold": thermo_max_shock_temporal_variation_threshold,
+        "thermo_pathological_spread_trend_ratio": thermo_pathological_spread_trend_ratio,
+        "thermo_max_pathological_spread_trend_ratio_threshold": thermo_max_pathological_spread_trend_ratio_threshold,
+        "thermo_pathological_temporal_variation_trend_ratio": thermo_pathological_temporal_variation_trend_ratio,
+        "thermo_max_pathological_temporal_variation_trend_ratio_threshold": thermo_max_pathological_temporal_variation_trend_ratio_threshold,
+        "thermo_shock_temporal_variation_trend_ratio": thermo_shock_temporal_variation_trend_ratio,
+        "thermo_max_shock_temporal_variation_trend_ratio_threshold": thermo_max_shock_temporal_variation_trend_ratio_threshold,
         "thermal_max_residual_norm": thermal_max_residual_norm,
         "thermal_max_residual_norm_threshold": thermal_max_residual_norm_threshold,
         "thermal_min_temperature_k": thermal_min_temperature_k,
@@ -7406,6 +7762,14 @@ def evaluate_release_readiness(
         "electro_max_joule_trend_ratio_threshold": electro_max_joule_trend_ratio_threshold,
         "electro_max_spread_trend_ratio_threshold": electro_max_spread_trend_ratio_threshold,
         "electro_max_time_scale_trend_ratio_threshold": electro_max_time_scale_trend_ratio_threshold,
+        "electro_max_pathological_conductivity_spread_assertion": electro_max_pathological_conductivity_spread_assertion,
+        "electro_max_pathological_conductivity_spread_ratio_threshold": electro_max_pathological_conductivity_spread_ratio_threshold,
+        "electro_max_pathological_temporal_variation_assertion": electro_max_pathological_temporal_variation_assertion,
+        "electro_max_pathological_temporal_variation_threshold": electro_max_pathological_temporal_variation_threshold,
+        "electro_pathological_conductivity_spread_trend_ratio": electro_pathological_conductivity_spread_trend_ratio,
+        "electro_max_pathological_conductivity_spread_trend_ratio_threshold": electro_max_pathological_conductivity_spread_trend_ratio_threshold,
+        "electro_pathological_temporal_variation_trend_ratio": electro_pathological_temporal_variation_trend_ratio,
+        "electro_max_pathological_temporal_variation_trend_ratio_threshold": electro_max_pathological_temporal_variation_trend_ratio_threshold,
         "acoustic_max_m_orthogonality_offdiag": acoustic_max_m_orthogonality_offdiag,
         "acoustic_max_m_orthogonality_offdiag_threshold": acoustic_max_m_orthogonality_offdiag_threshold,
         "acoustic_min_relative_frequency_separation": acoustic_min_relative_frequency_separation,
@@ -7849,6 +8213,22 @@ def markdown_summary(result: dict) -> str:
         "- Thermo heterogeneity trend ratio: "
         f"`{result.get('thermo_heterogeneity_trend_ratio') if result.get('thermo_heterogeneity_trend_ratio') is not None else '-'}`"
     )
+    lines.append(
+        "- Thermo pathological spread assertion/threshold: "
+        f"`{result.get('thermo_max_pathological_spread_assertion') if result.get('thermo_max_pathological_spread_assertion') is not None else '-'}`/`{result.get('thermo_max_pathological_spread_ratio_threshold') if result.get('thermo_max_pathological_spread_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo pathological temporal variation assertion/threshold: "
+        f"`{result.get('thermo_max_pathological_temporal_variation_assertion') if result.get('thermo_max_pathological_temporal_variation_assertion') is not None else '-'}`/`{result.get('thermo_max_pathological_temporal_variation_threshold') if result.get('thermo_max_pathological_temporal_variation_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo shock temporal variation assertion/threshold: "
+        f"`{result.get('thermo_max_shock_temporal_variation_assertion') if result.get('thermo_max_shock_temporal_variation_assertion') is not None else '-'}`/`{result.get('thermo_max_shock_temporal_variation_threshold') if result.get('thermo_max_shock_temporal_variation_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo pathological trend ratios (spread, temporal variation, shock temporal variation): "
+        f"`{result.get('thermo_pathological_spread_trend_ratio') if result.get('thermo_pathological_spread_trend_ratio') is not None else '-'}`/`{result.get('thermo_pathological_temporal_variation_trend_ratio') if result.get('thermo_pathological_temporal_variation_trend_ratio') is not None else '-'}`/`{result.get('thermo_shock_temporal_variation_trend_ratio') if result.get('thermo_shock_temporal_variation_trend_ratio') is not None else '-'}`"
+    )
     lines.append("")
     lines.append("### Thermal Posture")
     lines.append(
@@ -8020,6 +8400,18 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Electro-thermal time-scale trend ratio: "
         f"`{result.get('electro_time_scale_trend_ratio') if result.get('electro_time_scale_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Electro-thermal pathological conductivity spread assertion/threshold: "
+        f"`{result.get('electro_max_pathological_conductivity_spread_assertion') if result.get('electro_max_pathological_conductivity_spread_assertion') is not None else '-'}`/`{result.get('electro_max_pathological_conductivity_spread_ratio_threshold') if result.get('electro_max_pathological_conductivity_spread_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Electro-thermal pathological temporal variation assertion/threshold: "
+        f"`{result.get('electro_max_pathological_temporal_variation_assertion') if result.get('electro_max_pathological_temporal_variation_assertion') is not None else '-'}`/`{result.get('electro_max_pathological_temporal_variation_threshold') if result.get('electro_max_pathological_temporal_variation_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Electro-thermal pathological trend ratios (conductivity spread, temporal variation): "
+        f"`{result.get('electro_pathological_conductivity_spread_trend_ratio') if result.get('electro_pathological_conductivity_spread_trend_ratio') is not None else '-'}`/`{result.get('electro_pathological_temporal_variation_trend_ratio') if result.get('electro_pathological_temporal_variation_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Acoustic Posture")
