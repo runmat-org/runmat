@@ -190,6 +190,19 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_FSI_MIN_STEP_COUNT": "12.0",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_TIME_STEP_S": "0.0015",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_CFD_PROFILE_POINT_COUNT": "2.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REFERENCE_DENSITY_KG_PER_M3": "1.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_DYNAMIC_VISCOSITY_PA_S": "1e-05",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_INLET_VELOCITY_M_PER_S": "3.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_TURBULENCE_INTENSITY": "0.1",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_PROFILE_POINT_COUNT": "0.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REFERENCE_DENSITY_KG_PER_M3": "1.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_DYNAMIC_VISCOSITY_PA_S": "1e-05",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_INLET_VELOCITY_M_PER_S": "3.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_TURBULENCE_INTENSITY": "0.1",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REFERENCE_DENSITY_KG_PER_M3": "1.0",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_DYNAMIC_VISCOSITY_PA_S": "1e-05",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_INLET_VELOCITY_M_PER_S": "2.5",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY": "0.1",
             "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO": "1.1",
@@ -450,6 +463,19 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_FSI_MIN_STEP_COUNT": "10.0",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_TIME_STEP_S": "0.002",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_CFD_PROFILE_POINT_COUNT": "2.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REFERENCE_DENSITY_KG_PER_M3": "0.8",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_DYNAMIC_VISCOSITY_PA_S": "5e-06",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_INLET_VELOCITY_M_PER_S": "2.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_TURBULENCE_INTENSITY": "0.12",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_PROFILE_POINT_COUNT": "0.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REFERENCE_DENSITY_KG_PER_M3": "0.8",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_DYNAMIC_VISCOSITY_PA_S": "5e-06",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_INLET_VELOCITY_M_PER_S": "2.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_TURBULENCE_INTENSITY": "0.12",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REFERENCE_DENSITY_KG_PER_M3": "0.8",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_DYNAMIC_VISCOSITY_PA_S": "5e-06",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_INLET_VELOCITY_M_PER_S": "1.5",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY": "0.12",
             "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO": "1.2",
@@ -710,6 +736,19 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_FSI_MIN_STEP_COUNT": "8.0",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_TIME_STEP_S": "0.003",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_CFD_PROFILE_POINT_COUNT": "2.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REFERENCE_DENSITY_KG_PER_M3": "0.5",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_DYNAMIC_VISCOSITY_PA_S": "1e-06",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_INLET_VELOCITY_M_PER_S": "1.0",
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_TURBULENCE_INTENSITY": "0.2",
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_PROFILE_POINT_COUNT": "0.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REFERENCE_DENSITY_KG_PER_M3": "0.5",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_DYNAMIC_VISCOSITY_PA_S": "1e-06",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_INLET_VELOCITY_M_PER_S": "1.0",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_TURBULENCE_INTENSITY": "0.2",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REFERENCE_DENSITY_KG_PER_M3": "0.5",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_DYNAMIC_VISCOSITY_PA_S": "1e-06",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_INLET_VELOCITY_M_PER_S": "1.0",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY": "0.2",
             "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO": "1.35",
@@ -2068,6 +2107,93 @@ def evaluate_release_readiness(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_FSI_MIN_CFD_PROFILE_POINT_COUNT",
             profile_default("RUNMAT_RELEASE_READINESS_FSI_MIN_CFD_PROFILE_POINT_COUNT", "2.0"),
+        )
+    )
+    cfd_min_reference_density_kg_per_m3_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_REFERENCE_DENSITY_KG_PER_M3",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CFD_MIN_REFERENCE_DENSITY_KG_PER_M3",
+                "0.8",
+            ),
+        )
+    )
+    cfd_min_dynamic_viscosity_pa_s_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_DYNAMIC_VISCOSITY_PA_S",
+            profile_default("RUNMAT_RELEASE_READINESS_CFD_MIN_DYNAMIC_VISCOSITY_PA_S", "5e-06"),
+        )
+    )
+    cfd_min_inlet_velocity_m_per_s_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_INLET_VELOCITY_M_PER_S",
+            profile_default("RUNMAT_RELEASE_READINESS_CFD_MIN_INLET_VELOCITY_M_PER_S", "2.0"),
+        )
+    )
+    cfd_max_turbulence_intensity_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MAX_TURBULENCE_INTENSITY",
+            profile_default("RUNMAT_RELEASE_READINESS_CFD_MAX_TURBULENCE_INTENSITY", "0.12"),
+        )
+    )
+    cfd_min_profile_point_count_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CFD_MIN_PROFILE_POINT_COUNT",
+            profile_default("RUNMAT_RELEASE_READINESS_CFD_MIN_PROFILE_POINT_COUNT", "0.0"),
+        )
+    )
+    cht_min_reference_density_kg_per_m3_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_REFERENCE_DENSITY_KG_PER_M3",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CHT_MIN_REFERENCE_DENSITY_KG_PER_M3",
+                "0.8",
+            ),
+        )
+    )
+    cht_min_dynamic_viscosity_pa_s_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_DYNAMIC_VISCOSITY_PA_S",
+            profile_default("RUNMAT_RELEASE_READINESS_CHT_MIN_DYNAMIC_VISCOSITY_PA_S", "5e-06"),
+        )
+    )
+    cht_min_inlet_velocity_m_per_s_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_INLET_VELOCITY_M_PER_S",
+            profile_default("RUNMAT_RELEASE_READINESS_CHT_MIN_INLET_VELOCITY_M_PER_S", "2.0"),
+        )
+    )
+    cht_max_turbulence_intensity_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_TURBULENCE_INTENSITY",
+            profile_default("RUNMAT_RELEASE_READINESS_CHT_MAX_TURBULENCE_INTENSITY", "0.12"),
+        )
+    )
+    fsi_min_reference_density_kg_per_m3_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_REFERENCE_DENSITY_KG_PER_M3",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_FSI_MIN_REFERENCE_DENSITY_KG_PER_M3",
+                "0.8",
+            ),
+        )
+    )
+    fsi_min_dynamic_viscosity_pa_s_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_DYNAMIC_VISCOSITY_PA_S",
+            profile_default("RUNMAT_RELEASE_READINESS_FSI_MIN_DYNAMIC_VISCOSITY_PA_S", "5e-06"),
+        )
+    )
+    fsi_min_inlet_velocity_m_per_s_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_INLET_VELOCITY_M_PER_S",
+            profile_default("RUNMAT_RELEASE_READINESS_FSI_MIN_INLET_VELOCITY_M_PER_S", "1.5"),
+        )
+    )
+    fsi_max_turbulence_intensity_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY",
+            profile_default("RUNMAT_RELEASE_READINESS_FSI_MAX_TURBULENCE_INTENSITY", "0.12"),
         )
     )
     cfd_max_reynolds_proxy_drop_trend_ratio_threshold = float(
@@ -3563,13 +3689,26 @@ def evaluate_release_readiness(
     nonlinear_max_softening_spike_count = None
     nonlinear_max_softening_backtrack_bursts = None
     cfd_min_reynolds_proxy = None
+    cfd_min_reference_density_kg_per_m3 = None
+    cfd_min_dynamic_viscosity_pa_s = None
+    cfd_min_inlet_velocity_m_per_s = None
+    cfd_max_turbulence_intensity = None
+    cfd_min_profile_point_count = None
     cht_min_reynolds_proxy = None
     cht_min_applied_temperature_delta_k = None
+    cht_min_reference_density_kg_per_m3 = None
+    cht_min_dynamic_viscosity_pa_s = None
+    cht_min_inlet_velocity_m_per_s = None
+    cht_max_turbulence_intensity = None
     cht_min_profile_point_count = None
     cht_min_step_count = None
     cht_max_time_step_s = None
     fsi_min_reynolds_proxy = None
     fsi_min_structural_step_count = None
+    fsi_min_reference_density_kg_per_m3 = None
+    fsi_min_dynamic_viscosity_pa_s = None
+    fsi_min_inlet_velocity_m_per_s = None
+    fsi_max_turbulence_intensity = None
     fsi_min_profile_point_count = None
     fsi_min_step_count = None
     fsi_max_time_step_s = None
@@ -4782,12 +4921,84 @@ def evaluate_release_readiness(
                 "CFD Reynolds proxy",
             ),
             (
+                "cfd_steady_gpu_provider",
+                "cfd_reference_density_kg_per_m3",
+                cfd_min_reference_density_kg_per_m3_threshold,
+                "min",
+                "CFD_REFERENCE_DENSITY_KG_PER_M3_LOW",
+                "CFD reference density kg/m^3",
+            ),
+            (
+                "cfd_steady_gpu_provider",
+                "cfd_dynamic_viscosity_pa_s",
+                cfd_min_dynamic_viscosity_pa_s_threshold,
+                "min",
+                "CFD_DYNAMIC_VISCOSITY_PA_S_LOW",
+                "CFD dynamic viscosity Pa*s",
+            ),
+            (
+                "cfd_steady_gpu_provider",
+                "cfd_inlet_velocity_m_per_s",
+                cfd_min_inlet_velocity_m_per_s_threshold,
+                "min",
+                "CFD_INLET_VELOCITY_M_PER_S_LOW",
+                "CFD inlet velocity m/s",
+            ),
+            (
+                "cfd_steady_gpu_provider",
+                "cfd_turbulence_intensity",
+                cfd_max_turbulence_intensity_threshold,
+                "max",
+                "CFD_TURBULENCE_INTENSITY_HIGH",
+                "CFD turbulence intensity",
+            ),
+            (
+                "cfd_steady_gpu_provider",
+                "cfd_profile_point_count",
+                cfd_min_profile_point_count_threshold,
+                "min",
+                "CFD_PROFILE_POINT_COUNT_LOW",
+                "CFD profile point count",
+            ),
+            (
                 "cht_coupled_gpu_provider",
                 "cht_reynolds_proxy",
                 cht_min_reynolds_proxy_threshold,
                 "min",
                 "CHT_REYNOLDS_PROXY_LOW",
                 "CHT Reynolds proxy",
+            ),
+            (
+                "cht_coupled_gpu_provider",
+                "cht_reference_density_kg_per_m3",
+                cht_min_reference_density_kg_per_m3_threshold,
+                "min",
+                "CHT_REFERENCE_DENSITY_KG_PER_M3_LOW",
+                "CHT reference density kg/m^3",
+            ),
+            (
+                "cht_coupled_gpu_provider",
+                "cht_dynamic_viscosity_pa_s",
+                cht_min_dynamic_viscosity_pa_s_threshold,
+                "min",
+                "CHT_DYNAMIC_VISCOSITY_PA_S_LOW",
+                "CHT dynamic viscosity Pa*s",
+            ),
+            (
+                "cht_coupled_gpu_provider",
+                "cht_inlet_velocity_m_per_s",
+                cht_min_inlet_velocity_m_per_s_threshold,
+                "min",
+                "CHT_INLET_VELOCITY_M_PER_S_LOW",
+                "CHT inlet velocity m/s",
+            ),
+            (
+                "cht_coupled_gpu_provider",
+                "cht_turbulence_intensity",
+                cht_max_turbulence_intensity_threshold,
+                "max",
+                "CHT_TURBULENCE_INTENSITY_HIGH",
+                "CHT turbulence intensity",
             ),
             (
                 "cht_coupled_gpu_provider",
@@ -4804,6 +5015,38 @@ def evaluate_release_readiness(
                 "min",
                 "FSI_REYNOLDS_PROXY_LOW",
                 "FSI Reynolds proxy",
+            ),
+            (
+                "fsi_coupled_gpu_provider",
+                "fsi_reference_density_kg_per_m3",
+                fsi_min_reference_density_kg_per_m3_threshold,
+                "min",
+                "FSI_REFERENCE_DENSITY_KG_PER_M3_LOW",
+                "FSI reference density kg/m^3",
+            ),
+            (
+                "fsi_coupled_gpu_provider",
+                "fsi_dynamic_viscosity_pa_s",
+                fsi_min_dynamic_viscosity_pa_s_threshold,
+                "min",
+                "FSI_DYNAMIC_VISCOSITY_PA_S_LOW",
+                "FSI dynamic viscosity Pa*s",
+            ),
+            (
+                "fsi_coupled_gpu_provider",
+                "fsi_inlet_velocity_m_per_s",
+                fsi_min_inlet_velocity_m_per_s_threshold,
+                "min",
+                "FSI_INLET_VELOCITY_M_PER_S_LOW",
+                "FSI inlet velocity m/s",
+            ),
+            (
+                "fsi_coupled_gpu_provider",
+                "fsi_turbulence_intensity",
+                fsi_max_turbulence_intensity_threshold,
+                "max",
+                "FSI_TURBULENCE_INTENSITY_HIGH",
+                "FSI turbulence intensity",
             ),
             (
                 "fsi_coupled_gpu_provider",
@@ -4892,8 +5135,26 @@ def evaluate_release_readiness(
             observed = min(values) if mode == "min" else max(values)
             if assertion_name == "cfd_reynolds_proxy":
                 cfd_min_reynolds_proxy = observed
+            elif assertion_name == "cfd_reference_density_kg_per_m3":
+                cfd_min_reference_density_kg_per_m3 = observed
+            elif assertion_name == "cfd_dynamic_viscosity_pa_s":
+                cfd_min_dynamic_viscosity_pa_s = observed
+            elif assertion_name == "cfd_inlet_velocity_m_per_s":
+                cfd_min_inlet_velocity_m_per_s = observed
+            elif assertion_name == "cfd_turbulence_intensity":
+                cfd_max_turbulence_intensity = observed
+            elif assertion_name == "cfd_profile_point_count":
+                cfd_min_profile_point_count = observed
             elif assertion_name == "cht_reynolds_proxy":
                 cht_min_reynolds_proxy = observed
+            elif assertion_name == "cht_reference_density_kg_per_m3":
+                cht_min_reference_density_kg_per_m3 = observed
+            elif assertion_name == "cht_dynamic_viscosity_pa_s":
+                cht_min_dynamic_viscosity_pa_s = observed
+            elif assertion_name == "cht_inlet_velocity_m_per_s":
+                cht_min_inlet_velocity_m_per_s = observed
+            elif assertion_name == "cht_turbulence_intensity":
+                cht_max_turbulence_intensity = observed
             elif assertion_name == "cht_applied_temperature_delta_k":
                 cht_min_applied_temperature_delta_k = observed
             elif assertion_name == "cht_profile_point_count":
@@ -4904,6 +5165,14 @@ def evaluate_release_readiness(
                 cht_max_time_step_s = observed
             elif assertion_name == "fsi_reynolds_proxy":
                 fsi_min_reynolds_proxy = observed
+            elif assertion_name == "fsi_reference_density_kg_per_m3":
+                fsi_min_reference_density_kg_per_m3 = observed
+            elif assertion_name == "fsi_dynamic_viscosity_pa_s":
+                fsi_min_dynamic_viscosity_pa_s = observed
+            elif assertion_name == "fsi_inlet_velocity_m_per_s":
+                fsi_min_inlet_velocity_m_per_s = observed
+            elif assertion_name == "fsi_turbulence_intensity":
+                fsi_max_turbulence_intensity = observed
             elif assertion_name == "fsi_structural_step_count":
                 fsi_min_structural_step_count = observed
             elif assertion_name == "fsi_profile_point_count":
@@ -9415,10 +9684,28 @@ def evaluate_release_readiness(
         "nonlinear_max_softening_backtrack_bursts_threshold": nonlinear_max_softening_backtrack_bursts_threshold,
         "cfd_min_reynolds_proxy": cfd_min_reynolds_proxy,
         "cfd_min_reynolds_proxy_threshold": cfd_min_reynolds_proxy_threshold,
+        "cfd_min_reference_density_kg_per_m3": cfd_min_reference_density_kg_per_m3,
+        "cfd_min_reference_density_kg_per_m3_threshold": cfd_min_reference_density_kg_per_m3_threshold,
+        "cfd_min_dynamic_viscosity_pa_s": cfd_min_dynamic_viscosity_pa_s,
+        "cfd_min_dynamic_viscosity_pa_s_threshold": cfd_min_dynamic_viscosity_pa_s_threshold,
+        "cfd_min_inlet_velocity_m_per_s": cfd_min_inlet_velocity_m_per_s,
+        "cfd_min_inlet_velocity_m_per_s_threshold": cfd_min_inlet_velocity_m_per_s_threshold,
+        "cfd_max_turbulence_intensity": cfd_max_turbulence_intensity,
+        "cfd_max_turbulence_intensity_threshold": cfd_max_turbulence_intensity_threshold,
+        "cfd_min_profile_point_count": cfd_min_profile_point_count,
+        "cfd_min_profile_point_count_threshold": cfd_min_profile_point_count_threshold,
         "cht_min_reynolds_proxy": cht_min_reynolds_proxy,
         "cht_min_reynolds_proxy_threshold": cht_min_reynolds_proxy_threshold,
         "cht_min_applied_temperature_delta_k": cht_min_applied_temperature_delta_k,
         "cht_min_applied_temperature_delta_k_threshold": cht_min_applied_temperature_delta_k_threshold,
+        "cht_min_reference_density_kg_per_m3": cht_min_reference_density_kg_per_m3,
+        "cht_min_reference_density_kg_per_m3_threshold": cht_min_reference_density_kg_per_m3_threshold,
+        "cht_min_dynamic_viscosity_pa_s": cht_min_dynamic_viscosity_pa_s,
+        "cht_min_dynamic_viscosity_pa_s_threshold": cht_min_dynamic_viscosity_pa_s_threshold,
+        "cht_min_inlet_velocity_m_per_s": cht_min_inlet_velocity_m_per_s,
+        "cht_min_inlet_velocity_m_per_s_threshold": cht_min_inlet_velocity_m_per_s_threshold,
+        "cht_max_turbulence_intensity": cht_max_turbulence_intensity,
+        "cht_max_turbulence_intensity_threshold": cht_max_turbulence_intensity_threshold,
         "cht_min_profile_point_count": cht_min_profile_point_count,
         "cht_min_profile_point_count_threshold": cht_min_profile_point_count_threshold,
         "cht_min_step_count": cht_min_step_count,
@@ -9429,6 +9716,14 @@ def evaluate_release_readiness(
         "fsi_min_reynolds_proxy_threshold": fsi_min_reynolds_proxy_threshold,
         "fsi_min_structural_step_count": fsi_min_structural_step_count,
         "fsi_min_structural_step_count_threshold": fsi_min_structural_step_count_threshold,
+        "fsi_min_reference_density_kg_per_m3": fsi_min_reference_density_kg_per_m3,
+        "fsi_min_reference_density_kg_per_m3_threshold": fsi_min_reference_density_kg_per_m3_threshold,
+        "fsi_min_dynamic_viscosity_pa_s": fsi_min_dynamic_viscosity_pa_s,
+        "fsi_min_dynamic_viscosity_pa_s_threshold": fsi_min_dynamic_viscosity_pa_s_threshold,
+        "fsi_min_inlet_velocity_m_per_s": fsi_min_inlet_velocity_m_per_s,
+        "fsi_min_inlet_velocity_m_per_s_threshold": fsi_min_inlet_velocity_m_per_s_threshold,
+        "fsi_max_turbulence_intensity": fsi_max_turbulence_intensity,
+        "fsi_max_turbulence_intensity_threshold": fsi_max_turbulence_intensity_threshold,
         "fsi_min_profile_point_count": fsi_min_profile_point_count,
         "fsi_min_profile_point_count_threshold": fsi_min_profile_point_count_threshold,
         "fsi_min_step_count": fsi_min_step_count,
@@ -10143,12 +10438,34 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('cfd_min_reynolds_proxy') if result.get('cfd_min_reynolds_proxy') is not None else '-'}`/`{result.get('cfd_min_reynolds_proxy_threshold') if result.get('cfd_min_reynolds_proxy_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- CFD density/viscosity/velocity/turbulence/profile thresholds: "
+        f"`{result.get('cfd_min_reference_density_kg_per_m3') if result.get('cfd_min_reference_density_kg_per_m3') is not None else '-'}`/`{result.get('cfd_min_reference_density_kg_per_m3_threshold') if result.get('cfd_min_reference_density_kg_per_m3_threshold') is not None else '-'}`; "
+        f"`{result.get('cfd_min_dynamic_viscosity_pa_s') if result.get('cfd_min_dynamic_viscosity_pa_s') is not None else '-'}`/`{result.get('cfd_min_dynamic_viscosity_pa_s_threshold') if result.get('cfd_min_dynamic_viscosity_pa_s_threshold') is not None else '-'}`; "
+        f"`{result.get('cfd_min_inlet_velocity_m_per_s') if result.get('cfd_min_inlet_velocity_m_per_s') is not None else '-'}`/`{result.get('cfd_min_inlet_velocity_m_per_s_threshold') if result.get('cfd_min_inlet_velocity_m_per_s_threshold') is not None else '-'}`; "
+        f"`{result.get('cfd_max_turbulence_intensity') if result.get('cfd_max_turbulence_intensity') is not None else '-'}`/`{result.get('cfd_max_turbulence_intensity_threshold') if result.get('cfd_max_turbulence_intensity_threshold') is not None else '-'}`; "
+        f"`{result.get('cfd_min_profile_point_count') if result.get('cfd_min_profile_point_count') is not None else '-'}`/`{result.get('cfd_min_profile_point_count_threshold') if result.get('cfd_min_profile_point_count_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- CHT min Reynolds proxy and temperature delta K thresholds: "
         f"`{result.get('cht_min_reynolds_proxy') if result.get('cht_min_reynolds_proxy') is not None else '-'}`/`{result.get('cht_min_reynolds_proxy_threshold') if result.get('cht_min_reynolds_proxy_threshold') is not None else '-'}` and `{result.get('cht_min_applied_temperature_delta_k') if result.get('cht_min_applied_temperature_delta_k') is not None else '-'}`/`{result.get('cht_min_applied_temperature_delta_k_threshold') if result.get('cht_min_applied_temperature_delta_k_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- CHT density/viscosity/velocity/turbulence thresholds: "
+        f"`{result.get('cht_min_reference_density_kg_per_m3') if result.get('cht_min_reference_density_kg_per_m3') is not None else '-'}`/`{result.get('cht_min_reference_density_kg_per_m3_threshold') if result.get('cht_min_reference_density_kg_per_m3_threshold') is not None else '-'}`; "
+        f"`{result.get('cht_min_dynamic_viscosity_pa_s') if result.get('cht_min_dynamic_viscosity_pa_s') is not None else '-'}`/`{result.get('cht_min_dynamic_viscosity_pa_s_threshold') if result.get('cht_min_dynamic_viscosity_pa_s_threshold') is not None else '-'}`; "
+        f"`{result.get('cht_min_inlet_velocity_m_per_s') if result.get('cht_min_inlet_velocity_m_per_s') is not None else '-'}`/`{result.get('cht_min_inlet_velocity_m_per_s_threshold') if result.get('cht_min_inlet_velocity_m_per_s_threshold') is not None else '-'}`; "
+        f"`{result.get('cht_max_turbulence_intensity') if result.get('cht_max_turbulence_intensity') is not None else '-'}`/`{result.get('cht_max_turbulence_intensity_threshold') if result.get('cht_max_turbulence_intensity_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- FSI min Reynolds proxy and structural step-count thresholds: "
         f"`{result.get('fsi_min_reynolds_proxy') if result.get('fsi_min_reynolds_proxy') is not None else '-'}`/`{result.get('fsi_min_reynolds_proxy_threshold') if result.get('fsi_min_reynolds_proxy_threshold') is not None else '-'}` and `{result.get('fsi_min_structural_step_count') if result.get('fsi_min_structural_step_count') is not None else '-'}`/`{result.get('fsi_min_structural_step_count_threshold') if result.get('fsi_min_structural_step_count_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- FSI density/viscosity/velocity/turbulence thresholds: "
+        f"`{result.get('fsi_min_reference_density_kg_per_m3') if result.get('fsi_min_reference_density_kg_per_m3') is not None else '-'}`/`{result.get('fsi_min_reference_density_kg_per_m3_threshold') if result.get('fsi_min_reference_density_kg_per_m3_threshold') is not None else '-'}`; "
+        f"`{result.get('fsi_min_dynamic_viscosity_pa_s') if result.get('fsi_min_dynamic_viscosity_pa_s') is not None else '-'}`/`{result.get('fsi_min_dynamic_viscosity_pa_s_threshold') if result.get('fsi_min_dynamic_viscosity_pa_s_threshold') is not None else '-'}`; "
+        f"`{result.get('fsi_min_inlet_velocity_m_per_s') if result.get('fsi_min_inlet_velocity_m_per_s') is not None else '-'}`/`{result.get('fsi_min_inlet_velocity_m_per_s_threshold') if result.get('fsi_min_inlet_velocity_m_per_s_threshold') is not None else '-'}`; "
+        f"`{result.get('fsi_max_turbulence_intensity') if result.get('fsi_max_turbulence_intensity') is not None else '-'}`/`{result.get('fsi_max_turbulence_intensity_threshold') if result.get('fsi_max_turbulence_intensity_threshold') is not None else '-'}`"
     )
     lines.append(
         "- CHT profile points/steps/time-step thresholds: "
