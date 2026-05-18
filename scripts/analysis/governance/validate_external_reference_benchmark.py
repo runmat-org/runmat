@@ -14,6 +14,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "em_homogeneous_dispersive_coupling_ratio",
         "em_homogeneous_dispersive_phase_conductivity_attenuation_ratio",
         "em_homogeneous_flux_divergence_proxy",
+        "em_homogeneous_energy_imbalance_ratio",
+        "em_homogeneous_source_realization_ratio",
         "em_homogeneous_source_material_alignment_ratio",
         "em_homogeneous_source_region_coverage_ratio",
         "em_homogeneous_boundary_anchor_ratio",
@@ -29,6 +31,8 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "em_heterogeneous_region_contrast_index",
         "em_heterogeneous_source_material_alignment_ratio",
         "em_heterogeneous_source_region_coverage_ratio",
+        "em_heterogeneous_flux_divergence_proxy",
+        "em_heterogeneous_energy_imbalance_ratio",
         "em_heterogeneous_boundary_anchor_ratio",
     },
     "electromagnetic_reference_boundary_penalty_stress_gpu_provider": {

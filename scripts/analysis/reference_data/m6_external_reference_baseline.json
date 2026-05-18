@@ -109,6 +109,16 @@
       "tolerance_rel": 0.35
     },
     {
+      "name": "em_homogeneous_energy_imbalance_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_energy_imbalance_ratio",
+      "reference": 0.000041658594610710645,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": null
+    },
+    {
       "name": "em_homogeneous_boundary_energy_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -134,6 +144,16 @@
       "field": "unused_for_threshold_source",
       "source": "threshold_assertion",
       "assertion_name": "em_homogeneous_source_region_coverage_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 0.05
+    },
+    {
+      "name": "em_homogeneous_source_realization_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_source_realization_ratio",
       "reference": 1.0,
       "tolerance_abs": 0.05,
       "tolerance_rel": 0.05
@@ -257,6 +277,26 @@
       "reference": 0.75,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.2
+    },
+    {
+      "name": "em_heterogeneous_flux_divergence_proxy",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_flux_divergence_proxy",
+      "reference": 0.14285714285714288,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "em_heterogeneous_energy_imbalance_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_energy_imbalance_ratio",
+      "reference": 0.25333333333333335,
+      "tolerance_abs": 0.25,
+      "tolerance_rel": 1.0
     },
     {
       "name": "em_boundary_penalty_conditioning_contribution",

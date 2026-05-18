@@ -25,6 +25,10 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_energy_imbalance_ratio",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
                 "em_homogeneous_dispersive_phase_attenuation_mean",
             ),
             (
@@ -46,6 +50,10 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
                 "em_homogeneous_source_region_coverage_ratio",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_source_realization_ratio",
             ),
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
@@ -86,6 +94,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "em_heterogeneous_source_region_coverage_ratio",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_flux_divergence_proxy",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_energy_imbalance_ratio",
             ),
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
