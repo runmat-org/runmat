@@ -374,6 +374,42 @@ impl CallableFallbackPolicy {
     pub fn allows_runtime_name_resolution(self) -> bool {
         matches!(self, CallableFallbackPolicy::RuntimeNameResolution)
     }
+
+    pub fn allows_semantic_name_resolution_for(self, identity: &CallableIdentity) -> bool {
+        match identity {
+            CallableIdentity::DynamicName(_) => self.allows_runtime_name_resolution(),
+            CallableIdentity::ExternalName(_) => {
+                matches!(self, CallableFallbackPolicy::ExternalBoundary)
+            }
+            _ => false,
+        }
+    }
+
+    pub fn allows_vm_name_fallback_for(self, identity: &CallableIdentity) -> bool {
+        self.allows_semantic_name_resolution_for(identity)
+    }
+
+    pub fn supports_vm_static_call(self) -> bool {
+        matches!(
+            self,
+            CallableFallbackPolicy::RuntimeNameResolution
+                | CallableFallbackPolicy::ExternalBoundary
+        )
+    }
+
+    pub fn supports_vm_method_or_member_call(self) -> bool {
+        matches!(
+            self,
+            CallableFallbackPolicy::RuntimeNameResolution | CallableFallbackPolicy::ObjectDispatch
+        )
+    }
+
+    pub fn post_object_dispatch(self) -> Self {
+        match self {
+            CallableFallbackPolicy::ObjectDispatch => CallableFallbackPolicy::RuntimeNameResolution,
+            other => other,
+        }
+    }
 }
 
 pub const FEVAL_BUILTIN_NAME: &str = "feval";

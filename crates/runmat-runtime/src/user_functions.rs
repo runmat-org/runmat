@@ -156,14 +156,7 @@ pub async fn try_call_semantic_descriptor(
     if let CallableIdentity::SemanticFunction(function) = identity {
         return try_call_semantic_function(function.0, &args, requested_outputs).await;
     }
-    let allow_name_resolution = match &identity {
-        CallableIdentity::DynamicName(_) => fallback_policy.allows_runtime_name_resolution(),
-        CallableIdentity::ExternalName(_) => {
-            matches!(fallback_policy, CallableFallbackPolicy::ExternalBoundary)
-        }
-        _ => false,
-    };
-    if !allow_name_resolution {
+    if !fallback_policy.allows_semantic_name_resolution_for(&identity) {
         return None;
     }
     let name = identity.display_name()?;

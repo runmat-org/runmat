@@ -388,12 +388,18 @@ async fn forward_named_fallback(
     name: String,
     args: Vec<Value>,
     requested_outputs: usize,
-    fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
-    if !fallback_policy.allows_runtime_name_resolution() {
-        unreachable!();
-    }
     forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
+}
+
+fn fallback_display_name_for_identity(
+    identity: &CallableIdentity,
+    fallback_policy: CallableFallbackPolicy,
+) -> Option<String> {
+    if !fallback_policy.allows_vm_name_fallback_for(identity) {
+        return None;
+    }
+    identity.display_name()
 }
 
 async fn execute_resolved_callable(
@@ -432,36 +438,13 @@ async fn execute_resolved_callable(
             {
                 return result;
             }
-            if matches!(fallback_policy, CallableFallbackPolicy::ExternalBoundary)
-                && matches!(other, CallableIdentity::ExternalName(_))
-            {
-                let Some(name) = other.display_name() else {
-                    return Err(undefined_name_error("<unnamed callable>", &metadata));
-                };
-                return forward_named_fallback(
-                    name,
-                    args,
-                    requested_outputs,
-                    CallableFallbackPolicy::RuntimeNameResolution,
-                )
-                .await;
-            }
-            if !fallback_policy.allows_runtime_name_resolution() {
+            let Some(name) = fallback_display_name_for_identity(&other, fallback_policy) else {
                 let name = other
                     .display_name()
                     .unwrap_or_else(|| "<unnamed callable>".into());
                 return Err(undefined_name_error(&name, &metadata));
-            }
-            if !matches!(other, CallableIdentity::DynamicName(_)) {
-                let name = other
-                    .display_name()
-                    .unwrap_or_else(|| "<unnamed callable>".into());
-                return Err(undefined_name_error(&name, &metadata));
-            }
-            let Some(name) = other.display_name() else {
-                return Err(undefined_name_error("<unnamed callable>", &metadata));
             };
-            forward_named_fallback(name, args, requested_outputs, fallback_policy).await
+            forward_named_fallback(name, args, requested_outputs).await
         }
     }
 }
@@ -504,31 +487,10 @@ async fn try_execute_resolved_callable(
             {
                 return result.map(Some);
             }
-            if matches!(fallback_policy, CallableFallbackPolicy::ExternalBoundary)
-                && matches!(other, CallableIdentity::ExternalName(_))
-            {
-                let Some(name) = other.display_name() else {
-                    return Ok(None);
-                };
-                return forward_named_fallback(
-                    name,
-                    args,
-                    requested_outputs,
-                    CallableFallbackPolicy::RuntimeNameResolution,
-                )
-                .await
-                .map(Some);
-            }
-            if !fallback_policy.allows_runtime_name_resolution() {
-                return Ok(None);
-            }
-            if !matches!(other, CallableIdentity::DynamicName(_)) {
-                return Ok(None);
-            }
-            let Some(name) = other.display_name() else {
+            let Some(name) = fallback_display_name_for_identity(&other, fallback_policy) else {
                 return Ok(None);
             };
-            forward_named_fallback(name, args, requested_outputs, fallback_policy)
+            forward_named_fallback(name, args, requested_outputs)
                 .await
                 .map(Some)
         }

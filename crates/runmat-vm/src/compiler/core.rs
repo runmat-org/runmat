@@ -1144,18 +1144,14 @@ impl Compiler {
             }
             MirCallee::Static(identity) => {
                 let fallback_policy = call.fallback_policy;
-                if !matches!(
-                    fallback_policy,
-                    runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
-                        | runmat_hir::CallableFallbackPolicy::ExternalBoundary
-                ) {
+                if !fallback_policy.supports_vm_static_call() {
                     return Err(self.compile_error(format!(
                         "MIR call fallback policy {:?} is not supported for static callee {:?}",
                         fallback_policy, identity
                     )));
                 }
                 let display_name = self.mir_runtime_name_callee(identity)?;
-                if fallback_policy.allows_runtime_name_resolution() && display_name.is_none() {
+                if fallback_policy.allows_vm_name_fallback_for(identity) && display_name.is_none() {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this call callee is not implemented yet",
                     ));
@@ -1769,18 +1765,14 @@ impl Compiler {
             }
             MirCallee::Static(identity) => {
                 let fallback_policy = call.fallback_policy;
-                if !matches!(
-                    fallback_policy,
-                    runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
-                        | runmat_hir::CallableFallbackPolicy::ExternalBoundary
-                ) {
+                if !fallback_policy.supports_vm_static_call() {
                     return Err(self.compile_error(format!(
                         "MIR call fallback policy {:?} is not supported for static callee {:?}",
                         fallback_policy, identity
                     )));
                 }
                 let display_name = self.mir_runtime_name_callee(identity)?;
-                if fallback_policy.allows_runtime_name_resolution() && display_name.is_none() {
+                if fallback_policy.allows_vm_name_fallback_for(identity) && display_name.is_none() {
                     return Err(self.compile_error(
                         "MIR bytecode lowering for this call callee is not implemented yet",
                     ));
@@ -1870,11 +1862,7 @@ impl Compiler {
             }
         };
         let fallback_policy = call.fallback_policy;
-        if !matches!(
-            fallback_policy,
-            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution
-                | runmat_hir::CallableFallbackPolicy::ObjectDispatch
-        ) {
+        if !fallback_policy.supports_vm_method_or_member_call() {
             return Err(self.compile_error(format!(
                 "MIR method-call fallback policy {:?} is not supported for callee {:?}",
                 fallback_policy, identity
