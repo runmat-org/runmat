@@ -677,6 +677,32 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 },
             ),
             _record(
+                "cfd_steady_cpu",
+                {
+                    "cfd_reference_density_kg_per_m3",
+                    "cfd_dynamic_viscosity_pa_s",
+                    "cfd_inlet_velocity_m_per_s",
+                    "cfd_turbulence_intensity",
+                    "cfd_reynolds_proxy",
+                    "cfd_profile_point_count",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                },
+            ),
+            _record(
+                "cfd_steady_gpu_fallback",
+                {
+                    "cfd_reference_density_kg_per_m3",
+                    "cfd_dynamic_viscosity_pa_s",
+                    "cfd_inlet_velocity_m_per_s",
+                    "cfd_turbulence_intensity",
+                    "cfd_reynolds_proxy",
+                    "cfd_profile_point_count",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                },
+            ),
+            _record(
                 "cht_coupled_gpu_provider",
                 {
                     "cht_reference_density_kg_per_m3",
@@ -1013,6 +1039,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "plasticity_hardening_reference_load_realization_ratio"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_cfd_cpu_transient_residual_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "cfd_steady_cpu":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "transient_max_residual_norm"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

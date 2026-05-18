@@ -2827,6 +2827,166 @@
       "tolerance_rel": 2.0
     },
     {
+      "name": "cfd_reference_density_kg_per_m3",
+      "fixture_id": "cfd_steady_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_reference_density_kg_per_m3",
+      "reference": 1.225,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.08
+    },
+    {
+      "name": "cfd_dynamic_viscosity_pa_s",
+      "fixture_id": "cfd_steady_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_dynamic_viscosity_pa_s",
+      "reference": 1.81e-05,
+      "tolerance_abs": 5e-06,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "cfd_inlet_velocity_m_per_s",
+      "fixture_id": "cfd_steady_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_inlet_velocity_m_per_s",
+      "reference": 5.0,
+      "tolerance_abs": 0.8,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "cfd_turbulence_intensity",
+      "fixture_id": "cfd_steady_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_turbulence_intensity",
+      "reference": 0.06,
+      "tolerance_abs": 0.03,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "cfd_reynolds_proxy",
+      "fixture_id": "cfd_steady_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_reynolds_proxy",
+      "reference": 338397.79005524865,
+      "tolerance_abs": 70000.0,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "cfd_profile_point_count",
+      "fixture_id": "cfd_steady_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_profile_point_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "transient_max_residual_norm",
+      "fixture_id": "cfd_steady_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_residual_norm",
+      "reference": 1.0752752029478579e-17,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "transient_max_energy_growth_ratio",
+      "fixture_id": "cfd_steady_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_energy_growth_ratio",
+      "reference": 1.0000193285689896,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 0.03
+    },
+    {
+      "name": "cfd_reference_density_kg_per_m3",
+      "fixture_id": "cfd_steady_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_reference_density_kg_per_m3",
+      "reference": 1.225,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.08
+    },
+    {
+      "name": "cfd_dynamic_viscosity_pa_s",
+      "fixture_id": "cfd_steady_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_dynamic_viscosity_pa_s",
+      "reference": 1.81e-05,
+      "tolerance_abs": 5e-06,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "cfd_inlet_velocity_m_per_s",
+      "fixture_id": "cfd_steady_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_inlet_velocity_m_per_s",
+      "reference": 5.0,
+      "tolerance_abs": 0.8,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "cfd_turbulence_intensity",
+      "fixture_id": "cfd_steady_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_turbulence_intensity",
+      "reference": 0.06,
+      "tolerance_abs": 0.03,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "cfd_reynolds_proxy",
+      "fixture_id": "cfd_steady_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_reynolds_proxy",
+      "reference": 338397.79005524865,
+      "tolerance_abs": 70000.0,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "cfd_profile_point_count",
+      "fixture_id": "cfd_steady_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "cfd_profile_point_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "transient_max_residual_norm",
+      "fixture_id": "cfd_steady_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_residual_norm",
+      "reference": 1.0752752029478579e-17,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "transient_max_energy_growth_ratio",
+      "fixture_id": "cfd_steady_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_energy_growth_ratio",
+      "reference": 1.0000193285689896,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 0.03
+    },
+    {
       "name": "cht_applied_temperature_delta_k",
       "fixture_id": "cht_coupled_gpu_provider",
       "field": "unused_for_threshold_source",
