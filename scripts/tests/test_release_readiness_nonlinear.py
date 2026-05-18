@@ -2196,6 +2196,85 @@ class ReleaseReadinessTests(unittest.TestCase):
             f"EM core missing-metric detail did not include required raw metrics: {missing_metrics}",
         )
 
+    def test_em_core_missing_reason_covers_heterogeneous_core_raw_comparator_contract(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(latest, [], protected=True)
+        core_missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "EM_CORE_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(core_missing)
+        expected_raw_metrics = {
+            metric
+            for metric in REQUIRED_METRICS_BY_FIXTURE[
+                "electromagnetic_reference_heterogeneous_gpu_provider"
+            ]
+            if metric.startswith("electromagnetic_")
+        }
+        missing_metrics = sorted(
+            metric for metric in expected_raw_metrics if metric not in core_missing["detail"]
+        )
+        self.assertFalse(
+            missing_metrics,
+            "EM core missing-metric detail did not include required heterogeneous raw metrics: "
+            f"{missing_metrics}",
+        )
+
+    def test_em_core_missing_reason_deduplicates_metric_names(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].extend(
+            [
+                {
+                    "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                    "publishable": True,
+                    "gpu_run_ms": 100.0,
+                    "gpu_speedup_ratio": 1.2,
+                },
+                {
+                    "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+                    "publishable": True,
+                    "gpu_run_ms": 100.0,
+                    "gpu_speedup_ratio": 1.2,
+                },
+            ]
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(latest, [], protected=True)
+        core_missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "EM_CORE_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(core_missing)
+        detail_prefix = "missing EM metric fields: "
+        self.assertTrue(core_missing["detail"].startswith(detail_prefix))
+        metric_names = [
+            name.strip()
+            for name in core_missing["detail"][len(detail_prefix) :].split(",")
+            if name.strip()
+        ]
+        self.assertEqual(
+            len(metric_names),
+            len(set(metric_names)),
+            "EM core missing-metric detail should not include duplicate metric names",
+        )
+
     def test_em_metrics_missing_is_fail_on_protected_branches(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"] = []

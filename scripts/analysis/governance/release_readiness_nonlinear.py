@@ -9120,7 +9120,8 @@ def evaluate_release_readiness(
                     code="EM_CORE_METRICS_MISSING",
                     severity="fail" if protected else "warn",
                     detail=(
-                        "missing EM metric fields: " + ", ".join(sorted(missing_metric_fields))
+                        "missing EM metric fields: "
+                        + ", ".join(sorted(set(missing_metric_fields)))
                     ),
                 )
             )
