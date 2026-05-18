@@ -378,13 +378,8 @@ async fn call_method_builtin(
                 Err(err) if is_undefined_function_error(&err) => {}
                 Err(err) => return Err(err),
             }
-            dispatch_callable_with_policy(
-                runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(method)),
-                runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
-                args,
-                requested_outputs,
-            )
-            .await
+            let (identity, fallback_policy) = callable_identity_for_handle_name(&method);
+            dispatch_callable_with_policy(identity, fallback_policy, args, requested_outputs).await
         }
         other => {
             Err((format!("call_method unsupported on {other:?} for method '{method}'")).into())
