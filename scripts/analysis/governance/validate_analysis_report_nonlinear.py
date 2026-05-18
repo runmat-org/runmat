@@ -11,6 +11,9 @@ REQUIRED_FIXTURES = {
         "nonlinear_total_increments",
         "nonlinear_failed_increments",
         "nonlinear_iteration_spike_count",
+        "nonlinear_converged_increments",
+        "nonlinear_line_search_backtracks",
+        "nonlinear_max_increment_norm",
     },
     "nonlinear_assembly_stress_gpu_provider": {
         "nonlinear_stress_total_increments",

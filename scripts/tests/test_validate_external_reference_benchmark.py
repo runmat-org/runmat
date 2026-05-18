@@ -53,6 +53,27 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "nonlinear_converged_increments",
+            "fixture_id": "nonlinear_assembly_gpu_provider",
+            "observed": 24.0,
+            "reference": 24.0,
+            "pass": True,
+        },
+        {
+            "name": "nonlinear_line_search_backtracks",
+            "fixture_id": "nonlinear_assembly_gpu_provider",
+            "observed": 10.0,
+            "reference": 10.0,
+            "pass": True,
+        },
+        {
+            "name": "nonlinear_max_increment_norm",
+            "fixture_id": "nonlinear_assembly_gpu_provider",
+            "observed": 4.6530538590385074e-08,
+            "reference": 4.6530538590385074e-08,
+            "pass": True,
+        },
+        {
             "name": "nonlinear_stress_total_increments",
             "fixture_id": "nonlinear_assembly_stress_gpu_provider",
             "observed": 32.0,
