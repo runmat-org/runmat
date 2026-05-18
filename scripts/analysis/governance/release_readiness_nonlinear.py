@@ -1379,7 +1379,28 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS", "false"),
         )
     )
-    key_perf_records = records_for_fixtures(latest, KEY_PERFORMANCE_FIXTURES)
+    key_perf_records_all = records_for_fixtures(latest, KEY_PERFORMANCE_FIXTURES)
+    key_perf_unpublishable = sorted(
+        fixture
+        for fixture, rec in key_perf_records_all.items()
+        if rec.get("publishable") is not True
+    )
+    if key_perf_unpublishable:
+        reasons.append(
+            Reason(
+                code="KEY_PERF_FIXTURE_UNPUBLISHABLE",
+                severity="fail" if protected else "warn",
+                detail=(
+                    "non-publishable key-performance fixture records: "
+                    + ", ".join(key_perf_unpublishable)
+                ),
+            )
+        )
+    key_perf_records = {
+        fixture: rec
+        for fixture, rec in key_perf_records_all.items()
+        if rec.get("publishable") is True
+    }
     if key_perf_require_fixtures:
         missing_key_perf = sorted(KEY_PERFORMANCE_FIXTURES.difference(key_perf_records.keys()))
         if missing_key_perf:

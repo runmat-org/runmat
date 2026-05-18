@@ -942,6 +942,44 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("KEY_PERF_SOLVE_TREND_SLOWDOWN", codes)
         self.assertIn("KEY_PERF_SPEEDUP_TREND_WORSENING", codes)
 
+    def test_key_perf_fixture_unpublishable_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": False,
+                "gpu_run_ms": 120.0,
+                "gpu_speedup_ratio": 1.1,
+                "gpu_solver_solve_ms": 100.0,
+            }
+        )
+        result = evaluate_release_readiness(latest, [], protected=False)
+        matches = [
+            reason
+            for reason in result["reasons"]
+            if reason["code"] == "KEY_PERF_FIXTURE_UNPUBLISHABLE"
+            and "cfd_steady_gpu_provider" in reason["detail"]
+        ]
+        self.assertTrue(matches)
+
+    def test_key_perf_static_checks_ignore_non_publishable_latest_records(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": False,
+                "gpu_run_ms": 10000.0,
+                "gpu_speedup_ratio": 0.5,
+                "gpu_solver_solve_ms": 5000.0,
+            }
+        )
+        result = evaluate_release_readiness(latest, [], protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("KEY_PERF_FIXTURE_UNPUBLISHABLE", codes)
+        self.assertNotIn("KEY_PERF_RUN_MS_HIGH", codes)
+        self.assertNotIn("KEY_PERF_SPEEDUP_LOW", codes)
+        self.assertNotIn("KEY_PERF_SOLVE_MS_HIGH", codes)
+
     def test_key_perf_trend_baseline_missing_reason_is_not_emitted_when_min_samples_met(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
