@@ -381,6 +381,14 @@ Target outcome:
 - Runtime helper paths validate and apply plans.
 - No VM branch needs to infer whether a tensor index means scalar indexing, slice indexing, logical indexing, or deletion.
 
+Accepted resolution (A/A/A/A/A):
+
+- Use one canonical selector-plan representation across tensor/cell/object indexing and assignment paths.
+- Model deletion explicitly in MIR/bytecode (no runtime empty-RHS inference as the semantic source of truth).
+- Classify scalar-vs-slice assignment in MIR/lowering only; VM executes explicit operation kinds.
+- Remove remaining transitional `IndexKind::Dot` compatibility branches unless a sourced parser/HIR path requires them.
+- Enforce selector-plan invariants at compile/lowering boundaries; runtime validation remains execution-safety focused.
+
 ### 6. Varargout And Multi-Output Semantics
 
 Current state:
@@ -415,6 +423,14 @@ Design needed before implementation:
 - Cancellation, diagnostics, and call-stack metadata across suspension.
 - Compatibility policy: MATLAB-strict should reject unsupported async syntax before MIR/VM.
 
+Accepted resolution (A/A/A/A/A):
+
+- Runtime value shape: represent futures as task identities (`Future(TaskId)`-style), with task state in runtime-managed registry structures.
+- Suspension model: interpreter/runtime suspension records (frame/resume-point based), not CPS/state-machine lowering.
+- Top-level await contract: host-facing suspension outcome and explicit resume, not implicit blocking semantics.
+- Cancellation semantics: cooperative cancellation at safe yield points/await boundaries.
+- Diagnostics: stitch logical async call stacks (spawn/await/resume metadata), not active-frame-only reports.
+
 ### 8. Struct And Object Aggregate Semantics
 
 Current state:
@@ -432,6 +448,14 @@ Preferred direction:
 
 - Add typed aggregate construction instructions once semantic HIR has a clear source form for struct/object literals.
 
+Accepted resolution:
+
+- Use typed aggregate bytecode construction operations as the canonical lowering target (not public-builtin indirection for syntax literals).
+- Preserve strict source-order evaluation for aggregate element/field expressions.
+- Handle duplicate-field semantics by explicit compatibility policy decision (documented behavior; no implicit fallback heuristics).
+- Keep syntax-literal construction as compiler-internal typed ABI, while user-authored builtin calls stay on public call-dispatch paths.
+- Surface invalid aggregate forms as semantic/lowering errors whenever determinable before runtime.
+
 ### 9. Compatibility Mode Cleanup
 
 Current state:
@@ -447,6 +471,14 @@ Target state:
 Collapse opportunity:
 
 - Replace broad variants such as `RunMatExtended` where they mask multiple independent policy bits.
+
+Accepted resolution (A/A/A/A/A):
+
+- Parser mode owns syntax acceptance exclusively.
+- Lowering context owns explicit semantic behavior policy bits.
+- Session/request host policy owns execution-time host behavior (for example top-level await/export semantics).
+- Request/ABI policy surface keeps only fields with active enforced behavior; remove dead placeholders.
+- Keep distinct `RunMat` vs `Matlab` labels only where they map to concrete behavior differences; otherwise treat as alias-equivalent policy mapping.
 
 ## Remaining Gap Classification
 
