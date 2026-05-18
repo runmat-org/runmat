@@ -13,6 +13,7 @@ Last updated: 2026-05-18
 - Governance hardening is continuing in parallel: threshold-ratchet generator/validator key-contract parity is now regression-guarded in tests to prevent silent keyset drift.
 - Governance hardening is continuing in parallel: promotion-calibration artifacts now enforce canonical rationale and exact profile/cadence key-set shape checks before calibration-policy acceptance.
 - Governance hardening is continuing in parallel: promotion-calibration artifacts now also enforce monotonic profile-budget strictness and source/profile rolling-count coherence checks.
+- Governance hardening is continuing in parallel: promotion-calibration generator/validator contract parity is now regression-guarded in tests (rationale/profile-set parity, source/profile count coherence, and monotonic budget strictness) to prevent silent generator-policy drift.
 
 ## Achieved Baseline
 

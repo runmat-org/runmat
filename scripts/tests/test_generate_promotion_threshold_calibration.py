@@ -5,6 +5,10 @@ import unittest
 from pathlib import Path
 
 from scripts.analysis.governance.generate_promotion_threshold_calibration import main
+from scripts.analysis.governance.validate_promotion_threshold_calibration import (
+    EXPECTED_PROFILES,
+    EXPECTED_RATIONALE,
+)
 
 
 class GeneratePromotionThresholdCalibrationTests(unittest.TestCase):
@@ -47,6 +51,19 @@ class GeneratePromotionThresholdCalibrationTests(unittest.TestCase):
             self.assertEqual(
                 payload["by_profile"]["release"]["rolling_trusted_report_count"], 1
             )
+            self.assertEqual(payload["rationale"], EXPECTED_RATIONALE)
+            self.assertEqual(set(payload["by_profile"].keys()), set(EXPECTED_PROFILES))
+            self.assertEqual(set(payload["cadence_days"].keys()), set(EXPECTED_PROFILES))
+            self.assertGreaterEqual(payload["max_missed_cycles_allowed"], 0)
+            for profile in EXPECTED_PROFILES:
+                self.assertEqual(
+                    payload["by_profile"][profile]["rolling_report_count"],
+                    payload["source_report_count"],
+                )
+                self.assertEqual(
+                    payload["by_profile"][profile]["rolling_trusted_report_count"],
+                    payload["source_trusted_report_count"],
+                )
 
     def test_filters_untrusted_rolling_reports_and_records(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -161,6 +178,30 @@ class GeneratePromotionThresholdCalibrationTests(unittest.TestCase):
             self.assertEqual(feature["rolling_trusted_report_count"], 2)
             self.assertEqual(feature["plastic_promotion_max_blockers"], 1)
             self.assertEqual(feature["contact_promotion_max_blockers"], 1)
+            self.assertLessEqual(
+                payload["by_profile"]["release"]["plastic_promotion_max_blockers"],
+                payload["by_profile"]["development"]["plastic_promotion_max_blockers"],
+            )
+            self.assertLessEqual(
+                payload["by_profile"]["development"]["plastic_promotion_max_blockers"],
+                payload["by_profile"]["feature"]["plastic_promotion_max_blockers"],
+            )
+            self.assertLessEqual(
+                payload["by_profile"]["release"]["contact_promotion_max_blockers"],
+                payload["by_profile"]["development"]["contact_promotion_max_blockers"],
+            )
+            self.assertLessEqual(
+                payload["by_profile"]["development"]["contact_promotion_max_blockers"],
+                payload["by_profile"]["feature"]["contact_promotion_max_blockers"],
+            )
+            self.assertLessEqual(
+                payload["by_profile"]["release"]["promotion_max_blocker_regression"],
+                payload["by_profile"]["development"]["promotion_max_blocker_regression"],
+            )
+            self.assertLessEqual(
+                payload["by_profile"]["development"]["promotion_max_blocker_regression"],
+                payload["by_profile"]["feature"]["promotion_max_blocker_regression"],
+            )
 
 
 if __name__ == "__main__":

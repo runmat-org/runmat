@@ -45,6 +45,7 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - Threshold-ratchet governance now also has generator/validator key-contract parity guards in tests, so ratchet keyset drift cannot silently bypass enforce-mode policy checks.
 - Promotion-calibration governance now also enforces canonical rationale plus exact expected profile/cadence key sets, so malformed calibration contract shape cannot silently pass enforce-mode validation.
 - Promotion-calibration governance now also enforces monotonic profile budget strictness and source/profile rolling-count coherence, so policy-incoherent calibration payloads cannot silently pass enforce-mode validation.
+- Promotion-calibration governance now also has generator/validator contract-parity guards in tests (rationale/profile-set parity, source/profile raw+trusted count coherence, and monotonic budget strictness), so generator policy drift is caught before enforce-mode artifacts are produced.
 - EM now includes additive material frequency-response support (`sigma(omega)` baseline) with fixture-level governance thresholds.
 - EM diagnostics/governance now include dispersive-loss scale and dispersive conductivity coupling ratios for frequency-dependent runs.
 - EM fidelity/governance now includes dispersive-loss-derived phase attenuation signals for conductivity coupling (`dispersive_phase_attenuation_mean`, `dispersive_phase_conductivity_attenuation_ratio`) with enforced benchmark/external-reference metric coverage on key EM provider fixtures.
