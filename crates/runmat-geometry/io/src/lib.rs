@@ -28,6 +28,7 @@ mod tests {
     const SIMPLE_OBJ: &str = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\nf -4 -3 -2\n";
     const SIMPLE_PLY: &str = "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n1 1 0\n0 1 0\n4 0 1 2 3\n3 0 2 3\n";
     const SIMPLE_GLTF: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0],[0,1,0]]\n          },\n          \"indices\": [0,1,2,0,2,3]\n        }\n      ]\n    }\n  ]\n}\n";
+    const SIMPLE_GLB_HEADER: &[u8] = b"glTF\x02\x00\x00\x00";
 
     fn import(path: &str, bytes: &[u8], options: GeometryImportOptions) -> ImportResult {
         import_geometry(path, bytes, options).expect("import should succeed")
@@ -228,5 +229,19 @@ mod tests {
         let right =
             deterministic_import_fingerprint(&second.asset).expect("fingerprint should work");
         assert_eq!(left, right);
+    }
+
+    #[test]
+    fn glb_payload_reports_typed_parse_error() {
+        let error = import_geometry(
+            "/binary.glb",
+            SIMPLE_GLB_HEADER,
+            GeometryImportOptions::default(),
+        )
+        .expect_err("GLB payload should fail with typed parse error");
+        assert!(
+            error.to_string().contains("GLB payloads are not supported"),
+            "unexpected error message: {error}"
+        );
     }
 }

@@ -12,6 +12,12 @@ pub(super) fn import_gltf(
     bytes: &[u8],
     options: GeometryImportOptions,
 ) -> Result<crate::report::ImportResult, GeometryImportError> {
+    if bytes.len() >= 4 && &bytes[0..4] == b"glTF" {
+        return Err(GeometryImportError::ParseFailed(
+            "binary GLB payloads are not supported yet; provide JSON GLTF inline payload"
+                .to_string(),
+        ));
+    }
     let value: Value = serde_json::from_slice(bytes).map_err(|err| {
         GeometryImportError::ParseFailed(format!("failed to decode GLTF JSON payload: {err}"))
     })?;

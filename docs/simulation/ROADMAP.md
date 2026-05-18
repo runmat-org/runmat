@@ -261,3 +261,5 @@ Progress update (2026-05-17):
     `runmat-geometry-io` now supports additive deterministic GLTF ingestion (`gltf/v1`) for static inline mesh payloads (`asset.version` 2.x with inline `POSITION` + triangle indices), including degenerate-triangle pruning diagnostics and runtime geometry contract coverage for canonical and extension-less GLTF inputs.
 97. [x] CAD metadata fidelity signals expanded for STEP ingestion:
     STEP parsing now emits structured metadata diagnostics for product/material extraction counts plus FILE_NAME fallback usage (`CAD_METADATA_PRODUCT_COUNT`, `CAD_METADATA_MATERIAL_EVIDENCE_COUNT`, `CAD_METADATA_FILE_NAME_FALLBACK`), improving machine-readable import provenance posture without contract-version churn.
+98. [x] CAD GLB handling clarity and detection robustness expanded:
+    geometry format sniffing now recognizes GLB magic headers (`glTF`) on extension-less payloads as GLTF-family inputs, and GLTF import now emits deterministic typed parse failures for unsupported binary GLB payloads instead of generic JSON decode errors, improving machine-readable importer behavior for binary CAD mesh ingress.

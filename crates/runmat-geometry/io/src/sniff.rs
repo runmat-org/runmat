@@ -39,6 +39,9 @@ pub fn detect_geometry_format(path: &str, bytes: &[u8]) -> GeometryFormat {
     if header.contains("\"asset\"") && header.contains("\"version\"") && header.contains("2.0") {
         return GeometryFormat::Gltf;
     }
+    if bytes.len() >= 4 && &bytes[0..4] == b"glTF" {
+        return GeometryFormat::Gltf;
+    }
     if looks_like_obj(&header) {
         return GeometryFormat::Obj;
     }
@@ -102,6 +105,12 @@ mod tests {
             "/model.dat",
             b"{\"asset\":{\"version\":\"2.0\"},\"meshes\":[]}",
         );
+        assert_eq!(format, GeometryFormat::Gltf);
+    }
+
+    #[test]
+    fn gltf_detected_from_glb_magic_without_extension() {
+        let format = detect_geometry_format("/model.dat", b"glTF\x02\x00\x00\x00");
         assert_eq!(format, GeometryFormat::Gltf);
     }
 }
