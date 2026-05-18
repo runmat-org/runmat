@@ -1245,6 +1245,22 @@
       "tolerance_rel": 0.4
     },
     {
+      "name": "electromagnetic_source_localization_ratio",
+      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+      "field": "electromagnetic_source_localization_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_source_interference_index",
+      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+      "field": "electromagnetic_source_interference_index",
+      "reference": 0.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 1.0
+    },
+    {
       "name": "electromagnetic_assignment_coverage_ratio",
       "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
       "field": "electromagnetic_assignment_coverage_ratio",
@@ -1451,6 +1467,22 @@
       "reference": 0.20273819327397102,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.4
+    },
+    {
+      "name": "electromagnetic_source_localization_ratio",
+      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+      "field": "electromagnetic_source_localization_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_source_interference_index",
+      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+      "field": "electromagnetic_source_interference_index",
+      "reference": 0.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 1.0
     },
     {
       "name": "electromagnetic_assignment_coverage_ratio",
@@ -1691,6 +1723,22 @@
       "tolerance_rel": 0.4
     },
     {
+      "name": "electromagnetic_source_localization_ratio",
+      "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+      "field": "electromagnetic_source_localization_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_source_interference_index",
+      "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+      "field": "electromagnetic_source_interference_index",
+      "reference": 0.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 1.0
+    },
+    {
       "name": "electromagnetic_assignment_coverage_ratio",
       "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
       "field": "electromagnetic_assignment_coverage_ratio",
@@ -1929,6 +1977,22 @@
       "tolerance_rel": 0.4
     },
     {
+      "name": "electromagnetic_source_localization_ratio",
+      "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+      "field": "electromagnetic_source_localization_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_source_interference_index",
+      "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+      "field": "electromagnetic_source_interference_index",
+      "reference": 0.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 1.0
+    },
+    {
       "name": "electromagnetic_assignment_coverage_ratio",
       "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
       "field": "electromagnetic_assignment_coverage_ratio",
@@ -2137,6 +2201,22 @@
       "tolerance_rel": 0.2
     },
     {
+      "name": "electromagnetic_source_localization_ratio",
+      "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
+      "field": "electromagnetic_source_localization_ratio",
+      "reference": 1.0000000000000002,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_source_interference_index",
+      "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
+      "field": "electromagnetic_source_interference_index",
+      "reference": 0.5990113108381241,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.4
+    },
+    {
       "name": "electromagnetic_assignment_coverage_ratio",
       "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
       "field": "electromagnetic_assignment_coverage_ratio",
@@ -2333,6 +2413,22 @@
       "reference": 0.5,
       "tolerance_abs": 0.2,
       "tolerance_rel": 0.4
+    },
+    {
+      "name": "electromagnetic_source_localization_ratio",
+      "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+      "field": "electromagnetic_source_localization_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_source_interference_index",
+      "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+      "field": "electromagnetic_source_interference_index",
+      "reference": 0.0017748876695055094,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 5.0
     },
     {
       "name": "electromagnetic_assignment_coverage_ratio",

@@ -634,6 +634,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "electromagnetic_source_localization_ratio",
+            ),
+            (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "electromagnetic_source_interference_index",
+            ),
+            (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
                 "electromagnetic_assignment_coverage_ratio",
             ),
             (
@@ -731,6 +739,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_multi_region_phased_source_gpu_provider",
                 "electromagnetic_source_region_energy_consistency_ratio",
+            ),
+            (
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "electromagnetic_source_localization_ratio",
+            ),
+            (
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "electromagnetic_source_interference_index",
             ),
             (
                 "electromagnetic_reference_multi_region_phased_source_gpu_provider",
@@ -846,6 +862,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "electromagnetic_source_localization_ratio",
+            ),
+            (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "electromagnetic_source_interference_index",
+            ),
+            (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
                 "electromagnetic_assignment_coverage_ratio",
             ),
             (
@@ -958,6 +982,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "electromagnetic_source_localization_ratio",
+            ),
+            (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "electromagnetic_source_interference_index",
+            ),
+            (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
                 "electromagnetic_assignment_coverage_ratio",
             ),
             (
@@ -1058,6 +1090,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_overlap_interference_gpu_provider",
+                "electromagnetic_source_localization_ratio",
+            ),
+            (
+                "electromagnetic_reference_overlap_interference_gpu_provider",
+                "electromagnetic_source_interference_index",
+            ),
+            (
+                "electromagnetic_reference_overlap_interference_gpu_provider",
                 "electromagnetic_assignment_coverage_ratio",
             ),
             (
@@ -1151,6 +1191,14 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_boundary_kernel_gpu_provider",
                 "electromagnetic_source_region_energy_consistency_ratio",
+            ),
+            (
+                "electromagnetic_reference_boundary_kernel_gpu_provider",
+                "electromagnetic_source_localization_ratio",
+            ),
+            (
+                "electromagnetic_reference_boundary_kernel_gpu_provider",
+                "electromagnetic_source_interference_index",
             ),
             (
                 "electromagnetic_reference_boundary_kernel_gpu_provider",
