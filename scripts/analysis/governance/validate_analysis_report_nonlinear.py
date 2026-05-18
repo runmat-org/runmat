@@ -358,6 +358,14 @@ EM_CORE_ASSIGNMENT_REQUIRED_FIELDS = {
     "electromagnetic_boundary_anchor_ratio",
 }
 
+EM_CONSTITUTIVE_REQUIRED_FIELDS = {
+    "electromagnetic_conductivity_spread_ratio",
+    "electromagnetic_relative_permittivity_spread_ratio",
+    "electromagnetic_relative_permeability_spread_ratio",
+    "electromagnetic_material_heterogeneity_index",
+    "electromagnetic_region_coefficient_contrast_index",
+}
+
 EM_RESIDUAL_REQUIRED_FIELDS = {
     "electromagnetic_real_residual_norm",
     "electromagnetic_imag_residual_norm",
@@ -743,6 +751,17 @@ def main() -> int:
                 errors.append(
                     "fixture "
                     f"{fixture_id} missing finite EM core-assignment fields: "
+                    + ", ".join(missing_fields)
+                )
+            missing_fields = []
+            for field in sorted(EM_CONSTITUTIVE_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM constitutive fields: "
                     + ", ".join(missing_fields)
                 )
             missing_fields = []

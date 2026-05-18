@@ -415,6 +415,46 @@
       "tolerance_rel": 0.1
     },
     {
+      "name": "electromagnetic_conductivity_spread_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_conductivity_spread_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_relative_permittivity_spread_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_relative_permittivity_spread_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_relative_permeability_spread_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_relative_permeability_spread_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "electromagnetic_material_heterogeneity_index",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_material_heterogeneity_index",
+      "reference": 0.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "electromagnetic_region_coefficient_contrast_index",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_region_coefficient_contrast_index",
+      "reference": 0.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 1.0
+    },
+    {
       "name": "electromagnetic_energy_imbalance_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "electromagnetic_energy_imbalance_ratio",
@@ -875,6 +915,46 @@
       "reference": 0.75,
       "tolerance_abs": 0.15,
       "tolerance_rel": 0.25
+    },
+    {
+      "name": "electromagnetic_conductivity_spread_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_conductivity_spread_ratio",
+      "reference": 256041201.47883186,
+      "tolerance_abs": 150000000.0,
+      "tolerance_rel": 0.8
+    },
+    {
+      "name": "electromagnetic_relative_permittivity_spread_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_relative_permittivity_spread_ratio",
+      "reference": 6.576111384187429,
+      "tolerance_abs": 2.5,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_relative_permeability_spread_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_relative_permeability_spread_ratio",
+      "reference": 78.37173293201839,
+      "tolerance_abs": 35.0,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_material_heterogeneity_index",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_material_heterogeneity_index",
+      "reference": 1.101236334940836,
+      "tolerance_abs": 0.5,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_region_coefficient_contrast_index",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_region_coefficient_contrast_index",
+      "reference": 8.535251947124001,
+      "tolerance_abs": 4.0,
+      "tolerance_rel": 0.6
     },
     {
       "name": "electromagnetic_energy_imbalance_ratio",

@@ -254,6 +254,26 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_conductivity_spread_ratio",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_relative_permittivity_spread_ratio",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_relative_permeability_spread_ratio",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_material_heterogeneity_index",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_region_coefficient_contrast_index",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
                 "electromagnetic_energy_imbalance_ratio",
             ),
             (
@@ -451,6 +471,26 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "electromagnetic_boundary_anchor_ratio",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_conductivity_spread_ratio",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_relative_permittivity_spread_ratio",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_relative_permeability_spread_ratio",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_material_heterogeneity_index",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_region_coefficient_contrast_index",
             ),
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
