@@ -2092,6 +2092,28 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("electromagnetic_applied_current_a", core_missing["detail"])
         self.assertIn("electromagnetic_resonance_peak_frequency_hz", core_missing["detail"])
 
+    def test_em_core_metrics_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+            }
+        )
+        result = evaluate_release_readiness(latest, [], protected=True)
+        core_missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "EM_CORE_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(core_missing)
+        self.assertEqual(core_missing["severity"], "fail")
+
     def test_em_solver_conditioning_posture_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(

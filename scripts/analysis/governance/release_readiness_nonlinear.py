@@ -9111,7 +9111,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="EM_CORE_METRICS_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail=(
                         "missing EM metric fields: " + ", ".join(sorted(missing_metric_fields))
                     ),
