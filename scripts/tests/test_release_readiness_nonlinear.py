@@ -10,6 +10,9 @@ from scripts.analysis.governance.release_readiness_nonlinear import (
 from scripts.analysis.governance.validate_analysis_report_nonlinear import (
     PERFORMANCE_REQUIRED_FIELDS,
 )
+from scripts.analysis.governance.validate_external_reference_benchmark import (
+    REQUIRED_METRICS_BY_FIXTURE,
+)
 
 
 def report(
@@ -2156,6 +2159,42 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         self.assertIsNotNone(core_missing)
         self.assertEqual(core_missing["severity"], "fail")
+
+    def test_em_core_missing_reason_covers_core_raw_comparator_contract(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(latest, [], protected=True)
+        core_missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "EM_CORE_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(core_missing)
+        expected_raw_metrics = {
+            metric
+            for metric in REQUIRED_METRICS_BY_FIXTURE[
+                "electromagnetic_reference_homogeneous_gpu_provider"
+            ]
+            if metric.startswith("electromagnetic_")
+        }
+        missing_metrics = sorted(
+            metric for metric in expected_raw_metrics if metric not in core_missing["detail"]
+        )
+        self.assertFalse(
+            missing_metrics,
+            f"EM core missing-metric detail did not include required raw metrics: {missing_metrics}",
+        )
 
     def test_em_metrics_missing_is_fail_on_protected_branches(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

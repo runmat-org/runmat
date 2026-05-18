@@ -8414,6 +8414,11 @@ def evaluate_release_readiness(
                             if math.isfinite(value):
                                 values.append(value)
             if not values:
+                fallback_field = assertion_field_fallback_specs.get(
+                    (fixture_id, assertion_name)
+                )
+                if fallback_field is not None:
+                    missing_metric_fields.append(fallback_field)
                 missing_metric_fields.append(f"{fixture_id}.{assertion_name}")
                 continue
 
@@ -8827,6 +8832,8 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
+        else:
+            missing_metric_fields.append("electromagnetic_solver_conditioning_proxy")
 
         core_em_fixture_ids = {
             "electromagnetic_reference_homogeneous_gpu_provider",
