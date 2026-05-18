@@ -9491,6 +9491,174 @@ def evaluate_release_readiness(
             )
         )
 
+    plastic_required_assertion_specs = [
+        (
+            "nonlinear_plasticity_proxy_gpu_provider",
+            "plasticity_nonlinear_load_amplification_ratio",
+            "plastic_load_amplification_ratio",
+        ),
+        (
+            "nonlinear_plasticity_proxy_gpu_provider",
+            "plasticity_nonlinear_load_realization_ratio",
+            "plastic_load_realization_ratio",
+        ),
+        (
+            "nonlinear_plastic_hardening_reference_gpu_provider",
+            "plasticity_hardening_reference_load_amplification_ratio",
+            "plastic_load_amplification_ratio",
+        ),
+        (
+            "nonlinear_plastic_hardening_reference_gpu_provider",
+            "plasticity_hardening_reference_load_realization_ratio",
+            "plastic_load_realization_ratio",
+        ),
+        (
+            "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+            "plasticity_hardening_reference_complex_load_amplification_ratio",
+            "plastic_load_amplification_ratio",
+        ),
+        (
+            "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+            "plasticity_hardening_reference_complex_load_realization_ratio",
+            "plastic_load_realization_ratio",
+        ),
+        (
+            "nonlinear_plastic_hardening_reference_gpu_provider",
+            "plasticity_hardening_reference_severity_peak",
+            None,
+        ),
+        (
+            "nonlinear_plastic_hardening_reference_gpu_provider",
+            "plasticity_hardening_reference_severity_mean",
+            None,
+        ),
+        (
+            "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+            "plasticity_hardening_reference_complex_severity_peak",
+            None,
+        ),
+        (
+            "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+            "plasticity_hardening_reference_complex_severity_mean",
+            None,
+        ),
+    ]
+    missing_plastic_contract_assertion_fields = []
+    for fixture_id, assertion_name, fallback_field in plastic_required_assertion_specs:
+        observed_values = []
+        for rec in report_records(latest):
+            if rec.get("fixture_id") != fixture_id:
+                continue
+            observed = threshold_assertion_observed(rec, assertion_name)
+            if observed is not None:
+                observed_values.append(observed)
+                continue
+            if fallback_field is not None:
+                fallback_raw = rec.get(fallback_field)
+                if isinstance(fallback_raw, (int, float)):
+                    fallback_value = float(fallback_raw)
+                    if math.isfinite(fallback_value):
+                        observed_values.append(fallback_value)
+        if not observed_values:
+            missing_plastic_contract_assertion_fields.append(
+                f"{fixture_id}.{assertion_name}"
+            )
+    if missing_plastic_contract_assertion_fields and (protected or plastic_require_metrics):
+        reasons.append(
+            Reason(
+                code="PLASTIC_ASSERTION_CONTRACT_FIELDS_MISSING",
+                severity="fail" if protected else "warn",
+                detail=(
+                    "plastic threshold assertion contract missing required fields: "
+                    + ", ".join(sorted(set(missing_plastic_contract_assertion_fields)))
+                ),
+            )
+        )
+
+    contact_required_assertion_specs = [
+        (
+            "nonlinear_contact_proxy_gpu_provider",
+            "contact_nonlinear_load_amplification_ratio",
+            "contact_load_amplification_ratio",
+        ),
+        (
+            "nonlinear_contact_proxy_gpu_provider",
+            "contact_nonlinear_load_realization_ratio",
+            "contact_load_realization_ratio",
+        ),
+        (
+            "nonlinear_contact_frictionless_reference_gpu_provider",
+            "contact_frictionless_load_amplification_ratio",
+            "contact_load_amplification_ratio",
+        ),
+        (
+            "nonlinear_contact_frictionless_reference_gpu_provider",
+            "contact_frictionless_load_realization_ratio",
+            "contact_load_realization_ratio",
+        ),
+        (
+            "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+            "contact_frictionless_complex_load_amplification_ratio",
+            "contact_load_amplification_ratio",
+        ),
+        (
+            "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+            "contact_frictionless_complex_load_realization_ratio",
+            "contact_load_realization_ratio",
+        ),
+        (
+            "nonlinear_contact_frictionless_reference_gpu_provider",
+            "contact_frictionless_severity_peak",
+            None,
+        ),
+        (
+            "nonlinear_contact_frictionless_reference_gpu_provider",
+            "contact_frictionless_severity_mean",
+            None,
+        ),
+        (
+            "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+            "contact_frictionless_complex_severity_peak",
+            None,
+        ),
+        (
+            "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+            "contact_frictionless_complex_severity_mean",
+            None,
+        ),
+    ]
+    missing_contact_contract_assertion_fields = []
+    for fixture_id, assertion_name, fallback_field in contact_required_assertion_specs:
+        observed_values = []
+        for rec in report_records(latest):
+            if rec.get("fixture_id") != fixture_id:
+                continue
+            observed = threshold_assertion_observed(rec, assertion_name)
+            if observed is not None:
+                observed_values.append(observed)
+                continue
+            if fallback_field is not None:
+                fallback_raw = rec.get(fallback_field)
+                if isinstance(fallback_raw, (int, float)):
+                    fallback_value = float(fallback_raw)
+                    if math.isfinite(fallback_value):
+                        observed_values.append(fallback_value)
+        if not observed_values:
+            missing_contact_contract_assertion_fields.append(
+                f"{fixture_id}.{assertion_name}"
+            )
+    if missing_contact_contract_assertion_fields and (protected or contact_require_metrics):
+        reasons.append(
+            Reason(
+                code="CONTACT_ASSERTION_CONTRACT_FIELDS_MISSING",
+                severity="fail" if protected else "warn",
+                detail=(
+                    "contact threshold assertion contract missing required fields: "
+                    + ", ".join(sorted(set(missing_contact_contract_assertion_fields)))
+                ),
+            )
+        )
+
     trend_reports = [latest] + rolling
     trend_thermo_records = []
     for report in trend_reports:

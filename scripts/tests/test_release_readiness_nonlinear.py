@@ -4487,6 +4487,56 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("ELECTRO_JOULE_HEATING_SCALE_HIGH", codes)
 
+    def test_plastic_assertion_contract_missing_reason_is_emitted_when_required(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.15,
+            plastic_load_realization_ratio=0.9,
+            plastic_load_amplification_ratio=1.4,
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
+                "publishable": True,
+                "threshold_assertions": [],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_ASSERTION_CONTRACT_FIELDS_MISSING", codes)
+
+    def test_contact_assertion_contract_missing_reason_is_emitted_when_required(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            contact_nonlinear_severity=0.15,
+            contact_load_realization_ratio=0.9,
+            contact_load_amplification_ratio=1.35,
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+                "publishable": True,
+                "threshold_assertions": [],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CONTACT_ASSERTION_CONTRACT_FIELDS_MISSING", codes)
+
     def test_electro_spread_ratio_high_reason_is_emitted(self):
         latest = report(
             passed=True,
