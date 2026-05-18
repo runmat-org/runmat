@@ -2,7 +2,8 @@ use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
 
 use super::{
     build_asset, build_result, capacity_guard, is_degenerate_triangle, parse_f64,
-    push_mesh_count_diagnostics, GeometryImportError, GeometryImportOptions,
+    push_mesh_count_diagnostics, push_utf8_bom_stripped_diagnostic, strip_utf8_bom_text,
+    GeometryImportError, GeometryImportOptions,
 };
 
 pub(super) fn import_ply(
@@ -12,6 +13,11 @@ pub(super) fn import_ply(
 ) -> Result<crate::report::ImportResult, GeometryImportError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| GeometryImportError::ParseFailed("invalid UTF-8 PLY payload".to_string()))?;
+    let mut diagnostics = Vec::<ImportDiagnostic>::new();
+    let (text, stripped_bom) = strip_utf8_bom_text(text);
+    if stripped_bom {
+        push_utf8_bom_stripped_diagnostic(&mut diagnostics, "ply");
+    }
     let lines = text.lines().collect::<Vec<_>>();
     if lines.is_empty() || lines[0].trim() != "ply" {
         return Err(GeometryImportError::ParseFailed(
@@ -57,7 +63,6 @@ pub(super) fn import_ply(
         GeometryImportError::ParseFailed("PLY missing face element count".to_string())
     })?;
 
-    let mut diagnostics = Vec::<ImportDiagnostic>::new();
     let mut vertices = Vec::<[f64; 3]>::with_capacity(vertex_count);
     let mut triangle_count = 0u64;
 

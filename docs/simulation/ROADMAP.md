@@ -271,3 +271,5 @@ Progress update (2026-05-17):
     GLTF inline importer now enforces triangle primitive mode (`mode=4`) with deterministic typed parse failures for unsupported primitive modes, preventing non-triangle primitive payloads from silently flowing through triangle-only ingestion logic.
 102. [x] CAD GLTF implicit-index handling hardened with explicit diagnostics:
     GLTF inline importer now emits machine-readable diagnostics when indices are omitted (`GEOMETRY_GLTF_IMPLICIT_INDICES_USED`) and enforces triangle-cardinality constraints on generated deterministic index sequences, producing typed parse failures when implicit index counts are not multiples of 3.
+103. [x] CAD text-mesh UTF-8 BOM handling hardened across sniff/import paths:
+    OBJ/PLY/GLTF importers now strip UTF-8 BOM prefixes and emit explicit machine-readable diagnostics (`GEOMETRY_IMPORT_UTF8_BOM_STRIPPED`), and extension-less geometry sniffing now recognizes BOM-prefixed OBJ payloads so BOM-prefixed text meshes route supported importers through `geometry.inspect/v1` and `geometry.load/v1` instead of failing format detection.

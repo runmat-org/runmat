@@ -4,7 +4,8 @@ use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
 
 use super::{
     build_asset, build_result, capacity_guard, is_degenerate_triangle, push_mesh_count_diagnostics,
-    GeometryImportError, GeometryImportOptions,
+    push_utf8_bom_stripped_diagnostic, strip_utf8_bom_bytes, GeometryImportError,
+    GeometryImportOptions,
 };
 
 pub(super) fn import_gltf(
@@ -12,6 +13,7 @@ pub(super) fn import_gltf(
     bytes: &[u8],
     options: GeometryImportOptions,
 ) -> Result<crate::report::ImportResult, GeometryImportError> {
+    let (bytes, stripped_bom) = strip_utf8_bom_bytes(bytes);
     if bytes.len() >= 4 && &bytes[0..4] == b"glTF" {
         return Err(GeometryImportError::ParseFailed(
             "binary GLB payloads are not supported yet; provide JSON GLTF inline payload"
@@ -47,6 +49,9 @@ pub(super) fn import_gltf(
     }
 
     let mut diagnostics = Vec::<ImportDiagnostic>::new();
+    if stripped_bom {
+        push_utf8_bom_stripped_diagnostic(&mut diagnostics, "gltf");
+    }
     let mut all_positions = Vec::<[f64; 3]>::new();
     let mut triangle_count = 0u64;
 

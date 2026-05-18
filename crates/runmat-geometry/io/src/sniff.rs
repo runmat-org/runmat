@@ -26,6 +26,7 @@ pub fn detect_geometry_format(path: &str, bytes: &[u8]) -> GeometryFormat {
         return GeometryFormat::Gltf;
     }
 
+    let bytes = strip_utf8_bom_bytes(bytes);
     let header = String::from_utf8_lossy(&bytes[..bytes.len().min(512)]).to_ascii_lowercase();
     if header.starts_with("solid") {
         return GeometryFormat::Stl;
@@ -74,6 +75,15 @@ fn looks_like_binary_stl(bytes: &[u8]) -> bool {
     }
     let triangle_count = u32::from_le_bytes([bytes[80], bytes[81], bytes[82], bytes[83]]) as usize;
     84usize + triangle_count.saturating_mul(50) == bytes.len()
+}
+
+fn strip_utf8_bom_bytes(bytes: &[u8]) -> &[u8] {
+    const UTF8_BOM: &[u8; 3] = b"\xEF\xBB\xBF";
+    if bytes.starts_with(UTF8_BOM) {
+        &bytes[UTF8_BOM.len()..]
+    } else {
+        bytes
+    }
 }
 
 #[cfg(test)]
@@ -131,5 +141,14 @@ mod tests {
         payload[80..84].copy_from_slice(&1u32.to_le_bytes());
         let format = detect_geometry_format("/model.dat", &payload);
         assert_eq!(format, GeometryFormat::Stl);
+    }
+
+    #[test]
+    fn obj_detected_from_bom_prefixed_header_without_extension() {
+        let format = detect_geometry_format(
+            "/model.dat",
+            b"\xEF\xBB\xBFv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        );
+        assert_eq!(format, GeometryFormat::Obj);
     }
 }

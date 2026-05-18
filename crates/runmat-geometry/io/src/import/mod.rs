@@ -140,6 +140,34 @@ pub(crate) fn push_mesh_count_diagnostics(
     });
 }
 
+pub(crate) fn strip_utf8_bom_bytes(bytes: &[u8]) -> (&[u8], bool) {
+    const UTF8_BOM: &[u8; 3] = b"\xEF\xBB\xBF";
+    if bytes.starts_with(UTF8_BOM) {
+        (&bytes[UTF8_BOM.len()..], true)
+    } else {
+        (bytes, false)
+    }
+}
+
+pub(crate) fn strip_utf8_bom_text(text: &str) -> (&str, bool) {
+    if let Some(stripped) = text.strip_prefix('\u{feff}') {
+        (stripped, true)
+    } else {
+        (text, false)
+    }
+}
+
+pub(crate) fn push_utf8_bom_stripped_diagnostic(
+    diagnostics: &mut Vec<ImportDiagnostic>,
+    format_name: &str,
+) {
+    diagnostics.push(ImportDiagnostic {
+        code: "GEOMETRY_IMPORT_UTF8_BOM_STRIPPED".to_string(),
+        severity: ImportDiagnosticSeverity::Info,
+        message: format!("{format_name} import stripped UTF-8 BOM prefix before parsing payload"),
+    });
+}
+
 pub(crate) fn capacity_guard(
     triangle_count: u64,
     options: &GeometryImportOptions,

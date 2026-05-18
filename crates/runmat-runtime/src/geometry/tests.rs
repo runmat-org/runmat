@@ -7,6 +7,7 @@ const SIMPLE_PLY: &str = "ply\nformat ascii 1.0\nelement vertex 4\nproperty floa
 const SIMPLE_GLTF: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0],[0,1,0]]\n          },\n          \"indices\": [0,1,2,0,2,3]\n        }\n      ]\n    }\n  ]\n}\n";
 const NON_TRIANGLE_GLTF: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"mode\": 1,\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0]]\n          },\n          \"indices\": [0,1,2]\n        }\n      ]\n    }\n  ]\n}\n";
 const SIMPLE_GLB_HEADER: &[u8] = b"glTF\x02\x00\x00\x00";
+const BOM_PREFIX: &[u8] = b"\xEF\xBB\xBF";
 const SIMPLE_GLTF_IMPLICIT_INDICES: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[0,1,0]]\n          }\n        }\n      ]\n    }\n  ]\n}\n";
 const BAD_GLTF_IMPLICIT_INDEX_COUNT: &str = "{\n  \"asset\": {\"version\": \"2.0\"},\n  \"meshes\": [\n    {\n      \"primitives\": [\n        {\n          \"attributes\": {\n            \"POSITION\": [[0,0,0],[1,0,0],[1,1,0],[0,1,0]]\n          }\n        }\n      ]\n    }\n  ]\n}\n";
 
@@ -127,6 +128,23 @@ fn inspect_and_load_obj_work_without_extension() {
 }
 
 #[test]
+fn inspect_and_load_obj_work_without_extension_with_utf8_bom() {
+    let mut payload = BOM_PREFIX.to_vec();
+    payload.extend_from_slice(SIMPLE_OBJ.as_bytes());
+    let inspect = geometry_inspect("/part.dat", &payload).expect("inspect should work");
+    assert_eq!(inspect.format, "obj");
+
+    let asset = geometry_load("/part.dat", &payload).expect("load should work");
+    assert_eq!(asset.source.importer_version, "obj/v1");
+    let codes = asset
+        .diagnostics
+        .iter()
+        .map(|diag| diag.code.as_str())
+        .collect::<Vec<_>>();
+    assert!(codes.contains(&"GEOMETRY_IMPORT_UTF8_BOM_STRIPPED"));
+}
+
+#[test]
 fn inspect_and_load_ply_work() {
     let inspect =
         geometry_inspect("/part.ply", SIMPLE_PLY.as_bytes()).expect("inspect should work");
@@ -155,6 +173,23 @@ fn inspect_and_load_ply_work_without_extension() {
     let asset = geometry_load("/part.mesh", SIMPLE_PLY.as_bytes()).expect("load should work");
     assert_eq!(asset.source.importer_version, "ply/v1");
     assert_eq!(asset.meshes[0].element_count, 2);
+}
+
+#[test]
+fn inspect_and_load_ply_work_without_extension_with_utf8_bom() {
+    let mut payload = BOM_PREFIX.to_vec();
+    payload.extend_from_slice(SIMPLE_PLY.as_bytes());
+    let inspect = geometry_inspect("/part.mesh", &payload).expect("inspect should work");
+    assert_eq!(inspect.format, "ply");
+
+    let asset = geometry_load("/part.mesh", &payload).expect("load should work");
+    assert_eq!(asset.source.importer_version, "ply/v1");
+    let codes = asset
+        .diagnostics
+        .iter()
+        .map(|diag| diag.code.as_str())
+        .collect::<Vec<_>>();
+    assert!(codes.contains(&"GEOMETRY_IMPORT_UTF8_BOM_STRIPPED"));
 }
 
 #[test]
@@ -211,6 +246,23 @@ fn inspect_and_load_gltf_work_without_extension() {
     let asset = geometry_load("/part.data", SIMPLE_GLTF.as_bytes()).expect("load should work");
     assert_eq!(asset.source.importer_version, "gltf/v1");
     assert_eq!(asset.meshes[0].element_count, 2);
+}
+
+#[test]
+fn inspect_and_load_gltf_work_without_extension_with_utf8_bom() {
+    let mut payload = BOM_PREFIX.to_vec();
+    payload.extend_from_slice(SIMPLE_GLTF.as_bytes());
+    let inspect = geometry_inspect("/part.data", &payload).expect("inspect should work");
+    assert_eq!(inspect.format, "gltf");
+
+    let asset = geometry_load("/part.data", &payload).expect("load should work");
+    assert_eq!(asset.source.importer_version, "gltf/v1");
+    let codes = asset
+        .diagnostics
+        .iter()
+        .map(|diag| diag.code.as_str())
+        .collect::<Vec<_>>();
+    assert!(codes.contains(&"GEOMETRY_IMPORT_UTF8_BOM_STRIPPED"));
 }
 
 #[test]

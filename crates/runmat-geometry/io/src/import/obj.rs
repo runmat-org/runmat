@@ -2,7 +2,8 @@ use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
 
 use super::{
     build_asset, build_result, capacity_guard, is_degenerate_triangle, parse_f64,
-    push_mesh_count_diagnostics, GeometryImportError, GeometryImportOptions,
+    push_mesh_count_diagnostics, push_utf8_bom_stripped_diagnostic, strip_utf8_bom_text,
+    GeometryImportError, GeometryImportOptions,
 };
 
 pub(super) fn import_obj(
@@ -14,6 +15,10 @@ pub(super) fn import_obj(
         .map_err(|_| GeometryImportError::ParseFailed("invalid UTF-8 OBJ payload".to_string()))?;
 
     let mut diagnostics = Vec::<ImportDiagnostic>::new();
+    let (text, stripped_bom) = strip_utf8_bom_text(text);
+    if stripped_bom {
+        push_utf8_bom_stripped_diagnostic(&mut diagnostics, "obj");
+    }
     let mut vertex_pool = Vec::<[f64; 3]>::new();
     let mut triangle_count = 0u64;
 
