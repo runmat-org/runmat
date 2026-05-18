@@ -305,6 +305,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_SPREAD_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_REGION_CONTRAST_INDEX",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO",
@@ -318,6 +319,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_REGION_CONTRAST_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_BOUNDARY_ANCHOR_DROP_TREND_RATIO",
@@ -624,6 +626,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_homogeneous_dispersive_loss_scale_mean",
                         "observed": 0.8,
                     },
+                    {
+                        "name": "em_homogeneous_dispersive_loss_scale_spread_ratio",
+                        "observed": 2.0,
+                    },
                     {"name": "em_homogeneous_boundary_energy_ratio", "observed": 0.1},
                     {
                         "name": "em_homogeneous_dispersive_phase_attenuation_mean",
@@ -674,6 +680,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                     {
                         "name": "em_heterogeneous_dispersive_loss_scale_mean",
                         "observed": 1.0,
+                    },
+                    {
+                        "name": "em_heterogeneous_dispersive_loss_scale_spread_ratio",
+                        "observed": 2.4,
                     },
                     {
                         "name": "em_heterogeneous_dispersive_phase_attenuation_spread_ratio",
@@ -843,6 +853,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         ] = "0.9"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_RATIO"] = "2.0"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN"] = "0.5"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_SPREAD_RATIO"] = "1.4"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ENERGY_RATIO"] = "0.3"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_REGION_CONTRAST_INDEX"] = "3.0"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SOURCE_REALIZATION_RATIO"] = "0.8"
@@ -944,6 +955,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_SIGMA_OMEGA_RESPONSE_COVERAGE_RATIO_LOW", codes)
         self.assertIn("EM_SIGMA_OMEGA_SCALE_SPREAD_RATIO_HIGH", codes)
         self.assertIn("EM_DISPERSIVE_LOSS_SCALE_MEAN_HIGH", codes)
+        self.assertIn("EM_DISPERSIVE_LOSS_SCALE_SPREAD_RATIO_HIGH", codes)
         self.assertIn("EM_BOUNDARY_ENERGY_RATIO_LOW", codes)
         self.assertIn("EM_REGION_CONTRAST_INDEX_LOW", codes)
         self.assertIn("EM_DISPERSIVE_PHASE_ATTENUATION_MEAN_LOW", codes)
@@ -1128,6 +1140,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "name": "em_homogeneous_dispersive_loss_scale_mean",
                         "observed": 0.60,
                     },
+                    {
+                        "name": "em_homogeneous_dispersive_loss_scale_spread_ratio",
+                        "observed": 2.2,
+                    },
                     {"name": "em_homogeneous_boundary_energy_ratio", "observed": 0.20},
                     {"name": "em_homogeneous_boundary_anchor_ratio", "observed": 0.2},
                     {"name": "em_homogeneous_dispersive_coupling_ratio", "observed": 1.0e-6},
@@ -1172,6 +1188,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                     {
                         "name": "em_heterogeneous_dispersive_loss_scale_mean",
                         "observed": 0.70,
+                    },
+                    {
+                        "name": "em_heterogeneous_dispersive_loss_scale_spread_ratio",
+                        "observed": 2.5,
                     },
                     {
                         "name": "em_heterogeneous_dispersive_phase_attenuation_spread_ratio",
@@ -1233,6 +1253,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 0.20,
                     },
                     {
+                        "name": "em_homogeneous_dispersive_loss_scale_spread_ratio",
+                        "observed": 1.0,
+                    },
+                    {
                         "name": "em_homogeneous_boundary_energy_ratio",
                         "observed": 0.90,
                     },
@@ -1287,6 +1311,10 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 0.20,
                     },
                     {
+                        "name": "em_heterogeneous_dispersive_loss_scale_spread_ratio",
+                        "observed": 1.0,
+                    },
+                    {
                         "name": "em_heterogeneous_dispersive_phase_attenuation_spread_ratio",
                         "observed": 1.1,
                     },
@@ -1338,6 +1366,9 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO"
         ] = "1.5"
         os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_SPREAD_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_BOUNDARY_ENERGY_DROP_TREND_RATIO"
         ] = "1.5"
         os.environ[
@@ -1376,6 +1407,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_SIGMA_OMEGA_RESPONSE_COVERAGE_TREND_WORSENING", codes)
         self.assertIn("EM_SIGMA_OMEGA_SCALE_SPREAD_TREND_WORSENING", codes)
         self.assertIn("EM_DISPERSIVE_LOSS_SCALE_TREND_WORSENING", codes)
+        self.assertIn("EM_DISPERSIVE_LOSS_SCALE_SPREAD_TREND_WORSENING", codes)
         self.assertIn("EM_BOUNDARY_ENERGY_TREND_WORSENING", codes)
         self.assertIn("EM_REGION_CONTRAST_TREND_WORSENING", codes)
         self.assertIn("EM_CORE_BOUNDARY_ANCHOR_TREND_WORSENING", codes)
