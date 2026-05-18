@@ -1,4 +1,5 @@
 use super::*;
+use crate::fusion::FusionPlannerMetadata;
 
 impl RunMatSession {
     pub(crate) fn compile_input(
@@ -161,9 +162,16 @@ impl RunMatSession {
         input: &str,
     ) -> std::result::Result<Option<FusionPlanSnapshot>, RunError> {
         let prepared = self.compile_input(input)?;
+        let mir = runmat_mir::lowering::lower_assembly(&prepared.lowering.assembly)?;
+        let analysis = runmat_mir::analysis::analyze_assembly(&mir);
         Ok(build_fusion_snapshot(
             prepared.bytecode.accel_graph.as_ref(),
             &prepared.bytecode.fusion_groups,
+            Some(FusionPlannerMetadata {
+                source: "semantic-mir-analysis+bytecode-accel-graph".to_string(),
+                mir_local_fact_count: analysis.mir_locals.len(),
+                mir_diagnostic_count: analysis.diagnostics.len(),
+            }),
         ))
     }
 

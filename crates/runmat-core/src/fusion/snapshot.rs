@@ -3,11 +3,13 @@ use runmat_accelerate::graph::{AccelGraph, ShapeInfo};
 
 use super::{
     FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader, FusionPlanSnapshot,
+    FusionPlannerMetadata,
 };
 
 pub(crate) fn build_fusion_snapshot(
     graph: Option<&AccelGraph>,
     groups: &[FusionGroup],
+    planner: Option<FusionPlannerMetadata>,
 ) -> Option<FusionPlanSnapshot> {
     graph?;
     if groups.is_empty() {
@@ -62,6 +64,7 @@ pub(crate) fn build_fusion_snapshot(
         edges,
         shaders,
         decisions,
+        planner: planner.unwrap_or_default(),
     })
 }
 

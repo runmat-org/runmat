@@ -368,7 +368,7 @@ impl RunMatSession {
 
         #[cfg(not(target_arch = "wasm32"))]
         let fusion_snapshot = if self.emit_fusion_plan {
-            build_fusion_snapshot(bytecode.accel_graph.as_ref(), &bytecode.fusion_groups)
+            build_fusion_snapshot(bytecode.accel_graph.as_ref(), &bytecode.fusion_groups, None)
         } else {
             None
         };

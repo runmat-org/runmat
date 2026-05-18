@@ -4,6 +4,24 @@ pub struct FusionPlanSnapshot {
     pub edges: Vec<FusionPlanEdge>,
     pub shaders: Vec<FusionPlanShader>,
     pub decisions: Vec<FusionPlanDecision>,
+    pub planner: FusionPlannerMetadata,
+}
+
+#[derive(Debug, Clone)]
+pub struct FusionPlannerMetadata {
+    pub source: String,
+    pub mir_local_fact_count: usize,
+    pub mir_diagnostic_count: usize,
+}
+
+impl Default for FusionPlannerMetadata {
+    fn default() -> Self {
+        Self {
+            source: "bytecode-accel-graph".to_string(),
+            mir_local_fact_count: 0,
+            mir_diagnostic_count: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

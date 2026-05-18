@@ -41,6 +41,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added `runmat-cli` unit coverage for both path-target resolution and module/function-target rejection.
   - Validation: `cargo test -p runmat --lib`, `cargo fmt --all --check`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
 
+- (pending commit) Plan 7 visibility bridge in fusion snapshots
+  - `FusionPlanSnapshot` now carries planner metadata (`source`, `mir_local_fact_count`, `mir_diagnostic_count`).
+  - `RunMatSession::compile_fusion_plan` now computes MIR + `AnalysisStore` and records analysis fact counts into fusion snapshot metadata, making semantic-analysis availability explicit in the fusion planning surface.
+  - Runtime execution snapshots keep default planner metadata (`bytecode-accel-graph`) until fusion candidate construction itself is migrated off bytecode as source-of-truth.
+  - Validation: `cargo test -p runmat --lib`, `cargo test -p runmat-config`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 ## Next Resolution Items
 
 - Finish converting remaining legacy test/doc references that imply removed APIs where they block semantic-only confidence.
