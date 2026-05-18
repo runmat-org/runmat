@@ -4,7 +4,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use futures::executor::block_on;
-use runmat_core::{ExecutionStreamKind, LegacyExecutionResult, RunMatSession};
+use runmat_core::{ExecutionStreamKind, RunMatSession, SessionExecutionResult};
 use runmat_gc::gc_test_context;
 
 /// Test basic semicolon suppression behavior
@@ -251,7 +251,7 @@ fn test_control_flow_not_affected() {
     assert_eq!(result.value.unwrap().to_string(), "2");
 }
 
-fn collect_stdout_texts(result: &LegacyExecutionResult) -> Vec<String> {
+fn collect_stdout_texts(result: &SessionExecutionResult) -> Vec<String> {
     result
         .streams
         .iter()
@@ -260,7 +260,7 @@ fn collect_stdout_texts(result: &LegacyExecutionResult) -> Vec<String> {
         .collect()
 }
 
-fn collect_stdout_stream(result: &LegacyExecutionResult) -> String {
+fn collect_stdout_stream(result: &SessionExecutionResult) -> String {
     result
         .streams
         .iter()

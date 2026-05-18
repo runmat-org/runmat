@@ -5,10 +5,10 @@ impl RunMatSession {
     pub async fn execute(
         &mut self,
         input: &str,
-    ) -> std::result::Result<LegacyExecutionResult, RunError> {
+    ) -> std::result::Result<SessionExecutionResult, RunError> {
         self.execute_internal(input, false)
             .await
-            .map(legacy_result_from_execution)
+            .map(session_result_from_execution)
     }
 
     /// Execute MATLAB/Octave code and return the runtime/workspace ABI outcome.
@@ -1039,8 +1039,8 @@ struct SessionExecution {
     warnings: Vec<runmat_runtime::warning_store::RuntimeWarning>,
 }
 
-fn legacy_result_from_execution(execution: SessionExecution) -> LegacyExecutionResult {
-    LegacyExecutionResult {
+fn session_result_from_execution(execution: SessionExecution) -> SessionExecutionResult {
+    SessionExecutionResult {
         value: execution.public_value,
         execution_time_ms: execution.outcome.execution_time_ms,
         used_jit: execution.outcome.used_jit,
