@@ -1627,6 +1627,286 @@
       "reference": 2.0,
       "tolerance_abs": 1.0,
       "tolerance_rel": 0.5
+    },
+    {
+      "name": "nonlinear_total_increments",
+      "fixture_id": "nonlinear_assembly_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_total_increments",
+      "reference": 24.0,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 0.15
+    },
+    {
+      "name": "nonlinear_failed_increments",
+      "fixture_id": "nonlinear_assembly_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_failed_increments",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "nonlinear_iteration_spike_count",
+      "fixture_id": "nonlinear_assembly_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_iteration_spike_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "nonlinear_stress_total_increments",
+      "fixture_id": "nonlinear_assembly_stress_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_stress_total_increments",
+      "reference": 32.0,
+      "tolerance_abs": 3.0,
+      "tolerance_rel": 0.15
+    },
+    {
+      "name": "nonlinear_stress_stall_count",
+      "fixture_id": "nonlinear_assembly_stress_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_stress_stall_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "nonlinear_stress_iteration_spike_count",
+      "fixture_id": "nonlinear_assembly_stress_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_stress_iteration_spike_count",
+      "reference": 1.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "nonlinear_softening_total_increments",
+      "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_softening_total_increments",
+      "reference": 40.0,
+      "tolerance_abs": 3.0,
+      "tolerance_rel": 0.12
+    },
+    {
+      "name": "nonlinear_softening_spike_count",
+      "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_softening_spike_count",
+      "reference": 1.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "nonlinear_softening_backtrack_bursts",
+      "fixture_id": "nonlinear_softening_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_softening_backtrack_bursts",
+      "reference": 1.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "nonlinear_path_mix_total_increments",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_path_mix_total_increments",
+      "reference": 36.0,
+      "tolerance_abs": 4.0,
+      "tolerance_rel": 0.15
+    },
+    {
+      "name": "nonlinear_path_mix_max_backtracks_per_increment",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_path_mix_max_backtracks_per_increment",
+      "reference": 10.0,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "nonlinear_path_mix_backtrack_bursts",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_path_mix_backtrack_bursts",
+      "reference": 1.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "nonlinear_path_mix_effective_modulus_scale",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_path_mix_effective_modulus_scale",
+      "reference": 0.9674046365,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "nonlinear_path_mix_material_spread_ratio",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_path_mix_material_spread_ratio",
+      "reference": 1.0080275875955733,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "thermo_nonlinear_severity",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermo_nonlinear_severity",
+      "reference": 0.018,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": 0.4
+    },
+    {
+      "name": "electro_nonlinear_joule_heating_scale",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_nonlinear_joule_heating_scale",
+      "reference": 10.0,
+      "tolerance_abs": 2.5,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "electro_nonlinear_conductivity_spread_ratio",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_nonlinear_conductivity_spread_ratio",
+      "reference": 1.411764705882353,
+      "tolerance_abs": 0.35,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "electro_nonlinear_severity_peak",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_nonlinear_severity_peak",
+      "reference": 1.0,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "plasticity_nonlinear_severity_peak",
+      "fixture_id": "nonlinear_plasticity_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_nonlinear_severity_peak",
+      "reference": 0.85,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "plasticity_nonlinear_severity_mean",
+      "fixture_id": "nonlinear_plasticity_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_nonlinear_severity_mean",
+      "reference": 0.7053819444444445,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "contact_nonlinear_severity_peak",
+      "fixture_id": "nonlinear_contact_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_nonlinear_severity_peak",
+      "reference": 0.9500000000000001,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "contact_nonlinear_severity_mean",
+      "fixture_id": "nonlinear_contact_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_nonlinear_severity_mean",
+      "reference": 0.8114583333333333,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "contact_frictionless_severity_peak",
+      "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_frictionless_severity_peak",
+      "reference": 0.26666666666666666,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "contact_frictionless_severity_mean",
+      "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_frictionless_severity_mean",
+      "reference": 0.22777777777777775,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "plasticity_hardening_reference_severity_peak",
+      "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_hardening_reference_severity_peak",
+      "reference": 0.23333333333333334,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "plasticity_hardening_reference_severity_mean",
+      "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_hardening_reference_severity_mean",
+      "reference": 0.19352083333333336,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "thermo_gradient_benign_spread_ratio",
+      "fixture_id": "thermo_gradient_benign_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermo_gradient_benign_spread_ratio",
+      "reference": 1.0522704709897612,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "thermo_gradient_benign_heterogeneity",
+      "fixture_id": "thermo_gradient_benign_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermo_gradient_benign_heterogeneity",
+      "reference": 0.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": null
     }
   ]
 }

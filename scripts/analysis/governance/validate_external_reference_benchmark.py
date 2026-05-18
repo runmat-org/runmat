@@ -5,6 +5,52 @@ from pathlib import Path
 
 
 REQUIRED_METRICS_BY_FIXTURE = {
+    "nonlinear_assembly_gpu_provider": {
+        "nonlinear_total_increments",
+        "nonlinear_failed_increments",
+        "nonlinear_iteration_spike_count",
+    },
+    "nonlinear_assembly_stress_gpu_provider": {
+        "nonlinear_stress_total_increments",
+        "nonlinear_stress_stall_count",
+        "nonlinear_stress_iteration_spike_count",
+    },
+    "nonlinear_softening_proxy_gpu_provider": {
+        "nonlinear_softening_total_increments",
+        "nonlinear_softening_spike_count",
+        "nonlinear_softening_backtrack_bursts",
+    },
+    "nonlinear_load_path_mix_gpu_provider": {
+        "nonlinear_path_mix_total_increments",
+        "nonlinear_path_mix_max_backtracks_per_increment",
+        "nonlinear_path_mix_backtrack_bursts",
+        "nonlinear_path_mix_effective_modulus_scale",
+        "nonlinear_path_mix_material_spread_ratio",
+        "thermo_nonlinear_severity",
+        "electro_nonlinear_joule_heating_scale",
+        "electro_nonlinear_conductivity_spread_ratio",
+        "electro_nonlinear_severity_peak",
+    },
+    "nonlinear_plasticity_proxy_gpu_provider": {
+        "plasticity_nonlinear_severity_peak",
+        "plasticity_nonlinear_severity_mean",
+    },
+    "nonlinear_contact_proxy_gpu_provider": {
+        "contact_nonlinear_severity_peak",
+        "contact_nonlinear_severity_mean",
+    },
+    "nonlinear_contact_frictionless_reference_gpu_provider": {
+        "contact_frictionless_severity_peak",
+        "contact_frictionless_severity_mean",
+    },
+    "nonlinear_plastic_hardening_reference_gpu_provider": {
+        "plasticity_hardening_reference_severity_peak",
+        "plasticity_hardening_reference_severity_mean",
+    },
+    "thermo_gradient_benign_gpu_provider": {
+        "thermo_gradient_benign_spread_ratio",
+        "thermo_gradient_benign_heterogeneity",
+    },
     "electromagnetic_reference_homogeneous_gpu_provider": {
         "em_homogeneous_boundary_energy_ratio",
         "em_homogeneous_sigma_omega_response_coverage_ratio",
