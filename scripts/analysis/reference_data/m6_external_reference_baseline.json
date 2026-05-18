@@ -455,6 +455,38 @@
       "tolerance_rel": 1.0
     },
     {
+      "name": "electromagnetic_boundary_energy_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_boundary_energy_ratio",
+      "reference": 0.46272666218938885,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "electromagnetic_boundary_penalty_conditioning_contribution",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_boundary_penalty_conditioning_contribution",
+      "reference": 0.41406249999999994,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.4
+    },
+    {
+      "name": "electromagnetic_source_overlap_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_source_overlap_ratio",
+      "reference": 0.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "electromagnetic_insulation_leakage_proxy",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_insulation_leakage_proxy",
+      "reference": 0.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 1.0
+    },
+    {
       "name": "electromagnetic_energy_imbalance_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "electromagnetic_energy_imbalance_ratio",
@@ -954,6 +986,38 @@
       "field": "electromagnetic_region_coefficient_contrast_index",
       "reference": 8.535251947124001,
       "tolerance_abs": 4.0,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_boundary_energy_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_boundary_energy_ratio",
+      "reference": 0.8385539296909177,
+      "tolerance_abs": 0.25,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "electromagnetic_boundary_penalty_conditioning_contribution",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_boundary_penalty_conditioning_contribution",
+      "reference": 0.44341372912801486,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "electromagnetic_source_overlap_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_source_overlap_ratio",
+      "reference": 0.0,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "electromagnetic_insulation_leakage_proxy",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_insulation_leakage_proxy",
+      "reference": 0.5148602374120815,
+      "tolerance_abs": 0.25,
       "tolerance_rel": 0.6
     },
     {

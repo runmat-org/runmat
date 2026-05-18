@@ -274,6 +274,22 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_boundary_energy_ratio",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_boundary_penalty_conditioning_contribution",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_source_overlap_ratio",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_insulation_leakage_proxy",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
                 "electromagnetic_energy_imbalance_ratio",
             ),
             (
@@ -491,6 +507,22 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "electromagnetic_region_coefficient_contrast_index",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_boundary_energy_ratio",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_boundary_penalty_conditioning_contribution",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_source_overlap_ratio",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_insulation_leakage_proxy",
             ),
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
