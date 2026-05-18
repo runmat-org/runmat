@@ -693,34 +693,42 @@ PERFORMANCE_REQUIRED_FIELDS = {
     "electromagnetic_reference_homogeneous_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
+        "gpu_solver_fallback_apply_count",
     },
     "electromagnetic_reference_heterogeneous_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
+        "gpu_solver_fallback_apply_count",
     },
     "electromagnetic_reference_boundary_penalty_stress_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
+        "gpu_solver_fallback_apply_count",
     },
     "electromagnetic_reference_multi_region_phased_source_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
+        "gpu_solver_fallback_apply_count",
     },
     "electromagnetic_reference_sparse_assignments_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
+        "gpu_solver_fallback_apply_count",
     },
     "electromagnetic_reference_fallback_heavy_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
+        "gpu_solver_fallback_apply_count",
     },
     "electromagnetic_reference_overlap_interference_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
+        "gpu_solver_fallback_apply_count",
     },
     "electromagnetic_reference_boundary_kernel_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
+        "gpu_solver_fallback_apply_count",
     },
     "acoustic_harmonic_gpu_provider": {
         "gpu_speedup_ratio",

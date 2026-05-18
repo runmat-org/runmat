@@ -3235,6 +3235,12 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_PROXY", "5.0"),
         )
     )
+    em_max_fallback_apply_count_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_APPLY_COUNT",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_APPLY_COUNT", "1.0"),
+        )
+    )
     em_min_reference_frequency_hz_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MIN_REFERENCE_FREQUENCY_HZ",
@@ -3315,6 +3321,15 @@ def evaluate_release_readiness(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_TREND_RATIO",
             profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_TREND_RATIO", "1.25"),
+        )
+    )
+    em_max_fallback_apply_count_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_APPLY_COUNT_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_APPLY_COUNT_TREND_RATIO",
+                "1.2",
+            ),
         )
     )
     em_max_applied_current_drop_trend_ratio_threshold = float(
@@ -4795,6 +4810,7 @@ def evaluate_release_readiness(
     em_min_ground_anchor_effectiveness_ratio = None
     em_max_source_interference_index = None
     em_max_solver_conditioning_proxy = None
+    em_max_fallback_apply_count = None
     em_min_reference_frequency_hz = None
     em_min_sweep_count = None
     em_min_resonance_peak_frequency_hz = None
@@ -4847,6 +4863,7 @@ def evaluate_release_readiness(
     em_ground_anchor_effectiveness_drop_trend_ratio = None
     em_source_interference_trend_ratio = None
     em_solver_conditioning_trend_ratio = None
+    em_fallback_apply_count_trend_ratio = None
     em_reference_frequency_drop_trend_ratio = None
     em_sigma_omega_scale_mean_drop_trend_ratio = None
     em_sigma_omega_response_coverage_drop_trend_ratio = None
@@ -8065,6 +8082,34 @@ def evaluate_release_readiness(
         else:
             missing_metric_fields.append("electromagnetic_source_interference_index")
 
+        fallback_apply_count_values = []
+        for rec in em_records:
+            raw_value = rec.get("gpu_solver_fallback_apply_count")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    fallback_apply_count_values.append(value)
+        if fallback_apply_count_values:
+            em_max_fallback_apply_count = max(fallback_apply_count_values)
+            fallback_apply_count_breached = (
+                em_max_fallback_apply_count > em_max_fallback_apply_count_threshold
+            )
+            breaches.append(fallback_apply_count_breached)
+            if fallback_apply_count_breached:
+                reasons.append(
+                    Reason(
+                        code="EM_FALLBACK_APPLY_COUNT_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "max EM fallback apply count "
+                            f"{em_max_fallback_apply_count:.3f} exceeds threshold "
+                            f"{em_max_fallback_apply_count_threshold:.3f}"
+                        ),
+                    )
+                )
+        else:
+            missing_metric_fields.append("gpu_solver_fallback_apply_count")
+
         sweep_metric_specs = [
             (
                 "electromagnetic_applied_current_a",
@@ -10657,6 +10702,51 @@ def evaluate_release_readiness(
                     ),
                 )
             )
+
+        fallback_apply_count_trend_ratios = []
+        for fixture_id in EM_FIXTURES:
+            latest_rec = latest_by_fixture.get(fixture_id)
+            baseline_records = rolling_by_fixture.get(fixture_id, [])
+            if latest_rec is None or not baseline_records:
+                continue
+            latest_raw = latest_rec.get("gpu_solver_fallback_apply_count")
+            if not isinstance(latest_raw, (int, float)):
+                continue
+            latest_value = float(latest_raw)
+            if not math.isfinite(latest_value) or latest_value < 0:
+                continue
+            baseline_values = []
+            for rec in baseline_records:
+                raw = rec.get("gpu_solver_fallback_apply_count")
+                if isinstance(raw, (int, float)):
+                    value = float(raw)
+                    if math.isfinite(value) and value >= 0:
+                        baseline_values.append(value)
+            if not baseline_values:
+                continue
+            baseline_value = statistics.median(baseline_values)
+            if baseline_value == 0:
+                if latest_value > 0:
+                    fallback_apply_count_trend_ratios.append(float("inf"))
+                continue
+            fallback_apply_count_trend_ratios.append(latest_value / baseline_value)
+        if fallback_apply_count_trend_ratios:
+            em_fallback_apply_count_trend_ratio = max(fallback_apply_count_trend_ratios)
+            if (
+                em_fallback_apply_count_trend_ratio
+                > em_max_fallback_apply_count_trend_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="EM_FALLBACK_APPLY_COUNT_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "EM fallback-apply-count trend ratio "
+                            f"{em_fallback_apply_count_trend_ratio:.3f} exceeds threshold "
+                            f"{em_max_fallback_apply_count_trend_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
 
         em_applied_current_drop_trend_ratio = fixture_trend_ratio(
             "electromagnetic_applied_current_a",
@@ -13439,6 +13529,8 @@ def evaluate_release_readiness(
         "em_max_source_interference_index_threshold": em_max_source_interference_index_threshold,
         "em_max_solver_conditioning_proxy": em_max_solver_conditioning_proxy,
         "em_max_solver_conditioning_proxy_threshold": em_max_solver_conditioning_proxy_threshold,
+        "em_max_fallback_apply_count": em_max_fallback_apply_count,
+        "em_max_fallback_apply_count_threshold": em_max_fallback_apply_count_threshold,
         "em_min_reference_frequency_hz": em_min_reference_frequency_hz,
         "em_min_reference_frequency_hz_threshold": em_min_reference_frequency_hz_threshold,
         "em_min_sweep_count": em_min_sweep_count,
@@ -13531,6 +13623,8 @@ def evaluate_release_readiness(
         "em_max_imag_residual_norm_trend_ratio_threshold": em_max_imag_residual_norm_trend_ratio_threshold,
         "em_solver_conditioning_trend_ratio": em_solver_conditioning_trend_ratio,
         "em_max_solver_conditioning_trend_ratio_threshold": em_max_solver_conditioning_trend_ratio_threshold,
+        "em_fallback_apply_count_trend_ratio": em_fallback_apply_count_trend_ratio,
+        "em_max_fallback_apply_count_trend_ratio_threshold": em_max_fallback_apply_count_trend_ratio_threshold,
         "em_applied_current_drop_trend_ratio": em_applied_current_drop_trend_ratio,
         "em_max_applied_current_drop_trend_ratio_threshold": em_max_applied_current_drop_trend_ratio_threshold,
         "em_source_region_energy_consistency_drop_trend_ratio": em_source_region_energy_consistency_drop_trend_ratio,
@@ -14445,6 +14539,10 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_max_solver_conditioning_proxy') if result.get('em_max_solver_conditioning_proxy') is not None else '-'}`/`{result.get('em_max_solver_conditioning_proxy_threshold') if result.get('em_max_solver_conditioning_proxy_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM fallback-apply-count max/threshold: "
+        f"`{result.get('em_max_fallback_apply_count') if result.get('em_max_fallback_apply_count') is not None else '-'}`/`{result.get('em_max_fallback_apply_count_threshold') if result.get('em_max_fallback_apply_count_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- EM applied current min/threshold: "
         f"`{result.get('em_min_applied_current_a') if result.get('em_min_applied_current_a') is not None else '-'}`/`{result.get('em_min_applied_current_a_threshold') if result.get('em_min_applied_current_a_threshold') is not None else '-'}`"
     )
@@ -14483,6 +14581,10 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- EM solver-conditioning trend ratio/threshold: "
         f"`{result.get('em_solver_conditioning_trend_ratio') if result.get('em_solver_conditioning_trend_ratio') is not None else '-'}`/`{result.get('em_max_solver_conditioning_trend_ratio_threshold') if result.get('em_max_solver_conditioning_trend_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM fallback-apply-count trend ratio/threshold: "
+        f"`{result.get('em_fallback_apply_count_trend_ratio') if result.get('em_fallback_apply_count_trend_ratio') is not None else '-'}`/`{result.get('em_max_fallback_apply_count_trend_ratio_threshold') if result.get('em_max_fallback_apply_count_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- EM applied-current drop trend ratio/threshold: "

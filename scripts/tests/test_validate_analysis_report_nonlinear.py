@@ -19,6 +19,7 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
         "gpu_solver_backend": "runtime_tensor",
     }
     if fixture_id.startswith("electromagnetic_reference_"):
+        record["gpu_solver_fallback_apply_count"] = 0.0
         record["electromagnetic_placeholder_quality"] = 1.0
         record["electromagnetic_enabled"] = True
         record["electromagnetic_energy_imbalance_ratio"] = 0.0
@@ -1360,6 +1361,21 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             for record in records:
                 if record["fixture_id"] == "modal_large_gpu_provider":
                     record.pop("gpu_solver_solve_ms", None)
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_em_fallback_apply_count_field_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if (
+                    record["fixture_id"]
+                    == "electromagnetic_reference_homogeneous_gpu_provider"
+                ):
+                    record.pop("gpu_solver_fallback_apply_count", None)
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))

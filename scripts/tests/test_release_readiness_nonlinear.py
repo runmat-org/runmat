@@ -1405,6 +1405,22 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_SOLVER_CONDITIONING_PROXY_HIGH", codes)
 
+    def test_em_fallback_apply_count_posture_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "gpu_solver_fallback_apply_count": 3.0,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_APPLY_COUNT"] = "1.0"
+        result = evaluate_release_readiness(latest, [], protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_FALLBACK_APPLY_COUNT_HIGH", codes)
+
     def test_em_applied_current_posture_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
@@ -1532,6 +1548,32 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_SOLVER_CONDITIONING_PROXY_TREND_WORSENING", codes)
+
+    def test_em_fallback_apply_count_trend_worsening_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "gpu_solver_fallback_apply_count": 2.0,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "gpu_solver_fallback_apply_count": 0.0,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_FALLBACK_APPLY_COUNT_TREND_RATIO"] = "1.1"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_FALLBACK_APPLY_COUNT_TREND_WORSENING", codes)
 
     def test_em_applied_current_trend_worsening_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
