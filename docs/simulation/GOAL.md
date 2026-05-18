@@ -76,7 +76,7 @@ Legend: `[x]` complete baseline, `[~]` in active deepening, `[ ]` not started.
 | CHT | Fluid-thermal coupled family | [~] |
 | FSI | Coupled structural-fluid family | [~] |
 | Acoustics | Acoustic solver family | [~] |
-| Meshing/adaptivity | Production mesh generation/refinement pipeline | [ ] |
+| Meshing/adaptivity | Production mesh generation/refinement pipeline | [~] |
 | CAD interop depth | Robust CAD-native ingestion + metadata fidelity | [~] |
 | Performance/scale | Scale SLOs and regression-gated performance | [~] |
 | External-reference credibility (M6) | Protected-branch enforced industrial reference comparators | [~] |

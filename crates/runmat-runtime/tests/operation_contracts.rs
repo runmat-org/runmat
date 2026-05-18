@@ -163,6 +163,18 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
     assert!(!prep.data.prep_artifact_id.is_empty());
     assert!(!prep.data.prep.prepared_meshes.is_empty());
 
+    let adaptive_prep = geometry_prep_for_analysis_op(
+        &load.data,
+        GeometryPrepForAnalysisSpec {
+            profile: GeometryPrepProfile::AdaptiveRefine,
+            target_element_budget: 100_000,
+        },
+        OperationContext::new(Some("trace-contract-1f-adapt".to_string()), None),
+    )
+    .expect("adaptive prep for analysis should succeed");
+    assert_eq!(adaptive_prep.operation, "geometry.prep_for_analysis");
+    assert_eq!(adaptive_prep.op_version, "geometry.prep_for_analysis/v1");
+
     let prep_health = geometry_prep_artifact_health_op(
         GeometryPrepArtifactHealthQuery::default(),
         OperationContext::new(Some("trace-contract-1g".to_string()), None),

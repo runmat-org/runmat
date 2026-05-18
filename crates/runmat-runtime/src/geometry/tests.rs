@@ -277,6 +277,41 @@ fn prep_for_analysis_op_maps_invalid_spec_error() {
 }
 
 #[test]
+fn prep_for_analysis_op_supports_adaptive_refine_profile() {
+    reset_prep_artifact_store_for_tests();
+    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
+    let analysis_ready = geometry_prep_for_analysis_op(
+        &asset,
+        GeometryPrepForAnalysisSpec {
+            profile: GeometryPrepProfile::AnalysisReady,
+            target_element_budget: 4_000,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("analysis-ready prep should work");
+    let adaptive_refine = geometry_prep_for_analysis_op(
+        &asset,
+        GeometryPrepForAnalysisSpec {
+            profile: GeometryPrepProfile::AdaptiveRefine,
+            target_element_budget: 4_000,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("adaptive-refine prep should work");
+
+    assert_eq!(adaptive_refine.operation, "geometry.prep_for_analysis");
+    assert_eq!(adaptive_refine.op_version, "geometry.prep_for_analysis/v1");
+    assert!(
+        adaptive_refine.data.prep.quality.min_scaled_jacobian
+            >= analysis_ready.data.prep.quality.min_scaled_jacobian
+    );
+    assert!(
+        adaptive_refine.data.prep.quality.mean_aspect_ratio
+            <= analysis_ready.data.prep.quality.mean_aspect_ratio
+    );
+}
+
+#[test]
 fn prep_artifact_retention_prunes_old_entries() {
     reset_prep_artifact_store_for_tests();
     std::env::set_var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY", "2");

@@ -86,6 +86,7 @@ pub struct GeometryCaptureViewResult {
 pub enum GeometryPrepProfile {
     SurfaceOnly,
     AnalysisReady,
+    AdaptiveRefine,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -920,6 +921,7 @@ pub fn geometry_prep_for_analysis_op(
     let profile = match spec.profile {
         GeometryPrepProfile::SurfaceOnly => MeshingProfile::SurfaceOnly,
         GeometryPrepProfile::AnalysisReady => MeshingProfile::AnalysisReady,
+        GeometryPrepProfile::AdaptiveRefine => MeshingProfile::AdaptiveRefine,
     };
     let prepared = prepare_geometry_for_analysis(
         asset,

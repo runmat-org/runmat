@@ -67,3 +67,33 @@ fn geometry_prep_for_analysis_preserves_region_mapping_stability() {
         assert!(!mapping.prepared_mesh_ids.is_empty());
     }
 }
+
+#[test]
+fn geometry_prep_for_analysis_adaptive_refine_is_deterministic_and_quality_oriented() {
+    let geometry = geometry_load_op(
+        "/fixtures/tri.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(None, None),
+    )
+    .expect("geometry load should succeed");
+    let spec = GeometryPrepForAnalysisSpec {
+        profile: GeometryPrepProfile::AdaptiveRefine,
+        target_element_budget: 4_000,
+    };
+    let first = geometry_prep_for_analysis_op(
+        &geometry.data,
+        spec.clone(),
+        OperationContext::new(Some("trace-prep-adapt-1".to_string()), None),
+    )
+    .expect("first adaptive prep should succeed");
+    let second = geometry_prep_for_analysis_op(
+        &geometry.data,
+        spec,
+        OperationContext::new(Some("trace-prep-adapt-2".to_string()), None),
+    )
+    .expect("second adaptive prep should succeed");
+
+    assert_eq!(first.data.prep, second.data.prep);
+    assert!(first.data.prep.quality.min_scaled_jacobian >= 0.85);
+    assert!(first.data.prep.quality.mean_aspect_ratio <= 2.0);
+}

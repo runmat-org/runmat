@@ -20,7 +20,7 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 | CHT | Fluid-thermal coupled family | [~] |
 | FSI | Structural-fluid coupled family | [~] |
 | Acoustics | Acoustic solver family | [~] |
-| Meshing/adaptivity | Production meshing/refinement pipeline | [ ] |
+| Meshing/adaptivity | Production meshing/refinement pipeline | [~] |
 | External-reference gating (M6) | Protected-branch enforced external comparators | [~] |
 | Performance/scale regression gates | SLO-backed perf readiness across key workloads | [~] |
 
@@ -125,4 +125,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - Acoustics conformance/governance baseline landed: benchmark harness now includes acoustic fixtures (`acoustic_harmonic_cpu`, `acoustic_harmonic_gpu_provider`, `acoustic_harmonic_gpu_fallback`) with enforced acoustic threshold assertions, benchmark schema validation now requires acoustic provider assertion + GPU performance telemetry fields, and external-reference baseline/validator policy now requires acoustic comparator metrics so missing acoustic governance evidence fails enforce-mode validation.
 - Acoustics governance depth expanded: acoustic provider assertions/external-reference comparators now also enforce modal orthogonality and relative-frequency-separation metrics (`acoustic_max_m_orthogonality_offdiag`, `acoustic_min_relative_frequency_separation`) in addition to mode-count/residual controls, tightening acoustic quality/regression visibility.
 - Release-readiness key-performance coverage now also includes additional schema-governed thermo/electro/nonlinear fixtures (`nonlinear_assembly_stress_gpu_provider`, `nonlinear_softening_proxy_gpu_provider`, `nonlinear_load_path_mix_gpu_provider`, `nonlinear_plasticity_proxy_gpu_provider`, `nonlinear_contact_proxy_gpu_provider`, `nonlinear_contact_frictionless_reference_gpu_provider`, `nonlinear_plastic_hardening_reference_gpu_provider`, `thermo_mech_kickoff_gpu_provider`, `thermo_gradient_benign_gpu_provider`, `thermo_ramp_smooth_gpu_provider`, `thermo_ramp_smooth_field_artifact_gpu_provider`, `thermo_shock_oscillatory_gpu_provider`, `thermo_shock_oscillatory_field_artifact_gpu_provider`, `thermal_standalone_ramp_gpu_provider`, `electro_thermal_joule_benign_gpu_provider`) for speedup-floor and slowdown-trend gating.
+- Meshing/adaptivity kickoff landed: additive `geometry.prep_for_analysis/v1` profile `adaptive_refine` now routes through deterministic meshing-core refinement heuristics and quality shaping (`min_scaled_jacobian`, `mean_aspect_ratio`) with runtime contract and conformance coverage, moving meshing from not-started to active deepening.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.

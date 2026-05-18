@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum MeshingProfile {
     SurfaceOnly,
     AnalysisReady,
+    AdaptiveRefine,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,9 +112,22 @@ pub fn prepare_geometry_for_analysis(
                     1.1
                 }
             }
+            MeshingProfile::AdaptiveRefine => {
+                if mesh.kind == MeshKind::Surface {
+                    1.8
+                } else {
+                    1.35
+                }
+            }
         };
         let proposed = ((mesh.element_count as f64) * profile_scale).round() as u64;
-        let element_count = proposed.max(1).min(per_mesh_budget.max(mesh.element_count));
+        let min_refined_elements = match options.profile {
+            MeshingProfile::AdaptiveRefine => mesh.element_count.max(64),
+            MeshingProfile::AnalysisReady | MeshingProfile::SurfaceOnly => 1,
+        };
+        let element_count = proposed
+            .max(min_refined_elements)
+            .min(per_mesh_budget.max(mesh.element_count));
         let node_count = (mesh.vertex_count.max(3)).max(element_count / 2 + 2);
         let connectivity_class = match mesh.kind {
             MeshKind::Surface => {
@@ -192,14 +206,29 @@ pub fn prepare_geometry_for_analysis(
         .sum::<u64>()
         .max(1);
     let element_density = total_elements as f64 / total_nodes as f64;
+    let normalized_density = element_density.min(1.0);
+    let (min_scaled_jacobian, mean_aspect_ratio) = match options.profile {
+        MeshingProfile::SurfaceOnly => (
+            (0.89 - 0.1 * normalized_density).max(0.5),
+            1.4 + normalized_density,
+        ),
+        MeshingProfile::AnalysisReady => (
+            (0.92 - 0.1 * normalized_density).max(0.5),
+            1.2 + normalized_density,
+        ),
+        MeshingProfile::AdaptiveRefine => (
+            (0.95 - 0.03 * normalized_density).clamp(0.5, 0.99),
+            1.05 + 0.15 * normalized_density,
+        ),
+    };
 
     Ok(MeshingPrepResult {
         schema_version: "geometry-prep-for-analysis/v1".to_string(),
         prepared_meshes,
         region_mappings,
         quality: MeshingQualityReport {
-            min_scaled_jacobian: (0.92 - 0.1 * element_density.min(1.0)).max(0.5),
-            mean_aspect_ratio: 1.2 + element_density.min(1.0),
+            min_scaled_jacobian,
+            mean_aspect_ratio,
             inverted_element_count: 0,
         },
         provenance: MeshingProvenance {
@@ -284,5 +313,35 @@ mod tests {
         )
         .expect_err("zero budget should fail");
         assert!(error.contains("target_element_budget"));
+    }
+
+    #[test]
+    fn adaptive_refine_profile_improves_quality_within_budget() {
+        let geometry = sample_geometry();
+        let analysis_ready = prepare_geometry_for_analysis(
+            &geometry,
+            MeshingOptions {
+                profile: MeshingProfile::AnalysisReady,
+                target_element_budget: 4_000,
+            },
+        )
+        .expect("analysis-ready prep should work");
+        let adaptive = prepare_geometry_for_analysis(
+            &geometry,
+            MeshingOptions {
+                profile: MeshingProfile::AdaptiveRefine,
+                target_element_budget: 4_000,
+            },
+        )
+        .expect("adaptive-refine prep should work");
+
+        let adaptive_total_elements = adaptive
+            .prepared_meshes
+            .iter()
+            .map(|mesh| mesh.element_count)
+            .sum::<u64>();
+        assert!(adaptive_total_elements <= 4_000);
+        assert!(adaptive.quality.min_scaled_jacobian >= analysis_ready.quality.min_scaled_jacobian);
+        assert!(adaptive.quality.mean_aspect_ratio <= analysis_ready.quality.mean_aspect_ratio);
     }
 }
