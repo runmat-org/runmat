@@ -4,7 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.analysis.governance.validate_analysis_report_nonlinear import REQUIRED_FIXTURES
 from scripts.analysis.governance.validate_external_reference_benchmark import main
+from scripts.analysis.governance.validate_external_reference_benchmark import (
+    REQUIRED_METRICS_BY_FIXTURE,
+)
 
 
 def required_metrics_payload(*, cfd_density_pass: bool = True):
@@ -1322,6 +1326,26 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
 
 
 class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
+    def test_required_fixture_parity_with_benchmark_schema(self):
+        missing_fixtures = sorted(
+            set(REQUIRED_FIXTURES) - set(REQUIRED_METRICS_BY_FIXTURE)
+        )
+        self.assertFalse(
+            missing_fixtures,
+            f"external-reference required fixtures missing schema fixtures: {missing_fixtures}",
+        )
+
+        fixture_mismatches = {}
+        for fixture_id, required_assertions in REQUIRED_FIXTURES.items():
+            external_required = REQUIRED_METRICS_BY_FIXTURE.get(fixture_id, set())
+            missing_metrics = sorted(required_assertions - external_required)
+            if missing_metrics:
+                fixture_mismatches[fixture_id] = missing_metrics
+        self.assertFalse(
+            fixture_mismatches,
+            f"external-reference required metrics missing schema assertions: {fixture_mismatches}",
+        )
+
     def test_passes_with_valid_payload(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "external_reference_benchmark.json"
