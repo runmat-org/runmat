@@ -2068,6 +2068,30 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_RESONANCE_Q_PROXY_LOW", codes)
         self.assertIn("EM_RESONANCE_FLUX_GAIN_LOW", codes)
 
+    def test_em_sweep_resonance_fields_are_required_in_core_metric_missing_reason(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(latest, [], protected=False)
+        core_missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "EM_CORE_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(core_missing)
+        self.assertIn("electromagnetic_applied_current_a", core_missing["detail"])
+        self.assertIn("electromagnetic_resonance_peak_frequency_hz", core_missing["detail"])
+
     def test_em_solver_conditioning_posture_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(

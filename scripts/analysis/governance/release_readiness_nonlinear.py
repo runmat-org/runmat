@@ -9076,6 +9076,7 @@ def evaluate_release_readiness(
                     if math.isfinite(value):
                         values.append(value)
             if not values:
+                missing_metric_fields.append(field)
                 continue
             observed = min(values)
             if field == "electromagnetic_applied_current_a":
