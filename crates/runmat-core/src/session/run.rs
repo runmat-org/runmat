@@ -368,7 +368,17 @@ impl RunMatSession {
 
         #[cfg(not(target_arch = "wasm32"))]
         let fusion_snapshot = if self.emit_fusion_plan {
-            build_fusion_snapshot(bytecode.accel_graph.as_ref(), &bytecode.fusion_groups, None)
+            let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)?;
+            let analysis = runmat_mir::analysis::analyze_assembly(&mir);
+            build_fusion_snapshot(
+                bytecode.accel_graph.as_ref(),
+                &bytecode.fusion_groups,
+                Some(crate::fusion::FusionPlannerMetadata {
+                    source: "semantic-mir-analysis+bytecode-accel-graph-runtime".to_string(),
+                    mir_local_fact_count: analysis.mir_locals.len(),
+                    mir_diagnostic_count: analysis.diagnostics.len(),
+                }),
+            )
         } else {
             None
         };

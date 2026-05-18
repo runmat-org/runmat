@@ -43,8 +43,8 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - (pending commit) Plan 7 visibility bridge in fusion snapshots
   - `FusionPlanSnapshot` now carries planner metadata (`source`, `mir_local_fact_count`, `mir_diagnostic_count`).
-  - `RunMatSession::compile_fusion_plan` now computes MIR + `AnalysisStore` and records analysis fact counts into fusion snapshot metadata, making semantic-analysis availability explicit in the fusion planning surface.
-  - Runtime execution snapshots keep default planner metadata (`bytecode-accel-graph`) until fusion candidate construction itself is migrated off bytecode as source-of-truth.
+  - `RunMatSession::compile_fusion_plan` and runtime execution path (`execute_internal` when fusion snapshot emission is enabled) now compute MIR + `AnalysisStore` and record analysis fact counts into fusion snapshot metadata, making semantic-analysis availability explicit in the fusion planning surface.
+  - Fusion candidate construction itself is still bytecode-graph-driven; this slice improves observability and contract clarity while that migration remains open.
   - Validation: `cargo test -p runmat --lib`, `cargo test -p runmat-config`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
 
 ## Next Resolution Items
