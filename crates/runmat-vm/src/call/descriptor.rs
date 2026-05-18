@@ -399,16 +399,6 @@ async fn forward_named_fallback(
     forward_builtin_feval(Value::FunctionHandle(name), args, requested_outputs).await
 }
 
-fn fallback_display_name_for_identity(
-    identity: &CallableIdentity,
-    fallback_policy: CallableFallbackPolicy,
-) -> Option<String> {
-    if !fallback_policy.allows_vm_name_fallback_for(identity) {
-        return None;
-    }
-    identity.display_name()
-}
-
 async fn execute_resolved_callable(
     identity: CallableIdentity,
     args: Vec<Value>,
@@ -445,7 +435,7 @@ async fn execute_resolved_callable(
             {
                 return result;
             }
-            let Some(name) = fallback_display_name_for_identity(&other, fallback_policy) else {
+            let Some(name) = fallback_policy.vm_fallback_name_for(&other) else {
                 let name = other
                     .display_name()
                     .unwrap_or_else(|| "<unnamed callable>".into());
@@ -494,7 +484,7 @@ async fn try_execute_resolved_callable(
             {
                 return result.map(Some);
             }
-            let Some(name) = fallback_display_name_for_identity(&other, fallback_policy) else {
+            let Some(name) = fallback_policy.vm_fallback_name_for(&other) else {
                 return Ok(None);
             };
             forward_named_fallback(name, args, requested_outputs)

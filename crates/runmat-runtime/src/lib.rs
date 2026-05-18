@@ -154,10 +154,7 @@ async fn dispatch_named_with_requested_outputs(
     args: &[Value],
     requested_outputs: usize,
 ) -> BuiltinResult<Value> {
-    match requested_outputs {
-        out_count if out_count != 1 => call_builtin_async_with_outputs(name, args, out_count).await,
-        _ => call_builtin_async(name, args).await,
-    }
+    call_builtin_async_with_outputs(name, args, requested_outputs).await
 }
 
 async fn dispatch_callable_with_policy(
@@ -177,10 +174,8 @@ async fn dispatch_callable_with_policy(
         return result;
     }
 
-    if fallback_policy.allows_vm_name_fallback_for(&identity) {
-        if let Some(name) = identity.display_name() {
-            return dispatch_named_with_requested_outputs(&name, &args, requested_outputs).await;
-        }
+    if let Some(name) = fallback_policy.vm_fallback_name_for(&identity) {
+        return dispatch_named_with_requested_outputs(&name, &args, requested_outputs).await;
     }
 
     Err(undefined_callable_error(identity.display_name().as_deref()))

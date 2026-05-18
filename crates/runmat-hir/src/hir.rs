@@ -392,6 +392,13 @@ impl CallableFallbackPolicy {
         }
     }
 
+    pub fn vm_fallback_name_for(self, identity: &CallableIdentity) -> Option<String> {
+        if !self.allows_vm_name_fallback_for(identity) {
+            return None;
+        }
+        identity.display_name()
+    }
+
     pub fn supports_vm_static_call(self) -> bool {
         matches!(
             self,
@@ -1323,5 +1330,22 @@ mod tests {
         );
         assert!(CallableFallbackPolicy::ExternalBoundary
             .allows_vm_name_fallback_for(&qualified_external));
+
+        assert_eq!(
+            CallableFallbackPolicy::RuntimeNameResolution.vm_fallback_name_for(&dynamic),
+            Some("sqrt".into())
+        );
+        assert_eq!(
+            CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&dynamic),
+            None
+        );
+        assert_eq!(
+            CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&single_external),
+            None
+        );
+        assert_eq!(
+            CallableFallbackPolicy::ExternalBoundary.vm_fallback_name_for(&qualified_external),
+            Some("OverIdx.plus".into())
+        );
     }
 }
