@@ -536,14 +536,11 @@ pub fn run_electromagnetic_with_options(
         .zip(vector_potential_imag.iter())
         .map(|(real, imag)| (real * real + imag * imag).sqrt())
         .collect::<Vec<_>>();
-    let mut flux_density = vec![0.0_f64; node_count];
-    for i in 1..(node_count - 1) {
-        flux_density[i] = ((vector_potential[i + 1] - vector_potential[i - 1]) / (2.0 * h)).abs();
-    }
-    if node_count > 1 {
-        flux_density[0] = flux_density[1];
-        flux_density[node_count - 1] = flux_density[node_count - 2];
-    }
+    let flux_density = flux_density_from_complex_vector_potential(
+        &vector_potential_real,
+        &vector_potential_imag,
+        h,
+    );
 
     let real_applied = apply_k(&summary.operator, &vector_potential_real);
     let imag_applied = apply_k(&summary.operator, &vector_potential_imag);
@@ -1672,6 +1669,24 @@ fn block_dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
+fn flux_density_from_complex_vector_potential(real: &[f64], imag: &[f64], h: f64) -> Vec<f64> {
+    let node_count = real.len().min(imag.len());
+    let mut flux_density = vec![0.0_f64; node_count];
+    if node_count < 2 || !h.is_finite() || h <= 0.0 {
+        return flux_density;
+    }
+
+    let inv_two_h = 0.5 / h;
+    for i in 1..(node_count - 1) {
+        let grad_real = (real[i + 1] - real[i - 1]) * inv_two_h;
+        let grad_imag = (imag[i + 1] - imag[i - 1]) * inv_two_h;
+        flux_density[i] = (grad_real * grad_real + grad_imag * grad_imag).sqrt();
+    }
+    flux_density[0] = flux_density[1];
+    flux_density[node_count - 1] = flux_density[node_count - 2];
+    flux_density
+}
+
 #[cfg(test)]
 mod tests {
     use runmat_analysis_core::{ConductivityFrequencyPoint, MaterialElectricalModel};
@@ -1679,7 +1694,8 @@ mod tests {
     use super::{
         conductivity_frequency_sample, conductivity_scale_at_frequency,
         dispersive_loss_scale_at_frequency, dispersive_phase_attenuation_for_loss_scale,
-        relative_permeability_scale_at_frequency, relative_permittivity_scale_at_frequency,
+        flux_density_from_complex_vector_potential, relative_permeability_scale_at_frequency,
+        relative_permittivity_scale_at_frequency,
     };
 
     #[test]
@@ -1853,5 +1869,25 @@ mod tests {
         assert!(sample.has_relative_permeability_frequency_response);
         assert!(sample.relative_permittivity_scale > 0.0);
         assert!(sample.relative_permeability_scale > 0.0);
+    }
+
+    #[test]
+    fn complex_flux_density_reconstruction_preserves_quadrature_gradients() {
+        let real = vec![0.0, 1.0, 0.0, -1.0, 0.0];
+        let imag = vec![1.0, 0.0, -1.0, 0.0, 1.0];
+        let flux_density = flux_density_from_complex_vector_potential(&real, &imag, 0.25);
+
+        assert!(flux_density[2] > 3.5);
+        assert!((flux_density[0] - flux_density[1]).abs() < 1.0e-12);
+        assert!((flux_density[4] - flux_density[3]).abs() < 1.0e-12);
+    }
+
+    #[test]
+    fn complex_flux_density_reconstruction_zero_for_uniform_phasor() {
+        let real = vec![2.0; 8];
+        let imag = vec![-1.0; 8];
+        let flux_density = flux_density_from_complex_vector_potential(&real, &imag, 0.1);
+
+        assert!(flux_density.iter().all(|value| value.abs() <= 1.0e-12));
     }
 }

@@ -21,6 +21,7 @@ Last updated: 2026-05-18
 1. Frequency-dependent constitutive modeling in EM solve coefficients.
    Baseline complete: material `sigma(omega)` interpolation and dispersive-loss coupling from additive frequency-response points with EM governance thresholds.
 2. Higher-fidelity Maxwell-form implementation depth beyond current proxy approximations.
+   Baseline increment landed: electromagnetic flux-density reconstruction now uses complex-gradient magnitude from harmonic real/imag vector-potential solutions, replacing gradient-of-magnitude proxy reconstruction so quadrature-phase flux variation remains represented in solver evidence.
 3. Stronger external-reference EM comparators integrated into protected-branch policy.
    Baseline complete: external-reference benchmark generation now compares expanded EM threshold-assertion metrics (including `sigma(omega)`, dispersive-loss, homogeneous/heterogeneous quality proxies, and boundary/phased-source entries) and governance validation enforces complete EM fixture metric-set presence in enforce mode.
 4. Continued robustness/performance hardening under larger EM workloads.
