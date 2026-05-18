@@ -4392,6 +4392,62 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "reference": 0.0,
             "pass": True,
         },
+        {
+            "name": "gpu_solver_fallback_apply_count",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "gpu_solver_fallback_apply_count",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "gpu_solver_fallback_apply_count",
+            "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "gpu_solver_fallback_apply_count",
+            "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "gpu_solver_fallback_apply_count",
+            "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "gpu_solver_fallback_apply_count",
+            "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "gpu_solver_fallback_apply_count",
+            "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "gpu_solver_fallback_apply_count",
+            "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
     ]
 
 

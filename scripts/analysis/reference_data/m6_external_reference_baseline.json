@@ -5795,6 +5795,70 @@
       "reference": 0.0,
       "tolerance_abs": 0.0,
       "tolerance_rel": 0.0
+    },
+    {
+      "name": "gpu_solver_fallback_apply_count",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "gpu_solver_fallback_apply_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "gpu_solver_fallback_apply_count",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "gpu_solver_fallback_apply_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "gpu_solver_fallback_apply_count",
+      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+      "field": "gpu_solver_fallback_apply_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "gpu_solver_fallback_apply_count",
+      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+      "field": "gpu_solver_fallback_apply_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "gpu_solver_fallback_apply_count",
+      "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+      "field": "gpu_solver_fallback_apply_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "gpu_solver_fallback_apply_count",
+      "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+      "field": "gpu_solver_fallback_apply_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "gpu_solver_fallback_apply_count",
+      "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
+      "field": "gpu_solver_fallback_apply_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 1.0
+    },
+    {
+      "name": "gpu_solver_fallback_apply_count",
+      "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+      "field": "gpu_solver_fallback_apply_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 1.0
     }
   ]
 }
