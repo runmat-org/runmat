@@ -438,8 +438,7 @@ pub async fn dispatch_indexing(
                 Value::FunctionHandle(_)
                 | Value::SemanticFunctionHandle { .. }
                 | Value::Closure(_) => {
-                    let numeric = linear_index_values_to_f64(&raw_indices).await?;
-                    let args = numeric.into_iter().map(Value::Num).collect::<Vec<_>>();
+                    let args = raw_indices;
                     match crate::call::feval::execute_feval(base, args, 1, semantic_registry)
                         .await?
                     {
@@ -612,6 +611,22 @@ pub async fn dispatch_indexing(
                         &numeric,
                     )?;
                     stack.push(object_subsref_paren(Value::HandleObject(handle), selectors).await?);
+                }
+                Value::FunctionHandle(_)
+                | Value::SemanticFunctionHandle { .. }
+                | Value::Closure(_) => {
+                    if *colon_mask != 0 || *end_mask != 0 {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedFunctionHandleSelector",
+                            "Function handle call does not support colon or end selector syntax",
+                        ));
+                    }
+                    let args = numeric;
+                    match crate::call::feval::execute_feval(base, args, 1, semantic_registry)
+                        .await?
+                    {
+                        crate::call::feval::FevalDispatch::Completed(value) => stack.push(value),
+                    }
                 }
                 Value::Tensor(t) => {
                     if *dims == 1 {

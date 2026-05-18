@@ -1463,6 +1463,34 @@ fn dynamic_function_handle_call_uses_semantic_vm() {
 }
 
 #[test]
+fn dynamic_function_handle_tensor_arg_uses_semantic_vm() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = "f = @sum; y = f([1, 2, 3]);";
+    let prepared = session
+        .compile_input(source)
+        .expect("compile dynamic function handle tensor-arg call");
+    assert!(
+        prepared.bytecode.layout.is_some(),
+        "dynamic function handle tensor-arg call should compile through semantic HIR/MIR/VM"
+    );
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateFunctionHandle(name) if name == "sum"
+        )),
+        "builtin function handle literal should lower to typed function-handle bytecode"
+    );
+
+    block_on(session.execute_outcome(source)).expect("exec succeeds");
+    let outcome = block_on(session.execute_outcome("y")).expect("read y");
+    let value = outcome
+        .flow
+        .durable_workspace_value()
+        .expect("y should be readable from workspace");
+    assert_eq!(value.to_string(), "6");
+}
+
+#[test]
 fn local_function_handle_uses_semantic_handle() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "f = @inc; y = f(2);\nfunction z = inc(x)\n  z = x + 1;\nend";
