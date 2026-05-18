@@ -388,11 +388,7 @@ async fn call_builtin_with_requested_outputs(
     args: &[Value],
     requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
-    if requested_outputs != 1 {
-        runmat_runtime::call_builtin_async_with_outputs(name, args, requested_outputs).await
-    } else {
-        runmat_runtime::call_builtin_async(name, args).await
-    }
+    runmat_runtime::call_builtin_async_with_outputs(name, args, requested_outputs).await
 }
 
 async fn forward_named_fallback(

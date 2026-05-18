@@ -319,16 +319,8 @@ pub(crate) async fn call_getfield_with_indices(
             .map_err(|e| format!("getfield idx build: {e}"))?;
         getfield_args.push(Value::Cell(idx_cell));
     }
-    if requested_outputs == 1 {
-        runmat_runtime::call_builtin_async("getfield", &getfield_args).await
-    } else {
-        runmat_runtime::call_builtin_async_with_outputs(
-            "getfield",
-            &getfield_args,
-            requested_outputs,
-        )
+    runmat_runtime::call_builtin_async_with_outputs("getfield", &getfield_args, requested_outputs)
         .await
-    }
 }
 
 pub(crate) async fn call_object_operator_method(

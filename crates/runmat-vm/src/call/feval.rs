@@ -11,15 +11,7 @@ pub async fn forward_builtin_feval(
     let mut argv = Vec::with_capacity(1 + args.len());
     argv.push(func_value);
     argv.extend(args);
-    if requested_outputs == 1 {
-        call_runtime_feval(&argv).await
-    } else {
-        runmat_runtime::call_builtin_async_with_outputs("feval", &argv, requested_outputs).await
-    }
-}
-
-pub async fn call_runtime_feval(args: &[Value]) -> Result<Value, RuntimeError> {
-    runmat_runtime::call_feval_async(args).await
+    runmat_runtime::call_builtin_async_with_outputs("feval", &argv, requested_outputs).await
 }
 
 pub enum FevalDispatch {
