@@ -6742,6 +6742,7 @@ def evaluate_release_readiness(
                 )
             )
 
+    assertion_field_fallback_specs = {}
     em_records = [
         rec
         for rec in report_records(latest)
@@ -7523,6 +7524,80 @@ def evaluate_release_readiness(
                 ),
             ],
         }
+        assertion_field_fallback_specs = {
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_assignment_coverage_ratio",
+            ): "electromagnetic_assignment_coverage_ratio",
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_assignment_coverage_ratio",
+            ): "electromagnetic_assignment_coverage_ratio",
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_boundary_anchor_ratio",
+            ): "electromagnetic_boundary_anchor_ratio",
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_boundary_anchor_ratio",
+            ): "electromagnetic_boundary_anchor_ratio",
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_boundary_energy_ratio",
+            ): "electromagnetic_boundary_energy_ratio",
+            (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "em_boundary_penalty_conditioning_contribution",
+            ): "electromagnetic_boundary_penalty_conditioning_contribution",
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_conductivity_spread_ratio",
+            ): "electromagnetic_conductivity_spread_ratio",
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_conductivity_spread_ratio",
+            ): "electromagnetic_conductivity_spread_ratio",
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_fallback_coefficient_ratio",
+            ): "electromagnetic_fallback_coefficient_ratio",
+            (
+                "electromagnetic_reference_boundary_kernel_gpu_provider",
+                "em_boundary_kernel_insulation_leakage_proxy",
+            ): "electromagnetic_insulation_leakage_proxy",
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_material_heterogeneity_index",
+            ): "electromagnetic_material_heterogeneity_index",
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_material_heterogeneity_index",
+            ): "electromagnetic_material_heterogeneity_index",
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_region_contrast_index",
+            ): "electromagnetic_region_coefficient_contrast_index",
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_relative_permeability_spread_ratio",
+            ): "electromagnetic_relative_permeability_spread_ratio",
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_relative_permeability_spread_ratio",
+            ): "electromagnetic_relative_permeability_spread_ratio",
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
+                "em_homogeneous_relative_permittivity_spread_ratio",
+            ): "electromagnetic_relative_permittivity_spread_ratio",
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "em_heterogeneous_relative_permittivity_spread_ratio",
+            ): "electromagnetic_relative_permittivity_spread_ratio",
+            (
+                "electromagnetic_reference_overlap_interference_gpu_provider",
+                "em_overlap_source_overlap_ratio",
+            ): "electromagnetic_source_overlap_ratio",
+        }
         for field, mode, threshold, code, label in metric_specs:
             values = []
             for rec in em_records:
@@ -7582,6 +7657,19 @@ def evaluate_release_readiness(
                 observed = threshold_assertion_observed(rec, assertion_name)
                 if observed is not None:
                     values.append(observed)
+            if not values:
+                fallback_field = assertion_field_fallback_specs.get(
+                    (fixture_id, assertion_name)
+                )
+                if fallback_field is not None:
+                    for rec in em_records:
+                        if rec.get("fixture_id") != fixture_id:
+                            continue
+                        raw_value = rec.get(fallback_field)
+                        if isinstance(raw_value, (int, float)):
+                            value = float(raw_value)
+                            if math.isfinite(value):
+                                values.append(value)
             if not values:
                 missing_metric_fields.append(f"{fixture_id}.{assertion_name}")
                 continue
@@ -9056,6 +9144,15 @@ def evaluate_release_readiness(
                 if not baseline_records:
                     continue
                 latest_value = threshold_assertion_observed(latest_rec, assertion_name)
+                fallback_field = assertion_field_fallback_specs.get(
+                    (fixture_id, assertion_name)
+                )
+                if latest_value is None and fallback_field is not None:
+                    latest_raw = latest_rec.get(fallback_field)
+                    if isinstance(latest_raw, (int, float)):
+                        latest_float = float(latest_raw)
+                        if math.isfinite(latest_float):
+                            latest_value = latest_float
                 if latest_value is None:
                     continue
                 baseline_values = []
@@ -9063,6 +9160,13 @@ def evaluate_release_readiness(
                     observed = threshold_assertion_observed(rec, assertion_name)
                     if observed is not None:
                         baseline_values.append(observed)
+                        continue
+                    if fallback_field is not None:
+                        baseline_raw = rec.get(fallback_field)
+                        if isinstance(baseline_raw, (int, float)):
+                            baseline_float = float(baseline_raw)
+                            if math.isfinite(baseline_float):
+                                baseline_values.append(baseline_float)
                 if not baseline_values:
                     continue
                 baseline_value = statistics.median(baseline_values)

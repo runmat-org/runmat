@@ -1944,6 +1944,52 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_ENERGY_IMBALANCE_TREND_WORSENING", codes)
 
+    def test_em_homogeneous_conductivity_posture_uses_raw_field_fallback(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_conductivity_spread_ratio": 1.4,
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_RATIO"
+        ] = "1.1"
+        result = evaluate_release_readiness(latest, [], protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_HOMOGENEOUS_CONDUCTIVITY_SPREAD_RATIO_HIGH", codes)
+
+    def test_em_core_assignment_trend_uses_raw_field_fallback(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_assignment_coverage_ratio": 0.5,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_assignment_coverage_ratio": 0.95,
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_ASSIGNMENT_COVERAGE_DROP_TREND_RATIO"
+        ] = "1.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_CORE_ASSIGNMENT_COVERAGE_TREND_WORSENING", codes)
+
     def test_em_flux_phasor_coherence_trend_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
