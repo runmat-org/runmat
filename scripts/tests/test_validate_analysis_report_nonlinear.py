@@ -116,6 +116,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 {
                     "plasticity_nonlinear_severity_peak",
                     "plasticity_nonlinear_severity_mean",
+                    "plasticity_nonlinear_load_amplification_ratio",
+                    "plasticity_nonlinear_load_realization_ratio",
                 },
             )
             | {
@@ -129,12 +131,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
             },
             _record(
                 "nonlinear_contact_proxy_gpu_provider",
-                {"contact_nonlinear_severity_peak", "contact_nonlinear_severity_mean"},
+                {
+                    "contact_nonlinear_severity_peak",
+                    "contact_nonlinear_severity_mean",
+                    "contact_nonlinear_load_amplification_ratio",
+                    "contact_nonlinear_load_realization_ratio",
+                },
             )
             | {"contact_nonlinear_severity": 0.1},
             _record(
                 "nonlinear_contact_frictionless_reference_gpu_provider",
-                {"contact_frictionless_severity_peak", "contact_frictionless_severity_mean"},
+                {
+                    "contact_frictionless_severity_peak",
+                    "contact_frictionless_severity_mean",
+                    "contact_frictionless_load_amplification_ratio",
+                    "contact_frictionless_load_realization_ratio",
+                },
             )
             | {"contact_nonlinear_severity": 0.1},
             _record(
@@ -152,6 +164,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 {
                     "plasticity_hardening_reference_severity_peak",
                     "plasticity_hardening_reference_severity_mean",
+                    "plasticity_hardening_reference_load_amplification_ratio",
+                    "plasticity_hardening_reference_load_realization_ratio",
                 },
             ),
             _record(
@@ -769,6 +783,70 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         for item in record["threshold_assertions"]
                         if item["name"]
                         != "plasticity_hardening_reference_complex_load_amplification_ratio"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_plastic_proxy_load_realization_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "nonlinear_plasticity_proxy_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "plasticity_nonlinear_load_realization_ratio"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_contact_proxy_load_realization_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "nonlinear_contact_proxy_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "contact_nonlinear_load_realization_ratio"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_contact_frictionless_reference_load_realization_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "nonlinear_contact_frictionless_reference_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "contact_frictionless_load_realization_ratio"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_plastic_reference_load_realization_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "nonlinear_plastic_hardening_reference_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "plasticity_hardening_reference_load_realization_ratio"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

@@ -34,18 +34,26 @@ REQUIRED_METRICS_BY_FIXTURE = {
     "nonlinear_plasticity_proxy_gpu_provider": {
         "plasticity_nonlinear_severity_peak",
         "plasticity_nonlinear_severity_mean",
+        "plasticity_nonlinear_load_amplification_ratio",
+        "plasticity_nonlinear_load_realization_ratio",
     },
     "nonlinear_contact_proxy_gpu_provider": {
         "contact_nonlinear_severity_peak",
         "contact_nonlinear_severity_mean",
+        "contact_nonlinear_load_amplification_ratio",
+        "contact_nonlinear_load_realization_ratio",
     },
     "nonlinear_contact_frictionless_reference_gpu_provider": {
         "contact_frictionless_severity_peak",
         "contact_frictionless_severity_mean",
+        "contact_frictionless_load_amplification_ratio",
+        "contact_frictionless_load_realization_ratio",
     },
     "nonlinear_plastic_hardening_reference_gpu_provider": {
         "plasticity_hardening_reference_severity_peak",
         "plasticity_hardening_reference_severity_mean",
+        "plasticity_hardening_reference_load_amplification_ratio",
+        "plasticity_hardening_reference_load_realization_ratio",
     },
     "thermo_gradient_benign_gpu_provider": {
         "thermo_gradient_benign_spread_ratio",

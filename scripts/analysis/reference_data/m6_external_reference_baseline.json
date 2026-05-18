@@ -4135,6 +4135,86 @@
       "reference": 0.8537499999999999,
       "tolerance_abs": 0.12,
       "tolerance_rel": 0.2
+    },
+    {
+      "name": "plasticity_nonlinear_load_amplification_ratio",
+      "fixture_id": "nonlinear_plasticity_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_nonlinear_load_amplification_ratio",
+      "reference": 1.5157894736842106,
+      "tolerance_abs": 0.25,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "plasticity_nonlinear_load_realization_ratio",
+      "fixture_id": "nonlinear_plasticity_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_nonlinear_load_realization_ratio",
+      "reference": 0.8298611111111112,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "contact_nonlinear_load_amplification_ratio",
+      "fixture_id": "nonlinear_contact_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_nonlinear_load_amplification_ratio",
+      "reference": 1.4117647058823533,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "contact_nonlinear_load_realization_ratio",
+      "fixture_id": "nonlinear_contact_proxy_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_nonlinear_load_realization_ratio",
+      "reference": 0.8541666666666665,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "contact_frictionless_load_amplification_ratio",
+      "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_frictionless_load_amplification_ratio",
+      "reference": 1.4117647058823533,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "contact_frictionless_load_realization_ratio",
+      "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "contact_frictionless_load_realization_ratio",
+      "reference": 0.8541666666666665,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "plasticity_hardening_reference_load_amplification_ratio",
+      "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_hardening_reference_load_amplification_ratio",
+      "reference": 1.5180265654648957,
+      "tolerance_abs": 0.25,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "plasticity_hardening_reference_load_realization_ratio",
+      "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "plasticity_hardening_reference_load_realization_ratio",
+      "reference": 0.8293750000000001,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.2
     }
   ]
 }

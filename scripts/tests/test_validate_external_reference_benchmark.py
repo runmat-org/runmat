@@ -172,6 +172,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "plasticity_nonlinear_load_amplification_ratio",
+            "fixture_id": "nonlinear_plasticity_proxy_gpu_provider",
+            "observed": 1.516,
+            "reference": 1.516,
+            "pass": True,
+        },
+        {
+            "name": "plasticity_nonlinear_load_realization_ratio",
+            "fixture_id": "nonlinear_plasticity_proxy_gpu_provider",
+            "observed": 0.83,
+            "reference": 0.83,
+            "pass": True,
+        },
+        {
             "name": "contact_nonlinear_severity_peak",
             "fixture_id": "nonlinear_contact_proxy_gpu_provider",
             "observed": 0.95,
@@ -183,6 +197,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "nonlinear_contact_proxy_gpu_provider",
             "observed": 0.811,
             "reference": 0.811,
+            "pass": True,
+        },
+        {
+            "name": "contact_nonlinear_load_amplification_ratio",
+            "fixture_id": "nonlinear_contact_proxy_gpu_provider",
+            "observed": 1.412,
+            "reference": 1.412,
+            "pass": True,
+        },
+        {
+            "name": "contact_nonlinear_load_realization_ratio",
+            "fixture_id": "nonlinear_contact_proxy_gpu_provider",
+            "observed": 0.854,
+            "reference": 0.854,
             "pass": True,
         },
         {
@@ -200,6 +228,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "contact_frictionless_load_amplification_ratio",
+            "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+            "observed": 1.412,
+            "reference": 1.412,
+            "pass": True,
+        },
+        {
+            "name": "contact_frictionless_load_realization_ratio",
+            "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+            "observed": 0.854,
+            "reference": 0.854,
+            "pass": True,
+        },
+        {
             "name": "plasticity_hardening_reference_severity_peak",
             "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
             "observed": 0.233,
@@ -211,6 +253,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
             "observed": 0.194,
             "reference": 0.194,
+            "pass": True,
+        },
+        {
+            "name": "plasticity_hardening_reference_load_amplification_ratio",
+            "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
+            "observed": 1.518,
+            "reference": 1.518,
+            "pass": True,
+        },
+        {
+            "name": "plasticity_hardening_reference_load_realization_ratio",
+            "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
+            "observed": 0.829,
+            "reference": 0.829,
             "pass": True,
         },
         {
