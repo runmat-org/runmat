@@ -54,6 +54,27 @@ pub(crate) async fn expand_brace_values(
     raw_indices: &[Value],
     pad_to_outputs: Option<usize>,
 ) -> Result<Vec<Value>, RuntimeError> {
+    async fn expand_object_brace_values(
+        base: Value,
+        raw_indices: &[Value],
+        pad_to_outputs: Option<usize>,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        let value = call_object_index_descriptor_method_with_outputs(
+            ObjectIndexDescriptor::subsref_brace(
+                base,
+                ObjectIndexSelector::IndexValues {
+                    values: raw_indices.to_vec(),
+                },
+            ),
+            pad_to_outputs,
+        )
+        .await?;
+        Ok(match value {
+            Value::OutputList(values) => values,
+            other => vec![other],
+        })
+    }
+
     let mut values = match base {
         Value::Cell(ca) => {
             if raw_indices.is_empty() {
@@ -66,24 +87,13 @@ pub(crate) async fn expand_brace_values(
                 expand_cell_indices(&ca, raw_indices)?
             }
         }
-        Value::Object(obj) => vec![
-            call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-                Value::Object(obj),
-                ObjectIndexSelector::IndexValues {
-                    values: raw_indices.to_vec(),
-                },
-            ))
-            .await?,
-        ],
-        Value::HandleObject(handle) => vec![
-            call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
-                Value::HandleObject(handle),
-                ObjectIndexSelector::IndexValues {
-                    values: raw_indices.to_vec(),
-                },
-            ))
-            .await?,
-        ],
+        Value::Object(obj) => {
+            expand_object_brace_values(Value::Object(obj), raw_indices, pad_to_outputs).await?
+        }
+        Value::HandleObject(handle) => {
+            expand_object_brace_values(Value::HandleObject(handle), raw_indices, pad_to_outputs)
+                .await?
+        }
         _ => {
             return Err(crate::interpreter::errors::mex(
                 "CellExpansionOnNonCell",
@@ -418,13 +428,20 @@ pub(crate) fn class_defines_member_subsasgn(class: &runmat_builtins::ClassDef) -
 pub(crate) async fn call_object_index_descriptor_method(
     descriptor: ObjectIndexDescriptor,
 ) -> Result<Value, RuntimeError> {
+    call_object_index_descriptor_method_with_outputs(descriptor, None).await
+}
+
+pub(crate) async fn call_object_index_descriptor_method_with_outputs(
+    descriptor: ObjectIndexDescriptor,
+    requested_outputs: Option<usize>,
+) -> Result<Value, RuntimeError> {
     let (base, method, args) = descriptor.into_method_invocation()?;
     crate::call::closures::call_method_or_member_index_with_outputs(
         base,
         CallableIdentity::DynamicName(SymbolName(method.clone())),
         Some(method),
         args,
-        None,
+        requested_outputs,
         CallableFallbackPolicy::ObjectDispatch,
     )
     .await
