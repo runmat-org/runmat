@@ -1221,14 +1221,28 @@ pub async fn dispatch_indexing(
                     );
                 }
                 Value::StringArray(sa) => {
-                    let selectors =
-                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
-                            .await
-                            .map_err(|e| format!("slice: {e}"))?;
-                    let plan = build_index_plan(&selectors, *dims, &sa.shape)
-                        .map_err(|e| map_slice_plan_error("slice", e))?;
+                    let vm_plan = build_expr_index_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &sa.shape,
+                        },
+                        |dim_len, expr| {
+                            let expr = expr.clone();
+                            let vars_ref = &*vars;
+                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
+                        },
+                    )
+                    .await?;
                     stack.push(
-                        idx_read_slice::gather_string_slice(&sa, &plan)
+                        idx_read_slice::gather_string_slice(&sa, &vm_plan)
                             .map_err(|e| format!("slice: {e}"))?,
                     );
                 }

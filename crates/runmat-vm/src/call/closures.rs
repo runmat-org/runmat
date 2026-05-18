@@ -8,7 +8,7 @@ use crate::call::shared::{
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
 use runmat_builtins::{builtin_functions, lookup_method, Access, Closure, Value};
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, SymbolName};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, SymbolName};
 use runmat_runtime::RuntimeError;
 
 fn requested_output_arity(requested_outputs: Option<usize>) -> usize {
@@ -17,10 +17,6 @@ fn requested_output_arity(requested_outputs: Option<usize>) -> usize {
 
 fn dynamic_identity(name: String) -> CallableIdentity {
     CallableIdentity::DynamicName(SymbolName(name))
-}
-
-fn method_identity(name: String) -> CallableIdentity {
-    CallableIdentity::Method(MethodId(name))
 }
 
 async fn call_identity_with_policy(
@@ -83,11 +79,11 @@ async fn call_member_index_on_object_like(
         full_args.push(receiver.clone());
         full_args.extend(args.iter().cloned());
         return call_identity_with_policy(
-            method_identity(m.function_name.clone()),
+            dynamic_identity(m.function_name.clone()),
             Some(m.function_name),
             full_args,
             requested_outputs,
-            fallback_policy,
+            CallableFallbackPolicy::RuntimeNameResolution,
         )
         .await;
     }
@@ -283,11 +279,11 @@ pub async fn call_method_or_member_index_with_outputs(
                     return Err(format!("Method '{}' is not static", name).into());
                 }
                 return call_identity_with_policy(
-                    method_identity(m.function_name.clone()),
+                    dynamic_identity(m.function_name.clone()),
                     Some(m.function_name),
                     args,
                     requested_outputs,
-                    CallableFallbackPolicy::ExternalBoundary,
+                    CallableFallbackPolicy::RuntimeNameResolution,
                 )
                 .await;
             }
