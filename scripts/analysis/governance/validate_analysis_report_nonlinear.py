@@ -318,6 +318,10 @@ EM_FREQUENCY_REQUIRED_FIELDS = {
     "electromagnetic_reference_frequency_hz",
 }
 
+EM_CONDITIONING_REQUIRED_FIELDS = {
+    "electromagnetic_solver_conditioning_proxy",
+}
+
 PERFORMANCE_REQUIRED_FIELDS = {
     "nonlinear_assembly_gpu_provider": {
         "gpu_speedup_ratio",
@@ -594,6 +598,17 @@ def main() -> int:
                 errors.append(
                     "fixture "
                     f"{fixture_id} missing finite EM reference-frequency fields: "
+                    + ", ".join(missing_fields)
+                )
+            missing_fields = []
+            for field in sorted(EM_CONDITIONING_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM conditioning fields: "
                     + ", ".join(missing_fields)
                 )
 

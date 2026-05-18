@@ -3019,6 +3019,12 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO", "0.8"),
         )
     )
+    em_max_solver_conditioning_proxy_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_PROXY",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_PROXY", "5.0"),
+        )
+    )
     em_min_reference_frequency_hz_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MIN_REFERENCE_FREQUENCY_HZ",
@@ -3081,6 +3087,12 @@ def evaluate_release_readiness(
             profile_default(
                 "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO", "1.25"
             ),
+        )
+    )
+    em_max_solver_conditioning_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_TREND_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_TREND_RATIO", "1.25"),
         )
     )
     em_max_reference_frequency_drop_trend_ratio_threshold = float(
@@ -4482,6 +4494,7 @@ def evaluate_release_readiness(
     em_min_core_assignment_coverage_ratio = None
     em_max_core_fallback_coefficient_ratio = None
     em_min_boundary_anchor_ratio = None
+    em_max_solver_conditioning_proxy = None
     em_min_reference_frequency_hz = None
     em_min_sweep_count = None
     em_min_resonance_peak_frequency_hz = None
@@ -4525,6 +4538,7 @@ def evaluate_release_readiness(
     em_breach_rate = None
     em_energy_imbalance_trend_ratio = None
     em_flux_divergence_trend_ratio = None
+    em_solver_conditioning_trend_ratio = None
     em_reference_frequency_drop_trend_ratio = None
     em_sigma_omega_scale_mean_drop_trend_ratio = None
     em_sigma_omega_response_coverage_drop_trend_ratio = None
@@ -7284,6 +7298,32 @@ def evaluate_release_readiness(
                     )
                 )
 
+        conditioning_values = []
+        for rec in em_records:
+            raw_value = rec.get("electromagnetic_solver_conditioning_proxy")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    conditioning_values.append(value)
+        if conditioning_values:
+            em_max_solver_conditioning_proxy = max(conditioning_values)
+            conditioning_breached = (
+                em_max_solver_conditioning_proxy > em_max_solver_conditioning_proxy_threshold
+            )
+            breaches.append(conditioning_breached)
+            if conditioning_breached:
+                reasons.append(
+                    Reason(
+                        code="EM_SOLVER_CONDITIONING_PROXY_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "max EM solver-conditioning proxy "
+                            f"{em_max_solver_conditioning_proxy:.3f} exceeds threshold "
+                            f"{em_max_solver_conditioning_proxy_threshold:.3f}"
+                        ),
+                    )
+                )
+
         sweep_metric_specs = [
             (
                 "electromagnetic_reference_frequency_hz",
@@ -9503,6 +9543,27 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
+
+        em_solver_conditioning_trend_ratio = fixture_trend_ratio(
+            "electromagnetic_solver_conditioning_proxy",
+            ratio_mode="increase",
+        )
+        if (
+            em_solver_conditioning_trend_ratio is not None
+            and em_solver_conditioning_trend_ratio
+            > em_max_solver_conditioning_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_SOLVER_CONDITIONING_PROXY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM solver-conditioning trend ratio "
+                        f"{em_solver_conditioning_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_solver_conditioning_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
 
         em_sweep_count_drop_trend_ratio = fixture_trend_ratio(
             "electromagnetic_sweep_count", latest_reducer=min, ratio_mode="drop"
@@ -11991,6 +12052,8 @@ def evaluate_release_readiness(
         "em_max_core_fallback_coefficient_ratio_threshold": em_max_core_fallback_coefficient_ratio_threshold,
         "em_min_boundary_anchor_ratio": em_min_boundary_anchor_ratio,
         "em_min_boundary_anchor_ratio_threshold": em_min_boundary_anchor_ratio_threshold,
+        "em_max_solver_conditioning_proxy": em_max_solver_conditioning_proxy,
+        "em_max_solver_conditioning_proxy_threshold": em_max_solver_conditioning_proxy_threshold,
         "em_min_reference_frequency_hz": em_min_reference_frequency_hz,
         "em_min_reference_frequency_hz_threshold": em_min_reference_frequency_hz_threshold,
         "em_min_sweep_count": em_min_sweep_count,
@@ -12077,6 +12140,8 @@ def evaluate_release_readiness(
         "em_max_energy_imbalance_trend_ratio_threshold": em_max_energy_imbalance_trend_ratio_threshold,
         "em_flux_divergence_trend_ratio": em_flux_divergence_trend_ratio,
         "em_max_flux_divergence_trend_ratio_threshold": em_max_flux_divergence_trend_ratio_threshold,
+        "em_solver_conditioning_trend_ratio": em_solver_conditioning_trend_ratio,
+        "em_max_solver_conditioning_trend_ratio_threshold": em_max_solver_conditioning_trend_ratio_threshold,
         "em_reference_frequency_drop_trend_ratio": em_reference_frequency_drop_trend_ratio,
         "em_max_reference_frequency_drop_trend_ratio_threshold": em_max_reference_frequency_drop_trend_ratio_threshold,
         "em_sweep_count_drop_trend_ratio": em_sweep_count_drop_trend_ratio,
@@ -12946,6 +13011,10 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('em_min_boundary_kernel_localization_ratio_threshold') if result.get('em_min_boundary_kernel_localization_ratio_threshold') is not None else '-'}`/`{result.get('em_min_boundary_kernel_ground_anchor_effectiveness_ratio_threshold') if result.get('em_min_boundary_kernel_ground_anchor_effectiveness_ratio_threshold') is not None else '-'}`/`{result.get('em_max_boundary_kernel_insulation_leakage_proxy_threshold') if result.get('em_max_boundary_kernel_insulation_leakage_proxy_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- EM solver-conditioning max/threshold: "
+        f"`{result.get('em_max_solver_conditioning_proxy') if result.get('em_max_solver_conditioning_proxy') is not None else '-'}`/`{result.get('em_max_solver_conditioning_proxy_threshold') if result.get('em_max_solver_conditioning_proxy_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- EM reference/sweep/resonance minima (reference-freq, sweep, peak-freq, peak-flux, bandwidth, Q, flux-gain): "
         f"`{result.get('em_min_reference_frequency_hz') if result.get('em_min_reference_frequency_hz') is not None else '-'}`/`{result.get('em_min_sweep_count') if result.get('em_min_sweep_count') is not None else '-'}`/`{result.get('em_min_resonance_peak_frequency_hz') if result.get('em_min_resonance_peak_frequency_hz') is not None else '-'}`/`{result.get('em_min_resonance_peak_flux_density') if result.get('em_min_resonance_peak_flux_density') is not None else '-'}`/`{result.get('em_min_resonance_bandwidth_hz') if result.get('em_min_resonance_bandwidth_hz') is not None else '-'}`/`{result.get('em_min_resonance_q_proxy') if result.get('em_min_resonance_q_proxy') is not None else '-'}`/`{result.get('em_min_resonance_flux_gain') if result.get('em_min_resonance_flux_gain') is not None else '-'}`"
     )
@@ -12956,6 +13025,10 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- EM breach rate/threshold: "
         f"`{result.get('em_breach_rate') if result.get('em_breach_rate') is not None else '-'}`/`{result.get('em_max_breach_rate_threshold') if result.get('em_max_breach_rate_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM solver-conditioning trend ratio/threshold: "
+        f"`{result.get('em_solver_conditioning_trend_ratio') if result.get('em_solver_conditioning_trend_ratio') is not None else '-'}`/`{result.get('em_max_solver_conditioning_trend_ratio_threshold') if result.get('em_max_solver_conditioning_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- EM reference/sweep/resonance trend ratios (reference-freq drop, sweep drop, peak-freq, peak-flux, bandwidth, Q drop, flux-gain drop): "

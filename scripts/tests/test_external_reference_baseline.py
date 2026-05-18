@@ -206,6 +206,10 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_homogeneous_gpu_provider",
+                "electromagnetic_solver_conditioning_proxy",
+            ),
+            (
+                "electromagnetic_reference_homogeneous_gpu_provider",
                 "electromagnetic_reference_frequency_hz",
             ),
             (
@@ -335,6 +339,10 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",
                 "em_heterogeneous_boundary_anchor_ratio",
+            ),
+            (
+                "electromagnetic_reference_heterogeneous_gpu_provider",
+                "electromagnetic_solver_conditioning_proxy",
             ),
             (
                 "electromagnetic_reference_heterogeneous_gpu_provider",

@@ -370,6 +370,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 },
             )
             | {
+                "electromagnetic_solver_conditioning_proxy": 1.83,
                 "electromagnetic_reference_frequency_hz": 60.0,
                 "electromagnetic_sweep_count": 5.0,
                 "electromagnetic_resonance_peak_frequency_hz": 60.0,
@@ -411,6 +412,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 },
             )
             | {
+                "electromagnetic_solver_conditioning_proxy": 3.36,
                 "electromagnetic_reference_frequency_hz": 75.0,
                 "electromagnetic_sweep_count": 5.0,
                 "electromagnetic_resonance_peak_frequency_hz": 75.0,

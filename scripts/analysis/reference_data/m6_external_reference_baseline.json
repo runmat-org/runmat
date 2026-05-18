@@ -319,6 +319,14 @@
       "tolerance_rel": 0.05
     },
     {
+      "name": "electromagnetic_solver_conditioning_proxy",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_solver_conditioning_proxy",
+      "reference": 1.8318888888888964,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": 0.6
+    },
+    {
       "name": "electromagnetic_reference_frequency_hz",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "electromagnetic_reference_frequency_hz",
@@ -643,6 +651,14 @@
       "reference": 0.25333333333333335,
       "tolerance_abs": 0.25,
       "tolerance_rel": 1.0
+    },
+    {
+      "name": "electromagnetic_solver_conditioning_proxy",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_solver_conditioning_proxy",
+      "reference": 3.3684700368835356,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 0.6
     },
     {
       "name": "electromagnetic_reference_frequency_hz",
