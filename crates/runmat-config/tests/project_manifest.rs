@@ -1,7 +1,7 @@
 use runmat_config::{
-    build_project_source_index, discover_project_manifest_from, load_project_manifest,
-    parse_project_manifest_toml, resolve_project_entrypoint, ResolvedEntrypointTarget,
-    PROJECT_MANIFEST_FILENAME,
+    build_project_composition_graph, build_project_source_index, discover_project_manifest_from,
+    load_project_manifest, parse_project_manifest_toml, resolve_project_entrypoint,
+    ResolvedEntrypointTarget, PROJECT_MANIFEST_FILENAME,
 };
 use std::fs;
 use tempfile::TempDir;
@@ -429,4 +429,124 @@ function = "main"
         err.to_string().contains("failed to resolve entrypoint")
             || err.to_string().contains("source root does not exist")
     );
+}
+
+#[test]
+fn composition_graph_loads_root_and_local_path_dependency() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join("dep_a/src")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+    fs::write(
+        tmp.path().join("dep_a/src/fn_a.m"),
+        "function y = fn_a(); y = 1; end",
+    )
+    .unwrap();
+    write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "root_pkg"
+
+[sources]
+roots = ["src"]
+
+[dependencies]
+dep_a = { path = "dep_a" }
+"#,
+    );
+    write_manifest(
+        &tmp.path().join("dep_a"),
+        r#"
+[package]
+name = "dep_pkg"
+
+[sources]
+roots = ["src"]
+"#,
+    );
+
+    let graph = build_project_composition_graph(&tmp.path().join("runmat.toml"))
+        .expect("composition graph should load");
+    assert_eq!(graph.root_package, "root_pkg");
+    assert_eq!(graph.packages.len(), 2);
+    let root = graph
+        .packages
+        .get("root_pkg")
+        .expect("root package should be present");
+    assert_eq!(root.dependencies.get("dep_a"), Some(&"dep_pkg".to_string()));
+    let dep = graph
+        .packages
+        .get("dep_pkg")
+        .expect("dependency package should be present");
+    assert!(dep
+        .source_index
+        .files
+        .iter()
+        .any(|file| file.qualified_name == "fn_a"));
+}
+
+#[test]
+fn composition_graph_reports_missing_dependency_manifest() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join("dep_missing")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+    write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "root_pkg"
+
+[sources]
+roots = ["src"]
+
+[dependencies]
+dep_missing = { path = "dep_missing" }
+"#,
+    );
+
+    let err = build_project_composition_graph(&tmp.path().join("runmat.toml"))
+        .expect_err("missing dependency manifest should fail");
+    assert!(err.to_string().contains("points to missing manifest"));
+}
+
+#[test]
+fn composition_graph_reports_duplicate_package_names() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join("dep_a/src")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+    fs::write(
+        tmp.path().join("dep_a/src/fn_a.m"),
+        "function y = fn_a(); y = 1; end",
+    )
+    .unwrap();
+    write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "dup_pkg"
+
+[sources]
+roots = ["src"]
+
+[dependencies]
+dep_a = { path = "dep_a" }
+"#,
+    );
+    write_manifest(
+        &tmp.path().join("dep_a"),
+        r#"
+[package]
+name = "dup_pkg"
+
+[sources]
+roots = ["src"]
+"#,
+    );
+
+    let err = build_project_composition_graph(&tmp.path().join("runmat.toml"))
+        .expect_err("duplicate package names should fail");
+    assert!(err.to_string().contains("duplicate package name"));
 }

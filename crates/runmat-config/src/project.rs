@@ -181,6 +181,62 @@ pub enum ProjectEntrypointResolveError {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectCompositionGraph {
+    pub root_package: String,
+    pub packages: BTreeMap<String, ProjectCompositionPackage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectCompositionPackage {
+    pub package_name: String,
+    pub manifest_path: PathBuf,
+    pub project_root: PathBuf,
+    pub manifest: ProjectManifest,
+    pub source_index: ProjectSourceIndex,
+    pub dependencies: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Error)]
+pub enum ProjectCompositionError {
+    #[error("failed to load root project manifest {path}: {source}")]
+    RootManifestLoad {
+        path: PathBuf,
+        #[source]
+        source: ProjectManifestLoadError,
+    },
+    #[error("dependency `{dependency}` in package `{package}` points to missing manifest {path}")]
+    MissingDependencyManifest {
+        package: String,
+        dependency: String,
+        path: PathBuf,
+    },
+    #[error(
+        "failed to load dependency manifest {path} for dependency `{dependency}` of package `{package}`: {source}"
+    )]
+    DependencyManifestLoad {
+        package: String,
+        dependency: String,
+        path: PathBuf,
+        #[source]
+        source: ProjectManifestLoadError,
+    },
+    #[error("failed to build source index for package `{package}`: {source}")]
+    SourceIndex {
+        package: String,
+        #[source]
+        source: ProjectSourceIndexError,
+    },
+    #[error("duplicate package name `{package}` found in {first_manifest} and {second_manifest}")]
+    DuplicatePackageName {
+        package: String,
+        first_manifest: PathBuf,
+        second_manifest: PathBuf,
+    },
+    #[error("dependency cycle detected while loading project composition: {cycle}")]
+    DependencyCycle { cycle: String },
+}
+
 impl ProjectManifest {
     pub fn validate(&self, project_root: &Path) -> Result<(), ProjectManifestValidationError> {
         let mut messages = Vec::new();
@@ -433,6 +489,23 @@ pub fn resolve_project_entrypoint(
     Ok(None)
 }
 
+pub fn build_project_composition_graph(
+    root_manifest_path: &Path,
+) -> Result<ProjectCompositionGraph, ProjectCompositionError> {
+    let mut loader = CompositionGraphLoader::default();
+    let root_package = loader.load_package(
+        root_manifest_path,
+        None,
+        true,
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )?;
+    Ok(ProjectCompositionGraph {
+        root_package,
+        packages: loader.packages,
+    })
+}
+
 fn is_relative_without_parent(path: &Path) -> bool {
     if path.is_absolute() {
         return false;
@@ -474,6 +547,138 @@ fn resolve_module_function_source_file(
         }
     }
     Ok(None)
+}
+
+#[derive(Default)]
+struct CompositionGraphLoader {
+    packages: BTreeMap<String, ProjectCompositionPackage>,
+    package_by_manifest: BTreeMap<PathBuf, String>,
+}
+
+impl CompositionGraphLoader {
+    fn load_package(
+        &mut self,
+        manifest_path: &Path,
+        from: Option<(&str, &str)>,
+        is_root: bool,
+        active_paths: &mut Vec<PathBuf>,
+        active_package_names: &mut Vec<String>,
+    ) -> Result<String, ProjectCompositionError> {
+        let manifest_path = canonical_manifest_path(manifest_path);
+        if let Some(existing) = self.package_by_manifest.get(&manifest_path) {
+            return Ok(existing.clone());
+        }
+
+        if let Some(idx) = active_paths.iter().position(|path| path == &manifest_path) {
+            let mut cycle = active_package_names[idx..].to_vec();
+            if let Some(last) = active_package_names.last() {
+                cycle.push(last.clone());
+            }
+            return Err(ProjectCompositionError::DependencyCycle {
+                cycle: cycle.join(" -> "),
+            });
+        }
+
+        let manifest = if is_root {
+            load_project_manifest(&manifest_path).map_err(|source| {
+                ProjectCompositionError::RootManifestLoad {
+                    path: manifest_path.clone(),
+                    source,
+                }
+            })?
+        } else {
+            let (package, dependency) = from.expect("dependency context is required");
+            load_project_manifest(&manifest_path).map_err(|source| {
+                ProjectCompositionError::DependencyManifestLoad {
+                    package: package.to_string(),
+                    dependency: dependency.to_string(),
+                    path: manifest_path.clone(),
+                    source,
+                }
+            })?
+        };
+
+        let package_name = manifest.package.name.clone();
+        let project_root = manifest_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        let source_index =
+            build_project_source_index(&project_root, &manifest).map_err(|source| {
+                ProjectCompositionError::SourceIndex {
+                    package: package_name.clone(),
+                    source,
+                }
+            })?;
+
+        if let Some(existing) = self.packages.get(&package_name) {
+            if existing.manifest_path != manifest_path {
+                return Err(ProjectCompositionError::DuplicatePackageName {
+                    package: package_name,
+                    first_manifest: existing.manifest_path.clone(),
+                    second_manifest: manifest_path,
+                });
+            }
+            return Ok(existing.package_name.clone());
+        }
+
+        active_paths.push(manifest_path.clone());
+        active_package_names.push(package_name.clone());
+
+        let mut dependency_map = BTreeMap::new();
+        for (dependency_name, dep) in &manifest.dependencies {
+            let dep_manifest_path = project_root.join(&dep.path).join(PROJECT_MANIFEST_FILENAME);
+            if !dep_manifest_path.is_file() {
+                return Err(ProjectCompositionError::MissingDependencyManifest {
+                    package: package_name.clone(),
+                    dependency: dependency_name.clone(),
+                    path: dep_manifest_path,
+                });
+            }
+            let dep_package_name = self.load_package(
+                &dep_manifest_path,
+                Some((&package_name, dependency_name)),
+                false,
+                active_paths,
+                active_package_names,
+            )?;
+            dependency_map.insert(dependency_name.clone(), dep_package_name);
+        }
+
+        active_paths.pop();
+        active_package_names.pop();
+
+        if let Some(existing) = self.packages.get(&package_name) {
+            if existing.manifest_path != manifest_path {
+                return Err(ProjectCompositionError::DuplicatePackageName {
+                    package: package_name,
+                    first_manifest: existing.manifest_path.clone(),
+                    second_manifest: manifest_path,
+                });
+            }
+            return Ok(existing.package_name.clone());
+        }
+
+        self.package_by_manifest
+            .insert(manifest_path.clone(), package_name.clone());
+        self.packages.insert(
+            package_name.clone(),
+            ProjectCompositionPackage {
+                package_name: package_name.clone(),
+                manifest_path,
+                project_root,
+                manifest,
+                source_index,
+                dependencies: dependency_map,
+            },
+        );
+
+        Ok(package_name)
+    }
+}
+
+fn canonical_manifest_path(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[derive(Debug, Clone, Default)]

@@ -17,6 +17,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 5 composition graph foundation in `runmat-config`
+  - Added `build_project_composition_graph(root_manifest_path)` with typed composition artifacts:
+    - `ProjectCompositionGraph`
+    - `ProjectCompositionPackage`
+    - `ProjectCompositionError`
+  - Composition loading now covers:
+    - root manifest load
+    - local path dependency manifest discovery/load
+    - per-package source index construction for root + dependencies
+    - explicit diagnostics for missing dependency manifest, duplicate package names, and dependency cycles
+  - Added `runmat-config` integration coverage for:
+    - successful root + local dependency graph construction
+    - missing dependency-manifest diagnostics
+    - duplicate package-name diagnostics
+  - Validation: `cargo test -p runmat-config`, `cargo test -p runmat --lib`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 5 module/function entrypoint resolution via source index
   - `runmat-config::resolve_project_entrypoint` module/function targets now resolve against `build_project_source_index` outputs instead of using a dotted-module file-path heuristic.
   - Module/function target resolution now supports MATLAB layout-derived qualified names, including class-folder methods (`+pkg/@ClassName/method.m`) represented as `module = "pkg.ClassName"` + `function = "method"`.
