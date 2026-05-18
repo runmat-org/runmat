@@ -6440,6 +6440,30 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("PLASTIC_PROMOTION_BLOCKER_BURNDOWN_STALLED", codes)
         self.assertIn("CONTACT_PROMOTION_BLOCKER_BURNDOWN_STALLED", codes)
 
+    def test_promotion_blocker_burndown_baseline_ignores_non_publishable_records(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.9,
+            contact_nonlinear_severity=0.9,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=False,
+                gpu_ms=95.0,
+                plastic_nonlinear_severity=0.2,
+                contact_nonlinear_severity=0.2,
+            )
+        ]
+        rolling[0]["publishable"] = True
+        os.environ["RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION"] = "0"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertNotIn("PLASTIC_PROMOTION_BLOCKER_BURNDOWN_STALLED", codes)
+        self.assertNotIn("CONTACT_PROMOTION_BLOCKER_BURNDOWN_STALLED", codes)
+
     def test_promotion_history_insufficient_reason_is_emitted_when_required(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         os.environ["RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY"] = "true"

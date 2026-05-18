@@ -13530,6 +13530,8 @@ def evaluate_release_readiness(
     ) -> int:
         values = []
         for rec in report_records(report):
+            if rec.get("publishable") is not True:
+                continue
             if rec.get("fixture_id") not in fixture_ids:
                 continue
             raw = rec.get(severity_field)
