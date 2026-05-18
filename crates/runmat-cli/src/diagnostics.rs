@@ -5,9 +5,8 @@ use runmat_runtime::build_runtime_error;
 
 pub fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode {
     match mode {
-        config::LanguageCompatMode::RunMat | config::LanguageCompatMode::Matlab => {
-            runmat_parser::CompatMode::Matlab
-        }
+        config::LanguageCompatMode::RunMat => runmat_parser::CompatMode::RunMat,
+        config::LanguageCompatMode::Matlab => runmat_parser::CompatMode::Matlab,
         config::LanguageCompatMode::Strict => runmat_parser::CompatMode::Strict,
     }
 }

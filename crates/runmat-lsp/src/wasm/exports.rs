@@ -230,6 +230,7 @@ pub fn diagnostics(_uri: String) -> Result<JsValue, JsValue> {
 #[wasm_bindgen(js_name = "setCompatMode")]
 pub fn set_compat_mode(mode: String) {
     let parsed = match mode.as_str() {
+        "runmat" | "RUNMAT" => CompatMode::RunMat,
         "matlab" | "MATLAB" => CompatMode::Matlab,
         "strict" | "STRICT" => CompatMode::Strict,
         _ => CompatMode::Matlab,

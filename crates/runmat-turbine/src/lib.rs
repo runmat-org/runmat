@@ -865,7 +865,7 @@ impl TurbineEngine {
                     r.hash(&mut hasher);
                     c.hash(&mut hasher);
                 }
-                Instr::IndexCell(k) => {
+                Instr::IndexCell { num_indices: k, .. } => {
                     "IndexCell".hash(&mut hasher);
                     k.hash(&mut hasher);
                 }

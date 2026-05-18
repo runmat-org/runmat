@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
 pub enum CompatMode {
+    #[serde(rename = "runmat")]
+    RunMat,
     #[default]
+    #[serde(rename = "matlab")]
     Matlab,
+    #[serde(rename = "strict")]
     Strict,
 }
 

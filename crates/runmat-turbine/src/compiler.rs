@@ -776,7 +776,7 @@ impl BytecodeCompiler {
                     // Not yet supported in JIT; require interpreter
                     Instr::IndexSlice(_, _, _, _)
                     | Instr::CreateCell2D(_, _)
-                    | Instr::IndexCell(_)
+                    | Instr::IndexCell { .. }
                     | Instr::LoadStaticProperty(_, _)
                     | Instr::EnterTry(_, _)
                     | Instr::PopTry
@@ -797,16 +797,17 @@ impl BytecodeCompiler {
                     | Instr::StoreMemberDynamic
                     | Instr::StoreMemberDynamicOrInit
                     | Instr::CreateFunctionHandle(_)
+                    | Instr::CreateExternalFunctionHandle(_)
                     | Instr::CreateSemanticFunctionHandle(_, _)
                     | Instr::CreateClosure(_, _)
                     | Instr::CreateSemanticClosure(_, _, _)
                     | Instr::CallMethodOrMemberIndexMulti { .. }
-                    | Instr::IndexCellExpand(_, _)
-                    | Instr::IndexCellList(_)
+                    | Instr::IndexCellExpand { .. }
+                    | Instr::IndexCellList { .. }
                     | Instr::StoreIndex(_)
-                    | Instr::StoreIndexCell(_)
+                    | Instr::StoreIndexCell { .. }
                     | Instr::StoreIndexDelete(_)
-                    | Instr::StoreIndexCellDelete(_)
+                    | Instr::StoreIndexCellDelete { .. }
                     | Instr::LoadMethod(_)
                     | Instr::RegisterClass { .. }
                     | Instr::Swap

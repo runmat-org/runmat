@@ -52,7 +52,8 @@ struct AnalyzerState {
 
 fn parser_compat(mode: LanguageCompatMode) -> CompatMode {
     match mode {
-        LanguageCompatMode::RunMat | LanguageCompatMode::Matlab => CompatMode::Matlab,
+        LanguageCompatMode::RunMat => CompatMode::RunMat,
+        LanguageCompatMode::Matlab => CompatMode::Matlab,
         LanguageCompatMode::Strict => CompatMode::Strict,
     }
 }
@@ -508,6 +509,7 @@ fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
 
 fn compat_label(mode: CompatMode) -> &'static str {
     match mode {
+        CompatMode::RunMat => "runmat",
         CompatMode::Matlab => "matlab",
         CompatMode::Strict => "strict",
     }

@@ -1089,7 +1089,7 @@ fn source_input_text(
 fn parser_compat_from_abi(mode: &runmat_hir::CompatibilityMode) -> CompatMode {
     match mode {
         runmat_hir::CompatibilityMode::MatlabStrict => CompatMode::Strict,
-        runmat_hir::CompatibilityMode::RunMatExtended
-        | runmat_hir::CompatibilityMode::Interactive => CompatMode::Matlab,
+        runmat_hir::CompatibilityMode::RunMatExtended => CompatMode::RunMat,
+        runmat_hir::CompatibilityMode::Interactive => CompatMode::Matlab,
     }
 }

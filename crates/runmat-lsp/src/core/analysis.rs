@@ -140,6 +140,7 @@ fn compile_error_for_lowering(lowering: &LoweringResult) -> Option<CompileError>
 
 fn hir_compatibility_mode(compat: CompatMode) -> CompatibilityMode {
     match compat {
+        CompatMode::RunMat => CompatibilityMode::RunMatExtended,
         CompatMode::Matlab => CompatibilityMode::RunMatExtended,
         CompatMode::Strict => CompatibilityMode::MatlabStrict,
     }

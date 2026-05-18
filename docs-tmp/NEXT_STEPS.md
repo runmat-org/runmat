@@ -243,7 +243,7 @@ Observed older-HIR artifacts worth collapsing:
 - `RunMatSession` now persists workspace bindings as stable ABI keys plus current VM slots; HIR lowering receives a derived slot map only at compile time.
 - `LoweringResult` now carries semantic assembly/index products without legacy HIR projection maps or placeholder inference fields.
 - LSP analysis uses semantic bindings plus shape facts rather than legacy variable maps.
-- `CompatibilityMode::RunMatExtended` is still mapped through parser compatibility as MATLAB mode in some places, which obscures the intended distinction between compatibility policy and parser syntax mode.
+- Parser compatibility now has an explicit `runmat` mode; `CompatibilityMode::RunMatExtended` no longer has to collapse to parser `matlab` mode at the boundary.
 
 Target cleanup direction:
 
@@ -451,7 +451,7 @@ Current ratchet status:
 - VM range, meshgrid-range, global/persistent, and logical-operator tests now run semantic bytecode.
 - VM indexing, matrix-slicing, and lvalue-assignment tests now run semantic bytecode.
 - VM cell-array, exception, datetime, and most closure/callback tests now run semantic bytecode; captured and nested closure capture tests remain legacy-executed pending semantic capture propagation.
-- VM control-flow tests now mostly run semantic bytecode; unknown-builtin catch behavior remains a legacy-executed semantic gap.
+- VM control-flow tests now mostly run semantic bytecode, including unknown-builtin catch behavior.
 - VM multidimensional indexing tests now run semantic bytecode for logical row selection and slice assignment cases; 3D indexing/slicing cases remain legacy-executed pending semantic N-D selector support.
 - VM indexing-property tests now run semantic bytecode for scalar/logical/range write broadcasts, end-arithmetic stores, negative-step linear indexing, roundtrip scatter, fastpath broadcasts, and simple cell expansion; advanced N-D empty/vector selector and expansion cases remain legacy-executed.
 - Remaining `functions.rs` legacy execution sites cover semantic gaps for struct-field vector/range indexing through member reads, test-class constructor resolution, metaclass postfix member/method lowering, dependent property backing behavior, `containers.Map` package calls, and string aggregate concatenation.
