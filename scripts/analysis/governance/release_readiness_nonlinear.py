@@ -182,6 +182,11 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS": "4.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MIN_PATH_MIX_EFFECTIVE_MODULUS_SCALE": "0.9",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_EFFECTIVE_MODULUS_SCALE_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "250000.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "250000.0",
@@ -481,6 +486,11 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS": "5.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MIN_PATH_MIX_EFFECTIVE_MODULUS_SCALE": "0.85",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_EFFECTIVE_MODULUS_SCALE_DROP_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO_TREND_RATIO": "1.3",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "200000.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "200000.0",
@@ -780,6 +790,11 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS": "6.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MIN_PATH_MIX_EFFECTIVE_MODULUS_SCALE": "0.8",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_EFFECTIVE_MODULUS_SCALE_DROP_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO_TREND_RATIO": "1.5",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "150000.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "150000.0",
@@ -2145,6 +2160,51 @@ def evaluate_release_readiness(
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_path_mix_total_increments_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS_TREND_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_path_mix_max_backtracks_per_increment_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT_TREND_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_path_mix_backtrack_bursts_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS_TREND_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_path_mix_effective_modulus_scale_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_EFFECTIVE_MODULUS_SCALE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_EFFECTIVE_MODULUS_SCALE_DROP_TREND_RATIO",
+                "1.3",
+            ),
+        )
+    )
+    nonlinear_max_path_mix_material_spread_ratio_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO_TREND_RATIO",
                 "1.3",
             ),
         )
@@ -4111,6 +4171,11 @@ def evaluate_release_readiness(
     nonlinear_max_path_mix_backtrack_bursts = None
     nonlinear_min_path_mix_effective_modulus_scale = None
     nonlinear_max_path_mix_material_spread_ratio = None
+    nonlinear_path_mix_total_increments_trend_ratio = None
+    nonlinear_path_mix_max_backtracks_per_increment_trend_ratio = None
+    nonlinear_path_mix_backtrack_bursts_trend_ratio = None
+    nonlinear_path_mix_effective_modulus_scale_drop_trend_ratio = None
+    nonlinear_path_mix_material_spread_ratio_trend_ratio = None
     cfd_min_reynolds_proxy = None
     cfd_min_reference_density_kg_per_m3 = None
     cfd_min_dynamic_viscosity_pa_s = None
@@ -8200,6 +8265,112 @@ def evaluate_release_readiness(
                 )
             )
 
+        nonlinear_path_mix_total_increments_trend_ratio = fixture_assertion_trend_ratio(
+            "nonlinear_path_mix_total_increments",
+            ratio_mode="increase",
+        )
+        if (
+            nonlinear_path_mix_total_increments_trend_ratio is not None
+            and nonlinear_path_mix_total_increments_trend_ratio
+            > nonlinear_max_path_mix_total_increments_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_PATH_MIX_TOTAL_INCREMENTS_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear path-mix total increments trend ratio "
+                        f"{nonlinear_path_mix_total_increments_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_path_mix_total_increments_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        nonlinear_path_mix_max_backtracks_per_increment_trend_ratio = (
+            fixture_assertion_trend_ratio(
+                "nonlinear_path_mix_max_backtracks_per_increment",
+                ratio_mode="increase",
+            )
+        )
+        if (
+            nonlinear_path_mix_max_backtracks_per_increment_trend_ratio is not None
+            and nonlinear_path_mix_max_backtracks_per_increment_trend_ratio
+            > nonlinear_max_path_mix_max_backtracks_per_increment_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear path-mix max backtracks per increment trend ratio "
+                        f"{nonlinear_path_mix_max_backtracks_per_increment_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_path_mix_max_backtracks_per_increment_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        nonlinear_path_mix_backtrack_bursts_trend_ratio = fixture_assertion_trend_ratio(
+            "nonlinear_path_mix_backtrack_bursts",
+            ratio_mode="increase",
+        )
+        if (
+            nonlinear_path_mix_backtrack_bursts_trend_ratio is not None
+            and nonlinear_path_mix_backtrack_bursts_trend_ratio
+            > nonlinear_max_path_mix_backtrack_bursts_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_PATH_MIX_BACKTRACK_BURSTS_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear path-mix backtrack bursts trend ratio "
+                        f"{nonlinear_path_mix_backtrack_bursts_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_path_mix_backtrack_bursts_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        nonlinear_path_mix_effective_modulus_scale_drop_trend_ratio = (
+            fixture_assertion_trend_ratio("nonlinear_path_mix_effective_modulus_scale")
+        )
+        if (
+            nonlinear_path_mix_effective_modulus_scale_drop_trend_ratio is not None
+            and nonlinear_path_mix_effective_modulus_scale_drop_trend_ratio
+            > nonlinear_max_path_mix_effective_modulus_scale_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_PATH_MIX_EFFECTIVE_MODULUS_SCALE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear path-mix effective-modulus-scale drop trend ratio "
+                        f"{nonlinear_path_mix_effective_modulus_scale_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_path_mix_effective_modulus_scale_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        nonlinear_path_mix_material_spread_ratio_trend_ratio = fixture_assertion_trend_ratio(
+            "nonlinear_path_mix_material_spread_ratio",
+            ratio_mode="increase",
+        )
+        if (
+            nonlinear_path_mix_material_spread_ratio_trend_ratio is not None
+            and nonlinear_path_mix_material_spread_ratio_trend_ratio
+            > nonlinear_max_path_mix_material_spread_ratio_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="NONLINEAR_PATH_MIX_MATERIAL_SPREAD_RATIO_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "nonlinear path-mix material-spread ratio trend ratio "
+                        f"{nonlinear_path_mix_material_spread_ratio_trend_ratio:.3f} exceeds threshold "
+                        f"{nonlinear_max_path_mix_material_spread_ratio_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         cfd_reynolds_proxy_drop_trend_ratio = fixture_assertion_trend_ratio(
             "cfd_reynolds_proxy"
         )
@@ -10960,6 +11131,16 @@ def evaluate_release_readiness(
         "nonlinear_min_path_mix_effective_modulus_scale_threshold": nonlinear_min_path_mix_effective_modulus_scale_threshold,
         "nonlinear_max_path_mix_material_spread_ratio": nonlinear_max_path_mix_material_spread_ratio,
         "nonlinear_max_path_mix_material_spread_ratio_threshold": nonlinear_max_path_mix_material_spread_ratio_threshold,
+        "nonlinear_path_mix_total_increments_trend_ratio": nonlinear_path_mix_total_increments_trend_ratio,
+        "nonlinear_max_path_mix_total_increments_trend_ratio_threshold": nonlinear_max_path_mix_total_increments_trend_ratio_threshold,
+        "nonlinear_path_mix_max_backtracks_per_increment_trend_ratio": nonlinear_path_mix_max_backtracks_per_increment_trend_ratio,
+        "nonlinear_max_path_mix_max_backtracks_per_increment_trend_ratio_threshold": nonlinear_max_path_mix_max_backtracks_per_increment_trend_ratio_threshold,
+        "nonlinear_path_mix_backtrack_bursts_trend_ratio": nonlinear_path_mix_backtrack_bursts_trend_ratio,
+        "nonlinear_max_path_mix_backtrack_bursts_trend_ratio_threshold": nonlinear_max_path_mix_backtrack_bursts_trend_ratio_threshold,
+        "nonlinear_path_mix_effective_modulus_scale_drop_trend_ratio": nonlinear_path_mix_effective_modulus_scale_drop_trend_ratio,
+        "nonlinear_max_path_mix_effective_modulus_scale_drop_trend_ratio_threshold": nonlinear_max_path_mix_effective_modulus_scale_drop_trend_ratio_threshold,
+        "nonlinear_path_mix_material_spread_ratio_trend_ratio": nonlinear_path_mix_material_spread_ratio_trend_ratio,
+        "nonlinear_max_path_mix_material_spread_ratio_trend_ratio_threshold": nonlinear_max_path_mix_material_spread_ratio_trend_ratio_threshold,
         "cfd_min_reynolds_proxy": cfd_min_reynolds_proxy,
         "cfd_min_reynolds_proxy_threshold": cfd_min_reynolds_proxy_threshold,
         "cfd_min_reference_density_kg_per_m3": cfd_min_reference_density_kg_per_m3,
@@ -11689,6 +11870,14 @@ def markdown_summary(result: dict) -> str:
         "- Nonlinear path-mix effective-modulus/material-spread thresholds (min/max): "
         f"`{result.get('nonlinear_min_path_mix_effective_modulus_scale') if result.get('nonlinear_min_path_mix_effective_modulus_scale') is not None else '-'}`/`{result.get('nonlinear_min_path_mix_effective_modulus_scale_threshold') if result.get('nonlinear_min_path_mix_effective_modulus_scale_threshold') is not None else '-'}`; "
         f"`{result.get('nonlinear_max_path_mix_material_spread_ratio') if result.get('nonlinear_max_path_mix_material_spread_ratio') is not None else '-'}`/`{result.get('nonlinear_max_path_mix_material_spread_ratio_threshold') if result.get('nonlinear_max_path_mix_material_spread_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Nonlinear path-mix trend ratios (total/max-backtracks/bursts, modulus-drop, spread) and thresholds: "
+        f"`{result.get('nonlinear_path_mix_total_increments_trend_ratio') if result.get('nonlinear_path_mix_total_increments_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_path_mix_total_increments_trend_ratio_threshold') if result.get('nonlinear_max_path_mix_total_increments_trend_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_path_mix_max_backtracks_per_increment_trend_ratio') if result.get('nonlinear_path_mix_max_backtracks_per_increment_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_path_mix_max_backtracks_per_increment_trend_ratio_threshold') if result.get('nonlinear_max_path_mix_max_backtracks_per_increment_trend_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_path_mix_backtrack_bursts_trend_ratio') if result.get('nonlinear_path_mix_backtrack_bursts_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_path_mix_backtrack_bursts_trend_ratio_threshold') if result.get('nonlinear_max_path_mix_backtrack_bursts_trend_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_path_mix_effective_modulus_scale_drop_trend_ratio') if result.get('nonlinear_path_mix_effective_modulus_scale_drop_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_path_mix_effective_modulus_scale_drop_trend_ratio_threshold') if result.get('nonlinear_max_path_mix_effective_modulus_scale_drop_trend_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_path_mix_material_spread_ratio_trend_ratio') if result.get('nonlinear_path_mix_material_spread_ratio_trend_ratio') is not None else '-'}`/`{result.get('nonlinear_max_path_mix_material_spread_ratio_trend_ratio_threshold') if result.get('nonlinear_max_path_mix_material_spread_ratio_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Electro-Thermal Posture")
