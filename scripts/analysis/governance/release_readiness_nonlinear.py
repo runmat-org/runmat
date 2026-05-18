@@ -177,6 +177,11 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS": "56.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT": "1.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS": "1.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS": "48.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT": "12.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS": "4.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MIN_PATH_MIX_EFFECTIVE_MODULUS_SCALE": "0.9",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "250000.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "250000.0",
@@ -471,6 +476,11 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS": "84.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT": "2.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS": "2.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS": "64.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT": "14.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS": "5.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MIN_PATH_MIX_EFFECTIVE_MODULUS_SCALE": "0.85",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO": "1.3",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "200000.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "200000.0",
@@ -765,6 +775,11 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS": "120.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT": "3.0",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS": "3.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS": "96.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT": "18.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS": "6.0",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MIN_PATH_MIX_EFFECTIVE_MODULUS_SCALE": "0.8",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO": "1.5",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY": "150000.0",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY": "150000.0",
@@ -2088,6 +2103,49 @@ def evaluate_release_readiness(
             profile_default(
                 "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS",
                 "2.0",
+            ),
+        )
+    )
+    nonlinear_max_path_mix_total_increments_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS", "64.0"
+            ),
+        )
+    )
+    nonlinear_max_path_mix_max_backtracks_per_increment_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT",
+                "14.0",
+            ),
+        )
+    )
+    nonlinear_max_path_mix_backtrack_bursts_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS", "5.0"
+            ),
+        )
+    )
+    nonlinear_min_path_mix_effective_modulus_scale_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MIN_PATH_MIX_EFFECTIVE_MODULUS_SCALE",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MIN_PATH_MIX_EFFECTIVE_MODULUS_SCALE",
+                "0.85",
+            ),
+        )
+    )
+    nonlinear_max_path_mix_material_spread_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO",
+                "1.3",
             ),
         )
     )
@@ -4048,6 +4106,11 @@ def evaluate_release_readiness(
     nonlinear_max_softening_total_increments = None
     nonlinear_max_softening_spike_count = None
     nonlinear_max_softening_backtrack_bursts = None
+    nonlinear_max_path_mix_total_increments = None
+    nonlinear_max_path_mix_max_backtracks_per_increment = None
+    nonlinear_max_path_mix_backtrack_bursts = None
+    nonlinear_min_path_mix_effective_modulus_scale = None
+    nonlinear_max_path_mix_material_spread_ratio = None
     cfd_min_reynolds_proxy = None
     cfd_min_reference_density_kg_per_m3 = None
     cfd_min_dynamic_viscosity_pa_s = None
@@ -5151,6 +5214,7 @@ def evaluate_release_readiness(
             "nonlinear_assembly_gpu_provider",
             "nonlinear_assembly_stress_gpu_provider",
             "nonlinear_softening_proxy_gpu_provider",
+            "nonlinear_load_path_mix_gpu_provider",
         }
     ]
     if not nonlinear_core_records:
@@ -5227,6 +5291,41 @@ def evaluate_release_readiness(
                 "NONLINEAR_SOFTENING_BACKTRACK_BURSTS_HIGH",
                 "nonlinear softening backtrack bursts",
             ),
+            (
+                "nonlinear_load_path_mix_gpu_provider",
+                "nonlinear_path_mix_total_increments",
+                nonlinear_max_path_mix_total_increments_threshold,
+                "NONLINEAR_PATH_MIX_TOTAL_INCREMENTS_HIGH",
+                "nonlinear path-mix total increments",
+            ),
+            (
+                "nonlinear_load_path_mix_gpu_provider",
+                "nonlinear_path_mix_max_backtracks_per_increment",
+                nonlinear_max_path_mix_max_backtracks_per_increment_threshold,
+                "NONLINEAR_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT_HIGH",
+                "nonlinear path-mix max backtracks per increment",
+            ),
+            (
+                "nonlinear_load_path_mix_gpu_provider",
+                "nonlinear_path_mix_backtrack_bursts",
+                nonlinear_max_path_mix_backtrack_bursts_threshold,
+                "NONLINEAR_PATH_MIX_BACKTRACK_BURSTS_HIGH",
+                "nonlinear path-mix backtrack bursts",
+            ),
+            (
+                "nonlinear_load_path_mix_gpu_provider",
+                "nonlinear_path_mix_effective_modulus_scale",
+                nonlinear_min_path_mix_effective_modulus_scale_threshold,
+                "NONLINEAR_PATH_MIX_EFFECTIVE_MODULUS_SCALE_LOW",
+                "nonlinear path-mix effective modulus scale",
+            ),
+            (
+                "nonlinear_load_path_mix_gpu_provider",
+                "nonlinear_path_mix_material_spread_ratio",
+                nonlinear_max_path_mix_material_spread_ratio_threshold,
+                "NONLINEAR_PATH_MIX_MATERIAL_SPREAD_RATIO_HIGH",
+                "nonlinear path-mix material spread ratio",
+            ),
         ]
         missing_nonlinear_core_fields = []
         for fixture_id, assertion_name, threshold, code, label in nonlinear_core_assertion_specs:
@@ -5259,12 +5358,32 @@ def evaluate_release_readiness(
                 nonlinear_max_softening_spike_count = observed
             elif assertion_name == "nonlinear_softening_backtrack_bursts":
                 nonlinear_max_softening_backtrack_bursts = observed
-            if observed > threshold:
+            elif assertion_name == "nonlinear_path_mix_total_increments":
+                nonlinear_max_path_mix_total_increments = observed
+            elif assertion_name == "nonlinear_path_mix_max_backtracks_per_increment":
+                nonlinear_max_path_mix_max_backtracks_per_increment = observed
+            elif assertion_name == "nonlinear_path_mix_backtrack_bursts":
+                nonlinear_max_path_mix_backtrack_bursts = observed
+            elif assertion_name == "nonlinear_path_mix_effective_modulus_scale":
+                nonlinear_min_path_mix_effective_modulus_scale = observed
+            elif assertion_name == "nonlinear_path_mix_material_spread_ratio":
+                nonlinear_max_path_mix_material_spread_ratio = observed
+            breached = (
+                observed < threshold
+                if assertion_name == "nonlinear_path_mix_effective_modulus_scale"
+                else observed > threshold
+            )
+            if breached:
+                comparator = (
+                    "below"
+                    if assertion_name == "nonlinear_path_mix_effective_modulus_scale"
+                    else "exceeds"
+                )
                 reasons.append(
                     Reason(
                         code=code,
                         severity="fail" if protected else "warn",
-                        detail=f"{label} {observed:.3f} exceeds threshold {threshold:.3f}",
+                        detail=f"{label} {observed:.3f} {comparator} threshold {threshold:.3f}",
                     )
                 )
         if missing_nonlinear_core_fields and (protected or nonlinear_core_require_metrics):
@@ -10831,6 +10950,16 @@ def evaluate_release_readiness(
         "nonlinear_max_softening_spike_count_threshold": nonlinear_max_softening_spike_count_threshold,
         "nonlinear_max_softening_backtrack_bursts": nonlinear_max_softening_backtrack_bursts,
         "nonlinear_max_softening_backtrack_bursts_threshold": nonlinear_max_softening_backtrack_bursts_threshold,
+        "nonlinear_max_path_mix_total_increments": nonlinear_max_path_mix_total_increments,
+        "nonlinear_max_path_mix_total_increments_threshold": nonlinear_max_path_mix_total_increments_threshold,
+        "nonlinear_max_path_mix_max_backtracks_per_increment": nonlinear_max_path_mix_max_backtracks_per_increment,
+        "nonlinear_max_path_mix_max_backtracks_per_increment_threshold": nonlinear_max_path_mix_max_backtracks_per_increment_threshold,
+        "nonlinear_max_path_mix_backtrack_bursts": nonlinear_max_path_mix_backtrack_bursts,
+        "nonlinear_max_path_mix_backtrack_bursts_threshold": nonlinear_max_path_mix_backtrack_bursts_threshold,
+        "nonlinear_min_path_mix_effective_modulus_scale": nonlinear_min_path_mix_effective_modulus_scale,
+        "nonlinear_min_path_mix_effective_modulus_scale_threshold": nonlinear_min_path_mix_effective_modulus_scale_threshold,
+        "nonlinear_max_path_mix_material_spread_ratio": nonlinear_max_path_mix_material_spread_ratio,
+        "nonlinear_max_path_mix_material_spread_ratio_threshold": nonlinear_max_path_mix_material_spread_ratio_threshold,
         "cfd_min_reynolds_proxy": cfd_min_reynolds_proxy,
         "cfd_min_reynolds_proxy_threshold": cfd_min_reynolds_proxy_threshold,
         "cfd_min_reference_density_kg_per_m3": cfd_min_reference_density_kg_per_m3,
@@ -11549,6 +11678,17 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('nonlinear_max_softening_total_increments') if result.get('nonlinear_max_softening_total_increments') is not None else '-'}`/`{result.get('nonlinear_max_softening_total_increments_threshold') if result.get('nonlinear_max_softening_total_increments_threshold') is not None else '-'}`; "
         f"`{result.get('nonlinear_max_softening_spike_count') if result.get('nonlinear_max_softening_spike_count') is not None else '-'}`/`{result.get('nonlinear_max_softening_spike_count_threshold') if result.get('nonlinear_max_softening_spike_count_threshold') is not None else '-'}`; "
         f"`{result.get('nonlinear_max_softening_backtrack_bursts') if result.get('nonlinear_max_softening_backtrack_bursts') is not None else '-'}`/`{result.get('nonlinear_max_softening_backtrack_bursts_threshold') if result.get('nonlinear_max_softening_backtrack_bursts_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Nonlinear path-mix total/max-backtracks/bursts thresholds: "
+        f"`{result.get('nonlinear_max_path_mix_total_increments') if result.get('nonlinear_max_path_mix_total_increments') is not None else '-'}`/`{result.get('nonlinear_max_path_mix_total_increments_threshold') if result.get('nonlinear_max_path_mix_total_increments_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_max_path_mix_max_backtracks_per_increment') if result.get('nonlinear_max_path_mix_max_backtracks_per_increment') is not None else '-'}`/`{result.get('nonlinear_max_path_mix_max_backtracks_per_increment_threshold') if result.get('nonlinear_max_path_mix_max_backtracks_per_increment_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_max_path_mix_backtrack_bursts') if result.get('nonlinear_max_path_mix_backtrack_bursts') is not None else '-'}`/`{result.get('nonlinear_max_path_mix_backtrack_bursts_threshold') if result.get('nonlinear_max_path_mix_backtrack_bursts_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Nonlinear path-mix effective-modulus/material-spread thresholds (min/max): "
+        f"`{result.get('nonlinear_min_path_mix_effective_modulus_scale') if result.get('nonlinear_min_path_mix_effective_modulus_scale') is not None else '-'}`/`{result.get('nonlinear_min_path_mix_effective_modulus_scale_threshold') if result.get('nonlinear_min_path_mix_effective_modulus_scale_threshold') is not None else '-'}`; "
+        f"`{result.get('nonlinear_max_path_mix_material_spread_ratio') if result.get('nonlinear_max_path_mix_material_spread_ratio') is not None else '-'}`/`{result.get('nonlinear_max_path_mix_material_spread_ratio_threshold') if result.get('nonlinear_max_path_mix_material_spread_ratio_threshold') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Electro-Thermal Posture")

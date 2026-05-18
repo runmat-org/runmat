@@ -277,6 +277,11 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_TOTAL_INCREMENTS",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_SPIKE_COUNT",
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MIN_PATH_MIX_EFFECTIVE_MODULUS_SCALE",
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_CFD_MIN_REYNOLDS_PROXY",
             "RUNMAT_RELEASE_READINESS_CHT_MIN_REYNOLDS_PROXY",
@@ -3095,6 +3100,24 @@ class ReleaseReadinessTests(unittest.TestCase):
                 ],
             }
         )
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "nonlinear_path_mix_total_increments", "observed": 120.0},
+                    {
+                        "name": "nonlinear_path_mix_max_backtracks_per_increment",
+                        "observed": 20.0,
+                    },
+                    {"name": "nonlinear_path_mix_backtrack_bursts", "observed": 7.0},
+                    {"name": "nonlinear_path_mix_effective_modulus_scale", "observed": 0.7},
+                    {"name": "nonlinear_path_mix_material_spread_ratio", "observed": 1.8},
+                ],
+            }
+        )
         os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_ASSEMBLY_TOTAL_INCREMENTS"] = (
             "60.0"
         )
@@ -3118,6 +3141,21 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ[
             "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_SOFTENING_BACKTRACK_BURSTS"
         ] = "2.0"
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_TOTAL_INCREMENTS"] = (
+            "80.0"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT"
+        ] = "12.0"
+        os.environ["RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_BACKTRACK_BURSTS"] = (
+            "4.0"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MIN_PATH_MIX_EFFECTIVE_MODULUS_SCALE"
+        ] = "0.85"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_NONLINEAR_MAX_PATH_MIX_MATERIAL_SPREAD_RATIO"
+        ] = "1.2"
         result = evaluate_release_readiness(
             latest,
             [report(passed=True, publishable=True, gpu_ms=95.0)],
@@ -3133,6 +3171,11 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("NONLINEAR_SOFTENING_TOTAL_INCREMENTS_HIGH", codes)
         self.assertIn("NONLINEAR_SOFTENING_SPIKE_COUNT_HIGH", codes)
         self.assertIn("NONLINEAR_SOFTENING_BACKTRACK_BURSTS_HIGH", codes)
+        self.assertIn("NONLINEAR_PATH_MIX_TOTAL_INCREMENTS_HIGH", codes)
+        self.assertIn("NONLINEAR_PATH_MIX_MAX_BACKTRACKS_PER_INCREMENT_HIGH", codes)
+        self.assertIn("NONLINEAR_PATH_MIX_BACKTRACK_BURSTS_HIGH", codes)
+        self.assertIn("NONLINEAR_PATH_MIX_EFFECTIVE_MODULUS_SCALE_LOW", codes)
+        self.assertIn("NONLINEAR_PATH_MIX_MATERIAL_SPREAD_RATIO_HIGH", codes)
 
     def test_pathological_thermo_electro_assertion_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
