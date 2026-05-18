@@ -351,6 +351,10 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "thermo_gradient_pathological_gpu_provider",
+                "thermo_gradient_pathological_heterogeneity",
+            ),
+            (
+                "thermo_gradient_pathological_gpu_provider",
                 "thermo_gradient_pathological_temporal_variation",
             ),
             (
@@ -427,11 +431,35 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electro_thermal_joule_benign_gpu_provider",
+                "electro_thermal_benign_joule_heating_scale",
+            ),
+            (
+                "electro_thermal_joule_benign_gpu_provider",
+                "electro_thermal_benign_conductivity_spread_ratio",
+            ),
+            (
+                "electro_thermal_joule_benign_gpu_provider",
+                "electro_thermal_benign_transient_severity_peak",
+            ),
+            (
+                "electro_thermal_joule_benign_gpu_provider",
+                "electro_thermal_benign_temporal_variation",
+            ),
+            (
+                "electro_thermal_joule_benign_gpu_provider",
                 "electro_thermal_benign_time_scale_mean",
             ),
             (
                 "electro_thermal_joule_pathological_gpu_provider",
+                "electro_thermal_pathological_joule_heating_scale",
+            ),
+            (
+                "electro_thermal_joule_pathological_gpu_provider",
                 "electro_thermal_pathological_conductivity_spread_ratio",
+            ),
+            (
+                "electro_thermal_joule_pathological_gpu_provider",
+                "electro_thermal_pathological_transient_severity_peak",
             ),
             (
                 "electro_thermal_joule_pathological_gpu_provider",
@@ -443,7 +471,23 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+                "plasticity_hardening_reference_complex_severity_peak",
+            ),
+            (
+                "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+                "plasticity_hardening_reference_complex_severity_mean",
+            ),
+            (
+                "nonlinear_plastic_hardening_reference_complex_gpu_provider",
                 "plasticity_hardening_reference_complex_load_realization_ratio",
+            ),
+            (
+                "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+                "contact_frictionless_complex_severity_peak",
+            ),
+            (
+                "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+                "contact_frictionless_complex_severity_mean",
             ),
             (
                 "nonlinear_contact_frictionless_reference_complex_gpu_provider",
