@@ -569,6 +569,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
@@ -739,6 +740,78 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("KEY_PERF_SPEEDUP_TREND_WORSENING", codes)
+
+    def test_key_perf_trend_baseline_missing_reason_is_emitted_without_rolling(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 120.0,
+                "gpu_speedup_ratio": 1.1,
+                "gpu_solver_solve_ms": 100.0,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES"] = "true"
+        result = evaluate_release_readiness(latest, [], protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("KEY_PERF_TREND_BASELINE_MISSING", codes)
+
+    def test_key_perf_trend_baseline_missing_reason_is_emitted_for_partial_history(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 120.0,
+                "gpu_speedup_ratio": 1.1,
+                "gpu_solver_solve_ms": 100.0,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 110.0,
+                "gpu_solver_solve_ms": 90.0,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES"] = "true"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        matches = [
+            reason
+            for reason in result["reasons"]
+            if reason["code"] == "KEY_PERF_TREND_BASELINE_MISSING"
+            and "gpu_speedup_ratio" in reason["detail"]
+        ]
+        self.assertTrue(matches)
+
+    def test_key_perf_trend_baseline_missing_reason_is_not_emitted_with_full_history(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 120.0,
+                "gpu_speedup_ratio": 1.1,
+                "gpu_solver_solve_ms": 100.0,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 110.0,
+                "gpu_speedup_ratio": 1.2,
+                "gpu_solver_solve_ms": 90.0,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES"] = "true"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertNotIn("KEY_PERF_TREND_BASELINE_MISSING", codes)
 
     def test_key_perf_speedup_low_reason_is_emitted_for_thermo_fixture(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

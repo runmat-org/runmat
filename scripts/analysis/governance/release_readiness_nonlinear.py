@@ -435,6 +435,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "5000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES": "true",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS": "true",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "true",
         },
@@ -760,6 +761,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "8000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.45",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO": "1.25",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES": "false",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS": "false",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "false",
         },
@@ -1067,6 +1069,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "12000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.8",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES": "false",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS": "false",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "false",
         },
@@ -1327,6 +1330,12 @@ def evaluate_release_readiness(
             ),
         )
     )
+    key_perf_require_trend_baselines = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES",
+            profile_default("RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES", "false"),
+        )
+    )
     key_perf_max_run_ms = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS",
@@ -1452,6 +1461,30 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
+    if key_perf_require_trend_baselines and key_perf_records and not rolling:
+        for fixture, rec in key_perf_records.items():
+            missing_trend_baselines = []
+            run_ms_value = rec.get("gpu_run_ms")
+            if isinstance(run_ms_value, (int, float)) and float(run_ms_value) > 0:
+                missing_trend_baselines.append("gpu_run_ms")
+            solve_ms_value = rec.get("gpu_solver_solve_ms")
+            if isinstance(solve_ms_value, (int, float)) and float(solve_ms_value) > 0:
+                missing_trend_baselines.append("gpu_solver_solve_ms")
+            speedup_value = rec.get("gpu_speedup_ratio")
+            if isinstance(speedup_value, (int, float)) and float(speedup_value) > 0:
+                missing_trend_baselines.append("gpu_speedup_ratio")
+            if missing_trend_baselines:
+                reasons.append(
+                    Reason(
+                        code="KEY_PERF_TREND_BASELINE_MISSING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"{fixture} missing key-performance trend baselines for: "
+                            f"{', '.join(missing_trend_baselines)}"
+                        ),
+                    )
+                )
+
     if rolling and key_perf_records:
         hist = {fixture: [] for fixture in key_perf_records}
         solve_hist = {fixture: [] for fixture in key_perf_records}
@@ -1468,6 +1501,40 @@ def evaluate_release_readiness(
                 if isinstance(speedup_value, (int, float)) and speedup_value > 0:
                     speedup_hist[fixture].append(float(speedup_value))
         for fixture, rec in key_perf_records.items():
+            if key_perf_require_trend_baselines:
+                missing_trend_baselines = []
+                run_ms_value = rec.get("gpu_run_ms")
+                if (
+                    isinstance(run_ms_value, (int, float))
+                    and run_ms_value > 0
+                    and not hist.get(fixture, [])
+                ):
+                    missing_trend_baselines.append("gpu_run_ms")
+                solve_ms_value = rec.get("gpu_solver_solve_ms")
+                if (
+                    isinstance(solve_ms_value, (int, float))
+                    and solve_ms_value > 0
+                    and not solve_hist.get(fixture, [])
+                ):
+                    missing_trend_baselines.append("gpu_solver_solve_ms")
+                speedup_value = rec.get("gpu_speedup_ratio")
+                if (
+                    isinstance(speedup_value, (int, float))
+                    and speedup_value > 0
+                    and not speedup_hist.get(fixture, [])
+                ):
+                    missing_trend_baselines.append("gpu_speedup_ratio")
+                if missing_trend_baselines:
+                    reasons.append(
+                        Reason(
+                            code="KEY_PERF_TREND_BASELINE_MISSING",
+                            severity="fail" if protected else "warn",
+                            detail=(
+                                f"{fixture} missing key-performance trend baselines for: "
+                                f"{', '.join(missing_trend_baselines)}"
+                            ),
+                        )
+                    )
             current = rec.get("gpu_run_ms")
             history = hist.get(fixture, [])
             if isinstance(current, (int, float)) and current > 0 and history:
