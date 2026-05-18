@@ -264,7 +264,7 @@ impl ObjectIndexDescriptor {
         }
     }
 
-    fn into_runtime_method_args(self) -> Result<Vec<Value>, RuntimeError> {
+    fn into_method_invocation(self) -> Result<(Value, String, Vec<Value>), RuntimeError> {
         let selector = match self.selector {
             ObjectIndexSelector::ScalarIndices { indices } => {
                 let values = indices
@@ -277,15 +277,13 @@ impl ObjectIndexDescriptor {
             ObjectIndexSelector::Member(field) => Value::String(field),
         };
         let mut args = vec![
-            self.base,
-            Value::String(self.op.protocol_name().to_string()),
             Value::String(self.kind.protocol_name().to_string()),
             selector,
         ];
         if let Some(rhs) = self.rhs {
             args.push(rhs);
         }
-        Ok(args)
+        Ok((self.base, self.op.protocol_name().to_string(), args))
     }
 }
 
@@ -420,23 +418,7 @@ pub(crate) fn class_defines_member_subsasgn(class: &runmat_builtins::ClassDef) -
 pub(crate) async fn call_object_index_descriptor_method(
     descriptor: ObjectIndexDescriptor,
 ) -> Result<Value, RuntimeError> {
-    let mut args = descriptor.into_runtime_method_args()?;
-    if args.len() < 2 {
-        return Err(crate::interpreter::errors::mex(
-            "ObjectIndexDescriptorError",
-            "object index descriptor requires base and method name",
-        ));
-    }
-    let base = args.remove(0);
-    let method = match args.remove(0) {
-        Value::String(name) => name,
-        other => {
-            return Err(crate::interpreter::errors::mex(
-                "ObjectIndexDescriptorError",
-                &format!("object index descriptor method name must be string, got {other:?}"),
-            ))
-        }
-    };
+    let (base, method, args) = descriptor.into_method_invocation()?;
     crate::call::closures::call_method_or_member_index_with_outputs(
         base,
         CallableIdentity::DynamicName(SymbolName(method.clone())),
@@ -795,15 +777,16 @@ mod tests {
             },
         );
 
-        let args = descriptor
-            .into_runtime_method_args()
+        let (base, method, args) = descriptor
+            .into_method_invocation()
             .expect("descriptor args");
-        assert_eq!(args[1], Value::String(OBJECT_PROTOCOL_SUBSREF.to_string()));
+        assert_eq!(base, Value::Num(1.0));
+        assert_eq!(method, OBJECT_PROTOCOL_SUBSREF.to_string());
         assert_eq!(
-            args[2],
+            args[0],
             Value::String(OBJECT_PROTOCOL_KIND_BRACE.to_string())
         );
-        match &args[3] {
+        match &args[1] {
             Value::Cell(cell) => assert_eq!((*cell.data[0]).clone(), Value::Num(2.0)),
             other => panic!("expected selector cell, got {other:?}"),
         }
@@ -818,16 +801,17 @@ mod tests {
             Some(Value::Num(9.0)),
         );
 
-        let args = descriptor
-            .into_runtime_method_args()
+        let (base, method, args) = descriptor
+            .into_method_invocation()
             .expect("descriptor args");
-        assert_eq!(args[1], Value::String(OBJECT_PROTOCOL_SUBSASGN.to_string()));
+        assert_eq!(base, Value::Num(1.0));
+        assert_eq!(method, OBJECT_PROTOCOL_SUBSASGN.to_string());
         assert_eq!(
-            args[2],
+            args[0],
             Value::String(OBJECT_PROTOCOL_KIND_MEMBER.to_string())
         );
-        assert_eq!(args[3], Value::String("field".to_string()));
-        assert_eq!(args[4], Value::Num(9.0));
+        assert_eq!(args[1], Value::String("field".to_string()));
+        assert_eq!(args[2], Value::Num(9.0));
     }
 
     #[test]
