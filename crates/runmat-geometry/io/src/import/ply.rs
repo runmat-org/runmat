@@ -169,20 +169,62 @@ fn parse_ply_header(bytes: &[u8]) -> Result<(PlyHeader, &[u8]), GeometryImportEr
 fn validate_binary_layout_support(
     header_text: &str,
 ) -> Result<BinaryFaceIndexType, GeometryImportError> {
-    let requires = ["property float x", "property float y", "property float z"];
-    if requires.iter().any(|token| !header_text.contains(token)) {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum ElementKind {
+        Vertex,
+        Face,
+        Other,
+    }
+
+    let mut element = ElementKind::Other;
+    let mut vertex_props = Vec::<String>::new();
+    let mut face_props = Vec::<String>::new();
+    for line in header_text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("element vertex ") {
+            element = ElementKind::Vertex;
+            continue;
+        }
+        if trimmed.starts_with("element face ") {
+            element = ElementKind::Face;
+            continue;
+        }
+        if trimmed.starts_with("element ") {
+            element = ElementKind::Other;
+            continue;
+        }
+        if !trimmed.starts_with("property ") {
+            continue;
+        }
+        match element {
+            ElementKind::Vertex => vertex_props.push(trimmed.to_string()),
+            ElementKind::Face => face_props.push(trimmed.to_string()),
+            ElementKind::Other => {}
+        }
+    }
+
+    let expected_vertex = ["property float x", "property float y", "property float z"];
+    if vertex_props.len() != expected_vertex.len()
+        || vertex_props
+            .iter()
+            .map(String::as_str)
+            .zip(expected_vertex)
+            .any(|(actual, expected)| actual != expected)
+    {
         return Err(GeometryImportError::ParseFailed(
-            "binary little-endian PLY currently requires vertex float x/y/z properties".to_string(),
+            "binary little-endian PLY currently requires vertex properties exactly: property float x/y/z"
+                .to_string(),
         ));
     }
-    if header_text.contains("property list uchar int vertex_indices") {
+
+    if face_props.as_slice() == ["property list uchar int vertex_indices"] {
         return Ok(BinaryFaceIndexType::I32);
     }
-    if header_text.contains("property list uchar uint vertex_indices") {
+    if face_props.as_slice() == ["property list uchar uint vertex_indices"] {
         return Ok(BinaryFaceIndexType::U32);
     }
     Err(GeometryImportError::ParseFailed(
-        "binary little-endian PLY currently requires face list uchar int|uint vertex_indices property"
+        "binary little-endian PLY currently requires face properties exactly: property list uchar int|uint vertex_indices"
             .to_string(),
     ))
 }

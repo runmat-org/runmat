@@ -147,6 +147,13 @@ mod tests {
         payload
     }
 
+    fn binary_ply_extra_vertex_property_payload() -> Vec<u8> {
+        let header = b"ply\nformat binary_little_endian 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n";
+        let mut payload = header.to_vec();
+        payload.resize(payload.len() + 4 * 16 + 2 * (1 + 3 * 4), 0u8);
+        payload
+    }
+
     #[test]
     fn stl_import_happy_path() {
         let result = import(
@@ -368,6 +375,19 @@ mod tests {
         assert_eq!(mesh.element_count, 2);
         assert!(has_diag(&result, "GEOMETRY_IMPORT_VERTEX_COUNT"));
         assert!(has_diag(&result, "GEOMETRY_IMPORT_TRIANGLE_COUNT"));
+    }
+
+    #[test]
+    fn ply_binary_little_endian_extra_vertex_property_reports_typed_parse_error() {
+        let payload = binary_ply_extra_vertex_property_payload();
+        let error = import_geometry("/mesh.ply", &payload, GeometryImportOptions::default())
+            .expect_err("unsupported binary PLY vertex layout should fail");
+        assert!(
+            error
+                .to_string()
+                .contains("requires vertex properties exactly"),
+            "unexpected error message: {error}"
+        );
     }
 
     #[test]

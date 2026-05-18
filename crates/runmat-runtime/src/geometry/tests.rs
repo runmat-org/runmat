@@ -108,6 +108,13 @@ fn binary_ply_uint_payload() -> Vec<u8> {
     payload
 }
 
+fn binary_ply_extra_vertex_property_payload() -> Vec<u8> {
+    let header = b"ply\nformat binary_little_endian 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n";
+    let mut payload = header.to_vec();
+    payload.resize(payload.len() + 4 * 16 + 2 * (1 + 3 * 4), 0u8);
+    payload
+}
+
 #[test]
 fn inspect_detects_stl() {
     let result =
@@ -436,6 +443,15 @@ fn load_op_maps_parse_error_for_bad_implicit_gltf_indices() {
     .expect_err("bad implicit GLTF indices should fail parse");
     assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
     assert!(error.message.contains("multiple of 3"));
+}
+
+#[test]
+fn load_op_maps_parse_error_for_unsupported_binary_ply_layout() {
+    let payload = binary_ply_extra_vertex_property_payload();
+    let error = geometry_load_op("/mesh.ply", &payload, OperationContext::new(None, None))
+        .expect_err("unsupported binary PLY layout should fail parse");
+    assert_eq!(error.error_code, "GEOMETRY_PARSE_FAILED");
+    assert!(error.message.contains("requires vertex properties exactly"));
 }
 
 #[test]
