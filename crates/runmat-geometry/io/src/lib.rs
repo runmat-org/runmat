@@ -122,6 +122,31 @@ mod tests {
         payload
     }
 
+    fn binary_ply_uint_payload() -> Vec<u8> {
+        let header = b"ply\nformat binary_little_endian 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 2\nproperty list uchar uint vertex_indices\nend_header\n";
+        let vertices = [
+            [0.0f32, 0.0f32, 0.0f32],
+            [1.0f32, 0.0f32, 0.0f32],
+            [1.0f32, 1.0f32, 0.0f32],
+            [0.0f32, 1.0f32, 0.0f32],
+        ];
+        let faces = [[0u32, 1, 2], [0u32, 2, 3]];
+
+        let mut payload = header.to_vec();
+        for vertex in vertices {
+            payload.extend_from_slice(&vertex[0].to_le_bytes());
+            payload.extend_from_slice(&vertex[1].to_le_bytes());
+            payload.extend_from_slice(&vertex[2].to_le_bytes());
+        }
+        for face in faces {
+            payload.push(3u8);
+            payload.extend_from_slice(&face[0].to_le_bytes());
+            payload.extend_from_slice(&face[1].to_le_bytes());
+            payload.extend_from_slice(&face[2].to_le_bytes());
+        }
+        payload
+    }
+
     #[test]
     fn stl_import_happy_path() {
         let result = import(
@@ -324,6 +349,18 @@ mod tests {
     #[test]
     fn ply_binary_little_endian_import_triangulates_faces_deterministically() {
         let payload = binary_ply_payload();
+        let result = import("/mesh.ply", &payload, GeometryImportOptions::default());
+        let mesh = single_mesh(&result.asset);
+        assert_eq!(result.asset.source.importer_version, "ply/v1");
+        assert_eq!(mesh.vertex_count, 4);
+        assert_eq!(mesh.element_count, 2);
+        assert!(has_diag(&result, "GEOMETRY_IMPORT_VERTEX_COUNT"));
+        assert!(has_diag(&result, "GEOMETRY_IMPORT_TRIANGLE_COUNT"));
+    }
+
+    #[test]
+    fn ply_binary_little_endian_uint_indices_import_triangulates_faces_deterministically() {
+        let payload = binary_ply_uint_payload();
         let result = import("/mesh.ply", &payload, GeometryImportOptions::default());
         let mesh = single_mesh(&result.asset);
         assert_eq!(result.asset.source.importer_version, "ply/v1");

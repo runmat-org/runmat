@@ -20,6 +20,12 @@ struct PlyHeader {
     header_text: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BinaryFaceIndexType {
+    I32,
+    U32,
+}
+
 pub(super) fn import_ply(
     path: &str,
     bytes: &[u8],
@@ -48,11 +54,12 @@ pub(super) fn import_ply(
             )?;
         }
         PlyFormat::BinaryLittleEndian10 => {
-            validate_binary_layout_support(&header.header_text)?;
+            let face_index_type = validate_binary_layout_support(&header.header_text)?;
             parse_binary_little_endian_body(
                 body,
                 header.vertex_count,
                 header.face_count,
+                face_index_type,
                 &mut vertices,
                 &mut triangle_count,
                 &mut diagnostics,
@@ -159,19 +166,25 @@ fn parse_ply_header(bytes: &[u8]) -> Result<(PlyHeader, &[u8]), GeometryImportEr
     ))
 }
 
-fn validate_binary_layout_support(header_text: &str) -> Result<(), GeometryImportError> {
-    let requires = [
-        "property float x",
-        "property float y",
-        "property float z",
-        "property list uchar int vertex_indices",
-    ];
+fn validate_binary_layout_support(
+    header_text: &str,
+) -> Result<BinaryFaceIndexType, GeometryImportError> {
+    let requires = ["property float x", "property float y", "property float z"];
     if requires.iter().any(|token| !header_text.contains(token)) {
         return Err(GeometryImportError::ParseFailed(
-            "binary little-endian PLY currently requires vertex float x/y/z and face list uchar int vertex_indices properties".to_string(),
+            "binary little-endian PLY currently requires vertex float x/y/z properties".to_string(),
         ));
     }
-    Ok(())
+    if header_text.contains("property list uchar int vertex_indices") {
+        return Ok(BinaryFaceIndexType::I32);
+    }
+    if header_text.contains("property list uchar uint vertex_indices") {
+        return Ok(BinaryFaceIndexType::U32);
+    }
+    Err(GeometryImportError::ParseFailed(
+        "binary little-endian PLY currently requires face list uchar int|uint vertex_indices property"
+            .to_string(),
+    ))
 }
 
 fn parse_ascii_body(
@@ -250,6 +263,7 @@ fn parse_binary_little_endian_body(
     body: &[u8],
     vertex_count: usize,
     face_count: usize,
+    face_index_type: BinaryFaceIndexType,
     vertices: &mut Vec<[f64; 3]>,
     triangle_count: &mut u64,
     diagnostics: &mut Vec<ImportDiagnostic>,
@@ -279,14 +293,26 @@ fn parse_binary_little_endian_body(
 
         let mut indices = Vec::<usize>::with_capacity(face_vertex_count);
         for _ in 0..face_vertex_count {
-            let raw = read_i32_le(body, cursor, "PLY binary face index")?;
+            let raw = match face_index_type {
+                BinaryFaceIndexType::I32 => {
+                    let value = read_i32_le(body, cursor, "PLY binary face index")?;
+                    if value < 0 {
+                        return Err(GeometryImportError::ParseFailed(
+                            "PLY binary face index must be non-negative".to_string(),
+                        ));
+                    }
+                    value as u64
+                }
+                BinaryFaceIndexType::U32 => {
+                    read_u32_le(body, cursor, "PLY binary face index")? as u64
+                }
+            };
             cursor = cursor.saturating_add(4);
-            if raw < 0 {
-                return Err(GeometryImportError::ParseFailed(
-                    "PLY binary face index must be non-negative".to_string(),
-                ));
-            }
-            let index = raw as usize;
+            let index = usize::try_from(raw).map_err(|_| {
+                GeometryImportError::ParseFailed(
+                    "PLY binary face index exceeds host addressable range".to_string(),
+                )
+            })?;
             if index >= vertices.len() {
                 return Err(GeometryImportError::ParseFailed(format!(
                     "PLY face index {} out of bounds for {} vertices",
@@ -355,6 +381,22 @@ fn read_i32_le(bytes: &[u8], offset: usize, label: &str) -> Result<i32, Geometry
         )));
     }
     Ok(i32::from_le_bytes([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+    ]))
+}
+
+fn read_u32_le(bytes: &[u8], offset: usize, label: &str) -> Result<u32, GeometryImportError> {
+    let end = offset.saturating_add(4);
+    if end > bytes.len() {
+        return Err(GeometryImportError::ParseFailed(format!(
+            "{} is out of bounds",
+            label
+        )));
+    }
+    Ok(u32::from_le_bytes([
         bytes[offset],
         bytes[offset + 1],
         bytes[offset + 2],
