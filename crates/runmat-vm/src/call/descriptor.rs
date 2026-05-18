@@ -378,7 +378,7 @@ async fn call_builtin_with_requested_outputs(
     args: &[Value],
     requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
-    if requested_outputs > 1 {
+    if requested_outputs != 1 {
         runmat_runtime::call_builtin_async_with_outputs(name, args, requested_outputs).await
     } else {
         runmat_runtime::call_builtin_async(name, args).await
@@ -588,5 +588,24 @@ mod tests {
             Value::OutputList(values) => assert_eq!(values.len(), 2),
             other => panic!("expected two-output list from builtin descriptor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn builtin_descriptor_uses_requested_outputs_for_zero_result_calls() {
+        let args = vec![Value::Num(9.0)];
+        let expected = block_on(runmat_runtime::call_builtin_async_with_outputs(
+            "sqrt", &args, 0,
+        ))
+        .expect("runtime builtin with explicit zero outputs");
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::Builtin(BuiltinId("sqrt".to_string())),
+            Some("sqrt".to_string()),
+            args,
+            0,
+            CallableFallbackPolicy::None,
+            CallableCallKind::Direct,
+        );
+        let value = block_on(execute_callable_descriptor(descriptor)).expect("execute descriptor");
+        assert_eq!(value, expected);
     }
 }
