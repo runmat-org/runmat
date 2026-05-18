@@ -28,10 +28,20 @@ def main() -> int:
     profile = report.get("governance_profile", "unknown")
     entries = report.get("entries", [])
     rationale = report.get("rationale")
+    rolling_count = report.get("rolling_report_count")
+    trusted_rolling_count = report.get("rolling_trusted_report_count", rolling_count)
 
     errors = []
     if not isinstance(entries, list) or not entries:
         errors.append("ratchet report has no entries")
+    if not isinstance(rolling_count, int) or rolling_count < 0:
+        errors.append("rolling_report_count must be non-negative int")
+    if not isinstance(trusted_rolling_count, int) or trusted_rolling_count < 0:
+        errors.append("rolling_trusted_report_count must be non-negative int")
+    elif isinstance(rolling_count, int) and trusted_rolling_count > rolling_count:
+        errors.append(
+            "rolling_trusted_report_count must be less than or equal to rolling_report_count"
+        )
 
     if profile in {"development", "feature"}:
         if rationale != "rolling_median_reference_fixtures":
