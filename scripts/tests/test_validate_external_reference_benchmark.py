@@ -17,6 +17,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "em_homogeneous_sigma_omega_scale_spread_ratio",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
             "name": "em_homogeneous_sigma_omega_response_coverage_ratio",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 1.0,
@@ -49,6 +56,27 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 0.9996,
             "reference": 0.9996,
+            "pass": True,
+        },
+        {
+            "name": "em_homogeneous_material_heterogeneity_index",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "em_homogeneous_assignment_coverage_ratio",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
+            "pass": True,
+        },
+        {
+            "name": "em_homogeneous_fallback_coefficient_ratio",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 0.0,
+            "reference": 0.0,
             "pass": True,
         },
         {
@@ -101,6 +129,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "em_heterogeneous_sigma_omega_scale_mean",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 0.97,
+            "reference": 0.97,
+            "pass": True,
+        },
+        {
             "name": "em_heterogeneous_sigma_omega_scale_spread_ratio",
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 1.25,
@@ -147,6 +182,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 8.6,
             "reference": 8.5,
+            "pass": True,
+        },
+        {
+            "name": "em_heterogeneous_material_heterogeneity_index",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 1.11,
+            "reference": 1.11,
+            "pass": True,
+        },
+        {
+            "name": "em_heterogeneous_assignment_coverage_ratio",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 1.0,
+            "reference": 1.0,
             "pass": True,
         },
         {
