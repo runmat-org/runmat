@@ -279,7 +279,9 @@ fn classify_mir_index_plan(indexing: &IndexingSemantics) -> MirIndexPlan {
                 MirIndexPlan::Slice
             }
         }
-        IndexKind::Dot => MirIndexPlan::Slice,
+        IndexKind::Dot => unreachable!(
+            "dot indexing should be lowered through member expressions/places before MIR index planning"
+        ),
     }
 }
 
