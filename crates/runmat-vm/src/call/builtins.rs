@@ -113,7 +113,7 @@ pub async fn resolve_imported_builtin(
     name: &str,
     imports: &[(Vec<String>, bool)],
     prepared_primary: &[Value],
-    requested_outputs: Option<usize>,
+    requested_outputs: usize,
 ) -> Result<ImportedBuiltinResolution, RuntimeError> {
     let mut specific_matches: Vec<(String, Value)> = Vec::new();
     for (path, wildcard) in imports {
@@ -123,12 +123,12 @@ pub async fn resolve_imported_builtin(
         if path.last().map(|s| s.as_str()) == Some(name) {
             let qual = imported_builtin_qualified_name(path, None);
             let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
-            let result = match requested_outputs {
-                Some(count) => {
-                    runmat_runtime::call_builtin_async_with_outputs(&qual, &qual_args, count).await
-                }
-                None => runmat_runtime::call_builtin_async(&qual, &qual_args).await,
-            };
+            let result = runmat_runtime::call_builtin_async_with_outputs(
+                &qual,
+                &qual_args,
+                requested_outputs,
+            )
+            .await;
             if let Ok(value) = result {
                 specific_matches.push((qual, value));
             }
@@ -156,12 +156,9 @@ pub async fn resolve_imported_builtin(
         }
         let qual = imported_builtin_qualified_name(path, Some(name));
         let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
-        let result = match requested_outputs {
-            Some(count) => {
-                runmat_runtime::call_builtin_async_with_outputs(&qual, &qual_args, count).await
-            }
-            None => runmat_runtime::call_builtin_async(&qual, &qual_args).await,
-        };
+        let result =
+            runmat_runtime::call_builtin_async_with_outputs(&qual, &qual_args, requested_outputs)
+                .await;
         if let Ok(value) = result {
             wildcard_matches.push((qual, value));
         }

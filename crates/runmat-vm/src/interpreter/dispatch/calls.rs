@@ -159,14 +159,13 @@ pub async fn handle_builtin_call_multi(
     out_count: usize,
     refresh_vars: impl Fn(&[Value]),
 ) -> Result<BuiltinHandling, RuntimeError> {
-    handle_builtin_call_inner(ctx, refresh_vars, Some(out_count), out_count).await
+    handle_builtin_call_inner(ctx, refresh_vars, out_count).await
 }
 
 async fn handle_builtin_call_inner(
     ctx: BuiltinCallContext<'_>,
     refresh_vars: impl Fn(&[Value]),
-    requested_outputs: Option<usize>,
-    output_hint: usize,
+    requested_outputs: usize,
 ) -> Result<BuiltinHandling, RuntimeError> {
     let BuiltinCallContext {
         stack,
@@ -193,15 +192,12 @@ async fn handle_builtin_call_inner(
     let args = call_builtins::collect_call_args(stack, arg_count)?;
 
     let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
-    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
+    let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
 
     let prepared_primary = call_builtins::prepare_builtin_args(name, &args).await?;
-    let result = match requested_outputs {
-        Some(count) => {
-            runmat_runtime::call_builtin_async_with_outputs(name, &prepared_primary, count).await
-        }
-        None => runmat_runtime::call_builtin_async(name, &prepared_primary).await,
-    };
+    let result =
+        runmat_runtime::call_builtin_async_with_outputs(name, &prepared_primary, requested_outputs)
+            .await;
     let imported = call_builtins::resolve_imported_builtin(
         name,
         imports,
@@ -222,7 +218,7 @@ async fn handle_builtin_call_inner(
     handle_builtin_outcome(
         result,
         imported,
-        output_hint,
+        requested_outputs,
         stack,
         exception,
         refresh_vars,
