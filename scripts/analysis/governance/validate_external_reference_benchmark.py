@@ -676,6 +676,26 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "modal_max_m_orthogonality_offdiag",
         "modal_min_relative_frequency_separation",
     },
+    "modal_large_cpu": {
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
+    },
+    "modal_large_cpu_stress16": {
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
+    },
+    "modal_large_gpu_fallback": {
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
+    },
+    "modal_large_gpu_provider": {
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
+    },
+    "modal_large_gpu_provider_stress16": {
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
+    },
 }
 
 

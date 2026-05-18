@@ -3577,6 +3577,106 @@
       "tolerance_rel": 0.5
     },
     {
+      "name": "modal_max_m_orthogonality_offdiag",
+      "fixture_id": "modal_large_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "modal_max_m_orthogonality_offdiag",
+      "reference": 0.0,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": null
+    },
+    {
+      "name": "modal_min_relative_frequency_separation",
+      "fixture_id": "modal_large_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "modal_min_relative_frequency_separation",
+      "reference": 0.01346588876542237,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "modal_max_m_orthogonality_offdiag",
+      "fixture_id": "modal_large_cpu_stress16",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "modal_max_m_orthogonality_offdiag",
+      "reference": 0.0,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": null
+    },
+    {
+      "name": "modal_min_relative_frequency_separation",
+      "fixture_id": "modal_large_cpu_stress16",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "modal_min_relative_frequency_separation",
+      "reference": 0.009723171013900932,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "modal_max_m_orthogonality_offdiag",
+      "fixture_id": "modal_large_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "modal_max_m_orthogonality_offdiag",
+      "reference": 0.0,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": null
+    },
+    {
+      "name": "modal_min_relative_frequency_separation",
+      "fixture_id": "modal_large_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "modal_min_relative_frequency_separation",
+      "reference": 0.01346588876542237,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "modal_max_m_orthogonality_offdiag",
+      "fixture_id": "modal_large_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "modal_max_m_orthogonality_offdiag",
+      "reference": 0.0,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": null
+    },
+    {
+      "name": "modal_min_relative_frequency_separation",
+      "fixture_id": "modal_large_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "modal_min_relative_frequency_separation",
+      "reference": 0.01346588876542237,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "modal_max_m_orthogonality_offdiag",
+      "fixture_id": "modal_large_gpu_provider_stress16",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "modal_max_m_orthogonality_offdiag",
+      "reference": 0.0,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": null
+    },
+    {
+      "name": "modal_min_relative_frequency_separation",
+      "fixture_id": "modal_large_gpu_provider_stress16",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "modal_min_relative_frequency_separation",
+      "reference": 0.009723171013900932,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.5
+    },
+    {
       "name": "thermo_mech_thermal_strain_scale",
       "fixture_id": "thermo_mech_kickoff_gpu_provider",
       "field": "unused_for_threshold_source",

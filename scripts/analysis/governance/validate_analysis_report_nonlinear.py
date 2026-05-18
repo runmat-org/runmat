@@ -325,6 +325,26 @@ REQUIRED_FIXTURES = {
         "modal_max_m_orthogonality_offdiag",
         "modal_min_relative_frequency_separation",
     },
+    "modal_large_cpu": {
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
+    },
+    "modal_large_cpu_stress16": {
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
+    },
+    "modal_large_gpu_fallback": {
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
+    },
+    "modal_large_gpu_provider": {
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
+    },
+    "modal_large_gpu_provider_stress16": {
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
+    },
     "cfd_steady_gpu_provider": {
         "cfd_reference_density_kg_per_m3",
         "cfd_dynamic_viscosity_pa_s",

@@ -686,6 +686,41 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 },
             ),
             _record(
+                "modal_large_cpu",
+                {
+                    "modal_max_m_orthogonality_offdiag",
+                    "modal_min_relative_frequency_separation",
+                },
+            ),
+            _record(
+                "modal_large_cpu_stress16",
+                {
+                    "modal_max_m_orthogonality_offdiag",
+                    "modal_min_relative_frequency_separation",
+                },
+            ),
+            _record(
+                "modal_large_gpu_fallback",
+                {
+                    "modal_max_m_orthogonality_offdiag",
+                    "modal_min_relative_frequency_separation",
+                },
+            ),
+            _record(
+                "modal_large_gpu_provider",
+                {
+                    "modal_max_m_orthogonality_offdiag",
+                    "modal_min_relative_frequency_separation",
+                },
+            ),
+            _record(
+                "modal_large_gpu_provider_stress16",
+                {
+                    "modal_max_m_orthogonality_offdiag",
+                    "modal_min_relative_frequency_separation",
+                },
+            ),
+            _record(
                 "cfd_steady_gpu_provider",
                 {
                     "cfd_reference_density_kg_per_m3",
@@ -1193,6 +1228,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "acoustic_mode_count"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_modal_cpu_orthogonality_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "modal_large_cpu":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "modal_max_m_orthogonality_offdiag"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
