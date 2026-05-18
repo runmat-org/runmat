@@ -3447,6 +3447,66 @@
       "tolerance_rel": null
     },
     {
+      "name": "thermo_shock_constitutive_temperature_factor",
+      "fixture_id": "thermo_shock_oscillatory_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermo_shock_constitutive_temperature_factor",
+      "reference": -0.06580000000000001,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "thermo_shock_effective_modulus_scale",
+      "fixture_id": "thermo_shock_oscillatory_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermo_shock_effective_modulus_scale",
+      "reference": 0.9391385556266667,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "transient_max_residual_norm",
+      "fixture_id": "thermo_shock_oscillatory_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_residual_norm",
+      "reference": 7.441203050454289e-09,
+      "tolerance_abs": 1e-08,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "transient_max_energy_growth_ratio",
+      "fixture_id": "thermo_shock_oscillatory_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_energy_growth_ratio",
+      "reference": 1.0000159399758364,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.02
+    },
+    {
+      "name": "transient_prepared_cache_hit_ratio",
+      "fixture_id": "thermo_shock_oscillatory_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_hit_ratio",
+      "reference": 0.6,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "transient_prepared_cache_misses",
+      "fixture_id": "thermo_shock_oscillatory_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_misses",
+      "reference": 12.0,
+      "tolerance_abs": 6.0,
+      "tolerance_rel": 0.5
+    },
+    {
       "name": "thermo_shock_oscillatory_temporal_variation",
       "fixture_id": "thermo_shock_oscillatory_field_artifact_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -3495,6 +3555,66 @@
       "reference": 0.0,
       "tolerance_abs": 0.08,
       "tolerance_rel": null
+    },
+    {
+      "name": "thermo_shock_constitutive_temperature_factor",
+      "fixture_id": "thermo_shock_oscillatory_field_artifact_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermo_shock_constitutive_temperature_factor",
+      "reference": -0.06580000000000001,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "thermo_shock_effective_modulus_scale",
+      "fixture_id": "thermo_shock_oscillatory_field_artifact_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermo_shock_effective_modulus_scale",
+      "reference": 0.9391385556266667,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.2
+    },
+    {
+      "name": "transient_max_residual_norm",
+      "fixture_id": "thermo_shock_oscillatory_field_artifact_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_residual_norm",
+      "reference": 7.441203050454289e-09,
+      "tolerance_abs": 1e-08,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "transient_max_energy_growth_ratio",
+      "fixture_id": "thermo_shock_oscillatory_field_artifact_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_energy_growth_ratio",
+      "reference": 1.0000159399758364,
+      "tolerance_abs": 0.01,
+      "tolerance_rel": 0.02
+    },
+    {
+      "name": "transient_prepared_cache_hit_ratio",
+      "fixture_id": "thermo_shock_oscillatory_field_artifact_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_hit_ratio",
+      "reference": 0.6333333333333333,
+      "tolerance_abs": 0.15,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "transient_prepared_cache_misses",
+      "fixture_id": "thermo_shock_oscillatory_field_artifact_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_prepared_cache_misses",
+      "reference": 11.0,
+      "tolerance_abs": 6.0,
+      "tolerance_rel": 0.5
     },
     {
       "name": "thermal_standalone_max_residual_norm",

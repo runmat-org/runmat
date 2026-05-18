@@ -343,6 +343,12 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "thermo_shock_oscillatory_spatial_coverage_ratio",
                     "thermo_shock_oscillatory_field_extrapolation_ratio",
                     "thermo_shock_oscillatory_field_clamp_ratio",
+                    "thermo_shock_constitutive_temperature_factor",
+                    "thermo_shock_effective_modulus_scale",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                    "transient_prepared_cache_hit_ratio",
+                    "transient_prepared_cache_misses",
                 },
             )
             | {
@@ -366,6 +372,12 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "thermo_shock_oscillatory_spatial_coverage_ratio",
                     "thermo_shock_oscillatory_field_extrapolation_ratio",
                     "thermo_shock_oscillatory_field_clamp_ratio",
+                    "thermo_shock_constitutive_temperature_factor",
+                    "thermo_shock_effective_modulus_scale",
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                    "transient_prepared_cache_hit_ratio",
+                    "transient_prepared_cache_misses",
                 },
             )
             | {
@@ -842,6 +854,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         for item in record["threshold_assertions"]
                         if item["name"]
                         != "thermo_ramp_smooth_constitutive_temperature_factor"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_thermo_shock_constitutive_factor_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "thermo_shock_oscillatory_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "thermo_shock_constitutive_temperature_factor"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
