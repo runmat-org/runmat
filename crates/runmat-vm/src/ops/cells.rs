@@ -112,6 +112,27 @@ pub fn expand_all_cell_values(ca: &CellArray) -> Result<Vec<Value>, RuntimeError
         .collect()
 }
 
+pub fn gather_cell_paren_linear_indices(
+    ca: &CellArray,
+    indices: &[usize],
+    output_shape: &[usize],
+) -> Result<Value, RuntimeError> {
+    let mut handles = Vec::with_capacity(indices.len());
+    for &idx in indices {
+        let pos = row_major_pos_from_linear(ca, idx)?;
+        handles.push(ca.data[pos].clone());
+    }
+    let shape = if output_shape.is_empty() {
+        vec![1, handles.len().max(1)]
+    } else {
+        output_shape.to_vec()
+    };
+    Ok(Value::Cell(
+        CellArray::new_handles_with_shape(handles, shape)
+            .map_err(|e| format!("Cell paren indexing error: {e}"))?,
+    ))
+}
+
 pub fn gather_cell_member(ca: &CellArray, field: &str) -> Result<Value, RuntimeError> {
     let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
     for value in &ca.data {

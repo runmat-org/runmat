@@ -69,3 +69,61 @@ fn host_linear_indexing_accepts_gpu_backed_range_selector() {
         panic!("y");
     }
 }
+
+#[test]
+fn cell_paren_scalar_index_returns_cell_container() {
+    let vars = execute_semantic_source("C={10,20,30}; D=C(2); x=D{1};").unwrap();
+    let mut saw_container = false;
+    let mut saw_unwrapped = false;
+    for value in vars {
+        match value {
+            Value::Cell(cell) if cell.data.len() == 1 => {
+                if matches!((*cell.data[0]).clone(), Value::Num(n) if (n - 20.0).abs() < 1e-9) {
+                    saw_container = true;
+                }
+            }
+            Value::Num(n) if (n - 20.0).abs() < 1e-9 => saw_unwrapped = true,
+            _ => {}
+        }
+    }
+    assert!(
+        saw_container,
+        "expected C(2) to produce a 1x1 cell container"
+    );
+    assert!(
+        saw_unwrapped,
+        "expected D{{1}} to unwrap to numeric payload"
+    );
+}
+
+#[test]
+fn cell_paren_range_index_returns_cell_subset() {
+    let vars = execute_semantic_source("C={1,2,3,4}; D=C(2:3); x=D{1}; y=D{2};").unwrap();
+    let mut saw_subset = false;
+    let mut saw_x = false;
+    let mut saw_y = false;
+    for value in vars {
+        match value {
+            Value::Cell(cell) if cell.data.len() == 2 => {
+                let first = (*cell.data[0]).clone();
+                let second = (*cell.data[1]).clone();
+                if matches!(first, Value::Num(n) if (n - 2.0).abs() < 1e-9)
+                    && matches!(second, Value::Num(n) if (n - 3.0).abs() < 1e-9)
+                {
+                    saw_subset = true;
+                }
+            }
+            Value::Num(n) if (n - 2.0).abs() < 1e-9 => saw_x = true,
+            Value::Num(n) if (n - 3.0).abs() < 1e-9 => saw_y = true,
+            _ => {}
+        }
+    }
+    assert!(
+        saw_subset,
+        "expected C(2:3) to return a two-element cell subset"
+    );
+    assert!(
+        saw_x && saw_y,
+        "expected D{{1}} and D{{2}} values to be preserved"
+    );
+}

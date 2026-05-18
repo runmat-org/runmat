@@ -11,7 +11,7 @@ use crate::indexing::read_slice as idx_read_slice;
 use crate::indexing::selectors::{build_slice_selectors, index_scalar_from_value, SliceSelector};
 use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
-use runmat_builtins::Value;
+use runmat_builtins::{CellArray, Value};
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 use std::pin::Pin;
@@ -117,6 +117,34 @@ fn resolve_cell_indices(
             }
         })
         .collect()
+}
+
+fn gather_cell_with_plan(
+    ca: &CellArray,
+    plan: &crate::indexing::plan::IndexPlan,
+) -> Result<Value, RuntimeError> {
+    let indices: Vec<usize> = plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
+    crate::ops::cells::gather_cell_paren_linear_indices(ca, &indices, &plan.output_shape)
+}
+
+async fn build_cell_scalar_selectors(
+    raw_indices: &[Value],
+) -> Result<Vec<SliceSelector>, RuntimeError> {
+    let mut selectors = Vec::with_capacity(raw_indices.len());
+    for value in raw_indices {
+        let idx_val = index_scalar_from_value(value).await?.ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "ScalarIndexRequired",
+                "Cell indexing requires scalar numeric indices",
+            )
+        })?;
+        selectors.push(SliceSelector::Scalar(if idx_val <= 0 {
+            0
+        } else {
+            idx_val as usize
+        }));
+    }
+    Ok(selectors)
 }
 
 fn pop_index_values(stack: &mut Vec<Value>, count: usize) -> Result<Vec<Value>, RuntimeError> {
@@ -423,6 +451,11 @@ pub async fn dispatch_indexing(
                     );
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
+                Value::Cell(ca) => {
+                    let selectors = build_cell_scalar_selectors(&raw_indices).await?;
+                    let plan = build_index_plan(&selectors, raw_indices.len(), &ca.shape)?;
+                    stack.push(gather_cell_with_plan(ca, &plan)?);
+                }
                 Value::FunctionHandle(_)
                 | Value::SemanticFunctionHandle { .. }
                 | Value::Closure(_) => {
@@ -725,6 +758,13 @@ pub async fn dispatch_indexing(
                     idx_read_slice::read_string_slice(&sa, *dims, *colon_mask, *end_mask, &numeric)
                         .await?,
                 ),
+                Value::Cell(ca) => {
+                    let selectors =
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ca.shape)
+                            .await?;
+                    let plan = build_index_plan(&selectors, *dims, &ca.shape)?;
+                    stack.push(gather_cell_with_plan(&ca, &plan)?);
+                }
                 other => {
                     if *dims == 1 {
                         if (*colon_mask & 1u32) != 0 {
@@ -1033,6 +1073,24 @@ pub async fn dispatch_indexing(
                         )
                         .await?
                     }
+                    Value::StringArray(sa) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, &sa.shape),
+                            end_numeric_exprs,
+                            vars,
+                        )
+                        .await?
+                    }
+                    Value::Cell(ca) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, &ca.shape),
+                            end_numeric_exprs,
+                            vars,
+                        )
+                        .await?
+                    }
                     _ => numeric,
                 };
             }
@@ -1141,6 +1199,29 @@ pub async fn dispatch_indexing(
                         idx_read_slice::gather_string_slice(&sa, &plan)
                             .map_err(|e| format!("slice: {e}"))?,
                     );
+                }
+                Value::Cell(ca) => {
+                    let vm_plan = build_expr_index_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &ca.shape,
+                        },
+                        |dim_len, expr| {
+                            let expr = expr.clone();
+                            let vars_ref = &*vars;
+                            async move { resolve_range_end_index(dim_len, &expr, vars_ref).await }
+                        },
+                    )
+                    .await?;
+                    stack.push(gather_cell_with_plan(&ca, &vm_plan)?);
                 }
                 _ => {
                     return Err(crate::interpreter::errors::mex(
