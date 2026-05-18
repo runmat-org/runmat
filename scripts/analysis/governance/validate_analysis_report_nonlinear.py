@@ -714,7 +714,59 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
+    "acoustic_harmonic_gpu_fallback": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "cantilever_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "cantilever_gpu_fallback": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "cantilever_load_sweep_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "cantilever_large_load_sweep_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "multi_material_assembly_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "modal_large_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "modal_large_gpu_provider_stress16": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "modal_large_gpu_fallback": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "transient_long_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "transient_long_gpu_fallback": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "transient_shock_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
     "cfd_steady_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "cfd_steady_gpu_fallback": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
@@ -722,7 +774,15 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
+    "cht_coupled_gpu_fallback": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
     "fsi_coupled_gpu_provider": {
+        "gpu_speedup_ratio",
+        "gpu_solver_solve_ms",
+    },
+    "fsi_coupled_gpu_fallback": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
