@@ -182,6 +182,17 @@ impl CallableDescriptor {
                 CallableFallbackPolicy::None,
             );
         }
+        if name
+            .split('.')
+            .filter(|segment| !segment.is_empty())
+            .count()
+            > 1
+        {
+            return (
+                Self::qualified_identity_from_name(name),
+                CallableFallbackPolicy::ExternalBoundary,
+            );
+        }
         (
             CallableIdentity::DynamicName(SymbolName(name.to_string())),
             CallableFallbackPolicy::RuntimeNameResolution,
@@ -553,7 +564,9 @@ pub(crate) async fn try_execute_callable_descriptor(
 
 #[cfg(test)]
 mod tests {
-    use super::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
+    use super::{
+        execute_callable_descriptor, CallableCallKind, CallableDescriptor, CallableTarget,
+    };
     use crate::bytecode::SemanticFunctionRegistry;
     use futures::executor::block_on;
     use runmat_builtins::{Tensor, Value};
@@ -737,5 +750,43 @@ mod tests {
         let value = block_on(execute_callable_descriptor(descriptor))
             .expect("builtin handle feval should execute");
         assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
+    fn feval_function_handle_qualified_name_classifies_as_external_boundary() {
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::FunctionHandle("pkg.remote_inc".to_string()),
+            vec![Value::Num(2.0)],
+            1,
+            &SemanticFunctionRegistry::default(),
+        );
+        let CallableTarget::Resolved {
+            identity,
+            fallback_policy,
+        } = &descriptor.target
+        else {
+            panic!("expected resolved target");
+        };
+        assert!(matches!(identity, CallableIdentity::ExternalName(_)));
+        assert_eq!(*fallback_policy, CallableFallbackPolicy::ExternalBoundary);
+    }
+
+    #[test]
+    fn feval_at_handle_qualified_name_classifies_as_external_boundary() {
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::String("@pkg.remote_inc".to_string()),
+            vec![Value::Num(2.0)],
+            1,
+            &SemanticFunctionRegistry::default(),
+        );
+        let CallableTarget::Resolved {
+            identity,
+            fallback_policy,
+        } = &descriptor.target
+        else {
+            panic!("expected resolved target");
+        };
+        assert!(matches!(identity, CallableIdentity::ExternalName(_)));
+        assert_eq!(*fallback_policy, CallableFallbackPolicy::ExternalBoundary);
     }
 }
