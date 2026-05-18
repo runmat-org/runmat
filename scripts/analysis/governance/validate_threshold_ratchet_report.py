@@ -32,6 +32,12 @@ def main() -> int:
     trusted_rolling_count = report.get("rolling_trusted_report_count", rolling_count)
 
     errors = []
+    if report.get("schema_version") != "threshold-ratchet-report/v1":
+        errors.append("schema_version must be threshold-ratchet-report/v1")
+    if profile not in {"release", "development", "feature"}:
+        errors.append(
+            "governance_profile must be one of: release, development, feature"
+        )
     if not isinstance(entries, list) or not entries:
         errors.append("ratchet report has no entries")
     if not isinstance(rolling_count, int) or rolling_count < 0:

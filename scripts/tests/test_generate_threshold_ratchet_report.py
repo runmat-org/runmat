@@ -44,6 +44,7 @@ class GenerateThresholdRatchetReportTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             report = json.loads(out_json.read_text())
             self.assertEqual(report["governance_profile"], "development")
+            self.assertEqual(report["schema_version"], "threshold-ratchet-report/v1")
             self.assertEqual(report["rolling_report_count"], 6)
             self.assertEqual(report["rolling_trusted_report_count"], 4)
             self.assertEqual(len(report["entries"]), 5)

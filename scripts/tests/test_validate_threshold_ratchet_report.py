@@ -14,6 +14,7 @@ class ValidateThresholdRatchetReportTests(unittest.TestCase):
             path.write_text(
                 json.dumps(
                     {
+                        "schema_version": "threshold-ratchet-report/v1",
                         "governance_profile": "development",
                         "rationale": "rolling_median_reference_fixtures",
                         "rolling_report_count": 6,
@@ -44,6 +45,7 @@ class ValidateThresholdRatchetReportTests(unittest.TestCase):
             path.write_text(
                 json.dumps(
                     {
+                        "schema_version": "threshold-ratchet-report/v1",
                         "governance_profile": "feature",
                         "rationale": "rolling_median_reference_fixtures",
                         "rolling_report_count": 6,
@@ -74,6 +76,7 @@ class ValidateThresholdRatchetReportTests(unittest.TestCase):
             path.write_text(
                 json.dumps(
                     {
+                        "schema_version": "threshold-ratchet-report/v1",
                         "governance_profile": "release",
                         "rationale": "rolling_median_reference_fixtures",
                         "rolling_report_count": 3,
@@ -105,6 +108,7 @@ class ValidateThresholdRatchetReportTests(unittest.TestCase):
             path.write_text(
                 json.dumps(
                     {
+                        "schema_version": "threshold-ratchet-report/v1",
                         "governance_profile": "release",
                         "rationale": "rolling_median_reference_fixtures",
                         "rolling_report_count": 3,
@@ -136,6 +140,7 @@ class ValidateThresholdRatchetReportTests(unittest.TestCase):
             path.write_text(
                 json.dumps(
                     {
+                        "schema_version": "threshold-ratchet-report/v1",
                         "governance_profile": "release",
                         "rationale": "rolling_median_reference_fixtures",
                         "rolling_report_count": 3,
@@ -169,10 +174,43 @@ class ValidateThresholdRatchetReportTests(unittest.TestCase):
             path.write_text(
                 json.dumps(
                     {
+                        "schema_version": "threshold-ratchet-report/v1",
                         "governance_profile": "release",
                         "rationale": "rolling_median_reference_fixtures",
                         "rolling_report_count": 2,
                         "rolling_trusted_report_count": 3,
+                        "entries": [
+                            {
+                                "threshold_key": "A",
+                                "status": "unchanged",
+                                "old": 1.1,
+                                "new": 1.1,
+                                "observed": 1.02,
+                            }
+                        ],
+                    }
+                )
+            )
+            os.environ["RUNMAT_THRESHOLD_RATCHET_REPORT"] = str(path)
+            os.environ["RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE"] = "true"
+            try:
+                rc = main()
+            finally:
+                os.environ.pop("RUNMAT_THRESHOLD_RATCHET_REPORT", None)
+                os.environ.pop("RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE", None)
+            self.assertEqual(rc, 1)
+
+    def test_fails_for_invalid_schema_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ratchet.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "threshold-ratchet-report/v0",
+                        "governance_profile": "release",
+                        "rationale": "rolling_median_reference_fixtures",
+                        "rolling_report_count": 2,
+                        "rolling_trusted_report_count": 2,
                         "entries": [
                             {
                                 "threshold_key": "A",
