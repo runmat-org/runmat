@@ -626,6 +626,8 @@ Current ratchet status:
 - VM shared call helper `external_qualified_display_name` now resolves through strict typed callable-name mapping (`strict_callable_display_name`) instead of generic `CallableIdentity::display_name()`, with coverage for malformed and well-formed external base-name rendering.
 - Dead core request entrypoint ABI surface has been removed: `ExecutionRequest` no longer carries an unconsumed `EntrypointSelector`, and request-path tests now validate behavior through semantic default-entrypoint compilation only.
 - Dead core request input/resolver ABI surface has been removed: `ExecutionRequest` no longer carries unconsumed `inputs` and `resolver` fields (`RuntimeFlow` request-input payload and `ResolverHandle`), with request-path tests updated to the reduced enforced policy set.
+- Dead builtin compatibility enum surface has been trimmed: `BuiltinCompatibility::RunMatExtended` was removed from `runmat-builtins` after confirming no production usage, keeping compatibility labels scoped to behavior-backed modes.
+- `runmat-gc` stress coverage no longer depends on removed legacy VM/HIR test APIs (`HirProgram`, `runmat_vm::execute`); it now compiles and executes through semantic lowering + MIR + VM bytecode (`lowering.assembly` -> `runmat_mir::lower_assembly` -> `runmat_vm::compile` -> `runmat_vm::interpret`).
 
 ## Validation Cadence
 

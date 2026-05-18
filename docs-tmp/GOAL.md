@@ -1,0 +1,46 @@
+# Goal
+
+Complete the semantic migration of RunMat across Plans 0-7 until:
+
+- active execution/analysis paths are semantic HIR -> MIR -> analysis -> VM/runtime
+- production code does not depend on legacy compiler/runtime paths
+- MATLAB core semantics are represented as compiler/runtime products
+- project composition and entrypoint behavior are manifest-driven
+- nominal class and builtin metadata are unified
+- accel/fusion planning is semantic-fact-driven
+- workspace validation cadence stays green
+
+## Success Criteria Checklist
+
+1. Semantic-only active pipeline
+- Evidence: no production `compile_legacy`/legacy execute shims in active compiler/runtime paths.
+- Evidence command: `rg -n "compile_legacy|LegacyUserFunction|runmat_vm::execute|HirProgram|VarId" crates`
+- Current status: in progress (production paths are largely semantic; some test/docs compatibility references still exist).
+
+2. MATLAB core semantics modeled by products
+- Evidence: semantic HIR/MIR + VM lowering coverage for indexing, calls, workspace effects, outputs, and compatibility diagnostics.
+- Evidence files: `docs-tmp/TARGET_MODEL.md`, `docs-tmp/ABI_DESIGN.md`, `docs-tmp/NEXT_STEPS.md`.
+- Current status: in progress (broad ratchet coverage landed; remaining designed gaps tracked in `NEXT_STEPS.md`).
+
+3. Manifest-driven composition and entrypoints
+- Evidence: config/discovery and entrypoint selection wired through config crates + CLI/session integration.
+- Evidence commands: `rg -n "runmat.toml|entrypoint|manifest|sources|dependencies" crates/runmat-config crates/runmat-core crates/runmat-cli`.
+- Current status: partially verified; needs explicit closeout audit against Plan 5 acceptance criteria.
+
+4. Unified nominal class/builtin metadata
+- Evidence: shared callable/class identity and builtin semantics metadata surfaces used by runtime/lowering/analysis.
+- Evidence files: `crates/runmat-hir/src/hir.rs`, `crates/runmat-builtins/src/semantics.rs`, `docs-tmp/PLAN.6.md`.
+- Current status: in progress.
+
+5. Semantic-fact-driven accel/fusion planning
+- Evidence: MIR analysis store + fusion planning interfaces consume semantic products, with runtime/provider owning placement.
+- Evidence commands: `rg -n "AnalysisStore|fusion|FusionPlan|Accel" crates/runmat-mir crates/runmat-vm crates/runmat-core`.
+- Current status: in progress; requires explicit Plan 7 closeout audit.
+
+6. Validation cadence green
+- Required gates per slice:
+  - `cargo fmt --all --check`
+  - `cargo test -p runmat-core --test semicolon_suppression`
+  - `cargo check --workspace`
+  - `git diff --check`
+- Current status: green for latest slices (see `docs-tmp/PROGRESS.md` log entries).

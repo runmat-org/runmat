@@ -5641,6 +5641,7 @@ dependencies = [
  "runmat-builtins",
  "runmat-gc-api",
  "runmat-hir",
+ "runmat-mir",
  "runmat-parser",
  "runmat-time",
  "runmat-vm",
