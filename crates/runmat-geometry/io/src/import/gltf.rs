@@ -356,6 +356,16 @@ struct AccessorDecode {
     accessor_type: String,
 }
 
+fn component_size_bytes(component_type: u64) -> Option<usize> {
+    match component_type {
+        5121 => Some(1),
+        5123 => Some(2),
+        5125 => Some(4),
+        5126 => Some(4),
+        _ => None,
+    }
+}
+
 fn resolve_accessor_decode(
     root: &Value,
     accessor_index: u64,
@@ -532,6 +542,47 @@ fn resolve_accessor_decode(
     } else {
         byte_stride
     };
+
+    let component_size = component_size_bytes(component_type).unwrap_or(1);
+    if stride % component_size != 0 {
+        return Err(GeometryImportError::ParseFailed(format!(
+            "GLTF accessor byteStride {} is not aligned to component size {}",
+            stride, component_size
+        )));
+    }
+    let element_size = match accessor_type.as_str() {
+        "VEC3" => component_size.saturating_mul(3),
+        "SCALAR" => component_size,
+        _ => 1,
+    };
+    if stride < element_size {
+        return Err(GeometryImportError::ParseFailed(format!(
+            "GLTF accessor byteStride {} is too small for accessor element size {}",
+            stride, element_size
+        )));
+    }
+    let required_span = if count == 0 {
+        0usize
+    } else {
+        (count - 1)
+            .checked_mul(stride)
+            .and_then(|offset| offset.checked_add(element_size))
+            .ok_or_else(|| {
+                GeometryImportError::ParseFailed(
+                    "GLTF accessor declared count/stride overflows host range".to_string(),
+                )
+            })?
+    };
+    let accessor_end = base_offset.checked_add(required_span).ok_or_else(|| {
+        GeometryImportError::ParseFailed(
+            "GLTF accessor declared count/stride overflows host range".to_string(),
+        )
+    })?;
+    if accessor_end > buffer_view_end || accessor_end > bytes.len() {
+        return Err(GeometryImportError::ParseFailed(
+            "GLTF accessor declared count/stride exceeds bufferView byte range".to_string(),
+        ));
+    }
 
     Ok(AccessorDecode {
         bytes,

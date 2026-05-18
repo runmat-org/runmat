@@ -178,6 +178,30 @@ mod tests {
         .into_bytes()
     }
 
+    fn gltf_accessor_data_uri_stride_misaligned_payload() -> Vec<u8> {
+        let mut buffer = Vec::<u8>::new();
+        for _ in 0..4 {
+            buffer.extend_from_slice(&[0u8; 13]);
+        }
+        let encoded = BASE64_ENGINE.encode(&buffer);
+        format!(
+            "{{\"asset\":{{\"version\":\"2.0\"}},\"buffers\":[{{\"uri\":\"data:application/octet-stream;base64,{encoded}\",\"byteLength\":52}}],\"bufferViews\":[{{\"buffer\":0,\"byteOffset\":0,\"byteLength\":52,\"byteStride\":13}}],\"accessors\":[{{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\"}}],\"meshes\":[{{\"primitives\":[{{\"attributes\":{{\"POSITION\":0}}}}]}}]}}",
+        )
+        .into_bytes()
+    }
+
+    fn gltf_accessor_data_uri_count_span_overflow_payload() -> Vec<u8> {
+        let mut buffer = Vec::<u8>::new();
+        for _ in 0..4 {
+            buffer.extend_from_slice(&[0u8; 12]);
+        }
+        let encoded = BASE64_ENGINE.encode(&buffer);
+        format!(
+            "{{\"asset\":{{\"version\":\"2.0\"}},\"buffers\":[{{\"uri\":\"data:application/octet-stream;base64,{encoded}\",\"byteLength\":48}}],\"bufferViews\":[{{\"buffer\":0,\"byteOffset\":0,\"byteLength\":48,\"byteStride\":12}}],\"accessors\":[{{\"bufferView\":0,\"componentType\":5126,\"count\":8,\"type\":\"VEC3\"}}],\"meshes\":[{{\"primitives\":[{{\"attributes\":{{\"POSITION\":0}}}}]}}]}}",
+        )
+        .into_bytes()
+    }
+
     fn binary_ply_payload() -> Vec<u8> {
         let header = b"ply\nformat binary_little_endian 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 2\nproperty list uchar int vertex_indices\nend_header\n";
         let vertices = [
@@ -547,7 +571,9 @@ mod tests {
         let error = import_geometry("/mesh.gltf", &payload, GeometryImportOptions::default())
             .expect_err("bufferView-bounds violation should fail with typed parse error");
         assert!(
-            error.to_string().contains("out of bounds"),
+            error
+                .to_string()
+                .contains("declared count/stride exceeds bufferView byte range"),
             "unexpected error message: {error}"
         );
     }
@@ -585,6 +611,30 @@ mod tests {
             error
                 .to_string()
                 .contains("sparse accessors are not supported"),
+            "unexpected error message: {error}"
+        );
+    }
+
+    #[test]
+    fn gltf_accessor_stride_misaligned_reports_typed_parse_error() {
+        let payload = gltf_accessor_data_uri_stride_misaligned_payload();
+        let error = import_geometry("/mesh.gltf", &payload, GeometryImportOptions::default())
+            .expect_err("misaligned accessor stride should fail with typed parse error");
+        assert!(
+            error.to_string().contains("not aligned to component size"),
+            "unexpected error message: {error}"
+        );
+    }
+
+    #[test]
+    fn gltf_accessor_count_span_overflow_reports_typed_parse_error() {
+        let payload = gltf_accessor_data_uri_count_span_overflow_payload();
+        let error = import_geometry("/mesh.gltf", &payload, GeometryImportOptions::default())
+            .expect_err("count/stride span overflow should fail with typed parse error");
+        assert!(
+            error
+                .to_string()
+                .contains("declared count/stride exceeds bufferView byte range"),
             "unexpected error message: {error}"
         );
     }
