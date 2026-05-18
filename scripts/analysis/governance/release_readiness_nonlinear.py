@@ -6912,7 +6912,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="COUPLED_FLOW_METRICS_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="coupled-flow posture metrics missing from report records",
                 )
             )
@@ -7289,7 +7289,7 @@ def evaluate_release_readiness(
                 reasons.append(
                     Reason(
                         code="TRANSIENT_PROVIDER_METRICS_MISSING",
-                        severity="warn",
+                        severity="fail" if protected else "warn",
                         detail=(
                             "transient-provider posture metrics missing from report records"
                         ),

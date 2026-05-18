@@ -5402,6 +5402,45 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("FSI_REYNOLDS_PROXY_LOW", codes)
         self.assertIn("FSI_STRUCTURAL_STEP_COUNT_LOW", codes)
 
+    def test_coupled_flow_metrics_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "COUPLED_FLOW_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
+    def test_transient_provider_metrics_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cfd_reynolds_proxy", "observed": 200000.0}
+                ],
+            }
+        )
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "TRANSIENT_PROVIDER_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
     def test_coupled_flow_trend_worsening_reasons_are_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
