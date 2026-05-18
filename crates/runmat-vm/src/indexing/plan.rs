@@ -331,6 +331,37 @@ where
                 selectors.push(ExprSel::Scalar(idx as usize));
             } else {
                 match v {
+                    Value::Bool(b) => {
+                        selectors.push(if *b {
+                            ExprSel::Indices(vec![1])
+                        } else {
+                            ExprSel::Indices(Vec::new())
+                        });
+                    }
+                    Value::LogicalArray(la) => {
+                        if la.data.len() == 1 && is_scalar_shape(&la.shape) {
+                            selectors.push(if la.data[0] != 0 {
+                                ExprSel::Indices(vec![1])
+                            } else {
+                                ExprSel::Indices(Vec::new())
+                            });
+                        } else {
+                            let dim_len = *full_shape.get(d).unwrap_or(&1);
+                            if la.data.len() != dim_len {
+                                return Err(mex(
+                                    "IndexShape",
+                                    "Logical mask length mismatch for dimension",
+                                ));
+                            }
+                            let mut vv = Vec::new();
+                            for (i, &bit) in la.data.iter().enumerate() {
+                                if bit != 0 {
+                                    vv.push(i + 1);
+                                }
+                            }
+                            selectors.push(ExprSel::Indices(vv));
+                        }
+                    }
                     Value::Tensor(idx_t) => {
                         let dim_len = *full_shape.get(d).unwrap_or(&1);
                         let len = idx_t.shape.iter().product::<usize>();

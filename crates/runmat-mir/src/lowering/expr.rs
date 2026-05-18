@@ -296,13 +296,9 @@ fn index_component_needs_slice_expr(component: &IndexComponent) -> bool {
 fn hir_expr_needs_slice_expr(expr: &HirExpr) -> bool {
     match &expr.kind {
         HirExprKind::End => true,
-        HirExprKind::Range(start, step, end) => {
-            hir_expr_needs_slice_expr(start)
-                || step
-                    .as_ref()
-                    .is_some_and(|step| hir_expr_needs_slice_expr(step))
-                || hir_expr_needs_slice_expr(end)
-        }
+        // Preserve range selectors as structured slice metadata in MIR/bytecode,
+        // rather than reclassifying them at runtime from temporary tensors.
+        HirExprKind::Range(_, _, _) => true,
         HirExprKind::Unary(_, inner) => hir_expr_needs_slice_expr(inner),
         HirExprKind::Binary(left, _, right) => {
             hir_expr_needs_slice_expr(left) || hir_expr_needs_slice_expr(right)

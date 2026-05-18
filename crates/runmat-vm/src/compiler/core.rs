@@ -2370,9 +2370,6 @@ impl Compiler {
             .as_ref()
             .and_then(|step| self.mir_operand_end_expr(step));
         let end_expr = self.mir_operand_end_expr(&end);
-        if start_expr.is_none() && step_expr.is_none() && end_expr.is_none() {
-            return None;
-        }
         let end_expr = end_expr.or_else(|| self.mir_operand_any_end_expr(&end))?;
         Some(MirRangeEndSpec {
             start_expr,

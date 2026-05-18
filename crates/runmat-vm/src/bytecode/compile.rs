@@ -615,12 +615,13 @@ mod tests {
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
         let mut saw_index_expr = false;
-        let mut saw_store_slice = false;
+        let mut saw_store_expr = false;
         for instr in &bytecode.instructions {
             if let Instr::IndexSliceExpr {
                 dims,
                 end_mask,
                 end_numeric_exprs,
+                range_dims,
                 ..
             } = instr
             {
@@ -628,24 +629,38 @@ mod tests {
                     saw_index_expr = true;
                     assert_eq!(*end_mask, 0);
                     assert_eq!(end_numeric_exprs.len(), 1);
+                    assert_eq!(range_dims, &vec![0, 1]);
                 }
             }
-            if let Instr::StoreSlice(dims, numeric_count, colon_mask, end_mask) = instr {
+            if let Instr::StoreSliceExpr {
+                dims,
+                numeric_count,
+                colon_mask,
+                end_mask,
+                range_dims,
+                range_has_step,
+                end_numeric_exprs,
+                ..
+            } = instr
+            {
                 if *dims == 3 {
-                    saw_store_slice = true;
-                    assert_eq!(*numeric_count, 2);
+                    saw_store_expr = true;
+                    assert_eq!(*numeric_count, 1);
                     assert_eq!(*colon_mask, 0);
-                    assert_eq!(*end_mask, 1 << 2);
+                    assert_eq!(*end_mask, 0);
+                    assert_eq!(range_dims, &vec![0, 1]);
+                    assert_eq!(range_has_step, &vec![false, false]);
+                    assert_eq!(end_numeric_exprs.len(), 1);
                 }
             }
         }
         assert!(saw_index_expr);
-        assert!(saw_store_slice);
+        assert!(saw_store_expr);
 
         let run = block_on(crate::interpret(&bytecode));
         assert!(
             run.is_ok(),
-            "roundtrip script should interpret successfully"
+            "roundtrip script should interpret successfully: {run:?}"
         );
     }
 

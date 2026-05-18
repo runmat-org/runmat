@@ -261,15 +261,23 @@ struct IndexContext<'a> {
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
+    range_dims: &'a [usize],
     base_shape: &'a [usize],
 }
 
 impl<'a> IndexContext<'a> {
-    fn new(dims: usize, colon_mask: u32, end_mask: u32, base_shape: &'a [usize]) -> Self {
+    fn new(
+        dims: usize,
+        colon_mask: u32,
+        end_mask: u32,
+        range_dims: &'a [usize],
+        base_shape: &'a [usize],
+    ) -> Self {
         Self {
             dims,
             colon_mask,
             end_mask,
+            range_dims,
             base_shape,
         }
     }
@@ -280,7 +288,8 @@ impl<'a> IndexContext<'a> {
         for d in 0..self.dims {
             let is_colon = (self.colon_mask & (1u32 << d)) != 0;
             let is_end = (self.end_mask & (1u32 << d)) != 0;
-            if is_colon || is_end {
+            let is_range = self.range_dims.contains(&d);
+            if is_colon || is_end || is_range {
                 continue;
             }
             if seen_numeric == numeric_position {
@@ -1073,7 +1082,13 @@ pub async fn dispatch_indexing(
                     Value::GpuTensor(handle) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &handle.shape),
+                            IndexContext::new(
+                                *dims,
+                                *colon_mask,
+                                *end_mask,
+                                range_dims,
+                                &handle.shape,
+                            ),
                             end_numeric_exprs,
                             vars,
                         )
@@ -1082,7 +1097,7 @@ pub async fn dispatch_indexing(
                     Value::Tensor(t) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
                             end_numeric_exprs,
                             vars,
                         )
@@ -1091,7 +1106,7 @@ pub async fn dispatch_indexing(
                     Value::ComplexTensor(t) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
                             end_numeric_exprs,
                             vars,
                         )
@@ -1100,7 +1115,7 @@ pub async fn dispatch_indexing(
                     Value::StringArray(sa) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &sa.shape),
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &sa.shape),
                             end_numeric_exprs,
                             vars,
                         )
@@ -1109,7 +1124,7 @@ pub async fn dispatch_indexing(
                     Value::Cell(ca) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &ca.shape),
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &ca.shape),
                             end_numeric_exprs,
                             vars,
                         )
@@ -1324,7 +1339,13 @@ pub async fn dispatch_indexing(
                     Value::GpuTensor(handle) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &handle.shape),
+                            IndexContext::new(
+                                *dims,
+                                *colon_mask,
+                                *end_mask,
+                                range_dims,
+                                &handle.shape,
+                            ),
                             end_numeric_exprs,
                             vars,
                         )
@@ -1333,7 +1354,7 @@ pub async fn dispatch_indexing(
                     Value::Tensor(t) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
                             end_numeric_exprs,
                             vars,
                         )
@@ -1342,7 +1363,7 @@ pub async fn dispatch_indexing(
                     Value::ComplexTensor(t) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &t.shape),
                             end_numeric_exprs,
                             vars,
                         )
@@ -1351,7 +1372,7 @@ pub async fn dispatch_indexing(
                     Value::StringArray(sa) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &sa.shape),
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &sa.shape),
                             end_numeric_exprs,
                             vars,
                         )
@@ -1360,7 +1381,7 @@ pub async fn dispatch_indexing(
                     Value::Cell(ca) => {
                         apply_end_offsets_to_numeric(
                             &numeric,
-                            IndexContext::new(*dims, *colon_mask, *end_mask, &ca.shape),
+                            IndexContext::new(*dims, *colon_mask, *end_mask, range_dims, &ca.shape),
                             end_numeric_exprs,
                             vars,
                         )
