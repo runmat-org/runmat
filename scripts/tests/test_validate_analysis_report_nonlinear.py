@@ -33,6 +33,9 @@ def _record(fixture_id: str, assertion_names: set[str]) -> dict:
         record["electromagnetic_source_interference_index"] = 0.0
         record["electromagnetic_boundary_condition_localization_ratio"] = 1.0
         record["electromagnetic_ground_anchor_effectiveness_ratio"] = 1.0
+        record["electromagnetic_applied_current_a"] = 1.0
+        record["electromagnetic_solver_conditioning_proxy"] = 1.0
+        record["electromagnetic_reference_frequency_hz"] = 1.0
         record["electromagnetic_assignment_coverage_ratio"] = 1.0
         record["electromagnetic_fallback_coefficient_ratio"] = 0.0
         record["electromagnetic_boundary_anchor_ratio"] = 1.0
@@ -970,6 +973,21 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     == "electromagnetic_reference_sparse_assignments_gpu_provider"
                 ):
                     record.pop("electromagnetic_boundary_condition_localization_ratio", None)
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_non_core_em_applied_current_field_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if (
+                    record["fixture_id"]
+                    == "electromagnetic_reference_sparse_assignments_gpu_provider"
+                ):
+                    record.pop("electromagnetic_applied_current_a", None)
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
             path.write_text(json.dumps({"records": records}))

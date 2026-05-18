@@ -1277,6 +1277,30 @@
       "tolerance_rel": 0.35
     },
     {
+      "name": "electromagnetic_applied_current_a",
+      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+      "field": "electromagnetic_applied_current_a",
+      "reference": 210.0,
+      "tolerance_abs": 150.0,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_solver_conditioning_proxy",
+      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+      "field": "electromagnetic_solver_conditioning_proxy",
+      "reference": 1.0,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 0.7
+    },
+    {
+      "name": "electromagnetic_reference_frequency_hz",
+      "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+      "field": "electromagnetic_reference_frequency_hz",
+      "reference": 650.0,
+      "tolerance_abs": 120.0,
+      "tolerance_rel": 0.6
+    },
+    {
       "name": "electromagnetic_assignment_coverage_ratio",
       "fixture_id": "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
       "field": "electromagnetic_assignment_coverage_ratio",
@@ -1515,6 +1539,30 @@
       "reference": 0.5,
       "tolerance_abs": 0.15,
       "tolerance_rel": 0.35
+    },
+    {
+      "name": "electromagnetic_applied_current_a",
+      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+      "field": "electromagnetic_applied_current_a",
+      "reference": 260.0,
+      "tolerance_abs": 150.0,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_solver_conditioning_proxy",
+      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+      "field": "electromagnetic_solver_conditioning_proxy",
+      "reference": 2.6334071621248594,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 0.7
+    },
+    {
+      "name": "electromagnetic_reference_frequency_hz",
+      "fixture_id": "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+      "field": "electromagnetic_reference_frequency_hz",
+      "reference": 460.0,
+      "tolerance_abs": 100.0,
+      "tolerance_rel": 0.6
     },
     {
       "name": "electromagnetic_assignment_coverage_ratio",
@@ -1787,6 +1835,30 @@
       "tolerance_rel": 0.35
     },
     {
+      "name": "electromagnetic_applied_current_a",
+      "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+      "field": "electromagnetic_applied_current_a",
+      "reference": 170.0,
+      "tolerance_abs": 120.0,
+      "tolerance_rel": 0.7
+    },
+    {
+      "name": "electromagnetic_solver_conditioning_proxy",
+      "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+      "field": "electromagnetic_solver_conditioning_proxy",
+      "reference": 2.070551535629522,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 0.7
+    },
+    {
+      "name": "electromagnetic_reference_frequency_hz",
+      "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
+      "field": "electromagnetic_reference_frequency_hz",
+      "reference": 180.0,
+      "tolerance_abs": 70.0,
+      "tolerance_rel": 0.6
+    },
+    {
       "name": "electromagnetic_assignment_coverage_ratio",
       "fixture_id": "electromagnetic_reference_sparse_assignments_gpu_provider",
       "field": "electromagnetic_assignment_coverage_ratio",
@@ -2057,6 +2129,30 @@
       "tolerance_rel": 0.35
     },
     {
+      "name": "electromagnetic_applied_current_a",
+      "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+      "field": "electromagnetic_applied_current_a",
+      "reference": 210.0,
+      "tolerance_abs": 150.0,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_solver_conditioning_proxy",
+      "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+      "field": "electromagnetic_solver_conditioning_proxy",
+      "reference": 4.021582075719457,
+      "tolerance_abs": 3.0,
+      "tolerance_rel": 0.7
+    },
+    {
+      "name": "electromagnetic_reference_frequency_hz",
+      "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
+      "field": "electromagnetic_reference_frequency_hz",
+      "reference": 260.0,
+      "tolerance_abs": 80.0,
+      "tolerance_rel": 0.6
+    },
+    {
       "name": "electromagnetic_assignment_coverage_ratio",
       "fixture_id": "electromagnetic_reference_fallback_heavy_gpu_provider",
       "field": "electromagnetic_assignment_coverage_ratio",
@@ -2297,6 +2393,30 @@
       "tolerance_rel": 0.1
     },
     {
+      "name": "electromagnetic_applied_current_a",
+      "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
+      "field": "electromagnetic_applied_current_a",
+      "reference": 240.0,
+      "tolerance_abs": 150.0,
+      "tolerance_rel": 0.6
+    },
+    {
+      "name": "electromagnetic_solver_conditioning_proxy",
+      "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
+      "field": "electromagnetic_solver_conditioning_proxy",
+      "reference": 11.542118015125101,
+      "tolerance_abs": 6.0,
+      "tolerance_rel": 0.7
+    },
+    {
+      "name": "electromagnetic_reference_frequency_hz",
+      "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
+      "field": "electromagnetic_reference_frequency_hz",
+      "reference": 320.0,
+      "tolerance_abs": 100.0,
+      "tolerance_rel": 0.6
+    },
+    {
       "name": "electromagnetic_assignment_coverage_ratio",
       "fixture_id": "electromagnetic_reference_overlap_interference_gpu_provider",
       "field": "electromagnetic_assignment_coverage_ratio",
@@ -2525,6 +2645,30 @@
       "reference": 0.5,
       "tolerance_abs": 0.15,
       "tolerance_rel": 0.35
+    },
+    {
+      "name": "electromagnetic_applied_current_a",
+      "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+      "field": "electromagnetic_applied_current_a",
+      "reference": 180.0,
+      "tolerance_abs": 120.0,
+      "tolerance_rel": 0.7
+    },
+    {
+      "name": "electromagnetic_solver_conditioning_proxy",
+      "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+      "field": "electromagnetic_solver_conditioning_proxy",
+      "reference": 1.6036393287236705,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 0.7
+    },
+    {
+      "name": "electromagnetic_reference_frequency_hz",
+      "fixture_id": "electromagnetic_reference_boundary_kernel_gpu_provider",
+      "field": "electromagnetic_reference_frequency_hz",
+      "reference": 520.0,
+      "tolerance_abs": 120.0,
+      "tolerance_rel": 0.6
     },
     {
       "name": "electromagnetic_assignment_coverage_ratio",

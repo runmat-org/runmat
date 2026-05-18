@@ -678,6 +678,39 @@ def main() -> int:
                     + ", ".join(missing_fields)
                 )
             missing_fields = []
+            for field in sorted(EM_FREQUENCY_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM reference-frequency fields: "
+                    + ", ".join(missing_fields)
+                )
+            missing_fields = []
+            for field in sorted(EM_CONDITIONING_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM conditioning fields: "
+                    + ", ".join(missing_fields)
+                )
+            missing_fields = []
+            for field in sorted(EM_APPLIED_CURRENT_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM applied-current fields: "
+                    + ", ".join(missing_fields)
+                )
+            missing_fields = []
             for field in sorted(EM_SOURCE_ENERGY_CONSISTENCY_REQUIRED_FIELDS):
                 value = record.get(field)
                 if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
@@ -790,39 +823,6 @@ def main() -> int:
                 errors.append(
                     "fixture "
                     f"{fixture_id} missing finite EM sweep/resonance fields: "
-                    + ", ".join(missing_fields)
-                )
-            missing_fields = []
-            for field in sorted(EM_FREQUENCY_REQUIRED_FIELDS):
-                value = record.get(field)
-                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-                    missing_fields.append(field)
-            if missing_fields:
-                errors.append(
-                    "fixture "
-                    f"{fixture_id} missing finite EM reference-frequency fields: "
-                    + ", ".join(missing_fields)
-                )
-            missing_fields = []
-            for field in sorted(EM_CONDITIONING_REQUIRED_FIELDS):
-                value = record.get(field)
-                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-                    missing_fields.append(field)
-            if missing_fields:
-                errors.append(
-                    "fixture "
-                    f"{fixture_id} missing finite EM conditioning fields: "
-                    + ", ".join(missing_fields)
-                )
-            missing_fields = []
-            for field in sorted(EM_APPLIED_CURRENT_REQUIRED_FIELDS):
-                value = record.get(field)
-                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-                    missing_fields.append(field)
-            if missing_fields:
-                errors.append(
-                    "fixture "
-                    f"{fixture_id} missing finite EM applied-current fields: "
                     + ", ".join(missing_fields)
                 )
         if fixture_id in PERFORMANCE_REQUIRED_FIELDS:

@@ -650,6 +650,18 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "electromagnetic_applied_current_a",
+            ),
+            (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "electromagnetic_solver_conditioning_proxy",
+            ),
+            (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
+                "electromagnetic_reference_frequency_hz",
+            ),
+            (
+                "electromagnetic_reference_boundary_penalty_stress_gpu_provider",
                 "electromagnetic_assignment_coverage_ratio",
             ),
             (
@@ -763,6 +775,18 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_multi_region_phased_source_gpu_provider",
                 "electromagnetic_ground_anchor_effectiveness_ratio",
+            ),
+            (
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "electromagnetic_applied_current_a",
+            ),
+            (
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "electromagnetic_solver_conditioning_proxy",
+            ),
+            (
+                "electromagnetic_reference_multi_region_phased_source_gpu_provider",
+                "electromagnetic_reference_frequency_hz",
             ),
             (
                 "electromagnetic_reference_multi_region_phased_source_gpu_provider",
@@ -894,6 +918,18 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "electromagnetic_applied_current_a",
+            ),
+            (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "electromagnetic_solver_conditioning_proxy",
+            ),
+            (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
+                "electromagnetic_reference_frequency_hz",
+            ),
+            (
+                "electromagnetic_reference_sparse_assignments_gpu_provider",
                 "electromagnetic_assignment_coverage_ratio",
             ),
             (
@@ -1022,6 +1058,18 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "electromagnetic_applied_current_a",
+            ),
+            (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "electromagnetic_solver_conditioning_proxy",
+            ),
+            (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
+                "electromagnetic_reference_frequency_hz",
+            ),
+            (
+                "electromagnetic_reference_fallback_heavy_gpu_provider",
                 "electromagnetic_assignment_coverage_ratio",
             ),
             (
@@ -1138,6 +1186,18 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             ),
             (
                 "electromagnetic_reference_overlap_interference_gpu_provider",
+                "electromagnetic_applied_current_a",
+            ),
+            (
+                "electromagnetic_reference_overlap_interference_gpu_provider",
+                "electromagnetic_solver_conditioning_proxy",
+            ),
+            (
+                "electromagnetic_reference_overlap_interference_gpu_provider",
+                "electromagnetic_reference_frequency_hz",
+            ),
+            (
+                "electromagnetic_reference_overlap_interference_gpu_provider",
                 "electromagnetic_assignment_coverage_ratio",
             ),
             (
@@ -1247,6 +1307,18 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
             (
                 "electromagnetic_reference_boundary_kernel_gpu_provider",
                 "electromagnetic_ground_anchor_effectiveness_ratio",
+            ),
+            (
+                "electromagnetic_reference_boundary_kernel_gpu_provider",
+                "electromagnetic_applied_current_a",
+            ),
+            (
+                "electromagnetic_reference_boundary_kernel_gpu_provider",
+                "electromagnetic_solver_conditioning_proxy",
+            ),
+            (
+                "electromagnetic_reference_boundary_kernel_gpu_provider",
+                "electromagnetic_reference_frequency_hz",
             ),
             (
                 "electromagnetic_reference_boundary_kernel_gpu_provider",
