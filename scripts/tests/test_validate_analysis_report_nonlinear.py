@@ -721,6 +721,41 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 },
             ),
             _record(
+                "transient_long_cpu",
+                {
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                },
+            ),
+            _record(
+                "transient_long_gpu_fallback",
+                {
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                },
+            ),
+            _record(
+                "transient_long_gpu_provider",
+                {
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                },
+            ),
+            _record(
+                "transient_shock_cpu",
+                {
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                },
+            ),
+            _record(
+                "transient_shock_gpu_provider",
+                {
+                    "transient_max_residual_norm",
+                    "transient_max_energy_growth_ratio",
+                },
+            ),
+            _record(
                 "cfd_steady_gpu_provider",
                 {
                     "cfd_reference_density_kg_per_m3",
@@ -1244,6 +1279,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "modal_max_m_orthogonality_offdiag"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_transient_long_cpu_residual_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "transient_long_cpu":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "transient_max_residual_norm"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

@@ -345,6 +345,26 @@ REQUIRED_FIXTURES = {
         "modal_max_m_orthogonality_offdiag",
         "modal_min_relative_frequency_separation",
     },
+    "transient_long_cpu": {
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+    },
+    "transient_long_gpu_fallback": {
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+    },
+    "transient_long_gpu_provider": {
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+    },
+    "transient_shock_cpu": {
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+    },
+    "transient_shock_gpu_provider": {
+        "transient_max_residual_norm",
+        "transient_max_energy_growth_ratio",
+    },
     "cfd_steady_gpu_provider": {
         "cfd_reference_density_kg_per_m3",
         "cfd_dynamic_viscosity_pa_s",

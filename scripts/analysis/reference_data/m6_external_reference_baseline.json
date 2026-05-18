@@ -3677,6 +3677,106 @@
       "tolerance_rel": 0.5
     },
     {
+      "name": "transient_max_residual_norm",
+      "fixture_id": "transient_long_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_residual_norm",
+      "reference": 7.2097613538268326e-09,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "transient_max_energy_growth_ratio",
+      "fixture_id": "transient_long_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_energy_growth_ratio",
+      "reference": 1.000007609949087,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 0.03
+    },
+    {
+      "name": "transient_max_residual_norm",
+      "fixture_id": "transient_long_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_residual_norm",
+      "reference": 7.2097613538268326e-09,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "transient_max_energy_growth_ratio",
+      "fixture_id": "transient_long_gpu_fallback",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_energy_growth_ratio",
+      "reference": 1.000007609949087,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 0.03
+    },
+    {
+      "name": "transient_max_residual_norm",
+      "fixture_id": "transient_long_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_residual_norm",
+      "reference": 7.2097613538268326e-09,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "transient_max_energy_growth_ratio",
+      "fixture_id": "transient_long_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_energy_growth_ratio",
+      "reference": 1.000007609949087,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 0.03
+    },
+    {
+      "name": "transient_max_residual_norm",
+      "fixture_id": "transient_shock_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_residual_norm",
+      "reference": 7.480856946264845e-09,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "transient_max_energy_growth_ratio",
+      "fixture_id": "transient_shock_cpu",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_energy_growth_ratio",
+      "reference": 1.0000061482182692,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 0.03
+    },
+    {
+      "name": "transient_max_residual_norm",
+      "fixture_id": "transient_shock_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_residual_norm",
+      "reference": 7.480856946264845e-09,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": null
+    },
+    {
+      "name": "transient_max_energy_growth_ratio",
+      "fixture_id": "transient_shock_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "transient_max_energy_growth_ratio",
+      "reference": 1.0000061482182692,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 0.03
+    },
+    {
       "name": "thermo_mech_thermal_strain_scale",
       "fixture_id": "thermo_mech_kickoff_gpu_provider",
       "field": "unused_for_threshold_source",
