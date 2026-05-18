@@ -4162,6 +4162,31 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_COUPLING_METRICS_MISSING", codes)
 
+    def test_thermo_assertion_contract_missing_reason_is_emitted_when_required(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_transient_severity=0.1,
+            thermo_field_clamp_ratio=0.01,
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "thermo_ramp_smooth_gpu_provider",
+                "publishable": True,
+                "threshold_assertions": [],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_ASSERTION_CONTRACT_FIELDS_MISSING", codes)
+
     def test_thermal_metrics_missing_warn_when_required(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         os.environ["RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS"] = "true"

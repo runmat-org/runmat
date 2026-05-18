@@ -6265,6 +6265,73 @@ def evaluate_release_readiness(
             "thermo shock oscillatory temporal variation",
         ),
     ]
+    thermo_required_assertion_specs = [
+        (
+            "thermo_gradient_pathological_gpu_provider",
+            "thermo_gradient_pathological_spread_ratio",
+            None,
+        ),
+        (
+            "thermo_gradient_pathological_gpu_provider",
+            "thermo_gradient_pathological_temporal_variation",
+            None,
+        ),
+        (
+            "thermo_gradient_pathological_gpu_provider",
+            "thermo_gradient_pathological_heterogeneity",
+            None,
+        ),
+        (
+            "thermo_ramp_smooth_gpu_provider",
+            "thermo_ramp_smooth_field_clamp_ratio",
+            "thermo_field_clamp_ratio",
+        ),
+        (
+            "thermo_ramp_smooth_gpu_provider",
+            "thermo_ramp_smooth_constitutive_temperature_factor",
+            None,
+        ),
+        (
+            "thermo_ramp_smooth_field_artifact_gpu_provider",
+            "thermo_ramp_smooth_field_clamp_ratio",
+            "thermo_field_clamp_ratio",
+        ),
+        (
+            "thermo_ramp_smooth_field_artifact_gpu_provider",
+            "thermo_ramp_smooth_constitutive_temperature_factor",
+            None,
+        ),
+        (
+            "thermo_shock_oscillatory_gpu_provider",
+            "thermo_shock_oscillatory_temporal_variation",
+            None,
+        ),
+        (
+            "thermo_shock_oscillatory_gpu_provider",
+            "thermo_shock_oscillatory_field_clamp_ratio",
+            "thermo_field_clamp_ratio",
+        ),
+        (
+            "thermo_shock_oscillatory_gpu_provider",
+            "thermo_shock_constitutive_temperature_factor",
+            None,
+        ),
+        (
+            "thermo_shock_oscillatory_field_artifact_gpu_provider",
+            "thermo_shock_oscillatory_temporal_variation",
+            None,
+        ),
+        (
+            "thermo_shock_oscillatory_field_artifact_gpu_provider",
+            "thermo_shock_oscillatory_field_clamp_ratio",
+            "thermo_field_clamp_ratio",
+        ),
+        (
+            "thermo_shock_oscillatory_field_artifact_gpu_provider",
+            "thermo_shock_constitutive_temperature_factor",
+            None,
+        ),
+    ]
     missing_thermo_assertion_fields = []
     for fixture_id, assertion_name, threshold, code, label in thermo_assertion_specs:
         values = []
@@ -6300,6 +6367,37 @@ def evaluate_release_readiness(
                 detail=(
                     "thermo threshold assertions missing required fields: "
                     + ", ".join(sorted(set(missing_thermo_assertion_fields)))
+                ),
+            )
+        )
+    missing_thermo_contract_assertion_fields = []
+    for fixture_id, assertion_name, fallback_field in thermo_required_assertion_specs:
+        observed_values = []
+        for rec in report_records(latest):
+            if rec.get("fixture_id") != fixture_id:
+                continue
+            observed = threshold_assertion_observed(rec, assertion_name)
+            if observed is not None:
+                observed_values.append(observed)
+                continue
+            if fallback_field is not None:
+                fallback_raw = rec.get(fallback_field)
+                if isinstance(fallback_raw, (int, float)):
+                    fallback_value = float(fallback_raw)
+                    if math.isfinite(fallback_value):
+                        observed_values.append(fallback_value)
+        if not observed_values:
+            missing_thermo_contract_assertion_fields.append(
+                f"{fixture_id}.{assertion_name}"
+            )
+    if missing_thermo_contract_assertion_fields and (protected or thermo_require_metrics):
+        reasons.append(
+            Reason(
+                code="THERMO_ASSERTION_CONTRACT_FIELDS_MISSING",
+                severity="fail" if protected else "warn",
+                detail=(
+                    "thermo threshold assertion contract missing required fields: "
+                    + ", ".join(sorted(set(missing_thermo_contract_assertion_fields)))
                 ),
             )
         )
