@@ -7118,7 +7118,8 @@ def evaluate_release_readiness(
                 )
 
         sigma_omega_scale_mean_trend_candidates = [
-            fixture_assertion_trend_ratio("em_homogeneous_sigma_omega_scale_mean")
+            fixture_assertion_trend_ratio("em_homogeneous_sigma_omega_scale_mean"),
+            fixture_assertion_trend_ratio("em_heterogeneous_sigma_omega_scale_mean"),
         ]
         sigma_omega_scale_mean_trend_candidates = [
             value for value in sigma_omega_scale_mean_trend_candidates if value is not None
