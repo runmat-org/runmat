@@ -3987,6 +3987,66 @@
       "tolerance_rel": 0.2
     },
     {
+      "name": "nonlinear_path_mix_spike_count",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_path_mix_spike_count",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermo_nonlinear_field_clamp_ratio",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermo_nonlinear_field_clamp_ratio",
+      "reference": 0.0,
+      "tolerance_abs": 0.05,
+      "tolerance_rel": null
+    },
+    {
+      "name": "thermo_nonlinear_time_scale_mean",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "thermo_nonlinear_time_scale_mean",
+      "reference": 1.0,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.12
+    },
+    {
+      "name": "electro_nonlinear_severity_mean",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_nonlinear_severity_mean",
+      "reference": 0.9185185185185184,
+      "tolerance_abs": 0.06,
+      "tolerance_rel": 0.12
+    },
+    {
+      "name": "electro_nonlinear_temporal_variation",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_nonlinear_temporal_variation",
+      "reference": 0.32499999999999996,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "electro_nonlinear_time_scale_mean",
+      "fixture_id": "nonlinear_load_path_mix_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_nonlinear_time_scale_mean",
+      "reference": 0.9673611111111108,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.12
+    },
+    {
       "name": "plasticity_nonlinear_severity_peak",
       "fixture_id": "nonlinear_plasticity_proxy_gpu_provider",
       "field": "unused_for_threshold_source",

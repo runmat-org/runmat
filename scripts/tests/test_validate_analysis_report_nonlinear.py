@@ -97,10 +97,16 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "nonlinear_path_mix_backtrack_bursts",
                     "nonlinear_path_mix_effective_modulus_scale",
                     "nonlinear_path_mix_material_spread_ratio",
+                    "nonlinear_path_mix_spike_count",
                     "thermo_nonlinear_severity",
+                    "thermo_nonlinear_field_clamp_ratio",
+                    "thermo_nonlinear_time_scale_mean",
                     "electro_nonlinear_joule_heating_scale",
                     "electro_nonlinear_conductivity_spread_ratio",
                     "electro_nonlinear_severity_peak",
+                    "electro_nonlinear_severity_mean",
+                    "electro_nonlinear_temporal_variation",
+                    "electro_nonlinear_time_scale_mean",
                 },
             )
             | {
@@ -747,6 +753,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "nonlinear_stress_converged_increments"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_nonlinear_path_mix_spike_count_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "nonlinear_load_path_mix_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "nonlinear_path_mix_spike_count"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
