@@ -399,6 +399,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_APPLIED_CURRENT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOURCE_REGION_ENERGY_CONSISTENCY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOURCE_LOCALIZATION_DROP_TREND_RATIO",
@@ -1677,6 +1679,36 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("EM_SOURCE_INTERFERENCE_TREND_WORSENING", codes)
+
+    def test_em_real_imag_residual_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_real_residual_norm": 0.12,
+                "electromagnetic_imag_residual_norm": 0.10,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.2,
+                "electromagnetic_real_residual_norm": 0.04,
+                "electromagnetic_imag_residual_norm": 0.03,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM_TREND_RATIO"] = "1.5"
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM_TREND_RATIO"] = "1.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_REAL_RESIDUAL_NORM_TREND_WORSENING", codes)
+        self.assertIn("EM_IMAG_RESIDUAL_NORM_TREND_WORSENING", codes)
 
     def test_em_sweep_resonance_trend_worsening_reasons_are_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

@@ -448,6 +448,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "electromagnetic_real_residual_norm",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 7.654096074230948e-11,
+            "reference": 7.654096074230948e-11,
+            "pass": True,
+        },
+        {
+            "name": "electromagnetic_imag_residual_norm",
+            "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+            "observed": 2.5867083112396513e-8,
+            "reference": 2.5867083112396513e-8,
+            "pass": True,
+        },
+        {
             "name": "electromagnetic_solver_conditioning_proxy",
             "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
             "observed": 1.83,
@@ -732,6 +746,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
             "observed": 0.0,
             "reference": 0.0,
+            "pass": True,
+        },
+        {
+            "name": "electromagnetic_real_residual_norm",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 3.4795203053879997e-19,
+            "reference": 3.4795203053879997e-19,
+            "pass": True,
+        },
+        {
+            "name": "electromagnetic_imag_residual_norm",
+            "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+            "observed": 7.907328757140516e-16,
+            "reference": 7.907328757140516e-16,
             "pass": True,
         },
         {

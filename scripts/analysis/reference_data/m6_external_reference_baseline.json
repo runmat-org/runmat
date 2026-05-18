@@ -367,6 +367,22 @@
       "tolerance_rel": 5.0
     },
     {
+      "name": "electromagnetic_real_residual_norm",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_real_residual_norm",
+      "reference": 7.654096074230948e-11,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 10.0
+    },
+    {
+      "name": "electromagnetic_imag_residual_norm",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_imag_residual_norm",
+      "reference": 2.5867083112396513e-8,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 10.0
+    },
+    {
       "name": "electromagnetic_solver_conditioning_proxy",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "electromagnetic_solver_conditioning_proxy",
@@ -747,6 +763,22 @@
       "reference": 0.0,
       "tolerance_abs": 0.05,
       "tolerance_rel": 1.0
+    },
+    {
+      "name": "electromagnetic_real_residual_norm",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_real_residual_norm",
+      "reference": 3.4795203053879997e-19,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 10.0
+    },
+    {
+      "name": "electromagnetic_imag_residual_norm",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_imag_residual_norm",
+      "reference": 7.907328757140516e-16,
+      "tolerance_abs": 0.02,
+      "tolerance_rel": 10.0
     },
     {
       "name": "electromagnetic_solver_conditioning_proxy",

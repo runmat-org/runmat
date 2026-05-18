@@ -284,6 +284,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.15",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO": "1.1",
@@ -597,6 +599,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.25",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM_TREND_RATIO": "1.25",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM_TREND_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO": "1.2",
@@ -903,6 +907,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_MEAN_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_RESPONSE_COVERAGE_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO": "1.35",
@@ -3134,6 +3140,18 @@ def evaluate_release_readiness(
             ),
         )
     )
+    em_max_real_residual_norm_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM_TREND_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_REAL_RESIDUAL_NORM_TREND_RATIO", "1.25"),
+        )
+    )
+    em_max_imag_residual_norm_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM_TREND_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_EM_MAX_IMAG_RESIDUAL_NORM_TREND_RATIO", "1.25"),
+        )
+    )
     em_max_solver_conditioning_trend_ratio_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_MAX_SOLVER_CONDITIONING_TREND_RATIO",
@@ -4637,6 +4655,8 @@ def evaluate_release_readiness(
     em_breach_rate = None
     em_energy_imbalance_trend_ratio = None
     em_flux_divergence_trend_ratio = None
+    em_real_residual_norm_trend_ratio = None
+    em_imag_residual_norm_trend_ratio = None
     em_applied_current_drop_trend_ratio = None
     em_source_region_energy_consistency_drop_trend_ratio = None
     em_source_localization_drop_trend_ratio = None
@@ -9818,6 +9838,48 @@ def evaluate_release_readiness(
                     )
                 )
 
+        em_real_residual_norm_trend_ratio = fixture_trend_ratio(
+            "electromagnetic_real_residual_norm",
+            ratio_mode="increase",
+        )
+        if (
+            em_real_residual_norm_trend_ratio is not None
+            and em_real_residual_norm_trend_ratio
+            > em_max_real_residual_norm_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_REAL_RESIDUAL_NORM_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM real-residual trend ratio "
+                        f"{em_real_residual_norm_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_real_residual_norm_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        em_imag_residual_norm_trend_ratio = fixture_trend_ratio(
+            "electromagnetic_imag_residual_norm",
+            ratio_mode="increase",
+        )
+        if (
+            em_imag_residual_norm_trend_ratio is not None
+            and em_imag_residual_norm_trend_ratio
+            > em_max_imag_residual_norm_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="EM_IMAG_RESIDUAL_NORM_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "EM imaginary-residual trend ratio "
+                        f"{em_imag_residual_norm_trend_ratio:.3f} exceeds threshold "
+                        f"{em_max_imag_residual_norm_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         em_solver_conditioning_trend_ratio = fixture_trend_ratio(
             "electromagnetic_solver_conditioning_proxy",
             ratio_mode="increase",
@@ -12660,6 +12722,10 @@ def evaluate_release_readiness(
         "em_max_energy_imbalance_trend_ratio_threshold": em_max_energy_imbalance_trend_ratio_threshold,
         "em_flux_divergence_trend_ratio": em_flux_divergence_trend_ratio,
         "em_max_flux_divergence_trend_ratio_threshold": em_max_flux_divergence_trend_ratio_threshold,
+        "em_real_residual_norm_trend_ratio": em_real_residual_norm_trend_ratio,
+        "em_max_real_residual_norm_trend_ratio_threshold": em_max_real_residual_norm_trend_ratio_threshold,
+        "em_imag_residual_norm_trend_ratio": em_imag_residual_norm_trend_ratio,
+        "em_max_imag_residual_norm_trend_ratio_threshold": em_max_imag_residual_norm_trend_ratio_threshold,
         "em_solver_conditioning_trend_ratio": em_solver_conditioning_trend_ratio,
         "em_max_solver_conditioning_trend_ratio_threshold": em_max_solver_conditioning_trend_ratio_threshold,
         "em_applied_current_drop_trend_ratio": em_applied_current_drop_trend_ratio,
@@ -13609,6 +13675,11 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- EM source-interference trend ratio/threshold: "
         f"`{result.get('em_source_interference_trend_ratio') if result.get('em_source_interference_trend_ratio') is not None else '-'}`/`{result.get('em_max_source_interference_trend_ratio_threshold') if result.get('em_max_source_interference_trend_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- EM real/imag residual trend ratios and thresholds: "
+        f"`{result.get('em_real_residual_norm_trend_ratio') if result.get('em_real_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('em_imag_residual_norm_trend_ratio') if result.get('em_imag_residual_norm_trend_ratio') is not None else '-'}` ; "
+        f"`{result.get('em_max_real_residual_norm_trend_ratio_threshold') if result.get('em_max_real_residual_norm_trend_ratio_threshold') is not None else '-'}`/`{result.get('em_max_imag_residual_norm_trend_ratio_threshold') if result.get('em_max_imag_residual_norm_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- EM reference/sweep/resonance trend ratios (reference-freq drop, sweep drop, peak-freq, peak-flux, bandwidth, Q drop, flux-gain drop): "
