@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use log::{info, warn};
 use runmat_config::{
-    discover_project_manifest_from, load_project_manifest, resolve_project_entrypoint,
+    build_project_composition_graph, discover_project_manifest_from, resolve_project_entrypoint,
     ResolvedEntrypointTarget, RunMatConfig,
 };
 use runmat_core::{
@@ -58,22 +58,32 @@ fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
     let Some(manifest_path) = discover_project_manifest_from(&cwd) else {
         return Ok(script);
     };
-    let manifest = load_project_manifest(&manifest_path).with_context(|| {
+    let composition = build_project_composition_graph(&manifest_path).with_context(|| {
         format!(
-            "failed to load discovered project manifest {}",
+            "failed to build project composition from discovered project manifest {}",
             manifest_path.display()
         )
     })?;
-    let project_root = manifest_path.parent().unwrap_or_else(|| Path::new("."));
-    let Some(resolved) =
-        resolve_project_entrypoint(project_root, &manifest, &name).map_err(|err| {
+    let root_package = composition
+        .packages
+        .get(&composition.root_package)
+        .ok_or_else(|| {
             anyhow::anyhow!(
-                "failed to resolve project entrypoint '{}' from {}: {}",
-                name,
-                manifest_path.display(),
-                err
+                "project composition missing root package `{}` for manifest {}",
+                composition.root_package,
+                manifest_path.display()
             )
-        })?
+        })?;
+    let Some(resolved) =
+        resolve_project_entrypoint(&root_package.project_root, &root_package.manifest, &name)
+            .map_err(|err| {
+                anyhow::anyhow!(
+                    "failed to resolve project entrypoint '{}' from {}: {}",
+                    name,
+                    manifest_path.display(),
+                    err
+                )
+            })?
     else {
         return Ok(script);
     };

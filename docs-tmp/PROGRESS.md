@@ -17,6 +17,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 5 CLI composition-graph integration for entrypoint resolution
+  - `runmat-cli` script target resolution now builds a composition graph from discovered `runmat.toml` (`build_project_composition_graph`) and resolves named entrypoints from the root package manifest/root source context.
+  - This moves active CLI entrypoint selection off direct single-manifest loading and onto the new composition artifact boundary.
+  - Validation: `cargo test -p runmat-config`, `cargo test -p runmat --lib`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 5 composition graph foundation in `runmat-config`
   - Added `build_project_composition_graph(root_manifest_path)` with typed composition artifacts:
     - `ProjectCompositionGraph`
