@@ -2,7 +2,7 @@ use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
 
 use super::{
     build_asset, build_result, capacity_guard, is_degenerate_triangle, parse_f64,
-    GeometryImportError, GeometryImportOptions,
+    push_mesh_count_diagnostics, GeometryImportError, GeometryImportOptions,
 };
 
 pub(super) fn import_ply(
@@ -133,6 +133,12 @@ pub(super) fn import_ply(
         }
     }
 
+    push_mesh_count_diagnostics(
+        &mut diagnostics,
+        "ply",
+        vertices.len() as u64,
+        triangle_count,
+    );
     let asset = build_asset(
         path,
         "ply/v1",

@@ -122,6 +122,24 @@ pub(crate) fn build_result(
     }
 }
 
+pub(crate) fn push_mesh_count_diagnostics(
+    diagnostics: &mut Vec<ImportDiagnostic>,
+    format_name: &str,
+    vertex_count: u64,
+    triangle_count: u64,
+) {
+    diagnostics.push(ImportDiagnostic {
+        code: "GEOMETRY_IMPORT_VERTEX_COUNT".to_string(),
+        severity: ImportDiagnosticSeverity::Info,
+        message: format!("{format_name} import resolved {vertex_count} mesh vertices"),
+    });
+    diagnostics.push(ImportDiagnostic {
+        code: "GEOMETRY_IMPORT_TRIANGLE_COUNT".to_string(),
+        severity: ImportDiagnosticSeverity::Info,
+        message: format!("{format_name} import resolved {triangle_count} mesh triangles"),
+    });
+}
+
 pub(crate) fn capacity_guard(
     triangle_count: u64,
     options: &GeometryImportOptions,

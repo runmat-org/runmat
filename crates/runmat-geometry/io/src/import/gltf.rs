@@ -3,8 +3,8 @@ use serde_json::Value;
 use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
 
 use super::{
-    build_asset, build_result, capacity_guard, is_degenerate_triangle, GeometryImportError,
-    GeometryImportOptions,
+    build_asset, build_result, capacity_guard, is_degenerate_triangle, push_mesh_count_diagnostics,
+    GeometryImportError, GeometryImportOptions,
 };
 
 pub(super) fn import_gltf(
@@ -98,6 +98,12 @@ pub(super) fn import_gltf(
         }
     }
 
+    push_mesh_count_diagnostics(
+        &mut diagnostics,
+        "gltf",
+        all_positions.len() as u64,
+        triangle_count,
+    );
     let asset = build_asset(
         path,
         "gltf/v1",

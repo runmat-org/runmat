@@ -38,6 +38,14 @@ mod tests {
         asset.meshes.first().expect("mesh descriptor must exist")
     }
 
+    fn has_diag(result: &ImportResult, code: &str) -> bool {
+        result
+            .report
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == code)
+    }
+
     fn binary_triangle_stl() -> Vec<u8> {
         let mut payload = vec![0u8; 84 + 50];
         payload[80..84].copy_from_slice(&1u32.to_le_bytes());
@@ -65,6 +73,8 @@ mod tests {
         assert_eq!(mesh.kind, MeshKind::Surface);
         assert_eq!(mesh.element_count, 1);
         assert_eq!(mesh.vertex_count, 3);
+        assert!(has_diag(&result, "GEOMETRY_IMPORT_VERTEX_COUNT"));
+        assert!(has_diag(&result, "GEOMETRY_IMPORT_TRIANGLE_COUNT"));
     }
 
     #[test]
@@ -173,6 +183,8 @@ mod tests {
         assert_eq!(mesh.kind, MeshKind::Surface);
         assert_eq!(mesh.vertex_count, 4);
         assert_eq!(mesh.element_count, 3);
+        assert!(has_diag(&result, "GEOMETRY_IMPORT_VERTEX_COUNT"));
+        assert!(has_diag(&result, "GEOMETRY_IMPORT_TRIANGLE_COUNT"));
     }
 
     #[test]
@@ -205,6 +217,8 @@ mod tests {
         assert_eq!(mesh.kind, MeshKind::Surface);
         assert_eq!(mesh.vertex_count, 4);
         assert_eq!(mesh.element_count, 3);
+        assert!(has_diag(&result, "GEOMETRY_IMPORT_VERTEX_COUNT"));
+        assert!(has_diag(&result, "GEOMETRY_IMPORT_TRIANGLE_COUNT"));
     }
 
     #[test]
@@ -237,6 +251,8 @@ mod tests {
         assert_eq!(mesh.kind, MeshKind::Surface);
         assert_eq!(mesh.vertex_count, 4);
         assert_eq!(mesh.element_count, 2);
+        assert!(has_diag(&result, "GEOMETRY_IMPORT_VERTEX_COUNT"));
+        assert!(has_diag(&result, "GEOMETRY_IMPORT_TRIANGLE_COUNT"));
     }
 
     #[test]

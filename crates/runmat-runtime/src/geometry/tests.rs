@@ -83,6 +83,13 @@ fn inspect_and_load_binary_stl_work_without_extension() {
     assert_eq!(asset.meshes.len(), 1);
     assert_eq!(asset.meshes[0].element_count, 1);
     assert_eq!(asset.meshes[0].vertex_count, 3);
+    let codes = asset
+        .diagnostics
+        .iter()
+        .map(|diag| diag.code.as_str())
+        .collect::<Vec<_>>();
+    assert!(codes.contains(&"GEOMETRY_IMPORT_VERTEX_COUNT"));
+    assert!(codes.contains(&"GEOMETRY_IMPORT_TRIANGLE_COUNT"));
 }
 
 #[test]
@@ -96,6 +103,13 @@ fn inspect_and_load_obj_work() {
     assert_eq!(asset.meshes.len(), 1);
     assert_eq!(asset.meshes[0].element_count, 2);
     assert_eq!(asset.meshes[0].vertex_count, 4);
+    let codes = asset
+        .diagnostics
+        .iter()
+        .map(|diag| diag.code.as_str())
+        .collect::<Vec<_>>();
+    assert!(codes.contains(&"GEOMETRY_IMPORT_VERTEX_COUNT"));
+    assert!(codes.contains(&"GEOMETRY_IMPORT_TRIANGLE_COUNT"));
 }
 
 #[test]
@@ -120,6 +134,13 @@ fn inspect_and_load_ply_work() {
     assert_eq!(asset.meshes.len(), 1);
     assert_eq!(asset.meshes[0].element_count, 2);
     assert_eq!(asset.meshes[0].vertex_count, 4);
+    let codes = asset
+        .diagnostics
+        .iter()
+        .map(|diag| diag.code.as_str())
+        .collect::<Vec<_>>();
+    assert!(codes.contains(&"GEOMETRY_IMPORT_VERTEX_COUNT"));
+    assert!(codes.contains(&"GEOMETRY_IMPORT_TRIANGLE_COUNT"));
 }
 
 #[test]
@@ -144,6 +165,13 @@ fn inspect_and_load_gltf_work() {
     assert_eq!(asset.meshes.len(), 1);
     assert_eq!(asset.meshes[0].element_count, 2);
     assert_eq!(asset.meshes[0].vertex_count, 4);
+    let codes = asset
+        .diagnostics
+        .iter()
+        .map(|diag| diag.code.as_str())
+        .collect::<Vec<_>>();
+    assert!(codes.contains(&"GEOMETRY_IMPORT_VERTEX_COUNT"));
+    assert!(codes.contains(&"GEOMETRY_IMPORT_TRIANGLE_COUNT"));
 }
 
 #[test]

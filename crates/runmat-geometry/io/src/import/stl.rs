@@ -2,7 +2,7 @@ use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
 
 use super::{
     build_asset, build_result, capacity_guard, is_degenerate_triangle, parse_f64,
-    GeometryImportError, GeometryImportOptions,
+    push_mesh_count_diagnostics, GeometryImportError, GeometryImportOptions,
 };
 
 pub(super) fn import_stl(
@@ -63,6 +63,12 @@ fn import_ascii_stl(
         }
     }
 
+    push_mesh_count_diagnostics(
+        &mut diagnostics,
+        "stl",
+        vertices.len() as u64,
+        triangle_count,
+    );
     let asset = build_asset(
         path,
         "stl/v1",
@@ -120,6 +126,12 @@ fn import_binary_stl(
         accepted_triangles += 1;
     }
 
+    push_mesh_count_diagnostics(
+        &mut diagnostics,
+        "stl",
+        vertices.len() as u64,
+        accepted_triangles,
+    );
     let asset = build_asset(
         path,
         "stl/v1",
