@@ -748,6 +748,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("thermo_mech_kickoff_gpu_provider", detail)
         self.assertIn("thermal_standalone_ramp_gpu_provider", detail)
         self.assertIn("electromagnetic_reference_boundary_kernel_gpu_provider", detail)
+        self.assertIn("transient_long_gpu_provider", detail)
         self.assertNotIn(
             "nonlinear_plastic_hardening_reference_complex_gpu_provider", detail
         )
