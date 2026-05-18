@@ -416,12 +416,15 @@ async fn execute_resolved_callable(
                     .unwrap_or_else(|| "<unnamed callable>".into());
                 return Err(undefined_name_error(&name, &metadata));
             }
+            if !matches!(other, CallableIdentity::DynamicName(_)) {
+                let name = other
+                    .display_name()
+                    .unwrap_or_else(|| "<unnamed callable>".into());
+                return Err(undefined_name_error(&name, &metadata));
+            }
             let Some(name) = other.display_name() else {
                 return Err(undefined_name_error("<unnamed callable>", &metadata));
             };
-            if matches!(other, CallableIdentity::ExternalName(_)) {
-                return Err(undefined_name_error(&name, &metadata));
-            }
             forward_named_fallback(name, args, requested_outputs, fallback_policy).await
         }
     }
@@ -468,7 +471,7 @@ async fn try_execute_resolved_callable(
             if !fallback_policy.allows_runtime_name_resolution() {
                 return Ok(None);
             }
-            if matches!(other, CallableIdentity::ExternalName(_)) {
+            if !matches!(other, CallableIdentity::DynamicName(_)) {
                 return Ok(None);
             }
             let Some(name) = other.display_name() else {
@@ -542,9 +545,21 @@ mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{Tensor, Value};
     use runmat_hir::{
-        BuiltinId, CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName,
+        BuiltinId, CallableFallbackPolicy, CallableIdentity, DefPath, DefPathSegment, PackageName,
+        QualifiedName, SymbolName,
     };
     use std::sync::Arc;
+
+    fn imported_identity(name: &str) -> CallableIdentity {
+        CallableIdentity::Imported(DefPath {
+            package: PackageName("pkg".to_string()),
+            module: QualifiedName(vec![
+                SymbolName("pkg".to_string()),
+                SymbolName(name.to_string()),
+            ]),
+            item: vec![DefPathSegment::Function(SymbolName(name.to_string()))],
+        })
+    }
 
     #[test]
     fn builtin_descriptor_uses_requested_outputs_for_multi_result_calls() {
@@ -656,6 +671,21 @@ mod tests {
         let value = block_on(execute_callable_descriptor(descriptor))
             .expect("dynamic runtime name resolution should reach builtin");
         assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
+    fn imported_identity_never_falls_back_to_builtin_name_resolution() {
+        let descriptor = CallableDescriptor::resolved(
+            imported_identity("sqrt"),
+            Some("pkg.sqrt".to_string()),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::RuntimeNameResolution,
+            CallableCallKind::Direct,
+        );
+        let err = block_on(execute_callable_descriptor(descriptor))
+            .expect_err("imported identities should not fall back to builtin name resolution");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
     }
 
     #[test]
