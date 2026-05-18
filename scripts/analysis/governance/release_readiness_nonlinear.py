@@ -3818,6 +3818,15 @@ def evaluate_release_readiness(
                     value = float(raw_value)
                     if math.isfinite(value):
                         values.append(value)
+            if not values and field == "electromagnetic_flux_divergence_proxy":
+                for rec in em_records:
+                    if rec.get("fixture_id") != "electromagnetic_reference_homogeneous_gpu_provider":
+                        continue
+                    observed = threshold_assertion_observed(
+                        rec, "em_homogeneous_flux_divergence_proxy"
+                    )
+                    if observed is not None:
+                        values.append(observed)
             if not values:
                 missing_metric_fields.append(field)
                 continue
@@ -4992,23 +5001,29 @@ def evaluate_release_readiness(
                 )
             )
 
-        em_flux_divergence_trend_ratio = fixture_trend_ratio(
-            "electromagnetic_flux_divergence_proxy"
-        )
-        if (
-            em_flux_divergence_trend_ratio is not None
-            and em_flux_divergence_trend_ratio > em_max_flux_divergence_trend_ratio_threshold
-        ):
-            reasons.append(
-                Reason(
-                    code="EM_FLUX_DIVERGENCE_TREND_WORSENING",
-                    severity="fail" if protected else "warn",
-                    detail=(
-                        f"EM flux-divergence trend ratio {em_flux_divergence_trend_ratio:.3f} exceeds "
-                        f"threshold {em_max_flux_divergence_trend_ratio_threshold:.3f}"
-                    ),
+        flux_divergence_trend_candidates = [
+            fixture_trend_ratio("electromagnetic_flux_divergence_proxy"),
+            fixture_assertion_trend_ratio(
+                "em_homogeneous_flux_divergence_proxy",
+                ratio_mode="increase",
+            ),
+        ]
+        flux_divergence_trend_candidates = [
+            value for value in flux_divergence_trend_candidates if value is not None
+        ]
+        if flux_divergence_trend_candidates:
+            em_flux_divergence_trend_ratio = max(flux_divergence_trend_candidates)
+            if em_flux_divergence_trend_ratio > em_max_flux_divergence_trend_ratio_threshold:
+                reasons.append(
+                    Reason(
+                        code="EM_FLUX_DIVERGENCE_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"EM flux-divergence trend ratio {em_flux_divergence_trend_ratio:.3f} exceeds "
+                            f"threshold {em_max_flux_divergence_trend_ratio_threshold:.3f}"
+                        ),
+                    )
                 )
-            )
 
         sigma_omega_scale_mean_trend_candidates = [
             fixture_assertion_trend_ratio("em_homogeneous_sigma_omega_scale_mean")
