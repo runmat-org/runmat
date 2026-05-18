@@ -21,7 +21,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Removed dead `BuiltinCompatibility::RunMatExtended` variant to keep policy surfaces behavior-backed.
   - Validation: `cargo test -p runmat-builtins`, `cargo fmt --all --check`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
 
-- (uncommitted in this log entry) semantic test migration in `runmat-gc`
+- `e2095950` RM-378: migrate gc stress tests
   - Replaced legacy stress-test usage of removed APIs (`HirProgram`, `runmat_vm::execute`) with semantic pipeline (`lowering.assembly -> runmat_mir::lower_assembly -> runmat_vm::compile -> runmat_vm::interpret`).
   - Added `runmat-mir` dev dependency for `runmat-gc`.
   - Validation: `cargo test -p runmat-gc --tests` green.
