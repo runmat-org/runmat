@@ -1333,7 +1333,17 @@ def evaluate_release_readiness(
     for fixture, rec in key_perf_records.items():
         if key_perf_require_provider_backend and fixture.endswith("_gpu_provider"):
             backend = rec.get("gpu_solver_backend")
-            if isinstance(backend, str) and "fallback" in backend.lower():
+            if not isinstance(backend, str) or not backend.strip():
+                reasons.append(
+                    Reason(
+                        code="KEY_PERF_PROVIDER_BACKEND_MISSING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"{fixture} missing non-empty gpu_solver_backend evidence"
+                        ),
+                    )
+                )
+            elif "fallback" in backend.lower():
                 reasons.append(
                     Reason(
                         code="KEY_PERF_PROVIDER_BACKEND_FALLBACK",

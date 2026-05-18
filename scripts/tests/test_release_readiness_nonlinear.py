@@ -752,6 +752,22 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("KEY_PERF_PROVIDER_BACKEND_FALLBACK", codes)
 
+    def test_key_perf_provider_backend_missing_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 120.0,
+                "gpu_speedup_ratio": 1.1,
+                "gpu_solver_solve_ms": 100.0,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND"] = "true"
+        result = evaluate_release_readiness(latest, [], protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("KEY_PERF_PROVIDER_BACKEND_MISSING", codes)
+
     def test_key_perf_speedup_low_reason_is_emitted_for_em_non_core_fixture(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
