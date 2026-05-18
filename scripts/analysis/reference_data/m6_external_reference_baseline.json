@@ -149,6 +149,26 @@
       "tolerance_rel": 0.1
     },
     {
+      "name": "em_homogeneous_relative_permittivity_spread_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_relative_permittivity_spread_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.1
+    },
+    {
+      "name": "em_homogeneous_relative_permeability_spread_ratio",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_homogeneous_relative_permeability_spread_ratio",
+      "reference": 1.0,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.1
+    },
+    {
       "name": "em_homogeneous_assignment_coverage_ratio",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -357,6 +377,26 @@
       "reference": 256041201.47883186,
       "tolerance_abs": 800000000.0,
       "tolerance_rel": 3.2
+    },
+    {
+      "name": "em_heterogeneous_relative_permittivity_spread_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_relative_permittivity_spread_ratio",
+      "reference": 7.0,
+      "tolerance_abs": 4.0,
+      "tolerance_rel": 0.8
+    },
+    {
+      "name": "em_heterogeneous_relative_permeability_spread_ratio",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "em_heterogeneous_relative_permeability_spread_ratio",
+      "reference": 90.0,
+      "tolerance_abs": 80.0,
+      "tolerance_rel": 1.5
     },
     {
       "name": "em_heterogeneous_assignment_coverage_ratio",

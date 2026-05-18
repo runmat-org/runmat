@@ -347,6 +347,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_SIGMA_OMEGA_SCALE_SPREAD_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_CONDUCTIVITY_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_RELATIVE_PERMITTIVITY_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_RELATIVE_PERMITTIVITY_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_RELATIVE_PERMEABILITY_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_RELATIVE_PERMEABILITY_SPREAD_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX",
             "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_MATERIAL_HETEROGENEITY_INDEX",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_MEAN",
@@ -368,6 +372,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_SIGMA_OMEGA_SCALE_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_CONDUCTIVITY_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_CONDUCTIVITY_SPREAD_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_RELATIVE_PERMITTIVITY_SPREAD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_RELATIVE_PERMITTIVITY_SPREAD_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_RELATIVE_PERMEABILITY_SPREAD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_RELATIVE_PERMEABILITY_SPREAD_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_MATERIAL_HETEROGENEITY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_DISPERSIVE_LOSS_SCALE_TREND_RATIO",
@@ -757,6 +765,14 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 1.35,
                     },
                     {
+                        "name": "em_homogeneous_relative_permittivity_spread_ratio",
+                        "observed": 1.35,
+                    },
+                    {
+                        "name": "em_homogeneous_relative_permeability_spread_ratio",
+                        "observed": 1.35,
+                    },
+                    {
                         "name": "em_homogeneous_material_heterogeneity_index",
                         "observed": 0.12,
                     },
@@ -825,6 +841,14 @@ class ReleaseReadinessTests(unittest.TestCase):
                     },
                     {
                         "name": "em_heterogeneous_conductivity_spread_ratio",
+                        "observed": 4.0,
+                    },
+                    {
+                        "name": "em_heterogeneous_relative_permittivity_spread_ratio",
+                        "observed": 4.0,
+                    },
+                    {
+                        "name": "em_heterogeneous_relative_permeability_spread_ratio",
                         "observed": 4.0,
                     },
                     {
@@ -991,6 +1015,18 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_CONDUCTIVITY_SPREAD_RATIO"
         ] = "8.0"
         os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_RELATIVE_PERMITTIVITY_SPREAD_RATIO"
+        ] = "1.1"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_RELATIVE_PERMITTIVITY_SPREAD_RATIO"
+        ] = "8.0"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_RELATIVE_PERMEABILITY_SPREAD_RATIO"
+        ] = "1.1"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MIN_HETEROGENEOUS_RELATIVE_PERMEABILITY_SPREAD_RATIO"
+        ] = "8.0"
+        os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX"
         ] = "0.03"
         os.environ[
@@ -1103,6 +1139,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_HOMOGENEOUS_SIGMA_OMEGA_SCALE_SPREAD_RATIO_HIGH", codes)
         self.assertIn("EM_HOMOGENEOUS_CONDUCTIVITY_SPREAD_RATIO_HIGH", codes)
         self.assertIn("EM_HETEROGENEOUS_CONDUCTIVITY_SPREAD_RATIO_LOW", codes)
+        self.assertIn("EM_HOMOGENEOUS_RELATIVE_PERMITTIVITY_SPREAD_RATIO_HIGH", codes)
+        self.assertIn("EM_HETEROGENEOUS_RELATIVE_PERMITTIVITY_SPREAD_RATIO_LOW", codes)
+        self.assertIn("EM_HOMOGENEOUS_RELATIVE_PERMEABILITY_SPREAD_RATIO_HIGH", codes)
+        self.assertIn("EM_HETEROGENEOUS_RELATIVE_PERMEABILITY_SPREAD_RATIO_LOW", codes)
         self.assertIn("EM_HOMOGENEOUS_MATERIAL_HETEROGENEITY_INDEX_HIGH", codes)
         self.assertIn("EM_HETEROGENEOUS_MATERIAL_HETEROGENEITY_INDEX_LOW", codes)
         self.assertIn("EM_DISPERSIVE_LOSS_SCALE_MEAN_HIGH", codes)
@@ -1411,6 +1451,14 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 1.4,
                     },
                     {
+                        "name": "em_homogeneous_relative_permittivity_spread_ratio",
+                        "observed": 1.4,
+                    },
+                    {
+                        "name": "em_homogeneous_relative_permeability_spread_ratio",
+                        "observed": 1.4,
+                    },
+                    {
                         "name": "em_homogeneous_material_heterogeneity_index",
                         "observed": 0.12,
                     },
@@ -1472,6 +1520,14 @@ class ReleaseReadinessTests(unittest.TestCase):
                     },
                     {
                         "name": "em_heterogeneous_conductivity_spread_ratio",
+                        "observed": 6.0,
+                    },
+                    {
+                        "name": "em_heterogeneous_relative_permittivity_spread_ratio",
+                        "observed": 6.0,
+                    },
+                    {
+                        "name": "em_heterogeneous_relative_permeability_spread_ratio",
                         "observed": 6.0,
                     },
                     {
@@ -1564,6 +1620,14 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 1.0,
                     },
                     {
+                        "name": "em_homogeneous_relative_permittivity_spread_ratio",
+                        "observed": 1.0,
+                    },
+                    {
+                        "name": "em_homogeneous_relative_permeability_spread_ratio",
+                        "observed": 1.0,
+                    },
+                    {
                         "name": "em_homogeneous_material_heterogeneity_index",
                         "observed": 0.01,
                     },
@@ -1628,6 +1692,14 @@ class ReleaseReadinessTests(unittest.TestCase):
                         "observed": 10.0,
                     },
                     {
+                        "name": "em_heterogeneous_relative_permittivity_spread_ratio",
+                        "observed": 10.0,
+                    },
+                    {
+                        "name": "em_heterogeneous_relative_permeability_spread_ratio",
+                        "observed": 10.0,
+                    },
+                    {
                         "name": "em_heterogeneous_material_heterogeneity_index",
                         "observed": 0.40,
                     },
@@ -1669,6 +1741,18 @@ class ReleaseReadinessTests(unittest.TestCase):
         ] = "1.2"
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_CONDUCTIVITY_SPREAD_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_RELATIVE_PERMITTIVITY_SPREAD_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_RELATIVE_PERMITTIVITY_SPREAD_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_RELATIVE_PERMEABILITY_SPREAD_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_EM_MAX_HETEROGENEOUS_RELATIVE_PERMEABILITY_SPREAD_DROP_TREND_RATIO"
         ] = "1.2"
         os.environ[
             "RUNMAT_RELEASE_READINESS_EM_MAX_HOMOGENEOUS_MATERIAL_HETEROGENEITY_TREND_RATIO"
@@ -1729,6 +1813,14 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("EM_HOMOGENEOUS_SIGMA_OMEGA_SCALE_SPREAD_TREND_WORSENING", codes)
         self.assertIn("EM_HOMOGENEOUS_CONDUCTIVITY_SPREAD_TREND_WORSENING", codes)
         self.assertIn("EM_HETEROGENEOUS_CONDUCTIVITY_SPREAD_TREND_WORSENING", codes)
+        self.assertIn("EM_HOMOGENEOUS_RELATIVE_PERMITTIVITY_SPREAD_TREND_WORSENING", codes)
+        self.assertIn(
+            "EM_HETEROGENEOUS_RELATIVE_PERMITTIVITY_SPREAD_TREND_WORSENING", codes
+        )
+        self.assertIn("EM_HOMOGENEOUS_RELATIVE_PERMEABILITY_SPREAD_TREND_WORSENING", codes)
+        self.assertIn(
+            "EM_HETEROGENEOUS_RELATIVE_PERMEABILITY_SPREAD_TREND_WORSENING", codes
+        )
         self.assertIn("EM_HOMOGENEOUS_MATERIAL_HETEROGENEITY_TREND_WORSENING", codes)
         self.assertIn("EM_HETEROGENEOUS_MATERIAL_HETEROGENEITY_TREND_WORSENING", codes)
         self.assertIn("EM_DISPERSIVE_LOSS_SCALE_TREND_WORSENING", codes)

@@ -4886,6 +4886,34 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "em_homogeneous_relative_permittivity_spread_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "relative_permittivity_spread_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.1),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_homogeneous_relative_permeability_spread_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "relative_permeability_spread_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.1),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "em_homogeneous_material_heterogeneity_index",
                             "FEA_EM_STATIC",
                             diagnostic_metric(
@@ -5163,6 +5191,34 @@ pub(super) fn run_fixture(
                             ),
                             Some(10.0),
                             Some(1.0e9),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_relative_permittivity_spread_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "relative_permittivity_spread_ratio",
+                            ),
+                            Some(2.0),
+                            Some(1.0e9),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "em_heterogeneous_relative_permeability_spread_ratio",
+                            "FEA_EM_STATIC",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_EM_STATIC",
+                                "relative_permeability_spread_ratio",
+                            ),
+                            Some(5.0),
+                            Some(1.0e12),
                         );
                         push_threshold_assertion(
                             spec.id,
