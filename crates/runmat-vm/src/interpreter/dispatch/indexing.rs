@@ -164,6 +164,11 @@ enum BraceIndexOutcome {
     Expanded(Vec<Value>),
 }
 
+enum BraceOutcomeExpectation {
+    SingleValue { invalid_message: &'static str },
+    ExpandedValues { invalid_message: &'static str },
+}
+
 async fn execute_brace_operation(
     base: Value,
     raw_indices: &[Value],
@@ -254,6 +259,43 @@ async fn execute_brace_operation(
             Ok(BraceIndexOutcome::Value(value))
         }
     }
+}
+
+async fn execute_brace_operation_from_stack(
+    stack: &mut Vec<Value>,
+    num_indices: usize,
+    end_offsets: &[(usize, isize)],
+    operation: BraceIndexOperation,
+    expectation: BraceOutcomeExpectation,
+) -> Result<(), RuntimeError> {
+    let raw_indices = pop_index_values(stack, num_indices)?;
+    let base = pop_index_base(stack)?;
+    let adjusted_indices = apply_cell_end_offsets_for_base(&base, &raw_indices, end_offsets)?;
+    let outcome = execute_brace_operation(base, &adjusted_indices, operation).await?;
+    match (outcome, expectation) {
+        (BraceIndexOutcome::Value(value), BraceOutcomeExpectation::SingleValue { .. }) => {
+            stack.push(value)
+        }
+        (BraceIndexOutcome::Expanded(values), BraceOutcomeExpectation::ExpandedValues { .. }) => {
+            for value in values {
+                stack.push(value);
+            }
+        }
+        (
+            BraceIndexOutcome::Value(_),
+            BraceOutcomeExpectation::ExpandedValues { invalid_message },
+        )
+        | (
+            BraceIndexOutcome::Expanded(_),
+            BraceOutcomeExpectation::SingleValue { invalid_message },
+        ) => {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidBraceIndexOutcome",
+                invalid_message,
+            ))
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -484,22 +526,16 @@ pub async fn dispatch_indexing(
             num_indices,
             end_offsets,
         } => {
-            let raw_indices = pop_index_values(stack, *num_indices)?;
-            let base = pop_index_base(stack)?;
-            let adjusted_indices =
-                apply_cell_end_offsets_for_base(&base, &raw_indices, end_offsets)?;
-            let outcome =
-                execute_brace_operation(base, &adjusted_indices, BraceIndexOperation::ReadSingle)
-                    .await?;
-            match outcome {
-                BraceIndexOutcome::Value(value) => stack.push(value),
-                BraceIndexOutcome::Expanded(_) => {
-                    return Err(crate::interpreter::errors::mex(
-                        "InvalidBraceIndexOutcome",
-                        "IndexCell expected a single value outcome",
-                    ))
-                }
-            }
+            execute_brace_operation_from_stack(
+                stack,
+                *num_indices,
+                end_offsets,
+                BraceIndexOperation::ReadSingle,
+                BraceOutcomeExpectation::SingleValue {
+                    invalid_message: "IndexCell expected a single value outcome",
+                },
+            )
+            .await?;
             Ok(true)
         }
         crate::bytecode::Instr::IndexCellExpand {
@@ -507,52 +543,34 @@ pub async fn dispatch_indexing(
             out_count,
             end_offsets,
         } => {
-            let raw_indices = pop_index_values(stack, *num_indices)?;
-            let base = pop_index_base(stack)?;
-            let adjusted_indices =
-                apply_cell_end_offsets_for_base(&base, &raw_indices, end_offsets)?;
-            let outcome = execute_brace_operation(
-                base,
-                &adjusted_indices,
+            execute_brace_operation_from_stack(
+                stack,
+                *num_indices,
+                end_offsets,
                 BraceIndexOperation::Expand {
                     out_count: *out_count,
                 },
+                BraceOutcomeExpectation::ExpandedValues {
+                    invalid_message: "IndexCellExpand expected an expanded value list",
+                },
             )
             .await?;
-            match outcome {
-                BraceIndexOutcome::Expanded(values) => {
-                    for value in values {
-                        stack.push(value);
-                    }
-                }
-                BraceIndexOutcome::Value(_) => {
-                    return Err(crate::interpreter::errors::mex(
-                        "InvalidBraceIndexOutcome",
-                        "IndexCellExpand expected an expanded value list",
-                    ))
-                }
-            }
             Ok(true)
         }
         crate::bytecode::Instr::IndexCellList {
             num_indices,
             end_offsets,
         } => {
-            let raw_indices = pop_index_values(stack, *num_indices)?;
-            let base = pop_index_base(stack)?;
-            let adjusted_indices =
-                apply_cell_end_offsets_for_base(&base, &raw_indices, end_offsets)?;
-            let outcome =
-                execute_brace_operation(base, &adjusted_indices, BraceIndexOperation::List).await?;
-            match outcome {
-                BraceIndexOutcome::Value(value) => stack.push(value),
-                BraceIndexOutcome::Expanded(_) => {
-                    return Err(crate::interpreter::errors::mex(
-                        "InvalidBraceIndexOutcome",
-                        "IndexCellList expected a single list value",
-                    ))
-                }
-            }
+            execute_brace_operation_from_stack(
+                stack,
+                *num_indices,
+                end_offsets,
+                BraceIndexOperation::List,
+                BraceOutcomeExpectation::SingleValue {
+                    invalid_message: "IndexCellList expected a single list value",
+                },
+            )
+            .await?;
             Ok(true)
         }
         crate::bytecode::Instr::StoreIndexCell {
@@ -574,25 +592,16 @@ pub async fn dispatch_indexing(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let raw_indices = pop_index_values(stack, *num_indices)?;
-            let base = pop_index_base(stack)?;
-            let adjusted_indices =
-                apply_cell_end_offsets_for_base(&base, &raw_indices, end_offsets)?;
-            let outcome = execute_brace_operation(
-                base,
-                &adjusted_indices,
+            execute_brace_operation_from_stack(
+                stack,
+                *num_indices,
+                end_offsets,
                 BraceIndexOperation::Store { rhs },
+                BraceOutcomeExpectation::SingleValue {
+                    invalid_message: "StoreIndexCell expected a single base value",
+                },
             )
             .await?;
-            match outcome {
-                BraceIndexOutcome::Value(value) => stack.push(value),
-                BraceIndexOutcome::Expanded(_) => {
-                    return Err(crate::interpreter::errors::mex(
-                        "InvalidBraceIndexOutcome",
-                        "StoreIndexCell expected a single base value",
-                    ))
-                }
-            }
             Ok(true)
         }
         crate::bytecode::Instr::StoreIndex(num_indices)
