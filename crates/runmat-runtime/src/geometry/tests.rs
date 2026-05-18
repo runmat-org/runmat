@@ -3,6 +3,7 @@ use super::*;
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
 const SIMPLE_OBJ: &str = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\n";
+const SIMPLE_PLY: &str = "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n0 0 0\n1 0 0\n1 1 0\n0 1 0\n4 0 1 2 3\n";
 
 #[test]
 fn inspect_detects_stl() {
@@ -54,6 +55,19 @@ fn inspect_and_load_obj_work() {
 
     let asset = geometry_load("/part.obj", SIMPLE_OBJ.as_bytes()).expect("load should work");
     assert_eq!(asset.source.importer_version, "obj/v1");
+    assert_eq!(asset.meshes.len(), 1);
+    assert_eq!(asset.meshes[0].element_count, 2);
+    assert_eq!(asset.meshes[0].vertex_count, 4);
+}
+
+#[test]
+fn inspect_and_load_ply_work() {
+    let inspect =
+        geometry_inspect("/part.ply", SIMPLE_PLY.as_bytes()).expect("inspect should work");
+    assert_eq!(inspect.format, "ply");
+
+    let asset = geometry_load("/part.ply", SIMPLE_PLY.as_bytes()).expect("load should work");
+    assert_eq!(asset.source.importer_version, "ply/v1");
     assert_eq!(asset.meshes.len(), 1);
     assert_eq!(asset.meshes[0].element_count, 2);
     assert_eq!(asset.meshes[0].vertex_count, 4);

@@ -21,6 +21,7 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 | FSI | Structural-fluid coupled family | [~] |
 | Acoustics | Acoustic solver family | [~] |
 | Meshing/adaptivity | Production meshing/refinement pipeline | [~] |
+| CAD interop depth | Robust CAD-native ingestion + metadata fidelity | [~] |
 | External-reference gating (M6) | Protected-branch enforced external comparators | [~] |
 | Performance/scale regression gates | SLO-backed perf readiness across key workloads | [~] |
 
@@ -127,4 +128,5 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - Release-readiness key-performance coverage now also includes additional schema-governed thermo/electro/nonlinear fixtures (`nonlinear_assembly_stress_gpu_provider`, `nonlinear_softening_proxy_gpu_provider`, `nonlinear_load_path_mix_gpu_provider`, `nonlinear_plasticity_proxy_gpu_provider`, `nonlinear_contact_proxy_gpu_provider`, `nonlinear_contact_frictionless_reference_gpu_provider`, `nonlinear_plastic_hardening_reference_gpu_provider`, `thermo_mech_kickoff_gpu_provider`, `thermo_gradient_benign_gpu_provider`, `thermo_ramp_smooth_gpu_provider`, `thermo_ramp_smooth_field_artifact_gpu_provider`, `thermo_shock_oscillatory_gpu_provider`, `thermo_shock_oscillatory_field_artifact_gpu_provider`, `thermal_standalone_ramp_gpu_provider`, `electro_thermal_joule_benign_gpu_provider`) for speedup-floor and slowdown-trend gating.
 - Meshing/adaptivity kickoff landed: additive `geometry.prep_for_analysis/v1` profile `adaptive_refine` now routes through deterministic meshing-core refinement heuristics and quality shaping (`min_scaled_jacobian`, `mean_aspect_ratio`) with runtime contract and conformance coverage, moving meshing from not-started to active deepening.
 - CAD interop ingestion depth expanded: additive deterministic OBJ import support (`obj/v1`) now triangulates polygon faces (including negative-index references), prunes degenerate triangles with import diagnostics, and flows through runtime geometry contracts (`geometry.inspect/v1`, `geometry.load/v1`) without unsupported-format fallbacks for `.obj` paths.
+- CAD interop ingestion depth expanded further: additive deterministic ASCII PLY import support (`ply/v1`) now triangulates polygon faces with degenerate-triangle pruning diagnostics, and flows through runtime geometry contracts (`geometry.inspect/v1`, `geometry.load/v1`) without unsupported-format fallbacks for `.ply` paths.
 - Next material gains come from constitutive fidelity, external references, and missing physics families.
