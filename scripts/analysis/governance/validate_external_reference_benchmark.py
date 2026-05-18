@@ -657,18 +657,24 @@ REQUIRED_METRICS_BY_FIXTURE = {
         "acoustic_min_relative_frequency_separation",
         "acoustic_mode_count",
         "acoustic_residual_warn_threshold",
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
     },
     "acoustic_harmonic_cpu": {
         "acoustic_max_m_orthogonality_offdiag",
         "acoustic_min_relative_frequency_separation",
         "acoustic_mode_count",
         "acoustic_residual_warn_threshold",
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
     },
     "acoustic_harmonic_gpu_fallback": {
         "acoustic_max_m_orthogonality_offdiag",
         "acoustic_min_relative_frequency_separation",
         "acoustic_mode_count",
         "acoustic_residual_warn_threshold",
+        "modal_max_m_orthogonality_offdiag",
+        "modal_min_relative_frequency_separation",
     },
 }
 

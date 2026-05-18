@@ -659,6 +659,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "acoustic_min_relative_frequency_separation",
                     "acoustic_mode_count",
                     "acoustic_residual_warn_threshold",
+                    "modal_max_m_orthogonality_offdiag",
+                    "modal_min_relative_frequency_separation",
                 },
             ),
             _record(
@@ -668,6 +670,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "acoustic_min_relative_frequency_separation",
                     "acoustic_mode_count",
                     "acoustic_residual_warn_threshold",
+                    "modal_max_m_orthogonality_offdiag",
+                    "modal_min_relative_frequency_separation",
                 },
             ),
             _record(
@@ -677,6 +681,8 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "acoustic_min_relative_frequency_separation",
                     "acoustic_mode_count",
                     "acoustic_residual_warn_threshold",
+                    "modal_max_m_orthogonality_offdiag",
+                    "modal_min_relative_frequency_separation",
                 },
             ),
             _record(

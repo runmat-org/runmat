@@ -4071,6 +4071,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "modal_max_m_orthogonality_offdiag",
+            "fixture_id": "acoustic_harmonic_gpu_provider",
+            "observed": 0.0052,
+            "reference": 0.0052,
+            "pass": True,
+        },
+        {
+            "name": "modal_min_relative_frequency_separation",
+            "fixture_id": "acoustic_harmonic_gpu_provider",
+            "observed": 0.0172,
+            "reference": 0.0172,
+            "pass": True,
+        },
+        {
             "name": "acoustic_mode_count",
             "fixture_id": "acoustic_harmonic_cpu",
             "observed": 3.0,
@@ -4099,6 +4113,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "modal_max_m_orthogonality_offdiag",
+            "fixture_id": "acoustic_harmonic_cpu",
+            "observed": 0.0052,
+            "reference": 0.0052,
+            "pass": True,
+        },
+        {
+            "name": "modal_min_relative_frequency_separation",
+            "fixture_id": "acoustic_harmonic_cpu",
+            "observed": 0.0172,
+            "reference": 0.0172,
+            "pass": True,
+        },
+        {
             "name": "acoustic_mode_count",
             "fixture_id": "acoustic_harmonic_gpu_fallback",
             "observed": 3.0,
@@ -4124,6 +4152,20 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "acoustic_harmonic_gpu_fallback",
             "observed": 0.001,
             "reference": 0.001,
+            "pass": True,
+        },
+        {
+            "name": "modal_max_m_orthogonality_offdiag",
+            "fixture_id": "acoustic_harmonic_gpu_fallback",
+            "observed": 0.0052,
+            "reference": 0.0052,
+            "pass": True,
+        },
+        {
+            "name": "modal_min_relative_frequency_separation",
+            "fixture_id": "acoustic_harmonic_gpu_fallback",
+            "observed": 0.0172,
+            "reference": 0.0172,
             "pass": True,
         },
     ]
