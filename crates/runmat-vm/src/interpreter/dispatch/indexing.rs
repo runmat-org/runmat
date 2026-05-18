@@ -1,7 +1,6 @@
 use crate::bytecode::EndExpr;
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::shared::{
-    build_object_paren_expr_selector_values, build_object_paren_selector_values,
     call_object_index_descriptor_method, expand_brace_values, object_subsref_brace,
     ObjectIndexDescriptor, ObjectIndexSelector,
 };
@@ -144,19 +143,6 @@ async fn object_subsref_paren(base: Value, values: Vec<Value>) -> Result<Value, 
     call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_paren(
         base,
         ObjectIndexSelector::IndexValues { values },
-    ))
-    .await
-}
-
-async fn object_subsasgn_paren(
-    base: Value,
-    values: Vec<Value>,
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_paren(
-        base,
-        ObjectIndexSelector::IndexValues { values },
-        rhs,
     ))
     .await
 }
@@ -664,22 +650,24 @@ pub async fn dispatch_indexing(
             };
             match base {
                 Value::Object(obj) => {
-                    let selectors = build_object_paren_selector_values(
+                    let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
+                        Value::Object(obj),
                         *dims,
                         *colon_mask,
                         *end_mask,
                         &numeric,
                     )?;
-                    stack.push(object_subsref_paren(Value::Object(obj), selectors).await?);
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::HandleObject(handle) => {
-                    let selectors = build_object_paren_selector_values(
+                    let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
+                        Value::HandleObject(handle),
                         *dims,
                         *colon_mask,
                         *end_mask,
                         &numeric,
                     )?;
-                    stack.push(object_subsref_paren(Value::HandleObject(handle), selectors).await?);
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::FunctionHandle(_)
                 | Value::SemanticFunctionHandle { .. }
@@ -845,24 +833,26 @@ pub async fn dispatch_indexing(
             ))?;
             match base {
                 Value::Object(obj) => {
-                    let selectors = build_object_paren_selector_values(
+                    let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_slice(
+                        Value::Object(obj),
                         *dims,
                         *colon_mask,
                         *end_mask,
                         &numeric,
+                        rhs,
                     )?;
-                    stack.push(object_subsasgn_paren(Value::Object(obj), selectors, rhs).await?);
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::HandleObject(handle) => {
-                    let selectors = build_object_paren_selector_values(
+                    let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_slice(
+                        Value::HandleObject(handle),
                         *dims,
                         *colon_mask,
                         *end_mask,
                         &numeric,
+                        rhs,
                     )?;
-                    stack.push(
-                        object_subsasgn_paren(Value::HandleObject(handle), selectors, rhs).await?,
-                    );
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::Tensor(t) => {
                     let selectors =
@@ -1379,7 +1369,8 @@ pub async fn dispatch_indexing(
                     stack.push(updated);
                 }
                 Value::Object(obj) => {
-                    let idx_values = build_object_paren_expr_selector_values(
+                    let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_expr_slice(
+                        Value::Object(obj),
                         *dims,
                         *colon_mask,
                         *end_mask,
@@ -1389,11 +1380,13 @@ pub async fn dispatch_indexing(
                         range_step_exprs,
                         range_end_exprs,
                         &numeric,
+                        rhs,
                     )?;
-                    stack.push(object_subsasgn_paren(Value::Object(obj), idx_values, rhs).await?);
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::HandleObject(handle) => {
-                    let idx_values = build_object_paren_expr_selector_values(
+                    let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_expr_slice(
+                        Value::HandleObject(handle),
                         *dims,
                         *colon_mask,
                         *end_mask,
@@ -1403,10 +1396,9 @@ pub async fn dispatch_indexing(
                         range_step_exprs,
                         range_end_exprs,
                         &numeric,
+                        rhs,
                     )?;
-                    stack.push(
-                        object_subsasgn_paren(Value::HandleObject(handle), idx_values, rhs).await?,
-                    );
+                    stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::StringArray(mut sa) => {
                     if delete {

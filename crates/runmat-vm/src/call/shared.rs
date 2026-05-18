@@ -187,6 +187,67 @@ impl ObjectIndexDescriptor {
         }
     }
 
+    pub(crate) fn subsref_paren_from_slice(
+        base: Value,
+        dims: usize,
+        colon_mask: u32,
+        end_mask: u32,
+        numeric: &[Value],
+    ) -> Result<Self, RuntimeError> {
+        let values = build_object_paren_selector_values(dims, colon_mask, end_mask, numeric)?;
+        Ok(Self::subsref_paren(
+            base,
+            ObjectIndexSelector::IndexValues { values },
+        ))
+    }
+
+    pub(crate) fn subsasgn_paren_from_slice(
+        base: Value,
+        dims: usize,
+        colon_mask: u32,
+        end_mask: u32,
+        numeric: &[Value],
+        rhs: Value,
+    ) -> Result<Self, RuntimeError> {
+        let values = build_object_paren_selector_values(dims, colon_mask, end_mask, numeric)?;
+        Ok(Self::subsasgn_paren(
+            base,
+            ObjectIndexSelector::IndexValues { values },
+            rhs,
+        ))
+    }
+
+    pub(crate) fn subsasgn_paren_from_expr_slice(
+        base: Value,
+        dims: usize,
+        colon_mask: u32,
+        end_mask: u32,
+        range_dims: &[usize],
+        range_params: &[(f64, f64)],
+        range_start_exprs: &[Option<EndExpr>],
+        range_step_exprs: &[Option<EndExpr>],
+        range_end_exprs: &[EndExpr],
+        numeric: &[Value],
+        rhs: Value,
+    ) -> Result<Self, RuntimeError> {
+        let values = build_object_paren_expr_selector_values(
+            dims,
+            colon_mask,
+            end_mask,
+            range_dims,
+            range_params,
+            range_start_exprs,
+            range_step_exprs,
+            range_end_exprs,
+            numeric,
+        )?;
+        Ok(Self::subsasgn_paren(
+            base,
+            ObjectIndexSelector::IndexValues { values },
+            rhs,
+        ))
+    }
+
     pub(crate) fn member(
         base: Value,
         op: ObjectIndexOp,
