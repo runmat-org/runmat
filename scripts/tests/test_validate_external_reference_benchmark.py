@@ -4,7 +4,25 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.analysis.governance.validate_analysis_report_nonlinear import REQUIRED_FIXTURES
+from scripts.analysis.governance.validate_analysis_report_nonlinear import (
+    EM_APPLIED_CURRENT_REQUIRED_FIELDS,
+    EM_BALANCE_REQUIRED_FIELDS,
+    EM_BOUNDARY_CONDITION_LOCALIZATION_REQUIRED_FIELDS,
+    EM_BOUNDARY_SOURCE_REQUIRED_FIELDS,
+    EM_CONDITIONING_REQUIRED_FIELDS,
+    EM_CONSTITUTIVE_REQUIRED_FIELDS,
+    EM_CORE_ASSIGNMENT_REQUIRED_FIELDS,
+    EM_FREQUENCY_REQUIRED_FIELDS,
+    EM_GROUND_ANCHOR_EFFECTIVENESS_REQUIRED_FIELDS,
+    EM_PLACEHOLDER_QUALITY_REQUIRED_FIELDS,
+    EM_RESIDUAL_REQUIRED_FIELDS,
+    EM_SOURCE_ENERGY_CONSISTENCY_REQUIRED_FIELDS,
+    EM_SOURCE_FIDELITY_REQUIRED_FIELDS,
+    EM_SOURCE_INTERFERENCE_REQUIRED_FIELDS,
+    EM_SOURCE_LOCALIZATION_REQUIRED_FIELDS,
+    EM_SWEEP_RESONANCE_REQUIRED_FIELDS,
+    REQUIRED_FIXTURES,
+)
 from scripts.analysis.governance.validate_external_reference_benchmark import main
 from scripts.analysis.governance.validate_external_reference_benchmark import (
     REQUIRED_METRICS_BY_FIXTURE,
@@ -3136,6 +3154,43 @@ class ValidateExternalReferenceBenchmarkTests(unittest.TestCase):
         self.assertFalse(
             fixture_mismatches,
             f"external-reference required metrics missing schema assertions: {fixture_mismatches}",
+        )
+
+    def test_em_raw_metric_parity_with_schema_finite_checks(self):
+        schema_checked_em_metrics = set().union(
+            EM_SWEEP_RESONANCE_REQUIRED_FIELDS,
+            EM_FREQUENCY_REQUIRED_FIELDS,
+            EM_CONDITIONING_REQUIRED_FIELDS,
+            EM_APPLIED_CURRENT_REQUIRED_FIELDS,
+            EM_SOURCE_ENERGY_CONSISTENCY_REQUIRED_FIELDS,
+            EM_SOURCE_LOCALIZATION_REQUIRED_FIELDS,
+            EM_BOUNDARY_CONDITION_LOCALIZATION_REQUIRED_FIELDS,
+            EM_GROUND_ANCHOR_EFFECTIVENESS_REQUIRED_FIELDS,
+            EM_SOURCE_INTERFERENCE_REQUIRED_FIELDS,
+            EM_SOURCE_FIDELITY_REQUIRED_FIELDS,
+            EM_CORE_ASSIGNMENT_REQUIRED_FIELDS,
+            EM_CONSTITUTIVE_REQUIRED_FIELDS,
+            EM_BOUNDARY_SOURCE_REQUIRED_FIELDS,
+            EM_PLACEHOLDER_QUALITY_REQUIRED_FIELDS,
+            EM_RESIDUAL_REQUIRED_FIELDS,
+            EM_BALANCE_REQUIRED_FIELDS,
+        )
+
+        required_external_em_metrics = {
+            metric_name
+            for fixture_id, required_metrics in REQUIRED_METRICS_BY_FIXTURE.items()
+            if fixture_id.startswith("electromagnetic_reference_")
+            for metric_name in required_metrics
+            if metric_name.startswith("electromagnetic_")
+        }
+
+        missing_schema_checks = sorted(
+            required_external_em_metrics - schema_checked_em_metrics
+        )
+        self.assertFalse(
+            missing_schema_checks,
+            "external-reference requires EM raw metrics not covered by benchmark-schema "
+            f"finite-field checks: {missing_schema_checks}",
         )
 
     def test_passes_with_valid_payload(self):
