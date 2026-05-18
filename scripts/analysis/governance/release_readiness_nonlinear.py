@@ -168,6 +168,14 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM": "1e-06",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_RATIO": "1.02",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO": "0.9",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES": "2.0",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_HIT_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES_TREND_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.25",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.35",
@@ -392,6 +400,14 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM": "5e-06",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_RATIO": "1.04",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO": "0.85",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES": "3.0",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM_TREND_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_HIT_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.35",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.45",
@@ -616,6 +632,14 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM": "1e-05",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_RATIO": "1.08",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO": "0.75",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES": "5.0",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM_TREND_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_HIT_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES_TREND_RATIO": "1.5",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO": "0.5",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY": "0.6",
@@ -1959,6 +1983,78 @@ def evaluate_release_readiness(
             ),
         )
     )
+    coupled_flow_max_transient_residual_norm_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM",
+                "1e-05",
+            ),
+        )
+    )
+    coupled_flow_max_transient_energy_growth_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_RATIO",
+                "1.08",
+            ),
+        )
+    )
+    coupled_flow_min_transient_cache_hit_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO",
+                "0.75",
+            ),
+        )
+    )
+    coupled_flow_max_transient_cache_misses_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES",
+                "5.0",
+            ),
+        )
+    )
+    coupled_flow_max_transient_residual_norm_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM_TREND_RATIO",
+                "1.5",
+            ),
+        )
+    )
+    coupled_flow_max_transient_energy_growth_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_TREND_RATIO",
+                "1.35",
+            ),
+        )
+    )
+    coupled_flow_max_transient_cache_hit_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_HIT_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_HIT_DROP_TREND_RATIO",
+                "1.35",
+            ),
+        )
+    )
+    coupled_flow_max_transient_cache_misses_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES_TREND_RATIO",
+                "1.5",
+            ),
+        )
+    )
     em_require_metrics = is_true(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS",
@@ -3137,6 +3233,14 @@ def evaluate_release_readiness(
     cht_applied_temperature_delta_drop_trend_ratio = None
     fsi_reynolds_proxy_drop_trend_ratio = None
     fsi_structural_step_count_drop_trend_ratio = None
+    coupled_flow_max_transient_residual_norm = None
+    coupled_flow_max_transient_energy_growth_ratio = None
+    coupled_flow_min_transient_cache_hit_ratio = None
+    coupled_flow_max_transient_cache_misses = None
+    coupled_flow_transient_residual_norm_trend_ratio = None
+    coupled_flow_transient_energy_growth_trend_ratio = None
+    coupled_flow_transient_cache_hit_drop_trend_ratio = None
+    coupled_flow_transient_cache_misses_trend_ratio = None
     em_max_energy_imbalance_ratio = None
     em_max_flux_divergence_proxy = None
     em_max_real_residual_norm = None
@@ -4288,6 +4392,11 @@ def evaluate_release_readiness(
                 )
             )
     else:
+        coupled_flow_fixture_ids = {
+            "cfd_steady_gpu_provider",
+            "cht_coupled_gpu_provider",
+            "fsi_coupled_gpu_provider",
+        }
         coupled_flow_assertion_specs = [
             (
                 "cfd_steady_gpu_provider",
@@ -4354,6 +4463,78 @@ def evaluate_release_readiness(
                         code=code,
                         severity="fail" if protected else "warn",
                         detail=f"{label} {observed:.3f} below threshold {threshold:.3f}",
+                    )
+                )
+        coupled_flow_transient_specs = [
+            (
+                "transient_max_residual_norm",
+                "max",
+                coupled_flow_max_transient_residual_norm_threshold,
+                "COUPLED_FLOW_TRANSIENT_RESIDUAL_NORM_HIGH",
+                "coupled-flow transient max residual norm",
+            ),
+            (
+                "transient_max_energy_growth_ratio",
+                "max",
+                coupled_flow_max_transient_energy_growth_ratio_threshold,
+                "COUPLED_FLOW_TRANSIENT_ENERGY_GROWTH_RATIO_HIGH",
+                "coupled-flow transient max energy growth ratio",
+            ),
+            (
+                "transient_prepared_cache_hit_ratio",
+                "min",
+                coupled_flow_min_transient_cache_hit_ratio_threshold,
+                "COUPLED_FLOW_TRANSIENT_CACHE_HIT_RATIO_LOW",
+                "coupled-flow transient prepared-cache hit ratio",
+            ),
+            (
+                "transient_prepared_cache_misses",
+                "max",
+                coupled_flow_max_transient_cache_misses_threshold,
+                "COUPLED_FLOW_TRANSIENT_CACHE_MISSES_HIGH",
+                "coupled-flow transient prepared-cache misses",
+            ),
+        ]
+        for assertion_name, mode, threshold, code, label in coupled_flow_transient_specs:
+            values = []
+            for fixture_id in coupled_flow_fixture_ids:
+                fixture_values = []
+                for rec in coupled_flow_records:
+                    if rec.get("fixture_id") != fixture_id:
+                        continue
+                    observed = threshold_assertion_observed(rec, assertion_name)
+                    if observed is not None:
+                        fixture_values.append(observed)
+                if not fixture_values:
+                    missing_coupled_flow_fields.append(f"{fixture_id}.{assertion_name}")
+                    continue
+                values.extend(fixture_values)
+
+            if not values:
+                continue
+
+            observed = max(values) if mode == "max" else min(values)
+            if assertion_name == "transient_max_residual_norm":
+                coupled_flow_max_transient_residual_norm = observed
+            elif assertion_name == "transient_max_energy_growth_ratio":
+                coupled_flow_max_transient_energy_growth_ratio = observed
+            elif assertion_name == "transient_prepared_cache_hit_ratio":
+                coupled_flow_min_transient_cache_hit_ratio = observed
+            elif assertion_name == "transient_prepared_cache_misses":
+                coupled_flow_max_transient_cache_misses = observed
+
+            threshold_breached = (mode == "max" and observed > threshold) or (
+                mode == "min" and observed < threshold
+            )
+            if threshold_breached:
+                comparator = "exceeds" if mode == "max" else "below"
+                reasons.append(
+                    Reason(
+                        code=code,
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"{label} {observed:.3f} {comparator} threshold {threshold:.3f}"
+                        ),
                     )
                 )
         if missing_coupled_flow_fields and (protected or coupled_flow_require_metrics):
@@ -6434,6 +6615,86 @@ def evaluate_release_readiness(
                 )
             )
 
+        coupled_flow_transient_residual_norm_trend_ratio = fixture_assertion_trend_ratio(
+            "transient_max_residual_norm", ratio_mode="increase"
+        )
+        if (
+            coupled_flow_transient_residual_norm_trend_ratio is not None
+            and coupled_flow_transient_residual_norm_trend_ratio
+            > coupled_flow_max_transient_residual_norm_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="COUPLED_FLOW_TRANSIENT_RESIDUAL_NORM_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "coupled-flow transient residual-norm trend ratio "
+                        f"{coupled_flow_transient_residual_norm_trend_ratio:.3f} exceeds threshold "
+                        f"{coupled_flow_max_transient_residual_norm_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        coupled_flow_transient_energy_growth_trend_ratio = fixture_assertion_trend_ratio(
+            "transient_max_energy_growth_ratio", ratio_mode="increase"
+        )
+        if (
+            coupled_flow_transient_energy_growth_trend_ratio is not None
+            and coupled_flow_transient_energy_growth_trend_ratio
+            > coupled_flow_max_transient_energy_growth_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="COUPLED_FLOW_TRANSIENT_ENERGY_GROWTH_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "coupled-flow transient energy-growth trend ratio "
+                        f"{coupled_flow_transient_energy_growth_trend_ratio:.3f} exceeds threshold "
+                        f"{coupled_flow_max_transient_energy_growth_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        coupled_flow_transient_cache_hit_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "transient_prepared_cache_hit_ratio"
+        )
+        if (
+            coupled_flow_transient_cache_hit_drop_trend_ratio is not None
+            and coupled_flow_transient_cache_hit_drop_trend_ratio
+            > coupled_flow_max_transient_cache_hit_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="COUPLED_FLOW_TRANSIENT_CACHE_HIT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "coupled-flow transient prepared-cache-hit drop trend ratio "
+                        f"{coupled_flow_transient_cache_hit_drop_trend_ratio:.3f} exceeds threshold "
+                        f"{coupled_flow_max_transient_cache_hit_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        coupled_flow_transient_cache_misses_trend_ratio = fixture_assertion_trend_ratio(
+            "transient_prepared_cache_misses", ratio_mode="increase"
+        )
+        if (
+            coupled_flow_transient_cache_misses_trend_ratio is not None
+            and coupled_flow_transient_cache_misses_trend_ratio
+            > coupled_flow_max_transient_cache_misses_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="COUPLED_FLOW_TRANSIENT_CACHE_MISSES_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "coupled-flow transient prepared-cache-misses trend ratio "
+                        f"{coupled_flow_transient_cache_misses_trend_ratio:.3f} exceeds threshold "
+                        f"{coupled_flow_max_transient_cache_misses_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         energy_imbalance_trend_candidates = [
             fixture_trend_ratio("electromagnetic_energy_imbalance_ratio"),
             fixture_assertion_trend_ratio(
@@ -8068,6 +8329,22 @@ def evaluate_release_readiness(
         "fsi_max_reynolds_proxy_drop_trend_ratio_threshold": fsi_max_reynolds_proxy_drop_trend_ratio_threshold,
         "fsi_structural_step_count_drop_trend_ratio": fsi_structural_step_count_drop_trend_ratio,
         "fsi_max_structural_step_count_drop_trend_ratio_threshold": fsi_max_structural_step_count_drop_trend_ratio_threshold,
+        "coupled_flow_max_transient_residual_norm": coupled_flow_max_transient_residual_norm,
+        "coupled_flow_max_transient_residual_norm_threshold": coupled_flow_max_transient_residual_norm_threshold,
+        "coupled_flow_max_transient_energy_growth_ratio": coupled_flow_max_transient_energy_growth_ratio,
+        "coupled_flow_max_transient_energy_growth_ratio_threshold": coupled_flow_max_transient_energy_growth_ratio_threshold,
+        "coupled_flow_min_transient_cache_hit_ratio": coupled_flow_min_transient_cache_hit_ratio,
+        "coupled_flow_min_transient_cache_hit_ratio_threshold": coupled_flow_min_transient_cache_hit_ratio_threshold,
+        "coupled_flow_max_transient_cache_misses": coupled_flow_max_transient_cache_misses,
+        "coupled_flow_max_transient_cache_misses_threshold": coupled_flow_max_transient_cache_misses_threshold,
+        "coupled_flow_transient_residual_norm_trend_ratio": coupled_flow_transient_residual_norm_trend_ratio,
+        "coupled_flow_max_transient_residual_norm_trend_ratio_threshold": coupled_flow_max_transient_residual_norm_trend_ratio_threshold,
+        "coupled_flow_transient_energy_growth_trend_ratio": coupled_flow_transient_energy_growth_trend_ratio,
+        "coupled_flow_max_transient_energy_growth_trend_ratio_threshold": coupled_flow_max_transient_energy_growth_trend_ratio_threshold,
+        "coupled_flow_transient_cache_hit_drop_trend_ratio": coupled_flow_transient_cache_hit_drop_trend_ratio,
+        "coupled_flow_max_transient_cache_hit_drop_trend_ratio_threshold": coupled_flow_max_transient_cache_hit_drop_trend_ratio_threshold,
+        "coupled_flow_transient_cache_misses_trend_ratio": coupled_flow_transient_cache_misses_trend_ratio,
+        "coupled_flow_max_transient_cache_misses_trend_ratio_threshold": coupled_flow_max_transient_cache_misses_trend_ratio_threshold,
         "em_max_energy_imbalance_ratio": em_max_energy_imbalance_ratio,
         "em_max_energy_imbalance_ratio_threshold": em_max_energy_imbalance_ratio_threshold,
         "em_max_flux_divergence_proxy": em_max_flux_divergence_proxy,
@@ -8704,6 +8981,17 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Coupled-flow trend ratios (CFD Reynolds, CHT Reynolds, CHT delta K, FSI Reynolds, FSI structural steps): "
         f"`{result.get('cfd_reynolds_proxy_drop_trend_ratio') if result.get('cfd_reynolds_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_reynolds_proxy_drop_trend_ratio') if result.get('cht_reynolds_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('cht_applied_temperature_delta_drop_trend_ratio') if result.get('cht_applied_temperature_delta_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_reynolds_proxy_drop_trend_ratio') if result.get('fsi_reynolds_proxy_drop_trend_ratio') is not None else '-'}`/`{result.get('fsi_structural_step_count_drop_trend_ratio') if result.get('fsi_structural_step_count_drop_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Coupled-flow transient assertions (residual, energy growth, cache hit, cache misses): "
+        f"`{result.get('coupled_flow_max_transient_residual_norm') if result.get('coupled_flow_max_transient_residual_norm') is not None else '-'}`/`{result.get('coupled_flow_max_transient_residual_norm_threshold') if result.get('coupled_flow_max_transient_residual_norm_threshold') is not None else '-'}`; "
+        f"`{result.get('coupled_flow_max_transient_energy_growth_ratio') if result.get('coupled_flow_max_transient_energy_growth_ratio') is not None else '-'}`/`{result.get('coupled_flow_max_transient_energy_growth_ratio_threshold') if result.get('coupled_flow_max_transient_energy_growth_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('coupled_flow_min_transient_cache_hit_ratio') if result.get('coupled_flow_min_transient_cache_hit_ratio') is not None else '-'}`/`{result.get('coupled_flow_min_transient_cache_hit_ratio_threshold') if result.get('coupled_flow_min_transient_cache_hit_ratio_threshold') is not None else '-'}`; "
+        f"`{result.get('coupled_flow_max_transient_cache_misses') if result.get('coupled_flow_max_transient_cache_misses') is not None else '-'}`/`{result.get('coupled_flow_max_transient_cache_misses_threshold') if result.get('coupled_flow_max_transient_cache_misses_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Coupled-flow transient trend ratios (residual, energy growth, cache-hit drop, cache misses): "
+        f"`{result.get('coupled_flow_transient_residual_norm_trend_ratio') if result.get('coupled_flow_transient_residual_norm_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_energy_growth_trend_ratio') if result.get('coupled_flow_transient_energy_growth_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_cache_hit_drop_trend_ratio') if result.get('coupled_flow_transient_cache_hit_drop_trend_ratio') is not None else '-'}`/`{result.get('coupled_flow_transient_cache_misses_trend_ratio') if result.get('coupled_flow_transient_cache_misses_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### EM Posture")

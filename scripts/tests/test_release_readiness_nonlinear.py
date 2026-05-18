@@ -288,6 +288,14 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_HIT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_PROXY",
@@ -2841,6 +2849,130 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("FSI_REYNOLDS_PROXY_TREND_WORSENING", codes)
         self.assertIn("FSI_STRUCTURAL_STEP_COUNT_TREND_WORSENING", codes)
 
+    def test_coupled_flow_transient_metric_breaches_emit_reasons(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cfd_reynolds_proxy", "observed": 250000.0},
+                    {"name": "transient_max_residual_norm", "observed": 1e-4},
+                    {"name": "transient_max_energy_growth_ratio", "observed": 1.08},
+                    {"name": "transient_prepared_cache_hit_ratio", "observed": 0.72},
+                    {"name": "transient_prepared_cache_misses", "observed": 6.0},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "cht_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cht_reynolds_proxy", "observed": 250000.0},
+                    {"name": "cht_applied_temperature_delta_k", "observed": 60.0},
+                    {"name": "transient_max_residual_norm", "observed": 8e-5},
+                    {"name": "transient_max_energy_growth_ratio", "observed": 1.07},
+                    {"name": "transient_prepared_cache_hit_ratio", "observed": 0.75},
+                    {"name": "transient_prepared_cache_misses", "observed": 5.0},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "fsi_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "fsi_reynolds_proxy", "observed": 200000.0},
+                    {"name": "fsi_structural_step_count", "observed": 1.0},
+                    {"name": "transient_max_residual_norm", "observed": 9e-5},
+                    {"name": "transient_max_energy_growth_ratio", "observed": 1.09},
+                    {"name": "transient_prepared_cache_hit_ratio", "observed": 0.74},
+                    {"name": "transient_prepared_cache_misses", "observed": 7.0},
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM"] = (
+            "1e-6"
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_RATIO"
+        ] = "1.02"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO"
+        ] = "0.9"
+        os.environ["RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES"] = (
+            "2.0"
+        )
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("COUPLED_FLOW_TRANSIENT_RESIDUAL_NORM_HIGH", codes)
+        self.assertIn("COUPLED_FLOW_TRANSIENT_ENERGY_GROWTH_RATIO_HIGH", codes)
+        self.assertIn("COUPLED_FLOW_TRANSIENT_CACHE_HIT_RATIO_LOW", codes)
+        self.assertIn("COUPLED_FLOW_TRANSIENT_CACHE_MISSES_HIGH", codes)
+
+    def test_coupled_flow_transient_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cfd_reynolds_proxy", "observed": 250000.0},
+                    {"name": "transient_max_residual_norm", "observed": 1e-5},
+                    {"name": "transient_max_energy_growth_ratio", "observed": 1.03},
+                    {"name": "transient_prepared_cache_hit_ratio", "observed": 0.7},
+                    {"name": "transient_prepared_cache_misses", "observed": 4.0},
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cfd_reynolds_proxy", "observed": 260000.0},
+                    {"name": "transient_max_residual_norm", "observed": 1e-7},
+                    {"name": "transient_max_energy_growth_ratio", "observed": 1.0},
+                    {"name": "transient_prepared_cache_hit_ratio", "observed": 0.95},
+                    {"name": "transient_prepared_cache_misses", "observed": 1.0},
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM_TREND_RATIO"
+        ] = "1.5"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_TREND_RATIO"
+        ] = "1.01"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_HIT_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_CACHE_MISSES_TREND_RATIO"
+        ] = "1.2"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("COUPLED_FLOW_TRANSIENT_RESIDUAL_NORM_TREND_WORSENING", codes)
+        self.assertIn("COUPLED_FLOW_TRANSIENT_ENERGY_GROWTH_TREND_WORSENING", codes)
+        self.assertIn("COUPLED_FLOW_TRANSIENT_CACHE_HIT_TREND_WORSENING", codes)
+        self.assertIn("COUPLED_FLOW_TRANSIENT_CACHE_MISSES_TREND_WORSENING", codes)
+
     def test_plastic_nonlinear_severity_high_reason_is_emitted(self):
         latest = report(
             passed=True,
@@ -3850,6 +3982,14 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("### Coupled Flow Posture", summary)
         self.assertIn("CFD min Reynolds proxy/threshold", summary)
         self.assertIn("Coupled-flow trend ratios (CFD Reynolds, CHT Reynolds, CHT delta K, FSI Reynolds, FSI structural steps)", summary)
+        self.assertIn(
+            "Coupled-flow transient assertions (residual, energy growth, cache hit, cache misses)",
+            summary,
+        )
+        self.assertIn(
+            "Coupled-flow transient trend ratios (residual, energy growth, cache-hit drop, cache misses)",
+            summary,
+        )
         self.assertIn("### EM Posture", summary)
         self.assertIn("Max EM energy imbalance ratio", summary)
         self.assertIn("Max EM boundary-penalty residual norms (real/imag)", summary)
