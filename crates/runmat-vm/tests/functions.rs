@@ -162,6 +162,16 @@ fn too_many_outputs_and_varargout_mismatch() {
     let err_tmo = execute_semantic_source_result(program_tmo).err().unwrap();
     assert_eq!(err_tmo.identifier(), Some("RunMat:TooManyOutputs"));
 
+    // Too many outputs from non-call expression should not silently zero-pad.
+    let expr_tmo = "[x1,x2] = 1;";
+    let err_expr = execute_semantic_source_result(expr_tmo).err().unwrap();
+    assert_eq!(err_expr.identifier(), Some("RunMat:TooManyOutputs"));
+
+    // Too many outputs from single-output builtin should error.
+    let builtin_tmo = "[x1,x2] = sqrt(9);";
+    let err_builtin = execute_semantic_source_result(builtin_tmo).err().unwrap();
+    assert_eq!(err_builtin.identifier(), Some("RunMat:TooManyOutputs"));
+
     // Varargout requested more than provided
     let program_mis = r#"
         function varargout = h(a)

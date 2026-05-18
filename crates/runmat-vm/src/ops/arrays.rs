@@ -184,19 +184,25 @@ pub fn unpack(stack: &mut Vec<Value>, out_count: usize) -> Result<(), RuntimeErr
         .ok_or(mex("StackUnderflow", "stack underflow"))?;
     match value {
         Value::OutputList(values) => {
-            for i in 0..out_count {
-                if let Some(v) = values.get(i) {
-                    stack.push(v.clone());
-                } else {
-                    stack.push(Value::Num(0.0));
-                }
+            if values.len() < out_count {
+                let message = format!(
+                    "Requested {out_count} outputs but call produced {} output value(s)",
+                    values.len()
+                );
+                return Err(mex("TooManyOutputs", &message));
+            }
+            for v in values.into_iter().take(out_count) {
+                stack.push(v);
             }
         }
         other => {
-            stack.push(other);
-            for _ in 1..out_count {
-                stack.push(Value::Num(0.0));
+            if out_count > 1 {
+                let message = format!(
+                    "Requested {out_count} outputs but call produced a single output value"
+                );
+                return Err(mex("TooManyOutputs", &message));
             }
+            stack.push(other);
         }
     }
     Ok(())
