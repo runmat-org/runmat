@@ -151,3 +151,64 @@ fn mod_and_rem_real_session_parity_end_to_end() {
         }
     }
 }
+
+#[test]
+fn compile_fusion_plan_exposes_semantic_planner_metadata() {
+    ensure_fusion_regression_env();
+
+    let mut engine = gc_test_context(RunMatSession::new).expect("session init");
+    let script = r#"
+        A = rand(8, 8);
+        B = A + 1;
+        C = B .* 2;
+    "#;
+
+    let snapshot = engine
+        .compile_fusion_plan(script)
+        .expect("compile fusion plan should succeed")
+        .expect("expected at least one fusion group for regression script");
+
+    assert!(
+        snapshot
+            .planner
+            .source
+            .contains("semantic-mir-analysis+bytecode-accel-graph"),
+        "unexpected planner source tag: {}",
+        snapshot.planner.source
+    );
+    assert!(
+        snapshot.planner.mir_local_fact_count > 0,
+        "expected non-zero MIR local fact count"
+    );
+}
+
+#[test]
+fn runtime_fusion_snapshot_exposes_semantic_planner_metadata() {
+    ensure_fusion_regression_env();
+
+    let mut engine = gc_test_context(RunMatSession::new).expect("session init");
+    engine.set_emit_fusion_plan(true);
+    let script = r#"
+        A = rand(8, 8);
+        B = A + 1;
+        C = B .* 2;
+    "#;
+
+    let outcome = block_on(engine.execute_outcome(script)).expect("execute script");
+    let snapshot = outcome
+        .fusion_plan
+        .expect("expected runtime fusion plan snapshot");
+
+    assert!(
+        snapshot
+            .planner
+            .source
+            .contains("semantic-mir-analysis+bytecode-accel-graph-runtime"),
+        "unexpected runtime planner source tag: {}",
+        snapshot.planner.source
+    );
+    assert!(
+        snapshot.planner.mir_local_fact_count > 0,
+        "expected non-zero runtime MIR local fact count"
+    );
+}

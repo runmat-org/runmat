@@ -631,6 +631,7 @@ Current ratchet status:
 - `runmat-config` now has a dedicated `runmat.toml` project-manifest boundary separate from runtime `.runmat.*` config: typed manifest sections (`package`, `sources`, `dependencies`, `entrypoints`), upward discovery, parse/load helpers, and validation for relative/existing roots + local path dependencies + entrypoint target forms (including `.m` inference for path entrypoints).
 - `runmat-cli` script execution now performs a project-manifest integration step for named run targets: when a requested run target is not an existing file, CLI checks discovered `runmat.toml` entrypoints and resolves both path-based targets (with optional `.m` inference) and module/function targets (`module` dotted path -> source-root file), with explicit unresolved-target diagnostics.
 - Core fusion snapshots now expose planner metadata (`source`, MIR local fact count, MIR diagnostic count), and both `compile_fusion_plan` and runtime fusion-snapshot emission populate this metadata from MIR analysis while current fusion group construction remains bytecode-graph driven.
+- Core fusion regressions now ratchet this metadata contract directly: `runmat-core` fusion tests assert semantic planner source tags and non-zero MIR fact counts for both preview and runtime fusion-plan paths.
 
 ## Validation Cadence
 
