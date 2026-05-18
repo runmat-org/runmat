@@ -11,7 +11,11 @@ pub(crate) fn build_fusion_snapshot(
     groups: &[FusionGroup],
     planner: Option<FusionPlannerMetadata>,
 ) -> Option<FusionPlanSnapshot> {
-    graph?;
+    let accel_graph_state = if graph.is_some() {
+        "present"
+    } else {
+        "missing"
+    };
     let planner = planner.unwrap_or_default();
     if groups.is_empty() {
         if planner.mir_fusion_signal_count == 0 && planner.mir_fusion_candidate_group_count == 0 {
@@ -25,8 +29,10 @@ pub(crate) fn build_fusion_snapshot(
                 node_id: "semantic-candidate-summary".to_string(),
                 fused: false,
                 reason: Some(format!(
-                    "mir-signals={} mir-candidate-groups={} bytecode-groups=0",
-                    planner.mir_fusion_signal_count, planner.mir_fusion_candidate_group_count
+                    "mir-signals={} mir-candidate-groups={} bytecode-groups=0 accel-graph={}",
+                    planner.mir_fusion_signal_count,
+                    planner.mir_fusion_candidate_group_count,
+                    accel_graph_state
                 )),
                 thresholds: None,
             }],
@@ -91,5 +97,44 @@ fn shape_info(shape: &ShapeInfo) -> Vec<usize> {
         ShapeInfo::Unknown => Vec::new(),
         ShapeInfo::Scalar => vec![1, 1],
         ShapeInfo::Tensor(dims) => dims.iter().map(|d| d.unwrap_or(0)).collect::<Vec<usize>>(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_fusion_snapshot;
+    use crate::fusion::FusionPlannerMetadata;
+
+    #[test]
+    fn semantic_candidate_summary_emits_without_accel_graph() {
+        let snapshot = build_fusion_snapshot(
+            None,
+            &[],
+            Some(FusionPlannerMetadata {
+                source: "semantic".to_string(),
+                mir_local_fact_count: 0,
+                mir_diagnostic_count: 0,
+                mir_fusion_signal_count: 2,
+                mir_fusion_candidate_group_count: 1,
+            }),
+        )
+        .expect("semantic candidate summary snapshot");
+
+        assert!(snapshot.nodes.is_empty(), "expected no bytecode nodes");
+        assert!(
+            snapshot
+                .decisions
+                .iter()
+                .any(|decision| decision.node_id == "semantic-candidate-summary"),
+            "expected semantic candidate summary decision"
+        );
+        assert!(
+            snapshot.decisions[0]
+                .reason
+                .as_deref()
+                .unwrap_or("")
+                .contains("accel-graph=missing"),
+            "expected missing accel graph marker in summary reason"
+        );
     }
 }
