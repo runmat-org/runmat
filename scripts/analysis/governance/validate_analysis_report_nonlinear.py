@@ -677,6 +677,28 @@ def main() -> int:
                     f"{fixture_id} missing finite EM residual fields: "
                     + ", ".join(missing_fields)
                 )
+            missing_fields = []
+            for field in sorted(EM_SOURCE_ENERGY_CONSISTENCY_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM source-energy-consistency fields: "
+                    + ", ".join(missing_fields)
+                )
+            missing_fields = []
+            for field in sorted(EM_SOURCE_FIDELITY_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM source-fidelity fields: "
+                    + ", ".join(missing_fields)
+                )
 
         if fixture_id in {
             "electromagnetic_reference_homogeneous_gpu_provider",
@@ -727,17 +749,6 @@ def main() -> int:
                     + ", ".join(missing_fields)
                 )
             missing_fields = []
-            for field in sorted(EM_SOURCE_ENERGY_CONSISTENCY_REQUIRED_FIELDS):
-                value = record.get(field)
-                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-                    missing_fields.append(field)
-            if missing_fields:
-                errors.append(
-                    "fixture "
-                    f"{fixture_id} missing finite EM source-energy-consistency fields: "
-                    + ", ".join(missing_fields)
-                )
-            missing_fields = []
             for field in sorted(EM_SOURCE_LOCALIZATION_REQUIRED_FIELDS):
                 value = record.get(field)
                 if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
@@ -779,17 +790,6 @@ def main() -> int:
                 errors.append(
                     "fixture "
                     f"{fixture_id} missing finite EM source-interference fields: "
-                    + ", ".join(missing_fields)
-                )
-            missing_fields = []
-            for field in sorted(EM_SOURCE_FIDELITY_REQUIRED_FIELDS):
-                value = record.get(field)
-                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-                    missing_fields.append(field)
-            if missing_fields:
-                errors.append(
-                    "fixture "
-                    f"{fixture_id} missing finite EM source-fidelity fields: "
                     + ", ".join(missing_fields)
                 )
             missing_fields = []
