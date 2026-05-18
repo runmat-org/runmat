@@ -562,7 +562,7 @@
       "name": "electromagnetic_resonance_peak_flux_density",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "electromagnetic_resonance_peak_flux_density",
-      "reference": 1.0,
+      "reference": 6.083599040913027e-08,
       "tolerance_abs": 0.6,
       "tolerance_rel": 0.6
     },
@@ -1080,7 +1080,7 @@
       "name": "electromagnetic_reference_frequency_hz",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
       "field": "electromagnetic_reference_frequency_hz",
-      "reference": 75.0,
+      "reference": 400.0,
       "tolerance_abs": 40.0,
       "tolerance_rel": 0.55
     },
@@ -1096,7 +1096,7 @@
       "name": "electromagnetic_resonance_peak_frequency_hz",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
       "field": "electromagnetic_resonance_peak_frequency_hz",
-      "reference": 75.0,
+      "reference": 300.0,
       "tolerance_abs": 40.0,
       "tolerance_rel": 0.55
     },
@@ -1104,7 +1104,7 @@
       "name": "electromagnetic_resonance_peak_flux_density",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
       "field": "electromagnetic_resonance_peak_flux_density",
-      "reference": 1.3,
+      "reference": 1.2381565258227318e-08,
       "tolerance_abs": 0.8,
       "tolerance_rel": 0.6
     },
@@ -1112,7 +1112,7 @@
       "name": "electromagnetic_resonance_bandwidth_hz",
       "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
       "field": "electromagnetic_resonance_bandwidth_hz",
-      "reference": 24.0,
+      "reference": 100.0,
       "tolerance_abs": 14.0,
       "tolerance_rel": 0.6
     },

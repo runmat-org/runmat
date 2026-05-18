@@ -607,6 +607,14 @@ fn electromagnetic_profile_for_fixture(spec_id: &str) -> Option<ElectromagneticF
     }
 }
 
+fn electromagnetic_sweep_frequency_hz_for_fixture(spec_id: &str) -> Vec<f64> {
+    let Some(profile) = electromagnetic_profile_for_fixture(spec_id) else {
+        return Vec::new();
+    };
+    let f0 = profile.reference_frequency_hz.max(1.0);
+    vec![f0 * 0.75, f0 * 0.9, f0, f0 * 1.1, f0 * 1.25]
+}
+
 fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
     if spec_id.starts_with("acoustic_harmonic_") {
         model.steps = vec![runmat_analysis_core::AnalysisStep {
@@ -2084,8 +2092,8 @@ fn run_fixture_cpu(
                 prep_context: None,
                 prep_artifact_id: None,
                 prep_calibration_profile: None,
-                sweep_enabled: false,
-                sweep_frequency_hz: Vec::new(),
+                sweep_enabled: !electromagnetic_sweep_frequency_hz_for_fixture(spec.id).is_empty(),
+                sweep_frequency_hz: electromagnetic_sweep_frequency_hz_for_fixture(spec.id),
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
@@ -2239,8 +2247,8 @@ fn run_fixture_gpu(
                 prep_context: None,
                 prep_artifact_id: None,
                 prep_calibration_profile: None,
-                sweep_enabled: false,
-                sweep_frequency_hz: Vec::new(),
+                sweep_enabled: !electromagnetic_sweep_frequency_hz_for_fixture(spec.id).is_empty(),
+                sweep_frequency_hz: electromagnetic_sweep_frequency_hz_for_fixture(spec.id),
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -2489,6 +2497,12 @@ pub(super) fn run_fixture(
     let mut electromagnetic_source_region_energy_consistency_ratio = None;
     let mut electromagnetic_real_residual_norm = None;
     let mut electromagnetic_imag_residual_norm = None;
+    let mut electromagnetic_sweep_count = None;
+    let mut electromagnetic_resonance_peak_frequency_hz = None;
+    let mut electromagnetic_resonance_peak_flux_density = None;
+    let mut electromagnetic_resonance_bandwidth_hz = None;
+    let mut electromagnetic_resonance_q_proxy = None;
+    let mut electromagnetic_resonance_flux_gain = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -2599,6 +2613,12 @@ pub(super) fn run_fixture(
                     electromagnetic_source_region_energy_consistency_ratio,
                     electromagnetic_real_residual_norm,
                     electromagnetic_imag_residual_norm,
+                    electromagnetic_sweep_count,
+                    electromagnetic_resonance_peak_frequency_hz,
+                    electromagnetic_resonance_peak_flux_density,
+                    electromagnetic_resonance_bandwidth_hz,
+                    electromagnetic_resonance_q_proxy,
+                    electromagnetic_resonance_flux_gain,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -6096,6 +6116,12 @@ pub(super) fn run_fixture(
                                 electromagnetic_source_region_energy_consistency_ratio,
                                 electromagnetic_real_residual_norm,
                                 electromagnetic_imag_residual_norm,
+                                electromagnetic_sweep_count,
+                                electromagnetic_resonance_peak_frequency_hz,
+                                electromagnetic_resonance_peak_flux_density,
+                                electromagnetic_resonance_bandwidth_hz,
+                                electromagnetic_resonance_q_proxy,
+                                electromagnetic_resonance_flux_gain,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -6294,6 +6320,28 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.electromagnetic_real_residual_norm;
                     electromagnetic_imag_residual_norm =
                         gpu_results.data.summary.electromagnetic_imag_residual_norm;
+                    electromagnetic_sweep_count =
+                        gpu_results.data.summary.electromagnetic_sweep_count;
+                    electromagnetic_resonance_peak_frequency_hz = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_resonance_peak_frequency_hz;
+                    electromagnetic_resonance_peak_flux_density = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_resonance_peak_flux_density;
+                    electromagnetic_resonance_bandwidth_hz = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_resonance_bandwidth_hz;
+                    electromagnetic_resonance_q_proxy = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_resonance_q_proxy;
+                    electromagnetic_resonance_flux_gain = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_resonance_flux_gain;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -6508,6 +6556,12 @@ pub(super) fn run_fixture(
                                     electromagnetic_source_region_energy_consistency_ratio,
                                     electromagnetic_real_residual_norm,
                                     electromagnetic_imag_residual_norm,
+                                    electromagnetic_sweep_count,
+                                    electromagnetic_resonance_peak_frequency_hz,
+                                    electromagnetic_resonance_peak_flux_density,
+                                    electromagnetic_resonance_bandwidth_hz,
+                                    electromagnetic_resonance_q_proxy,
+                                    electromagnetic_resonance_flux_gain,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -6667,6 +6721,12 @@ pub(super) fn run_fixture(
         electromagnetic_source_region_energy_consistency_ratio,
         electromagnetic_real_residual_norm,
         electromagnetic_imag_residual_norm,
+        electromagnetic_sweep_count,
+        electromagnetic_resonance_peak_frequency_hz,
+        electromagnetic_resonance_peak_flux_density,
+        electromagnetic_resonance_bandwidth_hz,
+        electromagnetic_resonance_q_proxy,
+        electromagnetic_resonance_flux_gain,
         publishable,
         parity,
         threshold_assertions,
