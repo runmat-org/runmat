@@ -373,6 +373,18 @@ fn undefined_name_error(name: &str, metadata: &CallableMetadata) -> RuntimeError
     )
 }
 
+async fn call_builtin_with_requested_outputs(
+    name: &str,
+    args: &[Value],
+    requested_outputs: usize,
+) -> Result<Value, RuntimeError> {
+    if requested_outputs > 1 {
+        runmat_runtime::call_builtin_async_with_outputs(name, args, requested_outputs).await
+    } else {
+        runmat_runtime::call_builtin_async(name, args).await
+    }
+}
+
 async fn forward_named_fallback(
     name: String,
     args: Vec<Value>,
@@ -398,7 +410,9 @@ async fn execute_resolved_callable(
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Value, RuntimeError> {
     match identity {
-        CallableIdentity::Builtin(id) => runmat_runtime::call_builtin_async(&id.0, &args).await,
+        CallableIdentity::Builtin(id) => {
+            call_builtin_with_requested_outputs(&id.0, &args, requested_outputs).await
+        }
         CallableIdentity::SemanticFunction(function) => {
             if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
                 function.0,
@@ -451,9 +465,11 @@ async fn try_execute_resolved_callable(
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Option<Value>, RuntimeError> {
     match identity {
-        CallableIdentity::Builtin(id) => runmat_runtime::call_builtin_async(&id.0, &args)
-            .await
-            .map(Some),
+        CallableIdentity::Builtin(id) => {
+            call_builtin_with_requested_outputs(&id.0, &args, requested_outputs)
+                .await
+                .map(Some)
+        }
         CallableIdentity::SemanticFunction(function) => {
             if let Some(result) = runmat_runtime::user_functions::try_call_semantic_function(
                 function.0,
@@ -545,6 +561,32 @@ pub(crate) async fn try_execute_callable_descriptor(
             forward_builtin_feval(func_value, args, requested_outputs)
                 .await
                 .map(Some)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
+    use futures::executor::block_on;
+    use runmat_builtins::{Tensor, Value};
+    use runmat_hir::{BuiltinId, CallableFallbackPolicy, CallableIdentity};
+
+    #[test]
+    fn builtin_descriptor_uses_requested_outputs_for_multi_result_calls() {
+        let input = Value::Tensor(Tensor::new(vec![1.0, 3.0, 2.0], vec![1, 3]).expect("tensor"));
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::Builtin(BuiltinId("max".to_string())),
+            Some("max".to_string()),
+            vec![input],
+            2,
+            CallableFallbackPolicy::None,
+            CallableCallKind::Direct,
+        );
+        let value = block_on(execute_callable_descriptor(descriptor)).expect("execute descriptor");
+        match value {
+            Value::OutputList(values) => assert_eq!(values.len(), 2),
+            other => panic!("expected two-output list from builtin descriptor, got {other:?}"),
         }
     }
 }
