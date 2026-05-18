@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use log::{info, warn};
-use runmat_config::{discover_project_manifest_from, load_project_manifest, RunMatConfig};
+use runmat_config::{
+    discover_project_manifest_from, load_project_manifest, resolve_project_entrypoint,
+    ResolvedEntrypointTarget, RunMatConfig,
+};
 use runmat_core::{
     abi::{DiagnosticSeverity, ExecutionOutcome, RuntimeFlow},
     TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
@@ -61,50 +64,36 @@ fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
             manifest_path.display()
         )
     })?;
-    let Some(entrypoint) = manifest.entrypoints.iter().find(|entry| entry.name == name) else {
+    let project_root = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let Some(resolved) =
+        resolve_project_entrypoint(project_root, &manifest, &name).map_err(|err| {
+            anyhow::anyhow!(
+                "failed to resolve project entrypoint '{}' from {}: {}",
+                name,
+                manifest_path.display(),
+                err
+            )
+        })?
+    else {
         return Ok(script);
     };
-    let project_root = manifest_path.parent().unwrap_or_else(|| Path::new("."));
-    if let Some(path) = &entrypoint.path {
-        if let Some(resolved) = resolve_entrypoint_file(project_root, path) {
-            info!(
-                "Resolved project entrypoint '{}' via {} -> {}",
-                name,
-                manifest_path.display(),
-                resolved.display()
-            );
-            return Ok(resolved);
-        }
-        return Err(anyhow::anyhow!(
-            "entrypoint '{}' resolved from {} but target path '{}' does not exist",
+    match resolved.target {
+        ResolvedEntrypointTarget::Path => info!(
+            "Resolved project entrypoint '{}' via {} path -> {}",
             name,
             manifest_path.display(),
-            path.display()
-        ));
-    }
-    if let (Some(module), Some(function)) = (&entrypoint.module, &entrypoint.function) {
-        if let Some(resolved) =
-            resolve_module_entrypoint_file(project_root, &manifest.sources.roots, module)
-        {
-            info!(
-                "Resolved project entrypoint '{}' via {} module={} function={} -> {}",
-                name,
-                manifest_path.display(),
-                module,
-                function,
-                resolved.display()
-            );
-            return Ok(resolved);
-        }
-        return Err(anyhow::anyhow!(
-            "entrypoint '{}' resolved from {} but module target '{}.{}' did not resolve under configured source roots",
+            resolved.source_file.display()
+        ),
+        ResolvedEntrypointTarget::ModuleFunction => info!(
+            "Resolved project entrypoint '{}' via {} module={} function={} -> {}",
             name,
             manifest_path.display(),
-            module,
-            function
-        ));
+            resolved.module.as_deref().unwrap_or("<unknown>"),
+            resolved.function.as_deref().unwrap_or("<unknown>"),
+            resolved.source_file.display()
+        ),
     }
-    Ok(script)
+    Ok(resolved.source_file)
 }
 
 fn entrypoint_name_candidate(script: &Path) -> Option<String> {
@@ -120,38 +109,6 @@ fn entrypoint_name_candidate(script: &Path) -> Option<String> {
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(ToOwned::to_owned)
-}
-
-fn resolve_entrypoint_file(project_root: &Path, path: &Path) -> Option<PathBuf> {
-    let direct = project_root.join(path);
-    if direct.is_file() {
-        return Some(direct);
-    }
-    if direct.extension().is_none() {
-        let with_ext = direct.with_extension("m");
-        if with_ext.is_file() {
-            return Some(with_ext);
-        }
-    }
-    None
-}
-
-fn resolve_module_entrypoint_file(
-    project_root: &Path,
-    source_roots: &[PathBuf],
-    module: &str,
-) -> Option<PathBuf> {
-    let module_path = module.replace('.', "/");
-    for root in source_roots {
-        let candidate = project_root
-            .join(root)
-            .join(&module_path)
-            .with_extension("m");
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
 }
 
 pub(crate) async fn execute_script_contents(
@@ -570,9 +527,12 @@ function = "main"
             .expect_err("missing module file should return explicit error");
         std::env::set_current_dir(original).unwrap();
 
-        assert!(err
-            .to_string()
-            .contains("did not resolve under configured source roots"));
+        let message = err.to_string();
+        assert!(
+            message.contains("module/function target")
+                || message.contains("did not resolve under configured source roots"),
+            "unexpected error message: {message}"
+        );
     }
 }
 

@@ -148,6 +148,33 @@ pub enum ProjectSourceIndexError {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedProjectEntrypoint {
+    pub name: String,
+    pub source_file: PathBuf,
+    pub module: Option<String>,
+    pub function: Option<String>,
+    pub target: ResolvedEntrypointTarget,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolvedEntrypointTarget {
+    Path,
+    ModuleFunction,
+}
+
+#[derive(Debug, Error)]
+pub enum ProjectEntrypointResolveError {
+    #[error("entrypoint `{entrypoint}` path target `{path}` did not resolve to an existing file")]
+    MissingPathTarget { entrypoint: String, path: PathBuf },
+    #[error("entrypoint `{entrypoint}` module/function target `{module}.{function}` did not resolve under configured source roots")]
+    MissingModuleTarget {
+        entrypoint: String,
+        module: String,
+        function: String,
+    },
+}
+
 impl ProjectManifest {
     pub fn validate(&self, project_root: &Path) -> Result<(), ProjectManifestValidationError> {
         let mut messages = Vec::new();
@@ -344,6 +371,57 @@ pub fn build_project_source_index(
     Ok(index)
 }
 
+pub fn resolve_project_entrypoint(
+    project_root: &Path,
+    manifest: &ProjectManifest,
+    entrypoint_name: &str,
+) -> Result<Option<ResolvedProjectEntrypoint>, ProjectEntrypointResolveError> {
+    let Some(entrypoint) = manifest
+        .entrypoints
+        .iter()
+        .find(|entry| entry.name == entrypoint_name)
+    else {
+        return Ok(None);
+    };
+
+    if let Some(path) = &entrypoint.path {
+        let Some(source_file) = resolve_entrypoint_path(project_root, path) else {
+            return Err(ProjectEntrypointResolveError::MissingPathTarget {
+                entrypoint: entrypoint_name.to_string(),
+                path: path.clone(),
+            });
+        };
+        return Ok(Some(ResolvedProjectEntrypoint {
+            name: entrypoint_name.to_string(),
+            source_file,
+            module: None,
+            function: None,
+            target: ResolvedEntrypointTarget::Path,
+        }));
+    }
+
+    if let (Some(module), Some(function)) = (&entrypoint.module, &entrypoint.function) {
+        let Some(source_file) =
+            resolve_module_source_file(project_root, &manifest.sources.roots, module)
+        else {
+            return Err(ProjectEntrypointResolveError::MissingModuleTarget {
+                entrypoint: entrypoint_name.to_string(),
+                module: module.clone(),
+                function: function.clone(),
+            });
+        };
+        return Ok(Some(ResolvedProjectEntrypoint {
+            name: entrypoint_name.to_string(),
+            source_file,
+            module: Some(module.clone()),
+            function: Some(function.clone()),
+            target: ResolvedEntrypointTarget::ModuleFunction,
+        }));
+    }
+
+    Ok(None)
+}
+
 fn is_relative_without_parent(path: &Path) -> bool {
     if path.is_absolute() {
         return false;
@@ -362,6 +440,24 @@ fn resolve_entrypoint_path(project_root: &Path, path: &Path) -> Option<PathBuf> 
         let with_ext = direct.with_extension("m");
         if with_ext.is_file() {
             return Some(with_ext);
+        }
+    }
+    None
+}
+
+fn resolve_module_source_file(
+    project_root: &Path,
+    source_roots: &[PathBuf],
+    module: &str,
+) -> Option<PathBuf> {
+    let module_path = module.replace('.', "/");
+    for root in source_roots {
+        let candidate = project_root
+            .join(root)
+            .join(&module_path)
+            .with_extension("m");
+        if candidate.is_file() {
+            return Some(candidate);
         }
     }
     None

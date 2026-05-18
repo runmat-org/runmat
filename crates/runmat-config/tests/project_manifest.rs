@@ -1,6 +1,7 @@
 use runmat_config::{
     build_project_source_index, discover_project_manifest_from, load_project_manifest,
-    parse_project_manifest_toml, PROJECT_MANIFEST_FILENAME,
+    parse_project_manifest_toml, resolve_project_entrypoint, ResolvedEntrypointTarget,
+    PROJECT_MANIFEST_FILENAME,
 };
 use std::fs;
 use tempfile::TempDir;
@@ -265,4 +266,100 @@ roots = ["src"]
     let err = build_project_source_index(tmp.path(), &manifest)
         .expect_err("missing source root should be reported");
     assert!(err.to_string().contains("source root does not exist"));
+}
+
+#[test]
+fn resolve_project_entrypoint_returns_path_target() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "main"
+path = "src/main"
+"#,
+    );
+    let manifest = load_project_manifest(&manifest_path).expect("manifest should validate");
+    let resolved = resolve_project_entrypoint(tmp.path(), &manifest, "main")
+        .expect("resolver should succeed")
+        .expect("entrypoint should exist");
+
+    assert_eq!(resolved.target, ResolvedEntrypointTarget::Path);
+    assert_eq!(
+        resolved.source_file.canonicalize().unwrap(),
+        tmp.path().join("src/main.m").canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn resolve_project_entrypoint_returns_module_function_target() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src/app")).unwrap();
+    fs::write(
+        tmp.path().join("src/app/server.m"),
+        "function y = main(); y = 1; end",
+    )
+    .unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "server"
+module = "app.server"
+function = "main"
+"#,
+    );
+    let manifest = load_project_manifest(&manifest_path).expect("manifest should validate");
+    let resolved = resolve_project_entrypoint(tmp.path(), &manifest, "server")
+        .expect("resolver should succeed")
+        .expect("entrypoint should exist");
+
+    assert_eq!(resolved.target, ResolvedEntrypointTarget::ModuleFunction);
+    assert_eq!(resolved.module.as_deref(), Some("app.server"));
+    assert_eq!(resolved.function.as_deref(), Some("main"));
+    assert_eq!(
+        resolved.source_file.canonicalize().unwrap(),
+        tmp.path().join("src/app/server.m").canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn resolve_project_entrypoint_reports_missing_module_target() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "server"
+module = "app.server"
+function = "main"
+"#,
+    );
+    let manifest = load_project_manifest(&manifest_path).expect("manifest should validate");
+    let err = resolve_project_entrypoint(tmp.path(), &manifest, "server")
+        .expect_err("missing module file should return explicit error");
+    assert!(err
+        .to_string()
+        .contains("did not resolve under configured source roots"));
 }

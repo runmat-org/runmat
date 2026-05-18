@@ -13,9 +13,11 @@ mod schema;
 pub use loader::ConfigLoader;
 pub use project::{
     build_project_source_index, discover_project_manifest_from, load_project_manifest,
-    parse_project_manifest_toml, ProjectDependency, ProjectEntrypoint, ProjectManifest,
-    ProjectManifestLoadError, ProjectManifestValidationError, ProjectPackage, ProjectSourceFile,
-    ProjectSourceIndex, ProjectSourceIndexError, ProjectSources, PROJECT_MANIFEST_FILENAME,
+    parse_project_manifest_toml, resolve_project_entrypoint, ProjectDependency, ProjectEntrypoint,
+    ProjectEntrypointResolveError, ProjectManifest, ProjectManifestLoadError,
+    ProjectManifestValidationError, ProjectPackage, ProjectSourceFile, ProjectSourceIndex,
+    ProjectSourceIndexError, ProjectSources, ResolvedEntrypointTarget, ResolvedProjectEntrypoint,
+    PROJECT_MANIFEST_FILENAME,
 };
 pub use schema::{
     error_namespace_for_language_compat, AccelPowerPreference, AccelerateConfig,

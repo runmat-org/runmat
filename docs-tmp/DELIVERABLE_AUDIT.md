@@ -50,10 +50,11 @@ This audit maps the active objective to concrete repository evidence and marks e
     - validation of required shape + relative/existing paths + entrypoint target forms
   - tests in [project_manifest.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/tests/project_manifest.rs)
   - typed source-index scanning now exists in [project.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/src/project.rs) via `build_project_source_index`, including explicit `+pkg`, `@ClassName`, and `private` discovery buckets.
-  - CLI run-path integration in [script.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-cli/src/commands/script.rs) now resolves manifest entrypoint names for both path targets and module/function targets through configured source roots.
+  - shared config-layer entrypoint resolver now exists in [project.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/src/project.rs) via `resolve_project_entrypoint`, with typed resolved target metadata and explicit resolution errors.
+  - CLI run-path integration in [script.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-cli/src/commands/script.rs) now resolves manifest entrypoint names by delegating to the shared config-layer resolver for both path targets and module/function targets.
 - Gap:
-  - core/session-level project composition graph and resolver ownership are not yet wired end-to-end.
-  - source-index discovery now exists at config-layer, but resolver consumers have not yet switched to composition-graph/source-index ownership end-to-end.
+  - core/session-level project composition graph ownership is not yet wired end-to-end for entrypoint/import resolution.
+  - source-index discovery and shared entrypoint resolution now exist at config-layer, but resolver consumers have not yet switched to composition-graph/source-index ownership end-to-end.
 
 ### 5) Unified nominal class/builtin metadata (`partial`)
 
