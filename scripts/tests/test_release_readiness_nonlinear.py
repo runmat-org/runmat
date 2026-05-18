@@ -283,11 +283,25 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_CHT_MIN_APPLIED_TEMPERATURE_DELTA_K",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_REYNOLDS_PROXY",
             "RUNMAT_RELEASE_READINESS_FSI_MIN_STRUCTURAL_STEP_COUNT",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_PROFILE_POINT_COUNT",
+            "RUNMAT_RELEASE_READINESS_CHT_MIN_STEP_COUNT",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_TIME_STEP_S",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_PROFILE_POINT_COUNT",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_STEP_COUNT",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_TIME_STEP_S",
+            "RUNMAT_RELEASE_READINESS_FSI_MIN_CFD_PROFILE_POINT_COUNT",
             "RUNMAT_RELEASE_READINESS_CFD_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_CHT_MAX_APPLIED_TEMPERATURE_DELTA_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_REYNOLDS_PROXY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_FSI_MAX_STRUCTURAL_STEP_COUNT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_STEP_COUNT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_TIME_STEP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_STEP_COUNT_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_TIME_STEP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_CFD_PROFILE_POINT_COUNT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_RESIDUAL_NORM",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MAX_TRANSIENT_ENERGY_GROWTH_RATIO",
             "RUNMAT_RELEASE_READINESS_COUPLED_FLOW_MIN_TRANSIENT_CACHE_HIT_RATIO",
@@ -3224,6 +3238,148 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("CHT_APPLIED_TEMPERATURE_DELTA_K_TREND_WORSENING", codes)
         self.assertIn("FSI_REYNOLDS_PROXY_TREND_WORSENING", codes)
         self.assertIn("FSI_STRUCTURAL_STEP_COUNT_TREND_WORSENING", codes)
+
+    def test_coupled_flow_profile_step_metric_breaches_emit_reasons(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cht_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cht_reynolds_proxy", "observed": 250000.0},
+                    {"name": "cht_applied_temperature_delta_k", "observed": 60.0},
+                    {"name": "cht_profile_point_count", "observed": 1.0},
+                    {"name": "cht_step_count", "observed": 6.0},
+                    {"name": "cht_time_step_s", "observed": 0.004},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "fsi_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "fsi_reynolds_proxy", "observed": 200000.0},
+                    {"name": "fsi_structural_step_count", "observed": 2.0},
+                    {"name": "fsi_profile_point_count", "observed": 1.0},
+                    {"name": "fsi_step_count", "observed": 6.0},
+                    {"name": "fsi_time_step_s", "observed": 0.004},
+                    {"name": "fsi_cfd_profile_point_count", "observed": 1.0},
+                ],
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_CHT_MIN_PROFILE_POINT_COUNT"] = "2.0"
+        os.environ["RUNMAT_RELEASE_READINESS_CHT_MIN_STEP_COUNT"] = "8.0"
+        os.environ["RUNMAT_RELEASE_READINESS_CHT_MAX_TIME_STEP_S"] = "0.002"
+        os.environ["RUNMAT_RELEASE_READINESS_FSI_MIN_PROFILE_POINT_COUNT"] = "2.0"
+        os.environ["RUNMAT_RELEASE_READINESS_FSI_MIN_STEP_COUNT"] = "8.0"
+        os.environ["RUNMAT_RELEASE_READINESS_FSI_MAX_TIME_STEP_S"] = "0.002"
+        os.environ["RUNMAT_RELEASE_READINESS_FSI_MIN_CFD_PROFILE_POINT_COUNT"] = "2.0"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CHT_PROFILE_POINT_COUNT_LOW", codes)
+        self.assertIn("CHT_STEP_COUNT_LOW", codes)
+        self.assertIn("CHT_TIME_STEP_S_HIGH", codes)
+        self.assertIn("FSI_PROFILE_POINT_COUNT_LOW", codes)
+        self.assertIn("FSI_STEP_COUNT_LOW", codes)
+        self.assertIn("FSI_TIME_STEP_S_HIGH", codes)
+        self.assertIn("FSI_CFD_PROFILE_POINT_COUNT_LOW", codes)
+
+    def test_coupled_flow_profile_step_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cht_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cht_reynolds_proxy", "observed": 250000.0},
+                    {"name": "cht_applied_temperature_delta_k", "observed": 50.0},
+                    {"name": "cht_profile_point_count", "observed": 2.0},
+                    {"name": "cht_step_count", "observed": 8.0},
+                    {"name": "cht_time_step_s", "observed": 0.003},
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "fsi_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "fsi_reynolds_proxy", "observed": 200000.0},
+                    {"name": "fsi_structural_step_count", "observed": 2.0},
+                    {"name": "fsi_profile_point_count", "observed": 2.0},
+                    {"name": "fsi_step_count", "observed": 8.0},
+                    {"name": "fsi_time_step_s", "observed": 0.003},
+                    {"name": "fsi_cfd_profile_point_count", "observed": 2.0},
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cht_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "cht_reynolds_proxy", "observed": 300000.0},
+                    {"name": "cht_applied_temperature_delta_k", "observed": 60.0},
+                    {"name": "cht_profile_point_count", "observed": 4.0},
+                    {"name": "cht_step_count", "observed": 16.0},
+                    {"name": "cht_time_step_s", "observed": 0.001},
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "fsi_coupled_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "gpu_speedup_ratio": 1.1,
+                "threshold_assertions": [
+                    {"name": "fsi_reynolds_proxy", "observed": 240000.0},
+                    {"name": "fsi_structural_step_count", "observed": 2.0},
+                    {"name": "fsi_profile_point_count", "observed": 4.0},
+                    {"name": "fsi_step_count", "observed": 16.0},
+                    {"name": "fsi_time_step_s", "observed": 0.001},
+                    {"name": "fsi_cfd_profile_point_count", "observed": 4.0},
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_CHT_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ["RUNMAT_RELEASE_READINESS_CHT_MAX_STEP_COUNT_DROP_TREND_RATIO"] = "1.2"
+        os.environ["RUNMAT_RELEASE_READINESS_CHT_MAX_TIME_STEP_TREND_RATIO"] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_PROFILE_POINT_COUNT_DROP_TREND_RATIO"
+        ] = "1.2"
+        os.environ["RUNMAT_RELEASE_READINESS_FSI_MAX_STEP_COUNT_DROP_TREND_RATIO"] = "1.2"
+        os.environ["RUNMAT_RELEASE_READINESS_FSI_MAX_TIME_STEP_TREND_RATIO"] = "1.2"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_FSI_MAX_CFD_PROFILE_POINT_COUNT_DROP_TREND_RATIO"
+        ] = "1.2"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CHT_PROFILE_POINT_COUNT_TREND_WORSENING", codes)
+        self.assertIn("CHT_STEP_COUNT_TREND_WORSENING", codes)
+        self.assertIn("CHT_TIME_STEP_S_TREND_WORSENING", codes)
+        self.assertIn("FSI_PROFILE_POINT_COUNT_TREND_WORSENING", codes)
+        self.assertIn("FSI_STEP_COUNT_TREND_WORSENING", codes)
+        self.assertIn("FSI_TIME_STEP_S_TREND_WORSENING", codes)
+        self.assertIn("FSI_CFD_PROFILE_POINT_COUNT_TREND_WORSENING", codes)
 
     def test_coupled_flow_transient_metric_breaches_emit_reasons(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
