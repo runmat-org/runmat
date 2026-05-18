@@ -6482,6 +6482,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ["RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS"] = "1"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         self.assertFalse(result["promotion_history_sufficient"])
+        self.assertEqual(result["rolling_trusted_report_count"], 0)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PROMOTION_HISTORY_INSUFFICIENT", codes)
 
@@ -6493,6 +6494,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ["RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS"] = "1"
         result = evaluate_release_readiness(latest, rolling, protected=False)
         self.assertFalse(result["promotion_history_sufficient"])
+        self.assertEqual(result["rolling_trusted_report_count"], 0)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PROMOTION_HISTORY_INSUFFICIENT", codes)
 
@@ -7094,7 +7096,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("### Promotion Evidence Quality", summary)
         self.assertIn("Promotion calibration applied/required", summary)
         self.assertIn("Promotion calibration age/max days", summary)
-        self.assertIn("Promotion history sufficient (rolling/min)", summary)
+        self.assertIn("Promotion history sufficient (trusted rolling/min)", summary)
 
 
 if __name__ == "__main__":

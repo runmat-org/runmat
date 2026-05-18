@@ -14439,6 +14439,7 @@ def evaluate_release_readiness(
         "reference_trend_ratcheted": True,
         "reference_trend_rationale": "rolling_median_reference_fixtures",
         "rolling_report_count": len(rolling),
+        "rolling_trusted_report_count": promotion_history_trusted_count,
         "governance_profile": governance_profile_name(),
     }
 
@@ -14451,7 +14452,7 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "Reference trend ratchet: "
         f"**{result.get('reference_trend_ratcheted', False)}** "
-        f"(basis=`{result.get('reference_trend_rationale', '-')}`, rolling_reports=`{result.get('rolling_report_count', 0)}`)"
+        f"(basis=`{result.get('reference_trend_rationale', '-')}`, rolling_reports=`{result.get('rolling_report_count', 0)}`, trusted_rolling_reports=`{result.get('rolling_trusted_report_count', result.get('rolling_report_count', 0))}`)"
     )
     lines.append(
         "Promotion calibration applied: "
@@ -14465,7 +14466,7 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "Promotion history sufficient: "
         f"**{result.get('promotion_history_sufficient', False)}** "
-        f"(rolling=`{result.get('rolling_report_count', 0)}`, min=`{result.get('promotion_min_rolling_reports', 0)}`)"
+        f"(trusted_rolling=`{result.get('rolling_trusted_report_count', result.get('rolling_report_count', 0))}`, min=`{result.get('promotion_min_rolling_reports', 0)}`)"
     )
     lines.append("")
     lines.append("### Thermo Posture")
@@ -15425,8 +15426,8 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('promotion_calibration_age_days') if result.get('promotion_calibration_age_days') is not None else '-'}`/`{result.get('promotion_calibration_max_age_days') if result.get('promotion_calibration_max_age_days') is not None else '-'}`"
     )
     lines.append(
-        "- Promotion history sufficient (rolling/min): "
-        f"`{result.get('promotion_history_sufficient') if result.get('promotion_history_sufficient') is not None else '-'}` (`{result.get('rolling_report_count') if result.get('rolling_report_count') is not None else '-'}`/`{result.get('promotion_min_rolling_reports') if result.get('promotion_min_rolling_reports') is not None else '-'}`)"
+        "- Promotion history sufficient (trusted rolling/min): "
+        f"`{result.get('promotion_history_sufficient') if result.get('promotion_history_sufficient') is not None else '-'}` (`{result.get('rolling_trusted_report_count') if result.get('rolling_trusted_report_count') is not None else (result.get('rolling_report_count') if result.get('rolling_report_count') is not None else '-')}`/`{result.get('promotion_min_rolling_reports') if result.get('promotion_min_rolling_reports') is not None else '-'}`)"
     )
     lines.append("")
     if result["reasons"]:
