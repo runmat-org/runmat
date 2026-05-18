@@ -75,6 +75,40 @@ fn is_undefined_function_error(err: &RuntimeError) -> bool {
     err.identifier() == Some("RunMat:UndefinedFunction")
 }
 
+fn object_receiver_class_name(receiver: &Value) -> Option<String> {
+    match receiver {
+        Value::Object(obj) => Some(obj.class_name.clone()),
+        Value::HandleObject(handle) => {
+            let target = unsafe { &*handle.target.as_raw() };
+            Some(match target {
+                Value::Object(obj) => obj.class_name.clone(),
+                _ => handle.class_name.clone(),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn class_member_identity(class_name: &str, member: &str) -> runmat_hir::CallableIdentity {
+    runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
+        runmat_hir::SymbolName(class_name.to_string()),
+        runmat_hir::SymbolName(member.to_string()),
+    ]))
+}
+
+async fn dispatch_object_external_member(
+    class_name: String,
+    member: &str,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
+    dispatch_callable_with_policy(
+        class_member_identity(&class_name, member),
+        runmat_hir::CallableFallbackPolicy::ExternalBoundary,
+        args,
+    )
+    .await
+}
+
 async fn dispatch_named_with_current_outputs(name: &str, args: &[Value]) -> BuiltinResult<Value> {
     match current_requested_outputs() {
         out_count if out_count != 1 => call_builtin_async_with_outputs(name, args, out_count).await,
@@ -277,55 +311,16 @@ async fn call_method_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     match base {
-        Value::Object(obj) => {
+        receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
+            let class_name = object_receiver_class_name(&receiver).ok_or_else(|| {
+                build_runtime_error("call_method requires object receiver")
+                    .with_identifier("RunMat:InvalidObjectDispatch")
+                    .build()
+            })?;
             let mut args = Vec::with_capacity(1 + rest.len());
-            args.push(Value::Object(obj.clone()));
+            args.push(receiver.clone());
             args.extend(rest);
-            let qualified_identity =
-                runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                    runmat_hir::SymbolName(obj.class_name.clone()),
-                    runmat_hir::SymbolName(method.clone()),
-                ]));
-            match dispatch_callable_with_policy(
-                qualified_identity,
-                runmat_hir::CallableFallbackPolicy::ExternalBoundary,
-                args.clone(),
-            )
-            .await
-            {
-                Ok(v) => return Ok(v),
-                Err(err) if is_undefined_function_error(&err) => {}
-                Err(err) => return Err(err),
-            }
-            dispatch_callable_with_policy(
-                runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(method)),
-                runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
-                args,
-            )
-            .await
-        }
-        Value::HandleObject(h) => {
-            let target = unsafe { &*h.target.as_raw() };
-            let class_name = match target {
-                Value::Object(o) => o.class_name.clone(),
-                Value::Struct(_) => h.class_name.clone(),
-                _ => h.class_name.clone(),
-            };
-            let mut args = Vec::with_capacity(1 + rest.len());
-            args.push(Value::HandleObject(h.clone()));
-            args.extend(rest);
-            let qualified_identity =
-                runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                    runmat_hir::SymbolName(class_name),
-                    runmat_hir::SymbolName(method.clone()),
-                ]));
-            match dispatch_callable_with_policy(
-                qualified_identity,
-                runmat_hir::CallableFallbackPolicy::ExternalBoundary,
-                args.clone(),
-            )
-            .await
-            {
+            match dispatch_object_external_member(class_name, &method, args.clone()).await {
                 Ok(v) => return Ok(v),
                 Err(err) if is_undefined_function_error(&err) => {}
                 Err(err) => return Err(err),
@@ -351,35 +346,17 @@ async fn subsasgn_dispatch(
     payload: Value,
     rhs: Value,
 ) -> crate::BuiltinResult<Value> {
-    match &obj {
-        Value::Object(o) => {
-            let identity =
-                runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                    runmat_hir::SymbolName(o.class_name.clone()),
-                    runmat_hir::SymbolName(OBJECT_SUBSASGN_METHOD.to_string()),
-                ]));
-            dispatch_callable_with_policy(
-                identity,
-                runmat_hir::CallableFallbackPolicy::ExternalBoundary,
-                vec![obj, Value::String(kind), payload, rhs],
-            )
-            .await
-        }
-        Value::HandleObject(h) => {
-            let target = unsafe { &*h.target.as_raw() };
-            let class_name = match target {
-                Value::Object(o) => o.class_name.clone(),
-                _ => h.class_name.clone(),
-            };
-            let identity =
-                runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                    runmat_hir::SymbolName(class_name),
-                    runmat_hir::SymbolName(OBJECT_SUBSASGN_METHOD.to_string()),
-                ]));
-            dispatch_callable_with_policy(
-                identity,
-                runmat_hir::CallableFallbackPolicy::ExternalBoundary,
-                vec![obj, Value::String(kind), payload, rhs],
+    match obj {
+        receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
+            let class_name = object_receiver_class_name(&receiver).ok_or_else(|| {
+                build_runtime_error("subsasgn requires object receiver")
+                    .with_identifier("RunMat:InvalidObjectDispatch")
+                    .build()
+            })?;
+            dispatch_object_external_member(
+                class_name,
+                OBJECT_SUBSASGN_METHOD,
+                vec![receiver, Value::String(kind), payload, rhs],
             )
             .await
         }
@@ -389,35 +366,17 @@ async fn subsasgn_dispatch(
 
 #[runmat_macros::runtime_builtin(name = "subsref", builtin_path = "crate")]
 async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
-    match &obj {
-        Value::Object(o) => {
-            let identity =
-                runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                    runmat_hir::SymbolName(o.class_name.clone()),
-                    runmat_hir::SymbolName(OBJECT_SUBSREF_METHOD.to_string()),
-                ]));
-            dispatch_callable_with_policy(
-                identity,
-                runmat_hir::CallableFallbackPolicy::ExternalBoundary,
-                vec![obj, Value::String(kind), payload],
-            )
-            .await
-        }
-        Value::HandleObject(h) => {
-            let target = unsafe { &*h.target.as_raw() };
-            let class_name = match target {
-                Value::Object(o) => o.class_name.clone(),
-                _ => h.class_name.clone(),
-            };
-            let identity =
-                runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(vec![
-                    runmat_hir::SymbolName(class_name),
-                    runmat_hir::SymbolName(OBJECT_SUBSREF_METHOD.to_string()),
-                ]));
-            dispatch_callable_with_policy(
-                identity,
-                runmat_hir::CallableFallbackPolicy::ExternalBoundary,
-                vec![obj, Value::String(kind), payload],
+    match obj {
+        receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
+            let class_name = object_receiver_class_name(&receiver).ok_or_else(|| {
+                build_runtime_error("subsref requires object receiver")
+                    .with_identifier("RunMat:InvalidObjectDispatch")
+                    .build()
+            })?;
+            dispatch_object_external_member(
+                class_name,
+                OBJECT_SUBSREF_METHOD,
+                vec![receiver, Value::String(kind), payload],
             )
             .await
         }
