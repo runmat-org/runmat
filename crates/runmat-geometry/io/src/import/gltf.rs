@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
+use base64::Engine;
 use serde_json::Value;
 
 use crate::report::{ImportDiagnostic, ImportDiagnosticSeverity};
@@ -70,16 +72,20 @@ pub(super) fn import_gltf(
                     mode
                 )));
             }
-            let positions = parse_inline_positions(primitive)?;
+            let (positions, uses_accessor_data_uri) = parse_positions(&value, primitive)?;
             let uses_implicit_indices = primitive.get("indices").is_none();
             let base_vertex = all_positions.len();
             all_positions.extend_from_slice(&positions);
 
-            let indices = parse_inline_indices(primitive, positions.len()).map_err(|reason| {
-                GeometryImportError::ParseFailed(format!(
-                    "GLTF inline indices parse failed: {reason}"
-                ))
-            })?;
+            let (indices, indices_use_accessor_data_uri) =
+                parse_indices(&value, primitive, positions.len())?;
+            if uses_accessor_data_uri || indices_use_accessor_data_uri {
+                diagnostics.push(ImportDiagnostic {
+                    code: "GEOMETRY_GLTF_ACCESSOR_DATA_URI_USED".to_string(),
+                    severity: ImportDiagnosticSeverity::Info,
+                    message: "GLTF primitive used accessor-backed data-URI buffers for deterministic mesh import".to_string(),
+                });
+            }
             if uses_implicit_indices {
                 diagnostics.push(ImportDiagnostic {
                     code: "GEOMETRY_GLTF_IMPLICIT_INDICES_USED".to_string(),
@@ -92,8 +98,7 @@ pub(super) fn import_gltf(
             }
             if indices.len() % 3 != 0 {
                 return Err(GeometryImportError::ParseFailed(
-                    "GLTF inline indices must be a multiple of 3 for triangle primitives"
-                        .to_string(),
+                    "GLTF indices must be a multiple of 3 for triangle primitives".to_string(),
                 ));
             }
             for tri in indices.chunks_exact(3) {
@@ -104,7 +109,7 @@ pub(super) fn import_gltf(
                 if a >= all_positions.len() || b >= all_positions.len() || c >= all_positions.len()
                 {
                     return Err(GeometryImportError::ParseFailed(
-                        "GLTF inline index out of bounds for primitive positions".to_string(),
+                        "GLTF index out of bounds for primitive positions".to_string(),
                     ));
                 }
                 let vertices = [all_positions[a], all_positions[b], all_positions[c]];
@@ -138,17 +143,28 @@ pub(super) fn import_gltf(
     Ok(build_result(asset, diagnostics))
 }
 
-fn parse_inline_positions(primitive: &Value) -> Result<Vec<[f64; 3]>, GeometryImportError> {
-    let position_values = primitive
+fn parse_positions(
+    root: &Value,
+    primitive: &Value,
+) -> Result<(Vec<[f64; 3]>, bool), GeometryImportError> {
+    let position_ref = primitive
         .get("attributes")
         .and_then(|attributes| attributes.get("POSITION"))
-        .and_then(Value::as_array)
         .ok_or_else(|| {
-            GeometryImportError::ParseFailed(
-                "GLTF inline POSITION array is required (accessor-backed payloads are not yet supported)"
-                    .to_string(),
-            )
+            GeometryImportError::ParseFailed("GLTF POSITION attribute is required".to_string())
         })?;
+    if let Some(position_values) = position_ref.as_array() {
+        return Ok((parse_inline_positions(position_values)?, false));
+    }
+    if let Some(accessor_index) = position_ref.as_u64() {
+        return Ok((parse_accessor_positions(root, accessor_index)?, true));
+    }
+    Err(GeometryImportError::ParseFailed(
+        "GLTF POSITION attribute must be an inline array or accessor index".to_string(),
+    ))
+}
+
+fn parse_inline_positions(position_values: &[Value]) -> Result<Vec<[f64; 3]>, GeometryImportError> {
     if position_values.len() < 3 {
         return Err(GeometryImportError::ParseFailed(
             "GLTF POSITION must contain at least 3 vertices".to_string(),
@@ -180,20 +196,340 @@ fn parse_inline_positions(primitive: &Value) -> Result<Vec<[f64; 3]>, GeometryIm
         .collect()
 }
 
-fn parse_inline_indices(primitive: &Value, position_count: usize) -> Result<Vec<usize>, String> {
+fn parse_indices(
+    root: &Value,
+    primitive: &Value,
+    position_count: usize,
+) -> Result<(Vec<usize>, bool), GeometryImportError> {
     let Some(indices) = primitive.get("indices") else {
-        return Ok((0..position_count).collect());
+        return Ok(((0..position_count).collect(), false));
     };
-    let values = indices
-        .as_array()
-        .ok_or_else(|| "GLTF inline indices must be an array".to_string())?;
+    if let Some(values) = indices.as_array() {
+        return Ok((parse_inline_indices(values)?, false));
+    }
+    if let Some(accessor_index) = indices.as_u64() {
+        return Ok((parse_accessor_indices(root, accessor_index)?, true));
+    }
+    Err(GeometryImportError::ParseFailed(
+        "GLTF indices must be an inline array or accessor index".to_string(),
+    ))
+}
+
+fn parse_inline_indices(values: &[Value]) -> Result<Vec<usize>, GeometryImportError> {
     values
         .iter()
         .map(|value| {
-            value
-                .as_u64()
-                .map(|index| index as usize)
-                .ok_or_else(|| "GLTF inline index must be unsigned integer".to_string())
+            let index = value.as_u64().ok_or_else(|| {
+                GeometryImportError::ParseFailed(
+                    "GLTF inline index must be unsigned integer".to_string(),
+                )
+            })?;
+            usize::try_from(index).map_err(|_| {
+                GeometryImportError::ParseFailed(
+                    "GLTF inline index exceeds host addressable range".to_string(),
+                )
+            })
         })
         .collect()
+}
+
+fn parse_accessor_positions(
+    root: &Value,
+    accessor_index: u64,
+) -> Result<Vec<[f64; 3]>, GeometryImportError> {
+    let decoded = resolve_accessor_decode(root, accessor_index)?;
+    if decoded.accessor_type != "VEC3" {
+        return Err(GeometryImportError::ParseFailed(format!(
+            "GLTF POSITION accessor type '{}' is not supported; expected VEC3",
+            decoded.accessor_type
+        )));
+    }
+    if decoded.component_type != 5126 {
+        return Err(GeometryImportError::ParseFailed(format!(
+            "GLTF POSITION accessor componentType {} is not supported; expected 5126 (FLOAT)",
+            decoded.component_type
+        )));
+    }
+    if decoded.count < 3 {
+        return Err(GeometryImportError::ParseFailed(
+            "GLTF POSITION accessor must contain at least 3 vertices".to_string(),
+        ));
+    }
+    if decoded.stride < 12 {
+        return Err(GeometryImportError::ParseFailed(format!(
+            "GLTF POSITION accessor byteStride {} is too small for VEC3 float payloads",
+            decoded.stride
+        )));
+    }
+
+    let mut positions = Vec::<[f64; 3]>::with_capacity(decoded.count);
+    for i in 0..decoded.count {
+        let offset = decoded.base_offset + i.saturating_mul(decoded.stride);
+        let x = read_f32_le_as_f64(&decoded.bytes, offset, "POSITION x")?;
+        let y = read_f32_le_as_f64(&decoded.bytes, offset + 4, "POSITION y")?;
+        let z = read_f32_le_as_f64(&decoded.bytes, offset + 8, "POSITION z")?;
+        positions.push([x, y, z]);
+    }
+    Ok(positions)
+}
+
+fn parse_accessor_indices(
+    root: &Value,
+    accessor_index: u64,
+) -> Result<Vec<usize>, GeometryImportError> {
+    let decoded = resolve_accessor_decode(root, accessor_index)?;
+    if decoded.accessor_type != "SCALAR" {
+        return Err(GeometryImportError::ParseFailed(format!(
+            "GLTF index accessor type '{}' is not supported; expected SCALAR",
+            decoded.accessor_type
+        )));
+    }
+
+    let component_size = match decoded.component_type {
+        5121 => 1usize,
+        5123 => 2usize,
+        5125 => 4usize,
+        other => {
+            return Err(GeometryImportError::ParseFailed(format!(
+                "GLTF index accessor componentType {} is not supported; expected 5121/5123/5125",
+                other
+            )));
+        }
+    };
+    if decoded.stride < component_size {
+        return Err(GeometryImportError::ParseFailed(format!(
+            "GLTF index accessor byteStride {} is too small for component size {}",
+            decoded.stride, component_size
+        )));
+    }
+
+    let mut indices = Vec::<usize>::with_capacity(decoded.count);
+    for i in 0..decoded.count {
+        let offset = decoded.base_offset + i.saturating_mul(decoded.stride);
+        let index = match decoded.component_type {
+            5121 => decoded.bytes.get(offset).copied().ok_or_else(|| {
+                GeometryImportError::ParseFailed(
+                    "GLTF index accessor byte offset is out of bounds".to_string(),
+                )
+            })? as u64,
+            5123 => {
+                let bytes = get_slice(&decoded.bytes, offset, 2, "index accessor u16")?;
+                u16::from_le_bytes([bytes[0], bytes[1]]) as u64
+            }
+            5125 => {
+                let bytes = get_slice(&decoded.bytes, offset, 4, "index accessor u32")?;
+                u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64
+            }
+            _ => unreachable!(),
+        };
+        indices.push(usize::try_from(index).map_err(|_| {
+            GeometryImportError::ParseFailed(
+                "GLTF index accessor value exceeds host addressable range".to_string(),
+            )
+        })?);
+    }
+    Ok(indices)
+}
+
+struct AccessorDecode {
+    bytes: Vec<u8>,
+    base_offset: usize,
+    count: usize,
+    stride: usize,
+    component_type: u64,
+    accessor_type: String,
+}
+
+fn resolve_accessor_decode(
+    root: &Value,
+    accessor_index: u64,
+) -> Result<AccessorDecode, GeometryImportError> {
+    let accessors = root
+        .get("accessors")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            GeometryImportError::ParseFailed(
+                "GLTF accessor-backed payload requires top-level accessors[]".to_string(),
+            )
+        })?;
+    let accessor = accessors
+        .get(usize::try_from(accessor_index).map_err(|_| {
+            GeometryImportError::ParseFailed("GLTF accessor index exceeds host range".to_string())
+        })?)
+        .ok_or_else(|| {
+            GeometryImportError::ParseFailed(format!(
+                "GLTF accessor index {} is out of bounds",
+                accessor_index
+            ))
+        })?;
+    let buffer_view_index = accessor
+        .get("bufferView")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            GeometryImportError::ParseFailed(
+                "GLTF accessor-backed payload requires accessor.bufferView".to_string(),
+            )
+        })?;
+    let accessor_byte_offset = parse_usize(accessor.get("byteOffset").and_then(Value::as_u64), 0)?;
+    let component_type = accessor
+        .get("componentType")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            GeometryImportError::ParseFailed(
+                "GLTF accessor-backed payload requires accessor.componentType".to_string(),
+            )
+        })?;
+    let count = parse_usize(accessor.get("count").and_then(Value::as_u64), 0)?;
+    let accessor_type = accessor
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            GeometryImportError::ParseFailed(
+                "GLTF accessor-backed payload requires accessor.type".to_string(),
+            )
+        })?
+        .to_string();
+
+    let buffer_views = root
+        .get("bufferViews")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            GeometryImportError::ParseFailed(
+                "GLTF accessor-backed payload requires top-level bufferViews[]".to_string(),
+            )
+        })?;
+    let buffer_view = buffer_views
+        .get(usize::try_from(buffer_view_index).map_err(|_| {
+            GeometryImportError::ParseFailed("GLTF bufferView index exceeds host range".to_string())
+        })?)
+        .ok_or_else(|| {
+            GeometryImportError::ParseFailed(format!(
+                "GLTF bufferView index {} is out of bounds",
+                buffer_view_index
+            ))
+        })?;
+    let buffer_index = buffer_view
+        .get("buffer")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            GeometryImportError::ParseFailed(
+                "GLTF accessor-backed payload requires bufferView.buffer".to_string(),
+            )
+        })?;
+    let buffer_view_offset = parse_usize(buffer_view.get("byteOffset").and_then(Value::as_u64), 0)?;
+    let byte_stride = parse_usize(buffer_view.get("byteStride").and_then(Value::as_u64), 0)?;
+
+    let buffers = root
+        .get("buffers")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            GeometryImportError::ParseFailed(
+                "GLTF accessor-backed payload requires top-level buffers[]".to_string(),
+            )
+        })?;
+    let buffer = buffers
+        .get(usize::try_from(buffer_index).map_err(|_| {
+            GeometryImportError::ParseFailed("GLTF buffer index exceeds host range".to_string())
+        })?)
+        .ok_or_else(|| {
+            GeometryImportError::ParseFailed(format!(
+                "GLTF buffer index {} is out of bounds",
+                buffer_index
+            ))
+        })?;
+    let uri = buffer.get("uri").and_then(Value::as_str).ok_or_else(|| {
+        GeometryImportError::ParseFailed(
+            "GLTF accessor-backed payload requires buffer.uri data URI (external/GLB buffers are not supported yet)"
+                .to_string(),
+        )
+    })?;
+    let bytes = decode_data_uri(uri)?;
+
+    let base_offset = buffer_view_offset.saturating_add(accessor_byte_offset);
+    if base_offset > bytes.len() {
+        return Err(GeometryImportError::ParseFailed(
+            "GLTF accessor-backed payload offset is out of bounds".to_string(),
+        ));
+    }
+    let stride = if byte_stride == 0 {
+        match accessor_type.as_str() {
+            "VEC3" => 12,
+            "SCALAR" => match component_type {
+                5121 => 1,
+                5123 => 2,
+                5125 => 4,
+                _ => 1,
+            },
+            _ => 1,
+        }
+    } else {
+        byte_stride
+    };
+
+    Ok(AccessorDecode {
+        bytes,
+        base_offset,
+        count,
+        stride,
+        component_type,
+        accessor_type,
+    })
+}
+
+fn decode_data_uri(uri: &str) -> Result<Vec<u8>, GeometryImportError> {
+    if !uri.starts_with("data:") {
+        return Err(GeometryImportError::ParseFailed(
+            "GLTF accessor-backed buffer.uri must be a data URI (external file URIs are not supported yet)"
+                .to_string(),
+        ));
+    }
+    let (metadata, payload) = uri.split_once(',').ok_or_else(|| {
+        GeometryImportError::ParseFailed(
+            "GLTF accessor-backed data URI is missing payload separator".to_string(),
+        )
+    })?;
+    if !metadata.contains(";base64") {
+        return Err(GeometryImportError::ParseFailed(
+            "GLTF accessor-backed data URI must use base64 encoding".to_string(),
+        ));
+    };
+    BASE64_ENGINE.decode(payload.as_bytes()).map_err(|err| {
+        GeometryImportError::ParseFailed(format!(
+            "failed to decode GLTF accessor-backed data URI payload: {err}"
+        ))
+    })
+}
+
+fn parse_usize(value: Option<u64>, default: usize) -> Result<usize, GeometryImportError> {
+    match value {
+        Some(raw) => usize::try_from(raw).map_err(|_| {
+            GeometryImportError::ParseFailed("GLTF integer value exceeds host range".to_string())
+        }),
+        None => Ok(default),
+    }
+}
+
+fn read_f32_le_as_f64(
+    bytes: &[u8],
+    offset: usize,
+    label: &str,
+) -> Result<f64, GeometryImportError> {
+    let value = get_slice(bytes, offset, 4, label)?;
+    Ok(f32::from_le_bytes([value[0], value[1], value[2], value[3]]) as f64)
+}
+
+fn get_slice<'a>(
+    bytes: &'a [u8],
+    offset: usize,
+    len: usize,
+    label: &str,
+) -> Result<&'a [u8], GeometryImportError> {
+    let end = offset.saturating_add(len);
+    if end > bytes.len() {
+        return Err(GeometryImportError::ParseFailed(format!(
+            "GLTF accessor-backed {} payload is out of bounds",
+            label
+        )));
+    };
+    Ok(&bytes[offset..end])
 }

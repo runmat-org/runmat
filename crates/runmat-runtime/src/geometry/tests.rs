@@ -1,4 +1,6 @@
 use super::*;
+use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
+use base64::Engine;
 
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
@@ -25,6 +27,35 @@ fn binary_triangle_stl() -> Vec<u8> {
     payload[tri + 40..tri + 44].copy_from_slice(&(1.0f32).to_le_bytes());
     payload[tri + 44..tri + 48].copy_from_slice(&(0.0f32).to_le_bytes());
     payload
+}
+
+fn gltf_accessor_data_uri_payload() -> Vec<u8> {
+    let positions = [
+        [0.0f32, 0.0f32, 0.0f32],
+        [1.0f32, 0.0f32, 0.0f32],
+        [1.0f32, 1.0f32, 0.0f32],
+        [0.0f32, 1.0f32, 0.0f32],
+    ];
+    let indices = [0u16, 1, 2, 0, 2, 3];
+
+    let mut buffer = Vec::<u8>::new();
+    for vertex in positions {
+        buffer.extend_from_slice(&vertex[0].to_le_bytes());
+        buffer.extend_from_slice(&vertex[1].to_le_bytes());
+        buffer.extend_from_slice(&vertex[2].to_le_bytes());
+    }
+    let index_offset = buffer.len();
+    for index in indices {
+        buffer.extend_from_slice(&index.to_le_bytes());
+    }
+    let encoded = BASE64_ENGINE.encode(&buffer);
+    format!(
+        "{{\"asset\":{{\"version\":\"2.0\"}},\"buffers\":[{{\"uri\":\"data:application/octet-stream;base64,{encoded}\",\"byteLength\":{byte_len}}}],\"bufferViews\":[{{\"buffer\":0,\"byteOffset\":0,\"byteLength\":{positions_len}}},{{\"buffer\":0,\"byteOffset\":{index_offset},\"byteLength\":{indices_len}}}],\"accessors\":[{{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\"}},{{\"bufferView\":1,\"componentType\":5123,\"count\":6,\"type\":\"SCALAR\"}}],\"meshes\":[{{\"primitives\":[{{\"attributes\":{{\"POSITION\":0}},\"indices\":1}}]}}]}}",
+        byte_len = buffer.len(),
+        positions_len = index_offset,
+        indices_len = buffer.len() - index_offset
+    )
+    .into_bytes()
 }
 
 #[test]
@@ -210,6 +241,24 @@ fn inspect_and_load_gltf_work() {
         .collect::<Vec<_>>();
     assert!(codes.contains(&"GEOMETRY_IMPORT_VERTEX_COUNT"));
     assert!(codes.contains(&"GEOMETRY_IMPORT_TRIANGLE_COUNT"));
+}
+
+#[test]
+fn inspect_and_load_gltf_accessor_data_uri_work() {
+    let payload = gltf_accessor_data_uri_payload();
+    let inspect = geometry_inspect("/part.gltf", &payload).expect("inspect should work");
+    assert_eq!(inspect.format, "gltf");
+
+    let asset = geometry_load("/part.gltf", &payload).expect("load should work");
+    assert_eq!(asset.source.importer_version, "gltf/v1");
+    assert_eq!(asset.meshes[0].element_count, 2);
+    assert_eq!(asset.meshes[0].vertex_count, 4);
+    let codes = asset
+        .diagnostics
+        .iter()
+        .map(|diag| diag.code.as_str())
+        .collect::<Vec<_>>();
+    assert!(codes.contains(&"GEOMETRY_GLTF_ACCESSOR_DATA_URI_USED"));
 }
 
 #[test]

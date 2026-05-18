@@ -12,6 +12,8 @@ pub use sniff::{detect_geometry_format, GeometryFormat};
 
 #[cfg(test)]
 mod tests {
+    use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
+    use base64::Engine;
     use runmat_geometry_core::{GeometryAsset, MeshKind, SourceGeometryKind};
 
     use crate::{
@@ -64,6 +66,35 @@ mod tests {
         payload[tri + 40..tri + 44].copy_from_slice(&(1.0f32).to_le_bytes());
         payload[tri + 44..tri + 48].copy_from_slice(&(0.0f32).to_le_bytes());
         payload
+    }
+
+    fn gltf_accessor_data_uri_payload() -> Vec<u8> {
+        let positions = [
+            [0.0f32, 0.0f32, 0.0f32],
+            [1.0f32, 0.0f32, 0.0f32],
+            [1.0f32, 1.0f32, 0.0f32],
+            [0.0f32, 1.0f32, 0.0f32],
+        ];
+        let indices = [0u16, 1, 2, 0, 2, 3];
+
+        let mut buffer = Vec::<u8>::new();
+        for vertex in positions {
+            buffer.extend_from_slice(&vertex[0].to_le_bytes());
+            buffer.extend_from_slice(&vertex[1].to_le_bytes());
+            buffer.extend_from_slice(&vertex[2].to_le_bytes());
+        }
+        let index_offset = buffer.len();
+        for index in indices {
+            buffer.extend_from_slice(&index.to_le_bytes());
+        }
+        let encoded = BASE64_ENGINE.encode(&buffer);
+        format!(
+            "{{\"asset\":{{\"version\":\"2.0\"}},\"buffers\":[{{\"uri\":\"data:application/octet-stream;base64,{encoded}\",\"byteLength\":{byte_len}}}],\"bufferViews\":[{{\"buffer\":0,\"byteOffset\":0,\"byteLength\":{positions_len}}},{{\"buffer\":0,\"byteOffset\":{index_offset},\"byteLength\":{indices_len}}}],\"accessors\":[{{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\"}},{{\"bufferView\":1,\"componentType\":5123,\"count\":6,\"type\":\"SCALAR\"}}],\"meshes\":[{{\"primitives\":[{{\"attributes\":{{\"POSITION\":0}},\"indices\":1}}]}}]}}",
+            byte_len = buffer.len(),
+            positions_len = index_offset,
+            indices_len = buffer.len() - index_offset
+        )
+        .into_bytes()
     }
 
     #[test]
@@ -308,6 +339,31 @@ mod tests {
         assert_eq!(mesh.vertex_count, 4);
         assert_eq!(mesh.element_count, 2);
         assert!(has_diag(&result, "GEOMETRY_IMPORT_UTF8_BOM_STRIPPED"));
+    }
+
+    #[test]
+    fn gltf_import_supports_accessor_data_uri_payloads() {
+        let payload = gltf_accessor_data_uri_payload();
+        let result = import("/mesh.gltf", &payload, GeometryImportOptions::default());
+        let mesh = single_mesh(&result.asset);
+        assert_eq!(mesh.vertex_count, 4);
+        assert_eq!(mesh.element_count, 2);
+        assert!(has_diag(&result, "GEOMETRY_GLTF_ACCESSOR_DATA_URI_USED"));
+    }
+
+    #[test]
+    fn gltf_accessor_external_uri_reports_typed_parse_error() {
+        let payload = "{\"asset\":{\"version\":\"2.0\"},\"buffers\":[{\"uri\":\"mesh.bin\",\"byteLength\":48}],\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":48}],\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":4,\"type\":\"VEC3\"}],\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0}}]}]}";
+        let error = import_geometry(
+            "/mesh.gltf",
+            payload.as_bytes(),
+            GeometryImportOptions::default(),
+        )
+        .expect_err("external GLTF URI should fail with typed parse error");
+        assert!(
+            error.to_string().contains("data URI"),
+            "unexpected error message: {error}"
+        );
     }
 
     #[test]
