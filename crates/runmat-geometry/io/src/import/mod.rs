@@ -1,3 +1,4 @@
+mod obj;
 mod step;
 mod stl;
 
@@ -45,6 +46,7 @@ pub fn import_geometry(
     match detect_geometry_format(path, bytes) {
         GeometryFormat::Stl => stl::import_stl(path, bytes, options),
         GeometryFormat::Step => step::import_step(path, bytes, options),
+        GeometryFormat::Obj => obj::import_obj(path, bytes, options),
         _ => Err(GeometryImportError::UnsupportedFormat),
     }
 }

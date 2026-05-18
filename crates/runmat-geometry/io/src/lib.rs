@@ -25,6 +25,7 @@ mod tests {
     const DEGENERATE_STL: &str = "solid deg\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 0 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid deg\n";
 
     const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\n#11=PRODUCT('Bracket_B','',(#1));\n#20=MATERIAL_DESIGNATION('Aluminum 6061');\nENDSEC;\nEND-ISO-10303-21;\n";
+    const SIMPLE_OBJ: &str = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\nf -4 -3 -2\n";
 
     fn import(path: &str, bytes: &[u8], options: GeometryImportOptions) -> ImportResult {
         import_geometry(path, bytes, options).expect("import should succeed")
@@ -123,6 +124,38 @@ mod tests {
         let second = import(
             "/deterministic.step",
             SIMPLE_STEP.as_bytes(),
+            GeometryImportOptions::default(),
+        );
+        let left = deterministic_import_fingerprint(&first.asset).expect("fingerprint should work");
+        let right =
+            deterministic_import_fingerprint(&second.asset).expect("fingerprint should work");
+        assert_eq!(left, right);
+    }
+
+    #[test]
+    fn obj_import_triangulates_faces_deterministically() {
+        let result = import(
+            "/mesh.obj",
+            SIMPLE_OBJ.as_bytes(),
+            GeometryImportOptions::default(),
+        );
+        let mesh = single_mesh(&result.asset);
+        assert_eq!(result.asset.source.importer_version, "obj/v1");
+        assert_eq!(mesh.kind, MeshKind::Surface);
+        assert_eq!(mesh.vertex_count, 4);
+        assert_eq!(mesh.element_count, 3);
+    }
+
+    #[test]
+    fn obj_fingerprint_is_deterministic() {
+        let first = import(
+            "/deterministic.obj",
+            SIMPLE_OBJ.as_bytes(),
+            GeometryImportOptions::default(),
+        );
+        let second = import(
+            "/deterministic.obj",
+            SIMPLE_OBJ.as_bytes(),
             GeometryImportOptions::default(),
         );
         let left = deterministic_import_fingerprint(&first.asset).expect("fingerprint should work");
