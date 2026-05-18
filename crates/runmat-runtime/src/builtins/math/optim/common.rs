@@ -10,7 +10,7 @@ pub(crate) async fn call_function(handle: &Value, args: Vec<Value>) -> BuiltinRe
     let mut call_args = Vec::with_capacity(args.len() + 1);
     call_args.push(handle.clone());
     call_args.extend(args);
-    crate::call_builtin_async("feval", &call_args).await
+    crate::call_builtin_async_with_outputs("feval", &call_args, 1).await
 }
 
 pub(crate) async fn call_scalar_function(name: &str, handle: &Value, x: f64) -> BuiltinResult<f64> {
