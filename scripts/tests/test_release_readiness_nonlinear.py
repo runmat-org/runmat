@@ -393,6 +393,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_REFERENCE_COMPLEX_LOAD_REALIZATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_REFERENCE_COMPLEX_LOAD_REALIZATION_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES",
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MAX_BLOCKERS",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY",
@@ -408,6 +410,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES",
             "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MAX_BLOCKERS",
             "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY",
@@ -3064,6 +3068,115 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("CONTACT_REFERENCE_TREND_WORSENING", codes)
 
+    def test_reference_complex_assertion_breaches_emit_reasons(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {
+                        "name": "plasticity_hardening_reference_complex_load_realization_ratio",
+                        "observed": 0.75,
+                    }
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {
+                        "name": "contact_frictionless_complex_load_amplification_ratio",
+                        "observed": 1.8,
+                    }
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_REFERENCE_COMPLEX_LOAD_REALIZATION_RATIO"
+        ] = "0.8"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_RATIO"
+        ] = "1.6"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_REFERENCE_COMPLEX_LOAD_REALIZATION_RATIO_LOW", codes)
+        self.assertIn("CONTACT_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_RATIO_HIGH", codes)
+
+    def test_reference_complex_assertion_trend_worsening_reasons_are_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {
+                        "name": "plasticity_hardening_reference_complex_load_realization_ratio",
+                        "observed": 0.8,
+                    }
+                ],
+            }
+        )
+        latest["records"].append(
+            {
+                "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "threshold_assertions": [
+                    {
+                        "name": "contact_frictionless_complex_load_amplification_ratio",
+                        "observed": 1.7,
+                    }
+                ],
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 95.0,
+                "threshold_assertions": [
+                    {
+                        "name": "plasticity_hardening_reference_complex_load_realization_ratio",
+                        "observed": 0.95,
+                    }
+                ],
+            }
+        )
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 95.0,
+                "threshold_assertions": [
+                    {
+                        "name": "contact_frictionless_complex_load_amplification_ratio",
+                        "observed": 1.2,
+                    }
+                ],
+            }
+        )
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_REFERENCE_COMPLEX_LOAD_REALIZATION_DROP_TREND_RATIO"
+        ] = "1.1"
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_TREND_RATIO"
+        ] = "1.2"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_REFERENCE_COMPLEX_LOAD_REALIZATION_TREND_WORSENING", codes)
+        self.assertIn("CONTACT_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_TREND_WORSENING", codes)
+
     def test_promotion_ready_signals_true_when_reference_metrics_are_healthy(self):
         latest = report(
             passed=True,
@@ -3700,6 +3813,21 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn(
             "EM non-core trend ratios (sparse assignment, sparse fallback, sparse source realization, sparse energy imbalance, fallback source realization, fallback energy imbalance, fallback material alignment, overlap ratio, overlap interference, boundary-kernel leakage)",
             summary,
+        )
+        self.assertIn("### Plasticity Posture", summary)
+        self.assertIn(
+            "Plastic reference-complex load realization assertion/threshold", summary
+        )
+        self.assertIn(
+            "Plastic reference-complex load realization drop trend ratio/threshold",
+            summary,
+        )
+        self.assertIn("### Contact Posture", summary)
+        self.assertIn(
+            "Contact reference-complex load amplification assertion/threshold", summary
+        )
+        self.assertIn(
+            "Contact reference-complex load amplification trend ratio/threshold", summary
         )
         self.assertIn("### Promotion Evidence Quality", summary)
         self.assertIn("Promotion calibration applied/required", summary)

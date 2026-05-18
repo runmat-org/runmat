@@ -273,6 +273,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_REFERENCE_COMPLEX_LOAD_REALIZATION_RATIO": "0.825",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_REFERENCE_COMPLEX_LOAD_REALIZATION_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY": "0.65",
             "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_REALIZATION_RATIO": "0.75",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_RATIO": "0.98",
@@ -286,6 +288,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_RATIO": "1.45",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES": "2",
             "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES": "2",
             "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY": "true",
@@ -493,6 +497,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_TREND_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO": "1.15",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_REFERENCE_COMPLEX_LOAD_REALIZATION_RATIO": "0.82",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_REFERENCE_COMPLEX_LOAD_REALIZATION_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY": "0.75",
             "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_REALIZATION_RATIO": "0.7",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_RATIO": "1.02",
@@ -506,6 +512,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_TREND_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "1.15",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES": "2",
             "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES": "2",
             "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY": "false",
@@ -713,6 +721,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO": "1.26",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_REFERENCE_COMPLEX_LOAD_REALIZATION_RATIO": "0.8",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_REFERENCE_COMPLEX_LOAD_REALIZATION_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY": "0.9",
             "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_REALIZATION_RATIO": "0.6",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_RATIO": "1.1",
@@ -726,6 +736,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "1.26",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_RATIO": "1.65",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES": "2",
             "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES": "2",
             "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY": "false",
@@ -2795,6 +2807,24 @@ def evaluate_release_readiness(
             ),
         )
     )
+    plastic_min_reference_complex_load_realization_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_REFERENCE_COMPLEX_LOAD_REALIZATION_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_REFERENCE_COMPLEX_LOAD_REALIZATION_RATIO",
+                "0.82",
+            ),
+        )
+    )
+    plastic_max_reference_complex_load_realization_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_REFERENCE_COMPLEX_LOAD_REALIZATION_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_REFERENCE_COMPLEX_LOAD_REALIZATION_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
     contact_max_nonlinear_severity_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY",
@@ -2884,6 +2914,24 @@ def evaluate_release_readiness(
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO",
             profile_default(
                 "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO", "1.2"
+            ),
+        )
+    )
+    contact_max_reference_complex_load_amplification_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_RATIO",
+                "1.5",
+            ),
+        )
+    )
+    contact_max_reference_complex_load_amplification_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CONTACT_MAX_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_TREND_RATIO",
+                "1.2",
             ),
         )
     )
@@ -3192,6 +3240,8 @@ def evaluate_release_readiness(
     plastic_load_realization_drop_trend_ratio = None
     plastic_load_amplification_trend_ratio = None
     plastic_reference_trend_ratio = None
+    plastic_reference_complex_load_realization_assertion = None
+    plastic_reference_complex_load_realization_drop_trend_ratio = None
     plastic_promotion_ready = False
     plastic_promotion_blockers = []
     plastic_promotion_sample_count = 0
@@ -3209,6 +3259,8 @@ def evaluate_release_readiness(
     contact_load_realization_drop_trend_ratio = None
     contact_load_amplification_trend_ratio = None
     contact_reference_trend_ratio = None
+    contact_reference_complex_load_amplification_assertion = None
+    contact_reference_complex_load_amplification_trend_ratio = None
     contact_promotion_ready = False
     contact_promotion_blockers = []
     contact_promotion_sample_count = 0
@@ -5323,6 +5375,88 @@ def evaluate_release_readiness(
                     )
                 )
 
+    plastic_reference_complex_values = []
+    for rec in report_records(latest):
+        if rec.get("fixture_id") != "nonlinear_plastic_hardening_reference_complex_gpu_provider":
+            continue
+        observed = threshold_assertion_observed(
+            rec, "plasticity_hardening_reference_complex_load_realization_ratio"
+        )
+        if observed is not None:
+            plastic_reference_complex_values.append(observed)
+    if plastic_reference_complex_values:
+        plastic_reference_complex_load_realization_assertion = min(
+            plastic_reference_complex_values
+        )
+        if (
+            plastic_reference_complex_load_realization_assertion
+            < plastic_min_reference_complex_load_realization_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="PLASTIC_REFERENCE_COMPLEX_LOAD_REALIZATION_RATIO_LOW",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "plastic reference-complex load realization ratio "
+                        f"{plastic_reference_complex_load_realization_assertion:.3f} below threshold "
+                        f"{plastic_min_reference_complex_load_realization_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+    elif protected or plastic_require_metrics:
+        reasons.append(
+            Reason(
+                code="PLASTIC_REFERENCE_COMPLEX_ASSERTION_MISSING",
+                severity="fail" if protected else "warn",
+                detail=(
+                    "missing threshold assertion observed value for "
+                    "nonlinear_plastic_hardening_reference_complex_gpu_provider."
+                    "plasticity_hardening_reference_complex_load_realization_ratio"
+                ),
+            )
+        )
+
+    contact_reference_complex_values = []
+    for rec in report_records(latest):
+        if rec.get("fixture_id") != "nonlinear_contact_frictionless_reference_complex_gpu_provider":
+            continue
+        observed = threshold_assertion_observed(
+            rec, "contact_frictionless_complex_load_amplification_ratio"
+        )
+        if observed is not None:
+            contact_reference_complex_values.append(observed)
+    if contact_reference_complex_values:
+        contact_reference_complex_load_amplification_assertion = max(
+            contact_reference_complex_values
+        )
+        if (
+            contact_reference_complex_load_amplification_assertion
+            > contact_max_reference_complex_load_amplification_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CONTACT_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_RATIO_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "contact reference-complex load amplification ratio "
+                        f"{contact_reference_complex_load_amplification_assertion:.3f} exceeds threshold "
+                        f"{contact_max_reference_complex_load_amplification_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+    elif protected or contact_require_metrics:
+        reasons.append(
+            Reason(
+                code="CONTACT_REFERENCE_COMPLEX_ASSERTION_MISSING",
+                severity="fail" if protected else "warn",
+                detail=(
+                    "missing threshold assertion observed value for "
+                    "nonlinear_contact_frictionless_reference_complex_gpu_provider."
+                    "contact_frictionless_complex_load_amplification_ratio"
+                ),
+            )
+        )
+
     trend_reports = [latest] + rolling
     trend_thermo_records = []
     for report in trend_reports:
@@ -7289,6 +7423,27 @@ def evaluate_release_readiness(
                 )
             )
 
+        plastic_reference_complex_load_realization_drop_trend_ratio = fixture_assertion_trend_ratio(
+            "plasticity_hardening_reference_complex_load_realization_ratio"
+        )
+        if (
+            plastic_reference_complex_load_realization_drop_trend_ratio is not None
+            and plastic_reference_complex_load_realization_drop_trend_ratio
+            > plastic_max_reference_complex_load_realization_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="PLASTIC_REFERENCE_COMPLEX_LOAD_REALIZATION_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "plastic reference-complex load realization drop trend ratio "
+                        f"{plastic_reference_complex_load_realization_drop_trend_ratio:.3f} exceeds "
+                        "threshold "
+                        f"{plastic_max_reference_complex_load_realization_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
         plastic_reference_fixture_ids = {
             "nonlinear_plastic_hardening_reference_gpu_provider",
             "nonlinear_plastic_hardening_reference_complex_gpu_provider",
@@ -7382,6 +7537,28 @@ def evaluate_release_readiness(
                         "contact load amplification trend ratio "
                         f"{contact_load_amplification_trend_ratio:.3f} exceeds "
                         f"threshold {contact_max_load_amplification_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        contact_reference_complex_load_amplification_trend_ratio = fixture_assertion_trend_ratio(
+            "contact_frictionless_complex_load_amplification_ratio",
+            ratio_mode="increase",
+        )
+        if (
+            contact_reference_complex_load_amplification_trend_ratio is not None
+            and contact_reference_complex_load_amplification_trend_ratio
+            > contact_max_reference_complex_load_amplification_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CONTACT_REFERENCE_COMPLEX_LOAD_AMPLIFICATION_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "contact reference-complex load amplification trend ratio "
+                        f"{contact_reference_complex_load_amplification_trend_ratio:.3f} exceeds "
+                        "threshold "
+                        f"{contact_max_reference_complex_load_amplification_trend_ratio_threshold:.3f}"
                     ),
                 )
             )
@@ -8030,6 +8207,10 @@ def evaluate_release_readiness(
         "plastic_max_load_amplification_trend_ratio_threshold": plastic_max_load_amplification_trend_ratio_threshold,
         "plastic_reference_trend_ratio": plastic_reference_trend_ratio,
         "plastic_reference_max_trend_ratio_threshold": plastic_reference_max_trend_ratio_threshold,
+        "plastic_reference_complex_load_realization_assertion": plastic_reference_complex_load_realization_assertion,
+        "plastic_min_reference_complex_load_realization_ratio_threshold": plastic_min_reference_complex_load_realization_ratio_threshold,
+        "plastic_reference_complex_load_realization_drop_trend_ratio": plastic_reference_complex_load_realization_drop_trend_ratio,
+        "plastic_max_reference_complex_load_realization_drop_trend_ratio_threshold": plastic_max_reference_complex_load_realization_drop_trend_ratio_threshold,
         "plastic_promotion_ready": plastic_promotion_ready,
         "plastic_promotion_blockers": plastic_promotion_blockers,
         "plastic_promotion_sample_count": plastic_promotion_sample_count,
@@ -8061,6 +8242,10 @@ def evaluate_release_readiness(
         "contact_max_load_amplification_trend_ratio_threshold": contact_max_load_amplification_trend_ratio_threshold,
         "contact_reference_trend_ratio": contact_reference_trend_ratio,
         "contact_reference_max_trend_ratio_threshold": contact_reference_max_trend_ratio_threshold,
+        "contact_reference_complex_load_amplification_assertion": contact_reference_complex_load_amplification_assertion,
+        "contact_max_reference_complex_load_amplification_ratio_threshold": contact_max_reference_complex_load_amplification_ratio_threshold,
+        "contact_reference_complex_load_amplification_trend_ratio": contact_reference_complex_load_amplification_trend_ratio,
+        "contact_max_reference_complex_load_amplification_trend_ratio_threshold": contact_max_reference_complex_load_amplification_trend_ratio_threshold,
         "contact_promotion_ready": contact_promotion_ready,
         "contact_promotion_blockers": contact_promotion_blockers,
         "contact_promotion_sample_count": contact_promotion_sample_count,
@@ -8661,6 +8846,14 @@ def markdown_summary(result: dict) -> str:
         "- Plastic reference trend threshold: "
         f"`{result.get('plastic_reference_max_trend_ratio_threshold') if result.get('plastic_reference_max_trend_ratio_threshold') is not None else '-'}`"
     )
+    lines.append(
+        "- Plastic reference-complex load realization assertion/threshold: "
+        f"`{result.get('plastic_reference_complex_load_realization_assertion') if result.get('plastic_reference_complex_load_realization_assertion') is not None else '-'}`/`{result.get('plastic_min_reference_complex_load_realization_ratio_threshold') if result.get('plastic_min_reference_complex_load_realization_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic reference-complex load realization drop trend ratio/threshold: "
+        f"`{result.get('plastic_reference_complex_load_realization_drop_trend_ratio') if result.get('plastic_reference_complex_load_realization_drop_trend_ratio') is not None else '-'}`/`{result.get('plastic_max_reference_complex_load_realization_drop_trend_ratio_threshold') if result.get('plastic_max_reference_complex_load_realization_drop_trend_ratio_threshold') is not None else '-'}`"
+    )
     lines.append("")
     lines.append("### Contact Posture")
     lines.append(
@@ -8718,6 +8911,14 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Contact reference trend threshold: "
         f"`{result.get('contact_reference_max_trend_ratio_threshold') if result.get('contact_reference_max_trend_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact reference-complex load amplification assertion/threshold: "
+        f"`{result.get('contact_reference_complex_load_amplification_assertion') if result.get('contact_reference_complex_load_amplification_assertion') is not None else '-'}`/`{result.get('contact_max_reference_complex_load_amplification_ratio_threshold') if result.get('contact_max_reference_complex_load_amplification_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact reference-complex load amplification trend ratio/threshold: "
+        f"`{result.get('contact_reference_complex_load_amplification_trend_ratio') if result.get('contact_reference_complex_load_amplification_trend_ratio') is not None else '-'}`/`{result.get('contact_max_reference_complex_load_amplification_trend_ratio_threshold') if result.get('contact_max_reference_complex_load_amplification_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Promotion Readiness")
