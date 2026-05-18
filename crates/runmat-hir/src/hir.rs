@@ -135,8 +135,7 @@ pub struct CapturedBinding {
 /// Semantic binding identity for a name owned by a module or function.
 ///
 /// Bindings model MATLAB lexical/global/persistent storage and workspace
-/// visibility. They are not VM slot numbers and should be used instead of the
-/// legacy `VarId` in semantic HIR.
+/// visibility. They are not VM slot numbers.
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct HirBinding {
     pub id: BindingId,
