@@ -568,6 +568,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "RUNMAT_THERMO_FIELD_SIGNING_KEY",
@@ -794,6 +795,21 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, [], protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("KEY_PERF_PROVIDER_BACKEND_MISSING", codes)
+
+    def test_key_perf_field_missing_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 120.0,
+                "gpu_speedup_ratio": 1.1,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS"] = "true"
+        result = evaluate_release_readiness(latest, [], protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("KEY_PERF_FIELD_MISSING", codes)
 
     def test_key_perf_speedup_low_reason_is_emitted_for_em_non_core_fixture(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)

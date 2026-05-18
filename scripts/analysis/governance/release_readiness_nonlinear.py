@@ -434,6 +434,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS": "2500",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "5000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.25",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS": "true",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "true",
         },
         "development": {
@@ -757,6 +758,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS": "4000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "8000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.45",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS": "false",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "false",
         },
         "feature": {
@@ -1062,6 +1064,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_MS": "8000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_RUN_MS": "12000",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO": "1.8",
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS": "false",
             "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND": "false",
         },
     }
@@ -1325,6 +1328,12 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_PROVIDER_BACKEND", "false"),
         )
     )
+    key_perf_require_fields = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS",
+            profile_default("RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_FIELDS", "false"),
+        )
+    )
     key_perf_records = records_for_fixtures(latest, KEY_PERFORMANCE_FIXTURES)
     if key_perf_require_fixtures:
         missing_key_perf = sorted(KEY_PERFORMANCE_FIXTURES.difference(key_perf_records.keys()))
@@ -1340,6 +1349,36 @@ def evaluate_release_readiness(
                 )
             )
     for fixture, rec in key_perf_records.items():
+        if key_perf_require_fields:
+            missing_fields = []
+            run_ms_value = rec.get("gpu_run_ms")
+            if not (
+                isinstance(run_ms_value, (int, float))
+                and math.isfinite(float(run_ms_value))
+                and float(run_ms_value) > 0
+            ):
+                missing_fields.append("gpu_run_ms")
+            speedup_value = rec.get("gpu_speedup_ratio")
+            if not (
+                isinstance(speedup_value, (int, float))
+                and math.isfinite(float(speedup_value))
+            ):
+                missing_fields.append("gpu_speedup_ratio")
+            solve_ms_value = rec.get("gpu_solver_solve_ms")
+            if not (
+                isinstance(solve_ms_value, (int, float))
+                and math.isfinite(float(solve_ms_value))
+                and float(solve_ms_value) > 0
+            ):
+                missing_fields.append("gpu_solver_solve_ms")
+            if missing_fields:
+                reasons.append(
+                    Reason(
+                        code="KEY_PERF_FIELD_MISSING",
+                        severity="fail" if protected else "warn",
+                        detail=f"{fixture} missing required key-performance fields: {', '.join(missing_fields)}",
+                    )
+                )
         if key_perf_require_provider_backend and fixture.endswith("_gpu_provider"):
             backend = rec.get("gpu_solver_backend")
             if not isinstance(backend, str) or not backend.strip():
