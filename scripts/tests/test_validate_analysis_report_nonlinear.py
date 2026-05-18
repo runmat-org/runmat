@@ -294,6 +294,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "electro_thermal_benign_conductivity_spread_ratio",
                     "electro_thermal_benign_transient_severity_peak",
                     "electro_thermal_benign_temporal_variation",
+                    "electro_thermal_benign_time_scale_mean",
                 },
             )
             | {
@@ -311,6 +312,7 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "electro_thermal_pathological_conductivity_spread_ratio",
                     "electro_thermal_pathological_transient_severity_peak",
                     "electro_thermal_pathological_temporal_variation",
+                    "electro_thermal_pathological_time_scale_mean",
                 },
             )
             | {

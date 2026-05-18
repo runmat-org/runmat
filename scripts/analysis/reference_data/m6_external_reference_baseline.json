@@ -769,6 +769,16 @@
       "tolerance_rel": 0.3
     },
     {
+      "name": "electro_thermal_benign_time_scale_mean",
+      "fixture_id": "electro_thermal_joule_benign_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_thermal_benign_time_scale_mean",
+      "reference": 0.8500000000000001,
+      "tolerance_abs": 0.18,
+      "tolerance_rel": 0.2
+    },
+    {
       "name": "electro_thermal_pathological_conductivity_spread_ratio",
       "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
       "field": "unused_for_threshold_source",
@@ -787,6 +797,16 @@
       "reference": 0.5,
       "tolerance_abs": 0.15,
       "tolerance_rel": 0.3
+    },
+    {
+      "name": "electro_thermal_pathological_time_scale_mean",
+      "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "electro_thermal_pathological_time_scale_mean",
+      "reference": 0.9586206896551723,
+      "tolerance_abs": 0.2,
+      "tolerance_rel": 0.2
     },
     {
       "name": "plasticity_hardening_reference_complex_load_realization_ratio",

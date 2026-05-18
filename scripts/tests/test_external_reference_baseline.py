@@ -278,12 +278,20 @@ class ExternalReferenceBaselineTests(unittest.TestCase):
                 "thermo_shock_oscillatory_temporal_variation",
             ),
             (
+                "electro_thermal_joule_benign_gpu_provider",
+                "electro_thermal_benign_time_scale_mean",
+            ),
+            (
                 "electro_thermal_joule_pathological_gpu_provider",
                 "electro_thermal_pathological_conductivity_spread_ratio",
             ),
             (
                 "electro_thermal_joule_pathological_gpu_provider",
                 "electro_thermal_pathological_temporal_variation",
+            ),
+            (
+                "electro_thermal_joule_pathological_gpu_provider",
+                "electro_thermal_pathological_time_scale_mean",
             ),
             (
                 "nonlinear_plastic_hardening_reference_complex_gpu_provider",

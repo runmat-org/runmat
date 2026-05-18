@@ -104,12 +104,14 @@ REQUIRED_FIXTURES = {
         "electro_thermal_benign_conductivity_spread_ratio",
         "electro_thermal_benign_transient_severity_peak",
         "electro_thermal_benign_temporal_variation",
+        "electro_thermal_benign_time_scale_mean",
     },
     "electro_thermal_joule_pathological_gpu_provider": {
         "electro_thermal_pathological_joule_heating_scale",
         "electro_thermal_pathological_conductivity_spread_ratio",
         "electro_thermal_pathological_transient_severity_peak",
         "electro_thermal_pathological_temporal_variation",
+        "electro_thermal_pathological_time_scale_mean",
     },
     "electromagnetic_reference_homogeneous_gpu_provider": {
         "em_homogeneous_sigma_omega_scale_mean",

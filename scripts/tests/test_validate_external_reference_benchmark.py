@@ -521,6 +521,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "pass": True,
         },
         {
+            "name": "electro_thermal_benign_time_scale_mean",
+            "fixture_id": "electro_thermal_joule_benign_gpu_provider",
+            "observed": 0.85,
+            "reference": 0.85,
+            "pass": True,
+        },
+        {
             "name": "electro_thermal_pathological_conductivity_spread_ratio",
             "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
             "observed": 3.27,
@@ -532,6 +539,13 @@ def required_metrics_payload(*, cfd_density_pass: bool = True):
             "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
             "observed": 0.5,
             "reference": 0.5,
+            "pass": True,
+        },
+        {
+            "name": "electro_thermal_pathological_time_scale_mean",
+            "fixture_id": "electro_thermal_joule_pathological_gpu_provider",
+            "observed": 0.959,
+            "reference": 0.959,
             "pass": True,
         },
         {
