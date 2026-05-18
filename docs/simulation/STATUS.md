@@ -42,6 +42,7 @@ Legend: `[x]` complete baseline, `[~]` active deepening, `[ ]` not started.
 - Governance artifact validation contracts continue to tighten: threshold-ratchet artifacts now require explicit schema/profile identity checks (`schema_version == "threshold-ratchet-report/v1"` and `governance_profile` in `release|development|feature`) before enforce-mode acceptance.
 - Threshold-ratchet governance now also enforces exact threshold-key contract coverage (required set present, no unexpected keys, no duplicates), so partial ratchet artifacts cannot silently pass enforce-mode validation.
 - Threshold-ratchet governance now also enforces canonical rationale and per-entry profile coherence with report-level profile, so semantically inconsistent ratchet payloads cannot silently pass enforce-mode validation.
+- Threshold-ratchet governance now also has generator/validator key-contract parity guards in tests, so ratchet keyset drift cannot silently bypass enforce-mode policy checks.
 - Promotion-calibration governance now also enforces canonical rationale plus exact expected profile/cadence key sets, so malformed calibration contract shape cannot silently pass enforce-mode validation.
 - Promotion-calibration governance now also enforces monotonic profile budget strictness and source/profile rolling-count coherence, so policy-incoherent calibration payloads cannot silently pass enforce-mode validation.
 - EM now includes additive material frequency-response support (`sigma(omega)` baseline) with fixture-level governance thresholds.

@@ -10,6 +10,7 @@ Last updated: 2026-05-18
 - Governance hardening is continuing in parallel: threshold-ratchet artifacts now enforce explicit schema/profile identity validation before ratchet-policy acceptance.
 - Governance hardening is continuing in parallel: threshold-ratchet artifacts now also enforce exact expected threshold-key coverage (missing/unexpected/duplicate key sets fail validation).
 - Governance hardening is continuing in parallel: threshold-ratchet artifacts now also enforce canonical rationale and per-entry profile coherence with report-level profile.
+- Governance hardening is continuing in parallel: threshold-ratchet generator/validator key-contract parity is now regression-guarded in tests to prevent silent keyset drift.
 - Governance hardening is continuing in parallel: promotion-calibration artifacts now enforce canonical rationale and exact profile/cadence key-set shape checks before calibration-policy acceptance.
 - Governance hardening is continuing in parallel: promotion-calibration artifacts now also enforce monotonic profile-budget strictness and source/profile rolling-count coherence checks.
 

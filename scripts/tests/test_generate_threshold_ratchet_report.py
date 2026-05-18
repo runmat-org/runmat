@@ -3,7 +3,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.analysis.governance.generate_threshold_ratchet_report import main
+from scripts.analysis.governance.generate_threshold_ratchet_report import (
+    OBSERVED_FIELDS,
+    RATCHET_HISTORY,
+    main,
+)
+from scripts.analysis.governance.validate_threshold_ratchet_report import (
+    REQUIRED_THRESHOLD_KEYS,
+)
 
 
 class GenerateThresholdRatchetReportTests(unittest.TestCase):
@@ -48,6 +55,10 @@ class GenerateThresholdRatchetReportTests(unittest.TestCase):
             self.assertEqual(report["rolling_report_count"], 6)
             self.assertEqual(report["rolling_trusted_report_count"], 4)
             self.assertEqual(len(report["entries"]), 5)
+            self.assertEqual(
+                {entry["threshold_key"] for entry in report["entries"]},
+                set(REQUIRED_THRESHOLD_KEYS),
+            )
             self.assertTrue(
                 any(
                     entry["threshold_key"]
@@ -97,6 +108,10 @@ class GenerateThresholdRatchetReportTests(unittest.TestCase):
             self.assertEqual(report["rolling_report_count"], 3)
             self.assertEqual(report["rolling_trusted_report_count"], 3)
             self.assertIn("Rolling reports (raw/trusted): `3`/`3`", out_md.read_text())
+
+    def test_ratchet_threshold_key_contracts_are_in_sync(self):
+        self.assertEqual(set(RATCHET_HISTORY.keys()), set(REQUIRED_THRESHOLD_KEYS))
+        self.assertEqual(set(OBSERVED_FIELDS.keys()), set(REQUIRED_THRESHOLD_KEYS))
 
 
 if __name__ == "__main__":
