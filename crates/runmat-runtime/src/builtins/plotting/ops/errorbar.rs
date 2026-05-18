@@ -410,14 +410,6 @@ fn parse_errorbar_args(args: Vec<Value>) -> crate::BuiltinResult<ErrorBarArgs> {
                 let mut rest = vec![third, fourth];
                 rest.extend(it);
                 Ok((target_axes, x, y, None, None, err.clone(), err, rest))
-            } else if is_y_only_asymmetric_style(&first, &second, &third, &fourth) {
-                let y = first;
-                let y_neg = second;
-                let y_pos = third;
-                let x = infer_errorbar_x_from_y(&y)?;
-                let mut rest = vec![fourth];
-                rest.extend(it);
-                Ok((target_axes, x, y, None, None, y_neg, y_pos, rest))
             } else if is_styleish(&fourth) {
                 let mut rest = vec![fourth];
                 rest.extend(it);
@@ -484,24 +476,6 @@ fn infer_errorbar_x_from_y(y: &Value) -> crate::BuiltinResult<Value> {
         cols: 1,
         dtype: runmat_builtins::NumericDType::F64,
     }))
-}
-
-fn is_y_only_asymmetric_style(
-    first: &Value,
-    second: &Value,
-    third: &Value,
-    fourth: &Value,
-) -> bool {
-    let Some(style) = super::style::value_as_string(fourth) else {
-        return false;
-    };
-    is_numericish(first)
-        && is_numericish(second)
-        && is_numericish(third)
-        && !super::style::looks_like_option_name(&style)
-        && Tensor::try_from(first).is_ok()
-        && Tensor::try_from(second).is_ok()
-        && Tensor::try_from(third).is_ok()
 }
 
 #[cfg(test)]
@@ -678,15 +652,15 @@ mod tests {
     }
 
     #[test]
-    fn errorbar_accepts_y_only_asymmetric_line_spec_before_name_value_pairs() {
+    fn errorbar_preserves_explicit_x_y_err_with_trailing_line_spec() {
         let _guard = lock_plot_registry();
         ensure_plot_test_env();
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         errorbar_builtin(vec![
+            Value::Tensor(vec_tensor(&[1.0, 2.0])),
             Value::Tensor(vec_tensor(&[3.0, 4.0])),
             Value::Tensor(vec_tensor(&[0.2, 0.3])),
-            Value::Tensor(vec_tensor(&[0.4, 0.5])),
             Value::String("o-".into()),
             Value::String("LineWidth".into()),
             Value::Num(1.5),
@@ -703,7 +677,7 @@ mod tests {
         assert_eq!(error.x, vec![1.0, 2.0]);
         assert_eq!(error.y, vec![3.0, 4.0]);
         assert_eq!(error.y_neg, vec![0.2, 0.3]);
-        assert_eq!(error.y_pos, vec![0.4, 0.5]);
+        assert_eq!(error.y_pos, vec![0.2, 0.3]);
         assert_eq!(error.line_width, 1.5);
         let marker = error.marker.as_ref().expect("expected marker");
         assert_eq!(
