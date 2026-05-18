@@ -3888,6 +3888,55 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PREP_ACCEPTANCE_MISSING", codes)
 
+    def test_prep_acceptance_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        for rec in latest["records"]:
+            rec.pop("prep_acceptance_passed", None)
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "PREP_ACCEPTANCE_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
+    def test_prep_health_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(latest, [], protected=True, prep_health=None)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "PREP_HEALTH_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
+    def test_prep_calibration_evidence_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(
+            latest,
+            [],
+            protected=True,
+            calibration_evidence=None,
+        )
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "PREP_CALIBRATION_EVIDENCE_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
     def test_prep_calibration_drift_reason_is_emitted(self):
         latest = report(
             passed=True,
@@ -4079,6 +4128,61 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_MISSING", codes)
+
+    def test_recommendation_artifact_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(
+            latest,
+            [],
+            protected=True,
+            calibration_evidence={
+                "schema_version": "prep-calibration-evidence/v1",
+                "generated_at": "2026-03-08T00:00:00Z",
+                "max_age_days": 365,
+                "fixtures": {},
+            },
+            recommendation_artifact=None,
+        )
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
+    def test_recommendation_artifact_stale_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(
+            latest,
+            [],
+            protected=True,
+            calibration_evidence={
+                "schema_version": "prep-calibration-evidence/v1",
+                "generated_at": "2026-03-08T00:00:00Z",
+                "max_age_days": 365,
+                "fixtures": {},
+            },
+            recommendation_artifact={
+                "schema_version": "prep-calibration-recommendations/v1",
+                "generated_at": "2025-01-01T00:00:00Z",
+                "max_age_days": 1,
+                "recommendations": [],
+            },
+        )
+        stale = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_STALE"
+            ),
+            None,
+        )
+        self.assertIsNotNone(stale)
+        self.assertEqual(stale["severity"], "fail")
 
     def test_release_branch_profile_requires_recommendation_artifact_by_default(self):
         os.environ["GITHUB_REF_NAME"] = "release/1.2.3"

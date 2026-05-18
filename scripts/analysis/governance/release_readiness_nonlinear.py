@@ -1698,7 +1698,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="PREP_ACCEPTANCE_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="prep acceptance metrics missing from nonlinear fixture records",
                 )
             )
@@ -1733,7 +1733,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="PREP_HEALTH_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="prep artifact health data missing for release readiness evaluation",
                 )
             )
@@ -1823,7 +1823,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="PREP_CALIBRATION_EVIDENCE_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="prep calibration evidence artifact missing for drift evaluation",
                 )
             )
@@ -1932,7 +1932,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="prep calibration recommendation artifact missing",
                 )
             )
@@ -1950,7 +1950,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_STALE",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="prep calibration recommendation artifact is stale",
                 )
             )
