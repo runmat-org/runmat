@@ -4842,6 +4842,58 @@ def evaluate_release_readiness(
         ]
         missing_metric_fields = []
         breaches = []
+        field_assertion_fallback_specs = {
+            "electromagnetic_energy_imbalance_ratio": [
+                (
+                    "electromagnetic_reference_homogeneous_gpu_provider",
+                    "em_homogeneous_energy_imbalance_ratio",
+                ),
+                (
+                    "electromagnetic_reference_heterogeneous_gpu_provider",
+                    "em_heterogeneous_energy_imbalance_ratio",
+                ),
+            ],
+            "electromagnetic_flux_divergence_proxy": [
+                (
+                    "electromagnetic_reference_homogeneous_gpu_provider",
+                    "em_homogeneous_flux_divergence_proxy",
+                ),
+                (
+                    "electromagnetic_reference_heterogeneous_gpu_provider",
+                    "em_heterogeneous_flux_divergence_proxy",
+                ),
+            ],
+            "electromagnetic_source_realization_ratio": [
+                (
+                    "electromagnetic_reference_homogeneous_gpu_provider",
+                    "em_homogeneous_source_realization_ratio",
+                ),
+                (
+                    "electromagnetic_reference_heterogeneous_gpu_provider",
+                    "em_heterogeneous_source_realization_ratio",
+                ),
+            ],
+            "electromagnetic_source_region_coverage_ratio": [
+                (
+                    "electromagnetic_reference_homogeneous_gpu_provider",
+                    "em_homogeneous_source_region_coverage_ratio",
+                ),
+                (
+                    "electromagnetic_reference_heterogeneous_gpu_provider",
+                    "em_heterogeneous_source_region_coverage_ratio",
+                ),
+            ],
+            "electromagnetic_source_material_alignment_ratio": [
+                (
+                    "electromagnetic_reference_homogeneous_gpu_provider",
+                    "em_homogeneous_source_material_alignment_ratio",
+                ),
+                (
+                    "electromagnetic_reference_heterogeneous_gpu_provider",
+                    "em_heterogeneous_source_material_alignment_ratio",
+                ),
+            ],
+        }
         for field, mode, threshold, code, label in metric_specs:
             values = []
             for rec in em_records:
@@ -4850,15 +4902,14 @@ def evaluate_release_readiness(
                     value = float(raw_value)
                     if math.isfinite(value):
                         values.append(value)
-            if not values and field == "electromagnetic_flux_divergence_proxy":
-                for rec in em_records:
-                    if rec.get("fixture_id") != "electromagnetic_reference_homogeneous_gpu_provider":
-                        continue
-                    observed = threshold_assertion_observed(
-                        rec, "em_homogeneous_flux_divergence_proxy"
-                    )
-                    if observed is not None:
-                        values.append(observed)
+            if not values:
+                for fixture_id, assertion_name in field_assertion_fallback_specs.get(field, []):
+                    for rec in em_records:
+                        if rec.get("fixture_id") != fixture_id:
+                            continue
+                        observed = threshold_assertion_observed(rec, assertion_name)
+                        if observed is not None:
+                            values.append(observed)
             if not values:
                 missing_metric_fields.append(field)
                 continue
@@ -6383,29 +6434,45 @@ def evaluate_release_readiness(
                 )
             )
 
-        em_energy_imbalance_trend_ratio = fixture_trend_ratio(
-            "electromagnetic_energy_imbalance_ratio"
-        )
-        if (
-            em_energy_imbalance_trend_ratio is not None
-            and em_energy_imbalance_trend_ratio
-            > em_max_energy_imbalance_trend_ratio_threshold
-        ):
-            reasons.append(
-                Reason(
-                    code="EM_ENERGY_IMBALANCE_TREND_WORSENING",
-                    severity="fail" if protected else "warn",
-                    detail=(
-                        f"EM energy-imbalance trend ratio {em_energy_imbalance_trend_ratio:.3f} exceeds "
-                        f"threshold {em_max_energy_imbalance_trend_ratio_threshold:.3f}"
-                    ),
+        energy_imbalance_trend_candidates = [
+            fixture_trend_ratio("electromagnetic_energy_imbalance_ratio"),
+            fixture_assertion_trend_ratio(
+                "em_homogeneous_energy_imbalance_ratio",
+                ratio_mode="increase",
+            ),
+            fixture_assertion_trend_ratio(
+                "em_heterogeneous_energy_imbalance_ratio",
+                ratio_mode="increase",
+            ),
+        ]
+        energy_imbalance_trend_candidates = [
+            value for value in energy_imbalance_trend_candidates if value is not None
+        ]
+        if energy_imbalance_trend_candidates:
+            em_energy_imbalance_trend_ratio = max(energy_imbalance_trend_candidates)
+            if (
+                em_energy_imbalance_trend_ratio
+                > em_max_energy_imbalance_trend_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="EM_ENERGY_IMBALANCE_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"EM energy-imbalance trend ratio {em_energy_imbalance_trend_ratio:.3f} exceeds "
+                            f"threshold {em_max_energy_imbalance_trend_ratio_threshold:.3f}"
+                        ),
+                    )
                 )
-            )
 
         flux_divergence_trend_candidates = [
             fixture_trend_ratio("electromagnetic_flux_divergence_proxy"),
             fixture_assertion_trend_ratio(
                 "em_homogeneous_flux_divergence_proxy",
+                ratio_mode="increase",
+            ),
+            fixture_assertion_trend_ratio(
+                "em_heterogeneous_flux_divergence_proxy",
                 ratio_mode="increase",
             ),
         ]
