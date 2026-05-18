@@ -7500,7 +7500,7 @@ def evaluate_release_readiness(
             reasons.append(
                 Reason(
                     code="EM_METRICS_MISSING",
-                    severity="warn",
+                    severity="fail" if protected else "warn",
                     detail="electromagnetic posture metrics missing from report records",
                 )
             )

@@ -2114,6 +2114,21 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIsNotNone(core_missing)
         self.assertEqual(core_missing["severity"], "fail")
 
+    def test_em_metrics_missing_is_fail_on_protected_branches(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"] = []
+        result = evaluate_release_readiness(latest, [], protected=True)
+        missing = next(
+            (
+                reason
+                for reason in result["reasons"]
+                if reason["code"] == "EM_METRICS_MISSING"
+            ),
+            None,
+        )
+        self.assertIsNotNone(missing)
+        self.assertEqual(missing["severity"], "fail")
+
     def test_em_solver_conditioning_posture_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
