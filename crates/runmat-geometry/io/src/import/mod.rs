@@ -1,3 +1,4 @@
+mod gltf;
 mod obj;
 mod ply;
 mod step;
@@ -49,6 +50,7 @@ pub fn import_geometry(
         GeometryFormat::Step => step::import_step(path, bytes, options),
         GeometryFormat::Obj => obj::import_obj(path, bytes, options),
         GeometryFormat::Ply => ply::import_ply(path, bytes, options),
+        GeometryFormat::Gltf => gltf::import_gltf(path, bytes, options),
         _ => Err(GeometryImportError::UnsupportedFormat),
     }
 }

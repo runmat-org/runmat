@@ -95,4 +95,13 @@ mod tests {
         );
         assert_eq!(format, GeometryFormat::Ply);
     }
+
+    #[test]
+    fn gltf_detected_from_header_without_extension() {
+        let format = detect_geometry_format(
+            "/model.dat",
+            b"{\"asset\":{\"version\":\"2.0\"},\"meshes\":[]}",
+        );
+        assert_eq!(format, GeometryFormat::Gltf);
+    }
 }
