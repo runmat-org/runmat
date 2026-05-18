@@ -600,6 +600,56 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_3d_slice_roundtrip_uses_slice_expr_paths() {
+        let ast = runmat_parser::parse(
+            r#"
+            A = reshape([1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24], 3, 4, 2);
+            S = A(1:2, 2:3, end);
+            A(1:2, 2:3, end) = S;
+        "#,
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let mut saw_index_expr = false;
+        let mut saw_store_slice = false;
+        for instr in &bytecode.instructions {
+            if let Instr::IndexSliceExpr {
+                dims,
+                end_mask,
+                end_numeric_exprs,
+                ..
+            } = instr
+            {
+                if *dims == 3 {
+                    saw_index_expr = true;
+                    assert_eq!(*end_mask, 0);
+                    assert_eq!(end_numeric_exprs.len(), 1);
+                }
+            }
+            if let Instr::StoreSlice(dims, numeric_count, colon_mask, end_mask) = instr {
+                if *dims == 3 {
+                    saw_store_slice = true;
+                    assert_eq!(*numeric_count, 2);
+                    assert_eq!(*colon_mask, 0);
+                    assert_eq!(*end_mask, 1 << 2);
+                }
+            }
+        }
+        assert!(saw_index_expr);
+        assert!(saw_store_slice);
+
+        let run = block_on(crate::interpret(&bytecode));
+        assert!(
+            run.is_ok(),
+            "roundtrip script should interpret successfully"
+        );
+    }
+
+    #[test]
     fn primary_compile_interprets_basic_if_statement() {
         let ast = runmat_parser::parse("if 1; x = 2; else; x = 3; end").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

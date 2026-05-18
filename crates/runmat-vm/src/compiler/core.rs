@@ -2237,11 +2237,10 @@ impl Compiler {
             match component {
                 MirIndexComponent::Colon => colon_mask |= 1u32 << dim,
                 MirIndexComponent::End { offset, .. } => {
+                    numeric_operands.push(None);
                     if *offset == 0 {
-                        self.emit(Instr::LoadConst(0.0));
                         end_numeric_exprs.push((numeric_count, EndExpr::End));
                     } else {
-                        self.emit(Instr::LoadConst(0.0));
                         end_numeric_exprs.push((numeric_count, end_expr_with_offset(*offset)));
                     }
                     numeric_count += 1;
