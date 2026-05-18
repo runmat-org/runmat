@@ -662,6 +662,24 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                 },
             ),
             _record(
+                "acoustic_harmonic_cpu",
+                {
+                    "acoustic_max_m_orthogonality_offdiag",
+                    "acoustic_min_relative_frequency_separation",
+                    "acoustic_mode_count",
+                    "acoustic_residual_warn_threshold",
+                },
+            ),
+            _record(
+                "acoustic_harmonic_gpu_fallback",
+                {
+                    "acoustic_max_m_orthogonality_offdiag",
+                    "acoustic_min_relative_frequency_separation",
+                    "acoustic_mode_count",
+                    "acoustic_residual_warn_threshold",
+                },
+            ),
+            _record(
                 "cfd_steady_gpu_provider",
                 {
                     "cfd_reference_density_kg_per_m3",
@@ -1153,6 +1171,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "fsi_cfd_profile_point_count"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_acoustic_cpu_mode_count_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "acoustic_harmonic_cpu":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "acoustic_mode_count"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"
