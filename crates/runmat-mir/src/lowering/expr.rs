@@ -239,6 +239,11 @@ pub(crate) fn lower_indexing_with_replacements(
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<MirIndexing, SemanticError> {
+    if indexing.kind == IndexKind::Dot {
+        return Err(SemanticError::new(
+            "MIR indexing lowering expects member access to lower through member expressions/places, not IndexKind::Dot",
+        ));
+    }
     Ok(MirIndexing {
         kind: indexing.kind.clone(),
         components: indexing
