@@ -382,6 +382,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MIN_CORE_ASSIGNMENT_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_CORE_FALLBACK_COEFFICIENT_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MIN_BOUNDARY_ANCHOR_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MIN_REFERENCE_FREQUENCY_HZ",
             "RUNMAT_RELEASE_READINESS_EM_MIN_SWEEP_COUNT",
             "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FREQUENCY_HZ",
             "RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FLUX_DENSITY",
@@ -391,6 +392,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_EM_MAX_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_EM_MAX_ENERGY_IMBALANCE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_FLUX_DIVERGENCE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_EM_MAX_REFERENCE_FREQUENCY_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_SWEEP_COUNT_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FREQUENCY_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FLUX_DENSITY_TREND_RATIO",
@@ -1328,6 +1330,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "publishable": True,
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.2,
+                "electromagnetic_reference_frequency_hz": 0.5,
                 "electromagnetic_sweep_count": 2.0,
                 "electromagnetic_resonance_peak_frequency_hz": 0.5,
                 "electromagnetic_resonance_peak_flux_density": 0.0,
@@ -1336,6 +1339,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "electromagnetic_resonance_flux_gain": 0.8,
             }
         )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_REFERENCE_FREQUENCY_HZ"] = "1.0"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_SWEEP_COUNT"] = "5.0"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FREQUENCY_HZ"] = "1.0"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_PEAK_FLUX_DENSITY"] = "0.1"
@@ -1344,6 +1348,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         os.environ["RUNMAT_RELEASE_READINESS_EM_MIN_RESONANCE_FLUX_GAIN"] = "1.0"
         result = evaluate_release_readiness(latest, [], protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_REFERENCE_FREQUENCY_LOW", codes)
         self.assertIn("EM_SWEEP_COUNT_LOW", codes)
         self.assertIn("EM_RESONANCE_PEAK_FREQUENCY_LOW", codes)
         self.assertIn("EM_RESONANCE_PEAK_FLUX_DENSITY_LOW", codes)
@@ -1359,6 +1364,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "publishable": True,
                 "gpu_run_ms": 100.0,
                 "gpu_speedup_ratio": 1.2,
+                "electromagnetic_reference_frequency_hz": 15.0,
                 "electromagnetic_sweep_count": 3.0,
                 "electromagnetic_resonance_peak_frequency_hz": 20.0,
                 "electromagnetic_resonance_peak_flux_density": 0.6,
@@ -1374,6 +1380,7 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "publishable": True,
                 "gpu_run_ms": 90.0,
                 "gpu_speedup_ratio": 1.2,
+                "electromagnetic_reference_frequency_hz": 30.0,
                 "electromagnetic_sweep_count": 6.0,
                 "electromagnetic_resonance_peak_frequency_hz": 40.0,
                 "electromagnetic_resonance_peak_flux_density": 1.2,
@@ -1381,6 +1388,9 @@ class ReleaseReadinessTests(unittest.TestCase):
                 "electromagnetic_resonance_q_proxy": 2.0,
                 "electromagnetic_resonance_flux_gain": 1.5,
             }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_REFERENCE_FREQUENCY_DROP_TREND_RATIO"] = (
+            "1.5"
         )
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_SWEEP_COUNT_DROP_TREND_RATIO"] = "1.5"
         os.environ["RUNMAT_RELEASE_READINESS_EM_MAX_RESONANCE_PEAK_FREQUENCY_TREND_RATIO"] = (
@@ -1398,6 +1408,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("EM_REFERENCE_FREQUENCY_TREND_WORSENING", codes)
         self.assertIn("EM_SWEEP_COUNT_TREND_WORSENING", codes)
         self.assertIn("EM_RESONANCE_PEAK_FREQUENCY_TREND_WORSENING", codes)
         self.assertIn("EM_RESONANCE_PEAK_FLUX_DENSITY_TREND_WORSENING", codes)

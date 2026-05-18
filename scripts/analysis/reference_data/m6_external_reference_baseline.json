@@ -319,6 +319,14 @@
       "tolerance_rel": 0.05
     },
     {
+      "name": "electromagnetic_reference_frequency_hz",
+      "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
+      "field": "electromagnetic_reference_frequency_hz",
+      "reference": 60.0,
+      "tolerance_abs": 30.0,
+      "tolerance_rel": 0.5
+    },
+    {
       "name": "electromagnetic_sweep_count",
       "fixture_id": "electromagnetic_reference_homogeneous_gpu_provider",
       "field": "electromagnetic_sweep_count",
@@ -635,6 +643,14 @@
       "reference": 0.25333333333333335,
       "tolerance_abs": 0.25,
       "tolerance_rel": 1.0
+    },
+    {
+      "name": "electromagnetic_reference_frequency_hz",
+      "fixture_id": "electromagnetic_reference_heterogeneous_gpu_provider",
+      "field": "electromagnetic_reference_frequency_hz",
+      "reference": 75.0,
+      "tolerance_abs": 40.0,
+      "tolerance_rel": 0.55
     },
     {
       "name": "electromagnetic_sweep_count",
