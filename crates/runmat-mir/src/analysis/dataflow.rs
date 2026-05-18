@@ -888,7 +888,7 @@ fn diagnose_indexing_reads(
 ) {
     for component in &indexing.components {
         match component {
-            MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
+            MirIndexComponent::Expr(operand) => {
                 diagnose_operand_read(operand, state, span, diagnostics);
             }
             MirIndexComponent::Colon | MirIndexComponent::End { .. } => {}

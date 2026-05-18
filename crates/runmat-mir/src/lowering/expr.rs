@@ -280,9 +280,12 @@ fn lower_index_component(
                 await_replacements,
             )?),
         },
-        IndexComponent::Logical(expr) => MirIndexComponent::Logical(
-            lower_operand_with_replacements(ctx, expr, temps, await_replacements)?,
-        ),
+        IndexComponent::Logical(expr) => MirIndexComponent::Expr(lower_operand_with_replacements(
+            ctx,
+            expr,
+            temps,
+            await_replacements,
+        )?),
     })
 }
 

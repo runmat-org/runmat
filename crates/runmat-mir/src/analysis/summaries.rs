@@ -756,7 +756,7 @@ fn scan_indexing(
 ) {
     for component in &indexing.components {
         match component {
-            MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
+            MirIndexComponent::Expr(operand) => {
                 scan_operand(body, operand, reads_captures, function_handles);
             }
             MirIndexComponent::Colon | MirIndexComponent::End { .. } => {}

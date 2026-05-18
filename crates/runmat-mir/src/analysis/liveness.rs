@@ -220,7 +220,7 @@ fn collect_indexing_reads_with_defs(
 ) {
     for component in &indexing.components {
         match component {
-            MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
+            MirIndexComponent::Expr(operand) => {
                 collect_operand_read_with_defs(operand, uses, defs);
             }
             MirIndexComponent::Colon | MirIndexComponent::End { .. } => {}

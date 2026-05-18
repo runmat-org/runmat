@@ -14,5 +14,4 @@ pub enum MirIndexComponent {
     Colon,
     End { dim: Option<usize>, offset: isize },
     Expr(MirOperand),
-    Logical(MirOperand),
 }

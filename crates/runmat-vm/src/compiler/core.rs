@@ -1005,7 +1005,7 @@ impl Compiler {
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Colon => expand_all = true,
-                MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
+                MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
                     index_count += 1;
                 }
@@ -1928,13 +1928,12 @@ impl Compiler {
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
-                MirIndexComponent::Logical(operand) => self.compile_mir_operand(operand)?,
                 MirIndexComponent::End { offset, .. } => {
                     self.emit(Instr::LoadConst(encode_cell_end_offset(*offset)));
                 }
                 _ => {
                     return Err(self.compile_error(
-                        "MIR cell index lowering expects expression/logical selectors or end-relative selectors",
+                        "MIR cell index lowering expects expression selectors or end-relative selectors",
                     ))
                 }
             }
@@ -1949,13 +1948,12 @@ impl Compiler {
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
-                MirIndexComponent::Logical(operand) => self.compile_mir_operand(operand)?,
                 MirIndexComponent::End { offset, .. } => {
                     self.emit(Instr::LoadConst(encode_cell_end_offset(*offset)));
                 }
                 _ => {
                     return Err(self.compile_error(
-                        "MIR cell index lowering expects expression/logical selectors or end-relative selectors",
+                        "MIR cell index lowering expects expression selectors or end-relative selectors",
                     ))
                 }
             }
@@ -2015,7 +2013,7 @@ impl Compiler {
             match component {
                 MirIndexComponent::Colon => colon_mask |= 1u32 << dim,
                 MirIndexComponent::End { offset, .. } if *offset == 0 => end_mask |= 1u32 << dim,
-                MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
+                MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
                     numeric_count += 1;
                 }
@@ -2085,7 +2083,7 @@ impl Compiler {
                     ));
                     numeric_count += 1;
                 }
-                MirIndexComponent::Expr(operand) | MirIndexComponent::Logical(operand) => {
+                MirIndexComponent::Expr(operand) => {
                     numeric_operands.push(Some(operand.clone()));
                     numeric_count += 1;
                 }
