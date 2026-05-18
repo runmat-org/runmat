@@ -71,6 +71,12 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                     "nonlinear_stress_total_increments",
                     "nonlinear_stress_stall_count",
                     "nonlinear_stress_iteration_spike_count",
+                    "nonlinear_stress_converged_increments",
+                    "nonlinear_stress_failed_increments",
+                    "nonlinear_stress_line_search_backtracks",
+                    "nonlinear_stress_max_increment_norm",
+                    "nonlinear_stress_max_residual_norm",
+                    "nonlinear_stress_tangent_rebuild_count",
                 },
             ),
             _record(
@@ -725,6 +731,22 @@ class ValidateAnalysisReportNonlinearTests(unittest.TestCase):
                         item
                         for item in record["threshold_assertions"]
                         if item["name"] != "nonlinear_converged_increments"
+                    ]
+                    break
+            path = Path(tmp) / "analysis_benchmark_report.json"
+            path.write_text(json.dumps({"records": records}))
+            rc = self._run_main_with_report(path)
+            self.assertEqual(rc, 1)
+
+    def test_fails_when_nonlinear_stress_converged_increments_assertion_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            records = self._base_records()
+            for record in records:
+                if record["fixture_id"] == "nonlinear_assembly_stress_gpu_provider":
+                    record["threshold_assertions"] = [
+                        item
+                        for item in record["threshold_assertions"]
+                        if item["name"] != "nonlinear_stress_converged_increments"
                     ]
                     break
             path = Path(tmp) / "analysis_benchmark_report.json"

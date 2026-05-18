@@ -3807,6 +3807,66 @@
       "tolerance_rel": null
     },
     {
+      "name": "nonlinear_stress_converged_increments",
+      "fixture_id": "nonlinear_assembly_stress_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_stress_converged_increments",
+      "reference": 32.0,
+      "tolerance_abs": 3.0,
+      "tolerance_rel": 0.15
+    },
+    {
+      "name": "nonlinear_stress_failed_increments",
+      "fixture_id": "nonlinear_assembly_stress_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_stress_failed_increments",
+      "reference": 0.0,
+      "tolerance_abs": 1.0,
+      "tolerance_rel": null
+    },
+    {
+      "name": "nonlinear_stress_line_search_backtracks",
+      "fixture_id": "nonlinear_assembly_stress_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_stress_line_search_backtracks",
+      "reference": 10.0,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 0.25
+    },
+    {
+      "name": "nonlinear_stress_max_increment_norm",
+      "fixture_id": "nonlinear_assembly_stress_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_stress_max_increment_norm",
+      "reference": 4.754088391464469e-08,
+      "tolerance_abs": 1e-07,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "nonlinear_stress_max_residual_norm",
+      "fixture_id": "nonlinear_assembly_stress_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_stress_max_residual_norm",
+      "reference": 2.8784547839812024e-09,
+      "tolerance_abs": 1e-06,
+      "tolerance_rel": 0.5
+    },
+    {
+      "name": "nonlinear_stress_tangent_rebuild_count",
+      "fixture_id": "nonlinear_assembly_stress_gpu_provider",
+      "field": "unused_for_threshold_source",
+      "source": "threshold_assertion",
+      "assertion_name": "nonlinear_stress_tangent_rebuild_count",
+      "reference": 6.0,
+      "tolerance_abs": 2.0,
+      "tolerance_rel": 0.35
+    },
+    {
       "name": "nonlinear_softening_total_increments",
       "fixture_id": "nonlinear_softening_proxy_gpu_provider",
       "field": "unused_for_threshold_source",
