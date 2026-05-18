@@ -351,6 +351,11 @@ EM_RESIDUAL_REQUIRED_FIELDS = {
     "electromagnetic_imag_residual_norm",
 }
 
+EM_BALANCE_REQUIRED_FIELDS = {
+    "electromagnetic_energy_imbalance_ratio",
+    "electromagnetic_flux_divergence_proxy",
+}
+
 PERFORMANCE_REQUIRED_FIELDS = {
     "nonlinear_assembly_gpu_provider": {
         "gpu_speedup_ratio",
@@ -715,6 +720,17 @@ def main() -> int:
                 errors.append(
                     "fixture "
                     f"{fixture_id} missing finite EM residual fields: "
+                    + ", ".join(missing_fields)
+                )
+            missing_fields = []
+            for field in sorted(EM_BALANCE_REQUIRED_FIELDS):
+                value = record.get(field)
+                if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                    missing_fields.append(field)
+            if missing_fields:
+                errors.append(
+                    "fixture "
+                    f"{fixture_id} missing finite EM balance fields: "
                     + ", ".join(missing_fields)
                 )
 
