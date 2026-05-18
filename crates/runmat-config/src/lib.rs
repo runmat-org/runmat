@@ -7,9 +7,15 @@
 //! 4. Built-in defaults (lowest priority)
 
 mod loader;
+mod project;
 mod schema;
 
 pub use loader::ConfigLoader;
+pub use project::{
+    discover_project_manifest_from, load_project_manifest, parse_project_manifest_toml,
+    ProjectDependency, ProjectEntrypoint, ProjectManifest, ProjectManifestLoadError,
+    ProjectManifestValidationError, ProjectPackage, ProjectSources, PROJECT_MANIFEST_FILENAME,
+};
 pub use schema::{
     error_namespace_for_language_compat, AccelPowerPreference, AccelerateConfig,
     AccelerateProviderPreference, AutoOffloadConfig, AutoOffloadLogLevel, ExportConfig,

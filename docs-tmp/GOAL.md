@@ -25,7 +25,7 @@ Complete the semantic migration of RunMat across Plans 0-7 until:
 3. Manifest-driven composition and entrypoints
 - Evidence: config/discovery and entrypoint selection wired through config crates + CLI/session integration.
 - Evidence commands: `rg -n "runmat.toml|entrypoint|manifest|sources|dependencies" crates/runmat-config crates/runmat-core crates/runmat-cli`.
-- Current status: partially verified; needs explicit closeout audit against Plan 5 acceptance criteria.
+- Current status: in progress. `runmat-config` now has dedicated `runmat.toml` manifest modeling, discovery, parse/load, and validation APIs/tests; CLI/core integration and composition-graph-driven resolution are still open.
 
 4. Unified nominal class/builtin metadata
 - Evidence: shared callable/class identity and builtin semantics metadata surfaces used by runtime/lowering/analysis.

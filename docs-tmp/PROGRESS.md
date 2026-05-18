@@ -26,6 +26,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added `runmat-mir` dev dependency for `runmat-gc`.
   - Validation: `cargo test -p runmat-gc --tests` green.
 
+- (pending commit) Plan 5 foundation in `runmat-config`
+  - Added dedicated project-manifest support for `runmat.toml` separate from runtime `.runmat.*` config:
+    - `ProjectManifest` shape (`package`, `sources`, `dependencies`, `entrypoints`)
+    - upward discovery (`discover_project_manifest_from`)
+    - TOML parsing/loading (`parse_project_manifest_toml`, `load_project_manifest`)
+    - validation rules for non-empty package/source roots, relative roots/paths, existing source/dependency paths, entrypoint target forms, duplicate entrypoint names, and optional `.m` inference for path entrypoints.
+  - Added `runmat-config` tests covering parse/load/validation and manifest discovery walking.
+  - Validation: `cargo test -p runmat-config`, `cargo fmt --all --check`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+
 ## Next Resolution Items
 
 - Finish converting remaining legacy test/doc references that imply removed APIs where they block semantic-only confidence.

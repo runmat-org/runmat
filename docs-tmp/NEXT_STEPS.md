@@ -628,6 +628,7 @@ Current ratchet status:
 - Dead core request input/resolver ABI surface has been removed: `ExecutionRequest` no longer carries unconsumed `inputs` and `resolver` fields (`RuntimeFlow` request-input payload and `ResolverHandle`), with request-path tests updated to the reduced enforced policy set.
 - Dead builtin compatibility enum surface has been trimmed: `BuiltinCompatibility::RunMatExtended` was removed from `runmat-builtins` after confirming no production usage, keeping compatibility labels scoped to behavior-backed modes.
 - `runmat-gc` stress coverage no longer depends on removed legacy VM/HIR test APIs (`HirProgram`, `runmat_vm::execute`); it now compiles and executes through semantic lowering + MIR + VM bytecode (`lowering.assembly` -> `runmat_mir::lower_assembly` -> `runmat_vm::compile` -> `runmat_vm::interpret`).
+- `runmat-config` now has a dedicated `runmat.toml` project-manifest boundary separate from runtime `.runmat.*` config: typed manifest sections (`package`, `sources`, `dependencies`, `entrypoints`), upward discovery, parse/load helpers, and validation for relative/existing roots + local path dependencies + entrypoint target forms (including `.m` inference for path entrypoints).
 
 ## Validation Cadence
 
