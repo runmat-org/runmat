@@ -344,233 +344,9 @@ pub async fn read_string_slice(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let rank = sa.shape.len();
-    if dims == 1 {
-        let total = sa.data.len();
-        let mut idxs: Vec<usize> = Vec::new();
-        let is_colon = (colon_mask & 1u32) != 0;
-        let is_end = (end_mask & 1u32) != 0;
-        if is_colon {
-            idxs = (1..=total).collect();
-        } else if is_end {
-            idxs = vec![total];
-        } else if let Some(v) = numeric.first() {
-            let materialized = materialize_index_value(v).await?;
-            if let Some(i) = index_scalar_from_value(&materialized).await? {
-                if i < 1 {
-                    return Err(crate::interpreter::errors::mex(
-                        "IndexOutOfBounds",
-                        "Index out of bounds",
-                    ));
-                }
-                idxs = vec![i as usize];
-            } else {
-                match &materialized {
-                    Value::Tensor(idx_t) => {
-                        let len = idx_t.shape.iter().product::<usize>();
-                        if len == total {
-                            for (i, &val) in idx_t.data.iter().enumerate() {
-                                if val != 0.0 {
-                                    idxs.push(i + 1);
-                                }
-                            }
-                        } else {
-                            for &val in &idx_t.data {
-                                let i = val as isize;
-                                if i < 1 {
-                                    return Err(crate::interpreter::errors::mex(
-                                        "IndexOutOfBounds",
-                                        "Index out of bounds",
-                                    ));
-                                }
-                                idxs.push(i as usize);
-                            }
-                        }
-                    }
-                    _ => {
-                        return Err(crate::interpreter::errors::mex(
-                            "UnsupportedIndexType",
-                            "Unsupported index type",
-                        ))
-                    }
-                }
-            }
-        } else {
-            return Err(crate::interpreter::errors::mex(
-                "MissingNumericIndex",
-                "missing numeric index",
-            ));
-        }
-        if idxs.iter().any(|&i| i == 0 || i > total) {
-            return Err(crate::interpreter::errors::mex(
-                "IndexOutOfBounds",
-                "Index out of bounds",
-            ));
-        }
-        if idxs.len() == 1 {
-            Ok(Value::String(sa.data[idxs[0] - 1].clone()))
-        } else {
-            let mut out: Vec<String> = Vec::with_capacity(idxs.len());
-            for &i in &idxs {
-                out.push(sa.data[i - 1].clone());
-            }
-            let out_sa = StringArray::new(out, vec![idxs.len(), 1])
-                .map_err(|e| format!("Slice error: {e}"))?;
-            Ok(Value::StringArray(out_sa))
-        }
-    } else {
-        let mut selectors: Vec<SliceSelector> = Vec::with_capacity(dims);
-        let mut num_iter = 0usize;
-        for d in 0..dims {
-            let is_colon = (colon_mask & (1u32 << d)) != 0;
-            let is_end = (end_mask & (1u32 << d)) != 0;
-            if is_colon {
-                selectors.push(SliceSelector::Colon);
-            } else if is_end {
-                let dim_len = *sa.shape.get(d).unwrap_or(&1);
-                selectors.push(SliceSelector::Scalar(dim_len));
-            } else {
-                let v = numeric.get(num_iter).ok_or_else(|| {
-                    crate::interpreter::errors::mex("MissingNumericIndex", "missing numeric index")
-                })?;
-                num_iter += 1;
-                let materialized = materialize_index_value(v).await?;
-                if let Some(idx) = index_scalar_from_value(&materialized).await? {
-                    if idx < 1 {
-                        return Err(crate::interpreter::errors::mex(
-                            "IndexOutOfBounds",
-                            "Index out of bounds",
-                        ));
-                    }
-                    selectors.push(SliceSelector::Scalar(idx as usize));
-                } else {
-                    match &materialized {
-                        Value::Tensor(idx_t) => {
-                            let dim_len = *sa.shape.get(d).unwrap_or(&1);
-                            let len = idx_t.shape.iter().product::<usize>();
-                            let is_binary_mask =
-                                len == dim_len && idx_t.data.iter().all(|&x| x == 0.0 || x == 1.0);
-                            if is_binary_mask {
-                                let mut v = Vec::new();
-                                for (i, &val) in idx_t.data.iter().enumerate() {
-                                    if val != 0.0 {
-                                        v.push(i + 1);
-                                    }
-                                }
-                                selectors.push(SliceSelector::Indices(v));
-                            } else {
-                                let mut v = Vec::with_capacity(len);
-                                for &val in &idx_t.data {
-                                    let idx = val as isize;
-                                    if idx < 1 {
-                                        return Err(crate::interpreter::errors::mex(
-                                            "IndexOutOfBounds",
-                                            "Index out of bounds",
-                                        ));
-                                    }
-                                    v.push(idx as usize);
-                                }
-                                selectors.push(SliceSelector::Indices(v));
-                            }
-                        }
-                        _ => {
-                            return Err(crate::interpreter::errors::mex(
-                                "UnsupportedIndexType",
-                                "Unsupported index type",
-                            ))
-                        }
-                    }
-                }
-            }
-        }
-
-        let mut out_dims: Vec<usize> = Vec::new();
-        let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-        for (d, sel) in selectors.iter().enumerate().take(dims) {
-            let dim_len = *sa.shape.get(d).unwrap_or(&1);
-            let idxs = match sel {
-                SliceSelector::Colon => (1..=dim_len).collect::<Vec<usize>>(),
-                SliceSelector::Scalar(i) => vec![*i],
-                SliceSelector::Indices(v) => v.clone(),
-                SliceSelector::LinearIndices { values, .. } => values.clone(),
-            };
-            if idxs.iter().any(|&i| i == 0 || i > dim_len) {
-                return Err(crate::interpreter::errors::mex(
-                    "IndexOutOfBounds",
-                    "Index out of bounds",
-                ));
-            }
-            if idxs.len() > 1 {
-                out_dims.push(idxs.len());
-            } else {
-                out_dims.push(1);
-            }
-            per_dim_indices.push(idxs);
-        }
-        if dims == 2 {
-            match (
-                &per_dim_indices[0].as_slice(),
-                &per_dim_indices[1].as_slice(),
-            ) {
-                (i_list, j_list) if i_list.len() > 1 && j_list.len() == 1 => {
-                    out_dims = vec![i_list.len(), 1];
-                }
-                (i_list, j_list) if i_list.len() == 1 && j_list.len() > 1 => {
-                    out_dims = vec![1, j_list.len()];
-                }
-                _ => {}
-            }
-        }
-        let full_shape: Vec<usize> = if rank < dims {
-            let mut s = sa.shape.clone();
-            s.resize(dims, 1);
-            s
-        } else {
-            sa.shape.clone()
-        };
-        let mut strides: Vec<usize> = vec![0; dims];
-        let mut acc = 1usize;
-        for (d, stride) in strides.iter_mut().enumerate().take(dims) {
-            *stride = acc;
-            acc *= full_shape[d];
-        }
-        let total_out: usize = out_dims.iter().product();
-        if total_out == 0 {
-            return Ok(Value::StringArray(
-                StringArray::new(Vec::new(), out_dims).map_err(|e| format!("Slice error: {e}"))?,
-            ));
-        }
-        let mut out_data: Vec<String> = Vec::with_capacity(total_out);
-        let mut idx = vec![0usize; dims];
-        loop {
-            let current: Vec<usize> = (0..dims).map(|d| per_dim_indices[d][idx[d]]).collect();
-            let mut lin = 0usize;
-            for d in 0..dims {
-                let i0 = current[d] - 1;
-                lin += i0 * strides[d];
-            }
-            out_data.push(sa.data[lin].clone());
-            let mut d = 0usize;
-            while d < dims {
-                idx[d] += 1;
-                if idx[d] < per_dim_indices[d].len() {
-                    break;
-                }
-                idx[d] = 0;
-                d += 1;
-            }
-            if d == dims {
-                break;
-            }
-        }
-        if out_data.len() == 1 {
-            Ok(Value::String(out_data[0].clone()))
-        } else {
-            let out_sa =
-                StringArray::new(out_data, out_dims).map_err(|e| format!("Slice error: {e}"))?;
-            Ok(Value::StringArray(out_sa))
-        }
-    }
+    let selectors = build_slice_selectors(dims, colon_mask, end_mask, numeric, &sa.shape).await?;
+    let plan = build_index_plan(&selectors, dims, &sa.shape)?;
+    gather_string_slice(sa, &plan)
 }
 
 pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, RuntimeError> {
@@ -603,4 +379,58 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
     let out_sa = StringArray::new(out, plan.output_shape.clone())
         .map_err(|e| format!("Slice error: {e}"))?;
     Ok(Value::StringArray(out_sa))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_string_slice;
+    use futures::executor::block_on;
+    use runmat_builtins::{StringArray, Tensor, Value};
+
+    #[test]
+    fn string_slice_linear_tensor_indices_preserve_selector_shape() {
+        let sa = StringArray::new(
+            vec![
+                "a".to_string(),
+                "b".to_string(),
+                "c".to_string(),
+                "d".to_string(),
+            ],
+            vec![2, 2],
+        )
+        .expect("string array");
+        let selector =
+            Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![1, 2]).expect("selector tensor"));
+        let result = block_on(read_string_slice(&sa, 1, 0, 0, &[selector])).expect("slice");
+        match result {
+            Value::StringArray(out) => {
+                assert_eq!(out.shape, vec![1, 2]);
+                assert_eq!(out.data, vec!["a".to_string(), "c".to_string()]);
+            }
+            other => panic!("expected string array result, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn string_slice_colon_then_scalar_selects_column() {
+        let sa = StringArray::new(
+            vec![
+                "a".to_string(),
+                "b".to_string(),
+                "c".to_string(),
+                "d".to_string(),
+            ],
+            vec![2, 2],
+        )
+        .expect("string array");
+        let result =
+            block_on(read_string_slice(&sa, 2, 0b01, 0, &[Value::Num(2.0)])).expect("slice");
+        match result {
+            Value::StringArray(out) => {
+                assert_eq!(out.shape, vec![2, 1]);
+                assert_eq!(out.data, vec!["c".to_string(), "d".to_string()]);
+            }
+            other => panic!("expected string array result, got {other:?}"),
+        }
+    }
 }
