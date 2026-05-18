@@ -363,3 +363,70 @@ function = "main"
         .to_string()
         .contains("did not resolve under configured source roots"));
 }
+
+#[test]
+fn resolve_project_entrypoint_supports_class_folder_module_function_target() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src/+pkg/@Point")).unwrap();
+    fs::write(
+        tmp.path().join("src/+pkg/@Point/move.m"),
+        "function obj = move(obj); end",
+    )
+    .unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "point-move"
+module = "pkg.Point"
+function = "move"
+"#,
+    );
+    let manifest = load_project_manifest(&manifest_path).expect("manifest should validate");
+    let resolved = resolve_project_entrypoint(tmp.path(), &manifest, "point-move")
+        .expect("resolver should succeed")
+        .expect("entrypoint should exist");
+    assert_eq!(resolved.target, ResolvedEntrypointTarget::ModuleFunction);
+    assert_eq!(
+        resolved.source_file.canonicalize().unwrap(),
+        tmp.path()
+            .join("src/+pkg/@Point/move.m")
+            .canonicalize()
+            .unwrap()
+    );
+}
+
+#[test]
+fn resolve_project_entrypoint_reports_source_index_failure() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src/app")).unwrap();
+    let manifest_path = write_manifest(
+        tmp.path(),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "server"
+module = "app.server"
+function = "main"
+"#,
+    );
+    let manifest = load_project_manifest(&manifest_path).expect("manifest should validate");
+    fs::remove_dir_all(tmp.path().join("src")).unwrap();
+    let err = resolve_project_entrypoint(tmp.path(), &manifest, "server")
+        .expect_err("missing source root should bubble source index error");
+    assert!(
+        err.to_string().contains("failed to resolve entrypoint")
+            || err.to_string().contains("source root does not exist")
+    );
+}

@@ -173,6 +173,12 @@ pub enum ProjectEntrypointResolveError {
         module: String,
         function: String,
     },
+    #[error("failed to resolve entrypoint `{entrypoint}` via project source index: {source}")]
+    SourceIndex {
+        entrypoint: String,
+        #[source]
+        source: ProjectSourceIndexError,
+    },
 }
 
 impl ProjectManifest {
@@ -402,7 +408,12 @@ pub fn resolve_project_entrypoint(
 
     if let (Some(module), Some(function)) = (&entrypoint.module, &entrypoint.function) {
         let Some(source_file) =
-            resolve_module_source_file(project_root, &manifest.sources.roots, module)
+            resolve_module_function_source_file(project_root, manifest, module, function).map_err(
+                |source| ProjectEntrypointResolveError::SourceIndex {
+                    entrypoint: entrypoint_name.to_string(),
+                    source,
+                },
+            )?
         else {
             return Err(ProjectEntrypointResolveError::MissingModuleTarget {
                 entrypoint: entrypoint_name.to_string(),
@@ -445,22 +456,24 @@ fn resolve_entrypoint_path(project_root: &Path, path: &Path) -> Option<PathBuf> 
     None
 }
 
-fn resolve_module_source_file(
+fn resolve_module_function_source_file(
     project_root: &Path,
-    source_roots: &[PathBuf],
+    manifest: &ProjectManifest,
     module: &str,
-) -> Option<PathBuf> {
-    let module_path = module.replace('.', "/");
-    for root in source_roots {
-        let candidate = project_root
-            .join(root)
-            .join(&module_path)
-            .with_extension("m");
-        if candidate.is_file() {
-            return Some(candidate);
+    function: &str,
+) -> Result<Option<PathBuf>, ProjectSourceIndexError> {
+    let index = build_project_source_index(project_root, manifest)?;
+    let module_function = format!("{module}.{function}");
+    for file in &index.files {
+        if file.qualified_name == module || file.qualified_name == module_function {
+            return Ok(Some(
+                project_root
+                    .join(&file.source_root)
+                    .join(&file.relative_path),
+            ));
         }
     }
-    None
+    Ok(None)
 }
 
 #[derive(Debug, Clone, Default)]
