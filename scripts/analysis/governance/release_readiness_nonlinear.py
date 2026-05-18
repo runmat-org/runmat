@@ -1550,11 +1550,15 @@ def evaluate_release_readiness(
                                 f"{', '.join(missing_trend_baselines)} "
                                 f"(require >= {key_perf_min_trend_baseline_samples} samples)"
                             ),
+                            )
                         )
-                    )
             current = rec.get("gpu_run_ms")
             history = hist.get(fixture, [])
-            if isinstance(current, (int, float)) and current > 0 and history:
+            if (
+                isinstance(current, (int, float))
+                and current > 0
+                and len(history) >= key_perf_min_trend_baseline_samples
+            ):
                 baseline = statistics.median(history)
                 if baseline > 0:
                     ratio = float(current) / baseline
@@ -1574,7 +1578,7 @@ def evaluate_release_readiness(
             if (
                 isinstance(current_solve, (int, float))
                 and current_solve > 0
-                and solve_history
+                and len(solve_history) >= key_perf_min_trend_baseline_samples
             ):
                 solve_baseline = statistics.median(solve_history)
                 if solve_baseline > 0:
@@ -1595,7 +1599,7 @@ def evaluate_release_readiness(
             if (
                 isinstance(current_speedup, (int, float))
                 and current_speedup > 0
-                and speedup_history
+                and len(speedup_history) >= key_perf_min_trend_baseline_samples
             ):
                 speedup_baseline = statistics.median(speedup_history)
                 if speedup_baseline > 0:

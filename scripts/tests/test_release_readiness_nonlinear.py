@@ -845,6 +845,39 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("KEY_PERF_TREND_BASELINE_MISSING", codes)
 
+    def test_key_perf_trend_reasons_require_min_baseline_samples(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 500.0,
+                "gpu_speedup_ratio": 1.0,
+                "gpu_solver_solve_ms": 400.0,
+            }
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        rolling[0]["records"].append(
+            {
+                "fixture_id": "cfd_steady_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 100.0,
+                "gpu_speedup_ratio": 2.0,
+                "gpu_solver_solve_ms": 100.0,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_REQUIRE_TREND_BASELINES"] = "true"
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MIN_TREND_BASELINE_SAMPLES"] = "2"
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SLOWDOWN_RATIO"] = "1.1"
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SOLVE_SLOWDOWN_RATIO"] = "1.1"
+        os.environ["RUNMAT_RELEASE_READINESS_KEY_PERF_MAX_SPEEDUP_DROP_TREND_RATIO"] = "1.1"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("KEY_PERF_TREND_BASELINE_MISSING", codes)
+        self.assertNotIn("KEY_PERF_TREND_SLOWDOWN", codes)
+        self.assertNotIn("KEY_PERF_SOLVE_TREND_SLOWDOWN", codes)
+        self.assertNotIn("KEY_PERF_SPEEDUP_TREND_WORSENING", codes)
+
     def test_key_perf_trend_baseline_missing_reason_is_not_emitted_when_min_samples_met(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
