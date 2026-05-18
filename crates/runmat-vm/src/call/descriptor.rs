@@ -428,6 +428,9 @@ async fn execute_resolved_callable(
                 let Some(name) = other.display_name() else {
                     return Err(undefined_name_error("<unnamed callable>", &metadata));
                 };
+                if matches!(other, CallableIdentity::ExternalName(_)) {
+                    return Err(undefined_name_error(&name, &metadata));
+                }
                 forward_named_fallback(name, args, requested_outputs, fallback_policy).await
             }
             CallableFallbackPolicy::None
@@ -481,6 +484,9 @@ async fn try_execute_resolved_callable(
                     runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
                 {
                     return result.map(Some);
+                }
+                if matches!(other, CallableIdentity::ExternalName(_)) {
+                    return Ok(None);
                 }
                 let Some(name) = other.display_name() else {
                     return Ok(None);
@@ -555,7 +561,9 @@ mod tests {
     use super::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
     use futures::executor::block_on;
     use runmat_builtins::{Tensor, Value};
-    use runmat_hir::{BuiltinId, CallableFallbackPolicy, CallableIdentity};
+    use runmat_hir::{
+        BuiltinId, CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName,
+    };
 
     #[test]
     fn builtin_descriptor_uses_requested_outputs_for_multi_result_calls() {
@@ -592,5 +600,35 @@ mod tests {
         );
         let value = block_on(execute_callable_descriptor(descriptor)).expect("execute descriptor");
         assert_eq!(value, expected);
+    }
+
+    #[test]
+    fn external_name_descriptor_does_not_fallback_to_builtin_name_resolution() {
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::ExternalName(QualifiedName(vec![SymbolName("sqrt".to_string())])),
+            Some("sqrt".to_string()),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::RuntimeNameResolution,
+            CallableCallKind::Direct,
+        );
+        let err = block_on(execute_callable_descriptor(descriptor))
+            .expect_err("external names should remain unresolved without semantic resolution");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
+    fn dynamic_name_descriptor_runtime_name_resolution_can_reach_builtin() {
+        let descriptor = CallableDescriptor::resolved(
+            CallableIdentity::DynamicName(SymbolName("sqrt".to_string())),
+            Some("sqrt".to_string()),
+            vec![Value::Num(9.0)],
+            1,
+            CallableFallbackPolicy::RuntimeNameResolution,
+            CallableCallKind::Direct,
+        );
+        let value = block_on(execute_callable_descriptor(descriptor))
+            .expect("dynamic runtime name resolution should reach builtin");
+        assert_eq!(value, Value::Num(3.0));
     }
 }
