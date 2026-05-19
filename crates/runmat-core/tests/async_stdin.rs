@@ -216,3 +216,53 @@ fn spawn_of_async_function_triggers_pause_handler_before_await() -> Result<()> {
     assert_eq!(value_as_f64(&marker_value), Some(7.0));
     Ok(())
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn parallel_spawn_inputs_follow_spawn_order_not_await_order() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
+    let _guard = InteractiveGuard::new();
+    let mut session = RunMatSession::with_options(false, false)?;
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let prompts_clone = Arc::clone(&prompts);
+    let responses = Arc::new(Mutex::new(VecDeque::from([
+        InputResponse::Line("11".into()),
+        InputResponse::Line("22".into()),
+    ])));
+    let responses_clone = Arc::clone(&responses);
+    session.install_async_input_handler(move |request: InputRequest| {
+        let prompts_clone = Arc::clone(&prompts_clone);
+        let responses_clone = Arc::clone(&responses_clone);
+        async move {
+            prompts_clone.lock().unwrap().push(request.prompt.clone());
+            let response = responses_clone
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("missing queued response");
+            Ok(response)
+        }
+    });
+
+    let result = block_on(session.execute(
+        "async function y = first(); input('first: '); y = 1; end; \
+         async function y = second(); input('second: '); y = 2; end; \
+         t1 = spawn(first()); t2 = spawn(second()); out2 = await(t2); out1 = await(t1);",
+    ))
+    .map_err(anyhow::Error::new)?;
+    assert!(
+        result.error.is_none(),
+        "parallel spawn/await input flow should not raise runtime errors"
+    );
+    assert_eq!(result.stdin_events.len(), 2);
+    assert_eq!(prompts.lock().unwrap().as_slice(), &["first: ", "second: "]);
+
+    let out1 = block_on(session.execute("out1")).map_err(anyhow::Error::new)?;
+    let out1_value = out1.value.expect("out1 readback should produce a value");
+    assert_eq!(value_as_f64(&out1_value), Some(1.0));
+
+    let out2 = block_on(session.execute("out2")).map_err(anyhow::Error::new)?;
+    let out2_value = out2.value.expect("out2 readback should produce a value");
+    assert_eq!(value_as_f64(&out2_value), Some(2.0));
+    Ok(())
+}
