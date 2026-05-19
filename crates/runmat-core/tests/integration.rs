@@ -108,14 +108,9 @@ fn test_error_recovery_and_continued_execution() {
         let result3 = block_on(engine.execute("z = 3"));
         assert!(result3.is_ok());
 
-        // Statistics should reflect execution attempts (behavior may vary)
+        // Statistics should reflect all execution attempts, including parse failures.
         let stats = engine.stats();
-        // Could be 2 (only successful) or 3 (all attempts) depending on implementation
-        assert!(
-            stats.total_executions >= 2 && stats.total_executions <= 3,
-            "Expected 2-3 executions, got {}",
-            stats.total_executions
-        );
+        assert_eq!(stats.total_executions, 3);
     });
 }
 

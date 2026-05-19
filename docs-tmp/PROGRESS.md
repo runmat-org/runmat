@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 core execution-attempt stats contract ratchet
+  - Tightened execution-attempt accounting in [integration.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/integration.rs):
+    - `test_error_recovery_and_continued_execution` now asserts exact `stats.total_executions == 3` (valid run, invalid parse, valid recovery run), replacing the previous loose `2..=3` range.
+  - This locks the core stats surface to deterministic execute-entry accounting, including parser-stage failures.
+  - Validation: `cargo test -p runmat-core --test integration`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 core integration parse-stage contract ratchet
   - Tightened broad error handling in [integration.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/integration.rs):
     - `test_error_recovery_and_continued_execution` now asserts `Err(RunError::Syntax(_))` for the intentionally incomplete matrix literal path, instead of a generic `is_err()` check.
