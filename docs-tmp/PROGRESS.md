@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `f0f21c5c` `RM-378: require containment in fusion-group span filter`
+  - Tightened `fusion_group_within_semantic_candidate_spans` to require full instruction-span containment within a single semantic candidate span (instead of permissive overlap), aligning fusion-group semantic span filtering with the stricter containment contract used in pre-gate and node filtering.
+  - Removed now-dead overlap helper after containment unification.
+  - Validation: `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm semantic_candidates_with_partial_overlap_do_not_build_fusion_groups`.
+
 - `758c4516` `RM-378: refine colon-name symbol guard for local paths`
   - Refined colon-style source-name guard behavior across core compile and CLI bytecode symbol discovery: colon names are blocked from project-symbol discovery only when they do not resolve to an existing local path.
   - This preserves remote/virtual source isolation while avoiding portability regressions for legitimate local colon-bearing paths.
