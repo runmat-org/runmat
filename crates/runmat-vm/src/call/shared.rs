@@ -572,7 +572,10 @@ fn normalize_object_numeric_selector(selector: &Value) -> Result<Value, RuntimeE
         Value::Num(n) => Ok(Value::Num(*n)),
         Value::Int(i) => Ok(Value::Num(i.to_f64())),
         Value::Tensor(t) => Ok(Value::Tensor(t.clone())),
-        other => Err(format!("Unsupported index type for object selector: {other:?}").into()),
+        _ => Err(crate::interpreter::errors::mex(
+            "ObjectSelectorTypeUnsupported",
+            "unsupported index type for object selector",
+        )),
     }
 }
 
@@ -1123,6 +1126,43 @@ mod tests {
         )
         .expect_err("duplicate range dimensions should fail");
         assert_eq!(err.identifier(), Some("RunMat:DuplicateRangeSelectorDim"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_out_of_bounds_range_dim() {
+        let err = build_object_paren_expr_selector_values(
+            1,
+            0,
+            0,
+            &[1],
+            &[(1.0, 1.0)],
+            &[None],
+            &[None],
+            &[EndExpr::End],
+            &[],
+        )
+        .expect_err("out-of-bounds range dimension should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorDim"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_unsupported_numeric_selector_type() {
+        let err = build_object_paren_expr_selector_values(
+            1,
+            0,
+            0,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[Value::String("bad".to_string())],
+        )
+        .expect_err("unsupported object selector type should fail");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:ObjectSelectorTypeUnsupported")
+        );
     }
 
     #[test]

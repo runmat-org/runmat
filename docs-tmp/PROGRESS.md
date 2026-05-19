@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 6/7 object selector-plan identifier normalization ratchet
+  - Tightened object paren-expr selector validation/runtime contracts in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
+    - unsupported object numeric selector types now emit stable identifier `RunMat:ObjectSelectorTypeUnsupported` (via `mex("ObjectSelectorTypeUnsupported", ...)`) instead of ad hoc string errors.
+    - added explicit out-of-bounds range-dimension coverage (`RunMat:InvalidRangeSelectorDim`).
+  - Added/updated selector-plan tests:
+    - `object_paren_expr_selector_values_reject_out_of_bounds_range_dim`
+    - `object_paren_expr_selector_values_reject_unsupported_numeric_selector_type`
+  - Validation: `cargo test -p runmat-vm object_paren_expr_selector_values_reject_out_of_bounds_range_dim -- --nocapture`, `cargo test -p runmat-vm object_paren_expr_selector_values_reject_unsupported_numeric_selector_type -- --nocapture`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 runtime fusion sanitization no-longer-trusts stale compile node IDs
   - Strengthened runtime fusion-plan sanitization in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs):
     - pre-mapped compile node IDs are now retained only when they are both kind-compatible and span-overlap/touch compatible with the semantic group span.
