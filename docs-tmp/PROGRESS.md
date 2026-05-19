@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `9fd5f027` `RM-378: resolve wildcard imports via dependency aliases`
+  - Project composition symbol discovery in `runmat-core` now includes dependency alias-qualified symbols from root `runmat.toml` dependency mapping (`alias -> package`), in addition to package-qualified and raw source-index symbols.
+  - This enables wildcard imports like `import statsdep.*; y = summarize(1);` to resolve as package-function calls through manifest dependency aliases.
+  - Added integration regression coverage:
+    - `compile_input_resolves_wildcard_import_from_dependency_alias`
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-core compile_input_resolves_wildcard_import_from_project_source_index`, `cargo test -p runmat-core compile_input_resolves_wildcard_import_from_dependency_alias`, `cargo test -p runmat-core source_input_path_`, `cargo test -p runmat --lib resolve_script_input_`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+
 - `f3dd3c4b` `RM-378: thread project source symbols into import resolution`
   - `runmat-core` compile path now discovers project composition/source-index symbols from the active source context and passes them into HIR lowering.
   - `runmat-hir` wildcard import resolution now accepts project source-index candidates (not only builtins) for both:
