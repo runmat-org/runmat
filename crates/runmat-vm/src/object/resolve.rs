@@ -7,6 +7,8 @@ use crate::interpreter::errors::mex;
 use runmat_builtins::{self, Access, Closure, StructValue, Value};
 use runmat_runtime::RuntimeError;
 
+const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
+
 pub async fn load_member(
     base: Value,
     field: String,
@@ -23,7 +25,10 @@ pub async fn load_member(
                     .into());
                 }
                 if p.get_access == Access::Private {
-                    return Err(format!("Property '{}' is private", field).into());
+                    return Err(mex(
+                        IDENT_PROPERTY_PRIVATE_ACCESS,
+                        &format!("Property '{}' is private", field),
+                    ));
                 }
                 if p.is_dependent {
                     if let Ok(v) = call_object_property_getter_with_outputs(
@@ -173,7 +178,10 @@ where
                     .into());
                 }
                 if p.set_access == Access::Private {
-                    return Err(format!("Property '{}' is private", field).into());
+                    return Err(mex(
+                        IDENT_PROPERTY_PRIVATE_ACCESS,
+                        &format!("Property '{}' is private", field),
+                    ));
                 }
                 if p.is_dependent {
                     if let Ok(v) = call_object_property_setter_with_outputs(
@@ -208,7 +216,10 @@ where
                     return Err(format!("Property '{}' is not static", field).into());
                 }
                 if p.set_access == Access::Private {
-                    return Err(format!("Property '{}' is private", field).into());
+                    return Err(mex(
+                        IDENT_PROPERTY_PRIVATE_ACCESS,
+                        &format!("Property '{}' is private", field),
+                    ));
                 }
                 runmat_builtins::set_static_property_value_in_owner(&owner, &field, rhs)?;
                 Ok(Value::ClassRef(cls))

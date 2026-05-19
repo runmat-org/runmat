@@ -50,10 +50,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "setfield";
+const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
 
 fn setfield_flow(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn setfield_private_access(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(IDENT_PROPERTY_PRIVATE_ACCESS)
         .build()
 }
 
@@ -692,7 +700,7 @@ async fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult
             )));
         }
         if prop.get_access == Access::Private {
-            return Err(setfield_flow(format!(
+            return Err(setfield_private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
                 name, obj.class_name
             )));
@@ -719,7 +727,7 @@ async fn read_object_property(obj: &ObjectInstance, name: &str) -> BuiltinResult
 
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.get_access == Access::Private {
-            return Err(setfield_flow(format!(
+            return Err(setfield_private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
                 name, obj.class_name
             )));
@@ -749,7 +757,9 @@ async fn write_object_property(
             )));
         }
         if prop.set_access == Access::Private {
-            return Err(setfield_flow(format!("Property '{name}' is private")));
+            return Err(setfield_private_access(format!(
+                "Property '{name}' is private"
+            )));
         }
         if prop.is_dependent {
             let setter = object_property_setter_name(name);

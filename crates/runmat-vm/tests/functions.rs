@@ -831,8 +831,9 @@ fn classes_static_and_inheritance() {
         "__register_test_classes(); p = new_object('Point'); s = getfield(p,'secret');",
     )
     .expect_err("private property get should error");
-    assert!(
-        err.message().contains("secret") && err.message().contains("Point"),
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:PropertyPrivateAccess"),
         "unexpected error: {}",
         err.message()
     );
@@ -872,8 +873,9 @@ fn classes_property_access_attributes() {
         "__register_test_classes(); p = new_object('Point'); p = setfield(p,'secret', 7);",
     )
     .expect_err("private property set should error");
-    assert!(
-        err.message().contains("Property 'secret' is private"),
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:PropertyPrivateAccess"),
         "unexpected error: {}",
         err.message()
     );

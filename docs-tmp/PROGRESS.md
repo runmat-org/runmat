@@ -6,6 +6,16 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 3 private-property access identifier contract ratchet
+  - Added stable `RunMat:PropertyPrivateAccess` diagnostics across both VM object resolution and runtime object-field builtins:
+    - [resolve.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/object/resolve.rs)
+    - [getfield.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/structs/core/getfield.rs)
+    - [setfield.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/structs/core/setfield.rs)
+  - Updated semantic VM coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) to assert identifier contracts for private property get/set failures:
+    - `classes_static_and_inheritance`
+    - `classes_property_access_attributes`
+  - Validation: `cargo test -p runmat-vm --test functions classes_static_and_inheritance -- --exact`, `cargo test -p runmat-vm --test functions classes_property_access_attributes -- --exact`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 3 semantic class-attribute identifier contract ratchet
   - Added stable semantic-lowering identifiers for class attribute conflict diagnostics in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs):
     - `RunMat:ClassPropertyAttributeConflict` for incompatible property attribute combinations (for example `Constant` + `Dependent`).

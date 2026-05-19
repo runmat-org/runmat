@@ -46,10 +46,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "getfield";
+const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
 
 fn getfield_flow(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn getfield_private_access(message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(IDENT_PROPERTY_PRIVATE_ACCESS)
         .build()
 }
 
@@ -724,7 +732,7 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
             )));
         }
         if prop.get_access == Access::Private {
-            return Err(getfield_flow(format!(
+            return Err(getfield_private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
                 name, obj.class_name
             )));
@@ -751,7 +759,7 @@ async fn get_object_field(obj: &ObjectInstance, name: &str) -> BuiltinResult<Val
 
     if let Some((prop, _owner)) = runmat_builtins::lookup_property(&obj.class_name, name) {
         if prop.get_access == Access::Private {
-            return Err(getfield_flow(format!(
+            return Err(getfield_private_access(format!(
                 "You cannot get the '{}' property of '{}' class.",
                 name, obj.class_name
             )));
