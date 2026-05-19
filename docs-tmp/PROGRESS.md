@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `f54e8e79` `RM-378: add bytecode source-context symbol tests`
+  - Added CLI bytecode-command tests that ratchet manifest/source-context symbol discovery and wildcard-import lowering visibility for emitted-bytecode mode:
+    - `discover_known_project_symbols_reads_manifest_source_context`
+    - `emit_bytecode_uses_source_context_project_symbols`
+  - Validation: `cargo test -p runmat --lib commands::bytecode::tests::`, `cargo test -p runmat --lib commands::script::tests::`, `cargo test -p runmat --lib commands::benchmark::tests::`, `cargo test -p runmat-core --test semicolon_suppression`.
+
 - `a44db54a` `RM-378: tighten fusion-node span containment filter`
   - Tightened semantic fusion-group derivation filter so accel-graph nodes qualify only when their mapped instruction spans are fully contained by semantic candidate spans (no partial boundary overlap acceptance).
   - Added regression `semantic_candidates_with_partial_overlap_do_not_build_fusion_groups`.
