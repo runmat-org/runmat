@@ -355,6 +355,10 @@ This audit maps the active objective to concrete repository evidence and marks e
   - `cargo test -p runmat-core --test semicolon_suppression`
   - `cargo test -p runmat-vm expansion_on_non_cell_errors -- --nocapture`
   - `cargo test -p runmat-vm mixed_range_end_assign_shape_mismatch_error -- --nocapture`
+  - `cargo test -p runmat-vm semantic_windows_reject_disjoint_gap_at_compile_mapping_stage -- --nocapture`
+  - `cargo test -p runmat-vm semantic_windows_map_accel_nodes_with_small_boundary_shift_overlap -- --nocapture`
+  - `cargo test -p runmat-vm semantic_windows_reject_accel_nodes_with_large_disjoint_gap -- --nocapture`
+  - `cargo test -p runmat-vm semantic_windows_ -- --nocapture`
   - `cargo check --workspace`
   - `git diff --check`
 
@@ -363,6 +367,11 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `expansion_on_non_cell_errors` now asserts `RunMat:ExpandError`.
     - `mixed_range_end_assign_shape_mismatch_error` now asserts `RunMat:ShapeMismatch`.
   - Purpose: reduce display-message coupling and keep runtime behavior tests pinned to stable identifier contracts.
+
+- Additional Plan 7 heuristic-reduction ratchet:
+  - Removed compile-time disjoint-gap fallback in semantic-window node mapping in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
+  - Compile-time mapping now rejects disjoint graph/window spans and leaves that reconciliation to runtime fusion sanitization (`prepare_fusion_plan` -> `sanitize_runtime_groups`) in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs).
+  - Updated compile coverage to assert this boundary (`semantic_windows_reject_disjoint_gap_at_compile_mapping_stage`) while retaining bounded-overlap acceptance coverage.
 
 ## Current Conclusion
 

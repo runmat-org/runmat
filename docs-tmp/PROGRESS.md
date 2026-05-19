@@ -1293,6 +1293,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Rationale: these tests validate runtime behavior contracts, so identifier checks are the stable assertion surface; display text remains non-contract UX.
   - Validation: `cargo test -p runmat-vm expansion_on_non_cell_errors -- --nocapture`, `cargo test -p runmat-vm mixed_range_end_assign_shape_mismatch_error -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
+- (pending commit) Plan 7 compile-time fusion mapping heuristic reduction
+  - Removed compile-time semantic-window node mapping fallback for small disjoint graph/window gaps in `crates/runmat-vm/src/bytecode/compile.rs`.
+  - Compile mapping now requires overlap-based span matching; disjoint-gap reconciliation remains runtime-owned via fusion plan sanitization in `runmat-accelerate`.
+  - Updated compile tests to codify stricter compile behavior:
+    - renamed `semantic_windows_map_accel_nodes_with_small_disjoint_gap`
+    - now `semantic_windows_reject_disjoint_gap_at_compile_mapping_stage` asserting no compile-time mapping for disjoint spans.
+  - Validation: `cargo test -p runmat-vm semantic_windows_reject_disjoint_gap_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_map_accel_nodes_with_small_boundary_shift_overlap -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_accel_nodes_with_large_disjoint_gap -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
+
 ## Next Resolution Items
 
 - Finish converting remaining legacy test/doc references that imply removed APIs where they block semantic-only confidence.

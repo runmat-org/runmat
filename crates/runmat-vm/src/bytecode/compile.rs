@@ -464,21 +464,6 @@ fn accel_nodes_for_instruction_window(
         })
         .map(|node| node.id)
         .collect();
-    if nodes.is_empty() {
-        // Compatibility fallback: tolerate tiny disjoint span gaps (<=1 instruction)
-        // when strict overlap matching yields no nodes, so minor graph/span jitter
-        // does not drop semantic windows entirely.
-        nodes = accel_graph
-            .nodes
-            .iter()
-            .filter(|node| {
-                !assigned_nodes.contains(&node.id)
-                    && accel_node_matches_semantic_window_kind(node, window.kind)
-                    && accel_node_span_within_small_disjoint_gap(node, window)
-            })
-            .map(|node| node.id)
-            .collect();
-    }
     nodes.sort_unstable_by_key(|node_id| {
         accel_graph
             .node(*node_id)
@@ -519,20 +504,6 @@ fn accel_node_span_matches_instruction_window(
     let left_extra = window.span.start.saturating_sub(node.span.start);
     let right_extra = node.span.end.saturating_sub(window.span.end);
     left_extra <= 1 && right_extra <= 1
-}
-
-#[cfg(feature = "native-accel")]
-fn accel_node_span_within_small_disjoint_gap(
-    node: &runmat_accelerate::graph::AccelNode,
-    window: &crate::bytecode::SemanticFusionInstructionWindow,
-) -> bool {
-    if node.span.end < window.span.start {
-        window.span.start.saturating_sub(node.span.end) <= 1
-    } else if window.span.end < node.span.start {
-        node.span.start.saturating_sub(window.span.end) <= 1
-    } else {
-        false
-    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -1796,7 +1767,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_windows_map_accel_nodes_with_small_disjoint_gap() {
+    fn semantic_windows_reject_disjoint_gap_at_compile_mapping_stage() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -1839,12 +1810,10 @@ mod tests {
             kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
         }];
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
-        assert_eq!(
-            groups.len(),
-            1,
-            "semantic windows should tolerate small disjoint span gaps in accel node mapping"
+        assert!(
+            groups.is_empty(),
+            "compile-time mapping should reject disjoint graph/window spans and leave reconciliation to runtime sanitization"
         );
-        assert_eq!(groups[0].nodes, vec![0]);
     }
 
     #[cfg(feature = "native-accel")]
