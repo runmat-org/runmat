@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 semantic spawned-workload lifecycle evidence ratchet
+  - Added provider-backed VM integration coverage that executes compiled semantic functions (not synthetic stack setup) for `spawn(...)` overwrite/drop flows in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs):
+    - `semantic_spawn_overwrite_releases_unaliased_provider_handle`
+    - `semantic_spawn_overwrite_preserves_provider_handle_when_alias_retained`
+  - These tests compile semantic function bodies through HIR->MIR->VM function bytecode, inject known GPU-handle inputs, and assert real provider residency/storage outcomes after spawn-handle lifecycle transitions.
+  - Validation: `cargo test -p runmat-vm --test spawn_semantic_lifecycle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic-window-driven fusion compile gating
   - `runmat-vm` compile-time fusion setup in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now gates accel-graph realization directly on semantic instruction windows (`semantic_instruction_windows.is_empty()`) rather than a second bytecode accel-capability heuristic pass.
   - This removes duplicated bytecode capability gating from the runtime compile path and makes executable fusion-group admission depend on semantic-window artifacts first, with accel graph used for node realization/stack-layout annotation after that gate.
