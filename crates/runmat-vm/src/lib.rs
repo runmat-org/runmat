@@ -20,7 +20,10 @@ pub use bytecode::{
     SemanticFunctionBytecode, SemanticFunctionRegistry, SemanticSpawnSite, StackEffect,
 };
 #[cfg(feature = "native-accel")]
-pub use bytecode::{SemanticFusionCandidateGroup, SemanticFusionMetadata};
+pub use bytecode::{
+    SemanticFusionCandidateGroup, SemanticFusionInstructionKind, SemanticFusionInstructionWindow,
+    SemanticFusionMetadata,
+};
 pub use compiler::CompileError;
 pub use interpreter::api::{
     set_call_stack_limit, set_error_namespace, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,

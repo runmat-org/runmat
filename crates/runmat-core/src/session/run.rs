@@ -422,6 +422,9 @@ impl RunMatSession {
                 &bytecode
                     .semantic_fusion_metadata
                     .mir_fusion_candidate_groups,
+                &bytecode
+                    .semantic_fusion_metadata
+                    .semantic_instruction_windows,
                 Some(crate::fusion::FusionPlannerMetadata {
                     source: "semantic-mir-analysis+bytecode-accel-graph-runtime".to_string(),
                     mir_local_fact_count: mir_local_fact_count_for_entrypoint(

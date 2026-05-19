@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 surface semantic instruction-window artifacts in fusion snapshots
+  - Core fusion snapshot construction now accepts VM semantic instruction-window artifacts and emits explicit `SemanticWindow` nodes/decisions alongside semantic candidate artifacts.
+  - Compile-time fusion-plan preview and runtime fusion-plan emission now pass semantic instruction windows through from bytecode semantic fusion metadata.
+  - Added snapshot-level assertions that semantic-window artifacts are present in both no-bytecode-group and bytecode-group snapshot paths.
+  - Validation: `cargo test -p runmat-core fusion::snapshot::tests::`, `cargo test -p runmat-core --test fusion_regressions`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 propagate semantic instruction-window counts through fusion planner metadata
   - Core fusion planner metadata now includes semantic instruction-window counts sourced from VM bytecode semantic fusion metadata.
   - Both compile-time preview (`compile_fusion_plan`) and runtime emission (`execute_outcome` with fusion snapshots enabled) now propagate this count.
