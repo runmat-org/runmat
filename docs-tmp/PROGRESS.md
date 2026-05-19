@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 `StoreLocal` lifecycle ratchet for nested handle-object overwrite paths
+  - Added provider-backed VM runner coverage for local-slot overwrite cleanup where dropped/shared handles are nested under `Value::HandleObject` values:
+    - `store_local_overwrite_releases_nested_handle_object_provider_handle_when_unaliased`
+    - `store_local_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_var`
+  - This extends `Instr::StoreLocal` shared-liveness evidence beyond direct tensor values to handle-object target traversal.
+  - Validation: `cargo test -p runmat-vm store_local_overwrite_releases_nested_handle_object_provider_handle_when_unaliased`, `cargo test -p runmat-vm store_local_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_var`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 `StoreVar` lifecycle ratchet for nested handle-object overwrite paths
   - Added provider-backed VM runner coverage for var-slot overwrite cleanup where dropped/shared handles are nested under `Value::HandleObject` values:
     - `store_var_overwrite_releases_nested_handle_object_provider_handle_when_unaliased`
