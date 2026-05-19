@@ -10,7 +10,7 @@ Interpreter error semantics and MException
 Closures and feval
 ------------------
 
-- HIR lowers `@(x) expr` to `HirExprKind::AnonFunc { params: Vec<VarId>, body: HirExpr }`.
+- HIR lowers `@(x) expr` to semantic anonymous-function forms with parameter `BindingId` identities.
 - Compiler synthesizes a `UserFunction` with a unique name and emits `CreateClosure(name, capture_count)`. Capture analysis is pending; currently `capture_count=0`.
 - VM implements `CallFeval(argc)` to handle:
   - `Value::Closure` by prepending captures and dispatching to builtin or user function; 
@@ -40,5 +40,4 @@ Docs and builtins metadata
 --------------------------
 
 - Builtins registry now stores `category`, `doc`, and `examples` fields to support structured docs generation; macro currently populates defaults.
-
 
