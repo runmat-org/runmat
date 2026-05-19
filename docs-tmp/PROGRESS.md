@@ -17,6 +17,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 strict semantic-span coverage filter for executable bytecode fusion groups
+  - `runmat-vm` bytecode fusion-group filtering now requires full instruction-span coverage by semantic candidate source spans (not just any-overlap).
+  - This further constrains executable bytecode fusion groups to semantic candidate regions and reduces residual bytecode-graph-driven latitude in candidate retention.
+  - Added `runmat-vm` regression coverage:
+    - `fusion_group_semantic_span_filter_requires_full_group_coverage`
+  - Validation: `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 surface semantic candidate source spans in fusion snapshot diagnostics
   - `runmat-core` fusion snapshot semantic-candidate node labels and decision reasons now include semantic candidate source-span ranges.
   - This makes semantic candidate evidence traceable in planner artifacts to concrete source regions used for executable-group semantic alignment.

@@ -58,7 +58,7 @@ pub fn compile(
                     &mut fusion_groups,
                 );
                 fusion_groups.retain(|group| {
-                    fusion_group_has_semantic_candidate_overlap(
+                    fusion_group_within_semantic_candidate_spans(
                         group,
                         &c.instr_spans,
                         &semantic_fusion_metadata.mir_fusion_candidate_groups,
@@ -248,7 +248,7 @@ fn source_spans_overlap(lhs: runmat_hir::Span, rhs: runmat_hir::Span) -> bool {
 }
 
 #[cfg(feature = "native-accel")]
-fn fusion_group_has_semantic_candidate_overlap(
+fn fusion_group_within_semantic_candidate_spans(
     group: &runmat_accelerate::fusion::FusionGroup,
     instr_spans: &[runmat_hir::Span],
     semantic_candidate_groups: &[crate::bytecode::SemanticFusionCandidateGroup],
@@ -264,7 +264,7 @@ fn fusion_group_has_semantic_candidate_overlap(
         .iter()
         .map(|group| group.source_span)
         .collect();
-    instr_spans[group.span.start..=end].iter().any(|span| {
+    instr_spans[group.span.start..=end].iter().all(|span| {
         candidate_spans
             .iter()
             .any(|candidate| source_spans_overlap(*span, *candidate))
@@ -540,7 +540,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn fusion_group_semantic_overlap_uses_source_spans() {
+    fn fusion_group_semantic_span_filter_requires_full_group_coverage() {
         let instr_spans = vec![
             runmat_hir::Span { start: 0, end: 2 },
             runmat_hir::Span { start: 2, end: 4 },
@@ -555,14 +555,23 @@ mod tests {
             pattern: None,
             stack_layout: None,
         };
-        let overlapping_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+        let fully_covering_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 3,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 2,
+            source_span: runmat_hir::Span { start: 2, end: 6 },
+        }];
+        let partially_covering_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
             id: 0,
             signal_count: 2,
             function: runmat_hir::FunctionId(0),
             block: runmat_mir::BasicBlockId(0),
             stmt_start: 0,
             stmt_end: 1,
-            source_span: runmat_hir::Span { start: 3, end: 5 },
+            source_span: runmat_hir::Span { start: 0, end: 3 },
         }];
         let non_overlapping_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
             id: 0,
@@ -575,15 +584,23 @@ mod tests {
         }];
 
         assert!(
-            super::fusion_group_has_semantic_candidate_overlap(
+            super::fusion_group_within_semantic_candidate_spans(
                 &group,
                 &instr_spans,
-                &overlapping_candidates
+                &fully_covering_candidates
             ),
-            "expected overlap when instruction source span intersects semantic candidate span"
+            "expected full coverage when all instruction source spans intersect semantic candidate spans"
         );
         assert!(
-            !super::fusion_group_has_semantic_candidate_overlap(
+            !super::fusion_group_within_semantic_candidate_spans(
+                &group,
+                &instr_spans,
+                &partially_covering_candidates
+            ),
+            "expected group rejection when only part of the instruction span range intersects semantic candidate spans"
+        );
+        assert!(
+            !super::fusion_group_within_semantic_candidate_spans(
                 &group,
                 &instr_spans,
                 &non_overlapping_candidates
