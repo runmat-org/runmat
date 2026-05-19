@@ -275,6 +275,11 @@ fn source_spans_overlap(lhs: runmat_hir::Span, rhs: runmat_hir::Span) -> bool {
 }
 
 #[cfg(feature = "native-accel")]
+fn source_span_contains(outer: runmat_hir::Span, inner: runmat_hir::Span) -> bool {
+    outer.start <= inner.start && inner.end <= outer.end
+}
+
+#[cfg(feature = "native-accel")]
 fn semantic_candidates_touch_accel_capable_instruction(
     instructions: &[Instr],
     instr_spans: &[runmat_hir::Span],
@@ -291,7 +296,7 @@ fn semantic_candidates_touch_accel_capable_instruction(
             let span = instr_spans[index];
             semantic_candidate_groups
                 .iter()
-                .any(|candidate| source_spans_overlap(span, candidate.source_span))
+                .any(|candidate| source_span_contains(candidate.source_span, span))
                 && instr_is_accel_capable(instr)
         })
 }
@@ -806,6 +811,30 @@ mod tests {
                 &candidates,
             ),
             "elementwise arithmetic ops should trigger accel-graph construction gate"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_candidate_accel_capability_gate_rejects_partial_span_overlap() {
+        let instructions = vec![Instr::Add];
+        let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
+        let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 1,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 1,
+            source_span: runmat_hir::Span { start: 19, end: 25 },
+        }];
+        assert!(
+            !super::semantic_candidates_touch_accel_capable_instruction(
+                &instructions,
+                &instr_spans,
+                &candidates,
+            ),
+            "partial boundary overlap should not satisfy accel-capability semantic gate"
         );
     }
 
