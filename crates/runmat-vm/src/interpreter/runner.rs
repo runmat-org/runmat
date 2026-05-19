@@ -340,7 +340,18 @@ async fn run_interpreter_inner(
         set_vm_pc(pc);
         #[cfg(feature = "native-accel")]
         set_current_pc(pc);
-        interp_engine::check_cancelled()?;
+        if let Err(err) = interp_engine::check_cancelled() {
+            #[cfg(feature = "native-accel")]
+            {
+                for value in &stack {
+                    clear_residency(value);
+                }
+                for value in &vars {
+                    clear_residency(value);
+                }
+            }
+            return Err(err);
+        }
         #[cfg(feature = "native-accel")]
         if let (Some(plan), Some(graph)) =
             (active_group_plan_clone(), bytecode.accel_graph.as_ref())
@@ -692,11 +703,13 @@ pub async fn interpret_function_with_counts(
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_semantic_outputs, semantic_output_value};
-    use crate::bytecode::program::SemanticFunctionBytecode;
+    use super::{collect_semantic_outputs, interpret_with_vars, semantic_output_value};
+    use crate::bytecode::program::{Bytecode, SemanticFunctionBytecode};
     use crate::bytecode::Instr;
+    use futures::executor::block_on;
     use runmat_builtins::{CellArray, Value};
     use runmat_hir::FunctionId;
+    use std::sync::{atomic::AtomicBool, Arc};
 
     fn test_function(varargout_slot: Option<usize>) -> SemanticFunctionBytecode {
         SemanticFunctionBytecode {
@@ -745,6 +758,34 @@ mod tests {
         assert_eq!(
             value,
             Value::OutputList(vec![Value::Num(1.0), Value::Num(2.0)])
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn cancellation_clears_gpu_residency_for_live_values() {
+        use runmat_accelerate::fusion_residency;
+        use runmat_accelerate_api::GpuTensorHandle;
+
+        let handle = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 777_001,
+        };
+        fusion_residency::mark(&handle);
+        assert!(fusion_residency::is_resident(&handle));
+
+        let mut vars = vec![Value::GpuTensor(handle.clone())];
+        let bytecode = Bytecode::with_instructions(vec![Instr::Return], vars.len());
+        let cancelled = Arc::new(AtomicBool::new(true));
+        let _interrupt_guard = runmat_runtime::interrupt::replace_interrupt(Some(cancelled));
+
+        let err = block_on(interpret_with_vars(&bytecode, &mut vars, Some("<main>")))
+            .expect_err("cancelled execution should return error");
+        assert_eq!(err.identifier(), Some("RunMat:ExecutionCancelled"));
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "cancelled execution should clear residency marks for live GPU handles"
         );
     }
 }

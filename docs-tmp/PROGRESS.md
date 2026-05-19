@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 clear GPU residency marks on interpreter cancellation path
+  - VM interpreter loop now clears residency markers for live stack/variable values before returning `ExecutionCancelled`, preventing cancellation exits from leaving stale fusion residency state for GPU-handle values.
+  - Added VM regression `cancellation_clears_gpu_residency_for_live_values` in `interpreter/runner.rs`.
+  - Validation: `cargo test -p runmat-vm cancellation_clears_gpu_residency_for_live_values`, `cargo test -p runmat-vm spawn_policy_`.
+
 - (pending commit) Plan 1 callback ABI unresolved external identity normalization for cellfun/arrayfun
   - Runtime `cellfun` and `arrayfun` external-callback unresolved paths now emit `RunMat:UndefinedFunction` instead of a tool-specific fallback identifier or identifier-less flow error.
   - Core session outcome coverage now asserts this identifier through `ExecutionOutcome` runtime diagnostics for unresolved external `cellfun`/`arrayfun` callback paths.
