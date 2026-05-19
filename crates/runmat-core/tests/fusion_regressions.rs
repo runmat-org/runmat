@@ -262,3 +262,40 @@ fn compile_fusion_plan_exposes_semantic_candidates_without_bytecode_groups() {
         );
     }
 }
+
+#[test]
+fn compile_fusion_plan_scopes_local_fact_count_to_entrypoint() {
+    ensure_fusion_regression_env();
+
+    let mut engine = gc_test_context(RunMatSession::new).expect("session init");
+    let base_script = r#"
+        A = rand(8, 8);
+        B = A + 1;
+        C = B .* 2;
+    "#;
+    let helper_heavy_script = r#"
+        A = rand(8, 8);
+        B = A + 1;
+        C = B .* 2;
+        function out = helper(v)
+            t1 = v + 1;
+            t2 = t1 .* 2;
+            t3 = t2 - 3;
+            out = t3 ./ 4;
+        end
+    "#;
+
+    let base_snapshot = engine
+        .compile_fusion_plan(base_script)
+        .expect("compile base fusion plan should succeed")
+        .expect("expected base fusion snapshot");
+    let helper_snapshot = engine
+        .compile_fusion_plan(helper_heavy_script)
+        .expect("compile helper fusion plan should succeed")
+        .expect("expected helper fusion snapshot");
+
+    assert_eq!(
+        base_snapshot.planner.mir_local_fact_count, helper_snapshot.planner.mir_local_fact_count,
+        "entrypoint MIR local fact count should not be inflated by non-entrypoint helper locals"
+    );
+}

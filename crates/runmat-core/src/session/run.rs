@@ -1,5 +1,28 @@
 use super::*;
 
+fn entrypoint_target_function(
+    assembly: &runmat_hir::HirAssembly,
+) -> Option<runmat_hir::FunctionId> {
+    assembly
+        .entrypoints
+        .first()
+        .map(|entrypoint| entrypoint.target)
+}
+
+fn mir_local_fact_count_for_entrypoint(
+    analysis: &runmat_mir::analysis::AnalysisStore,
+    assembly: &runmat_hir::HirAssembly,
+) -> usize {
+    let Some(entrypoint_target) = entrypoint_target_function(assembly) else {
+        return analysis.mir_locals.len();
+    };
+    analysis
+        .mir_locals
+        .keys()
+        .filter(|key| key.function == entrypoint_target)
+        .count()
+}
+
 impl RunMatSession {
     /// Execute MATLAB/Octave code
     pub async fn execute(
@@ -378,7 +401,10 @@ impl RunMatSession {
                     .mir_fusion_candidate_groups,
                 Some(crate::fusion::FusionPlannerMetadata {
                     source: "semantic-mir-analysis+bytecode-accel-graph-runtime".to_string(),
-                    mir_local_fact_count: analysis.mir_locals.len(),
+                    mir_local_fact_count: mir_local_fact_count_for_entrypoint(
+                        &analysis,
+                        &lowering.assembly,
+                    ),
                     mir_diagnostic_count: analysis.diagnostics.len(),
                     mir_fusion_signal_count: bytecode
                         .semantic_fusion_metadata

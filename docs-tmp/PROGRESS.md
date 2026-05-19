@@ -17,6 +17,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 scope fusion planner MIR local-fact counts to active entrypoint
+  - `runmat-core` fusion snapshot planner metadata now counts MIR local facts only for the active entrypoint target function in both:
+    - preview path (`compile_fusion_plan`)
+    - runtime emission path (`set_emit_fusion_plan(true)` / execute outcome)
+  - This prevents non-entrypoint helper-function local facts from inflating active-entrypoint planner metadata.
+  - Added `runmat-core` regression coverage:
+    - `compile_fusion_plan_scopes_local_fact_count_to_entrypoint`
+  - Validation: `cargo test -p runmat-core compile_fusion_plan_scopes_local_fact_count_to_entrypoint`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo test -p runmat-vm primary_compile_scopes_semantic_fusion_metadata_to_entrypoint_target`, `cargo test -p runmat-vm primary_compile_scopes_spawn_site_metadata_to_entrypoint_target`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 scope semantic spawn-site metadata to compiled entrypoint target
   - `runmat-vm` bytecode compile now derives semantic async/spawn metadata from the selected entrypoint target MIR body instead of aggregating across every MIR body.
   - This prevents helper-function spawn sites from being attributed to active entrypoint bytecode artifacts and keeps async boundary metadata aligned to the active execution path.
