@@ -218,6 +218,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - VM overwrite cleanup for `Instr::StoreVar` / `Instr::StoreLocal` in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs) now applies handle-aware live-value exclusion across stack/vars/locals before residency/provider release.
   - provider-backed runner coverage in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) now asserts overwrite-path shared-liveness preservation:
     - `store_var_overwrite_preserves_provider_handle_when_shared_in_other_var`
+    - `store_local_overwrite_releases_provider_handle_when_unaliased`
     - `store_local_overwrite_preserves_provider_handle_when_shared_in_var`
     - `store_var_overwrite_releases_nested_handle_object_provider_handle_when_unaliased`
     - `store_var_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_other_var`

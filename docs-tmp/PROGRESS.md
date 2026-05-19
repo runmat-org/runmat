@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 `StoreLocal` overwrite release-path ratchet for direct handles
+  - Added provider-backed VM runner coverage for direct local-slot overwrite cleanup when no live alias remains:
+    - `store_local_overwrite_releases_provider_handle_when_unaliased`
+  - This closes the direct `StoreLocal` release-side counterpart to existing preserve-side liveness coverage.
+  - Validation: `cargo test -p runmat-vm store_local_overwrite_releases_provider_handle_when_unaliased`, `cargo test -p runmat-vm store_local_overwrite_preserves_provider_handle_when_shared_in_var`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 spawn-task ID replacement-liveness ratchet for nested handle-object values
   - Added VM dispatch coverage for overwrite replacement retirement when spawn-task handles are nested under `Value::HandleObject` targets:
     - `replaced_nested_spawn_task_handle_in_handle_object_retires_task_id_when_unaliased`
