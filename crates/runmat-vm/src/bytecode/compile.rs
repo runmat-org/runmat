@@ -414,8 +414,7 @@ fn accel_nodes_for_instruction_window(
         .filter(|node| {
             !assigned_nodes.contains(&node.id)
                 && accel_node_matches_semantic_window_kind(node, window.kind)
-                && node.span.start >= window.span.start
-                && node.span.end <= window.span.end
+                && accel_node_span_matches_instruction_window(node, window)
         })
         .map(|node| node.id)
         .collect();
@@ -427,6 +426,19 @@ fn accel_nodes_for_instruction_window(
     });
     nodes.dedup();
     nodes
+}
+
+#[cfg(feature = "native-accel")]
+fn accel_node_span_matches_instruction_window(
+    node: &runmat_accelerate::graph::AccelNode,
+    window: &crate::bytecode::SemanticFusionInstructionWindow,
+) -> bool {
+    // Primary path: node span is contained by semantic window span.
+    // Compatibility fallback: allow node spans that fully cover the semantic window.
+    // This keeps mapping robust to accel-graph span widening while staying stricter than
+    // arbitrary overlap matching.
+    (node.span.start >= window.span.start && node.span.end <= window.span.end)
+        || (node.span.start <= window.span.start && node.span.end >= window.span.end)
 }
 
 #[cfg(feature = "native-accel")]
@@ -1389,6 +1401,59 @@ mod tests {
             groups[0].kind,
             runmat_accelerate::fusion::FusionKind::ElementwiseChain
         );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_windows_map_accel_nodes_that_cover_window_span() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![runmat_accelerate::graph::AccelNode {
+                id: 0,
+                label: runmat_accelerate::graph::AccelNodeLabel::Primitive(
+                    runmat_accelerate::graph::PrimitiveOp::Add,
+                ),
+                category: runmat_accelerate::graph::AccelOpCategory::Elementwise,
+                inputs: vec![0, 0],
+                outputs: vec![1],
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 2 },
+                tags: vec![runmat_accelerate::graph::AccelGraphTag::Elementwise],
+            }],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+            span: runmat_accelerate::graph::InstrSpan { start: 1, end: 1 },
+            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+        }];
+        let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
+        assert_eq!(
+            groups.len(),
+            1,
+            "semantic windows should map accel nodes whose spans cover the window range"
+        );
+        assert_eq!(groups[0].nodes, vec![0]);
     }
 
     #[cfg(feature = "native-accel")]

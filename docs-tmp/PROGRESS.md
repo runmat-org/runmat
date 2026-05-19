@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 semantic-window mapping tolerates accel-node span widening
+  - VM semantic fusion-group node mapping now accepts accel nodes that fully cover a semantic instruction-window span, in addition to strict contained-by-window nodes.
+  - This keeps semantic-window realization robust to accel-graph span widening while remaining stricter than arbitrary overlap matching.
+  - Added compile-level regression coverage:
+    - `semantic_windows_map_accel_nodes_that_cover_window_span`
+  - Validation: `cargo test -p runmat-vm semantic_windows_map_accel_nodes_that_cover_window_span`, `cargo test -p runmat-vm semantic_candidates_with_partial_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm semantic_windows_map_accel_nodes_without_semantic_tags`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 constructor fallback metadata normalization in runtime dispatcher
   - Runtime builtin-dispatch constructor fallback now uses inheritance-aware class-method lookup for same-name constructor metadata and enforces static/public constructor dispatch policy.
   - Constructor fallback now default-constructs object instances when same-name constructor metadata is private or non-static instead of invoking those methods.
