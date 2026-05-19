@@ -6,8 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `758c4516` `RM-378: refine colon-name symbol guard for local paths`
+  - Refined colon-style source-name guard behavior across core compile and CLI bytecode symbol discovery: colon names are blocked from project-symbol discovery only when they do not resolve to an existing local path.
+  - This preserves remote/virtual source isolation while avoiding portability regressions for legitimate local colon-bearing paths.
+  - Validation: `cargo test -p runmat-core compile_input_does_not_leak_local_project_symbols_for_colon_remote_name`, `cargo test -p runmat --lib commands::bytecode::tests::`.
+
 - `f2cdc87e` `RM-378: reject colon-style remote names for symbol discovery`
-  - Hardened both core compile and CLI bytecode source-context symbol discovery to reject colon-style remote/virtual source names (for example `remote:main.m`) so local manifest/source-index symbols are not injected into remote contexts.
+  - Hardened both core compile and CLI bytecode source-context symbol discovery against colon-style remote/virtual source names (for example `remote:main.m`) so local manifest/source-index symbols are not injected into remote contexts.
   - Added regressions:
     - `compile_input_does_not_leak_local_project_symbols_for_colon_remote_name` (`runmat-core`)
     - `discover_known_project_symbols_rejects_colon_remote_name` (`runmat-cli` bytecode command)
