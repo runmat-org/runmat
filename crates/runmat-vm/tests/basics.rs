@@ -66,29 +66,54 @@ fn array_construct_like_and_size_vector_inference() {
     // zeros('like', A)
     let src_like = "A = rand(3,4); B = zeros('like', A);";
     let bytecode_like = compile_semantic_source(src_like).expect("compile semantic like");
-    let graph_like = bytecode_like.accel_graph.as_ref().expect("accel graph");
-    let last_like = graph_like.nodes.last().expect("node");
-    let out_id = *last_like.outputs.first().unwrap();
-    let out_info = graph_like.value(out_id).expect("out value");
-    match &out_info.shape {
-        ShapeInfo::Tensor(dims) => {
-            assert_eq!(dims, &vec![Some(3), Some(4)]);
+    if let Some(graph_like) = bytecode_like.accel_graph.as_ref() {
+        let last_like = graph_like.nodes.last().expect("node");
+        let out_id = *last_like.outputs.first().unwrap();
+        let out_info = graph_like.value(out_id).expect("out value");
+        match &out_info.shape {
+            ShapeInfo::Tensor(dims) => {
+                assert_eq!(dims, &vec![Some(3), Some(4)]);
+            }
+            other => panic!("unexpected shape: {:?}", other),
         }
-        other => panic!("unexpected shape: {:?}", other),
+    } else {
+        assert_eq!(
+            bytecode_like
+                .semantic_fusion_metadata
+                .mir_fusion_signal_count,
+            0,
+            "accel graph should only be omitted for non-fusion-signal programs"
+        );
+        let vars_like = execute_semantic_source(src_like);
+        let Value::Tensor(tensor_like) = &vars_like[1] else {
+            panic!("expected tensor result for zeros('like', A)");
+        };
+        assert_eq!(tensor_like.shape, vec![3, 4]);
     }
 
     // zeros([5,6]) via size vector
     let src_sz = "sz = [5,6]; B = zeros(sz);";
     let bytecode_sz = compile_semantic_source(src_sz).expect("compile semantic sz");
-    let graph_sz = bytecode_sz.accel_graph.as_ref().expect("accel graph");
-    let last_sz = graph_sz.nodes.last().expect("node");
-    let out_id_sz = *last_sz.outputs.first().unwrap();
-    let out_info_sz = graph_sz.value(out_id_sz).expect("out value");
-    match &out_info_sz.shape {
-        ShapeInfo::Tensor(dims) => {
-            assert_eq!(dims, &vec![Some(5), Some(6)]);
+    if let Some(graph_sz) = bytecode_sz.accel_graph.as_ref() {
+        let last_sz = graph_sz.nodes.last().expect("node");
+        let out_id_sz = *last_sz.outputs.first().unwrap();
+        let out_info_sz = graph_sz.value(out_id_sz).expect("out value");
+        match &out_info_sz.shape {
+            ShapeInfo::Tensor(dims) => {
+                assert_eq!(dims, &vec![Some(5), Some(6)]);
+            }
+            other => panic!("unexpected shape: {:?}", other),
         }
-        other => panic!("unexpected shape: {:?}", other),
+    } else {
+        assert_eq!(
+            bytecode_sz.semantic_fusion_metadata.mir_fusion_signal_count, 0,
+            "accel graph should only be omitted for non-fusion-signal programs"
+        );
+        let vars_sz = execute_semantic_source(src_sz);
+        let Value::Tensor(tensor_sz) = &vars_sz[1] else {
+            panic!("expected tensor result for zeros(sz)");
+        };
+        assert_eq!(tensor_sz.shape, vec![5, 6]);
     }
 }
 

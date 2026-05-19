@@ -40,17 +40,24 @@ pub fn compile(
     #[cfg(feature = "native-accel")]
     let semantic_fusion_metadata = derive_semantic_fusion_metadata(mir);
     #[cfg(feature = "native-accel")]
-    let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
-    #[cfg(feature = "native-accel")]
-    let mut fusion_groups = if semantic_fusion_metadata.mir_fusion_candidate_group_count == 0 {
-        Vec::new()
+    let (accel_graph, fusion_groups) = if semantic_fusion_metadata.mir_fusion_signal_count == 0 {
+        (None, Vec::new())
     } else {
-        accel_graph.detect_fusion_groups()
+        let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
+        let mut fusion_groups = if semantic_fusion_metadata.mir_fusion_candidate_group_count == 0 {
+            Vec::new()
+        } else {
+            accel_graph.detect_fusion_groups()
+        };
+        if !fusion_groups.is_empty() {
+            annotate_fusion_groups_with_stack_layout(
+                &c.instructions,
+                &accel_graph,
+                &mut fusion_groups,
+            );
+        }
+        (Some(accel_graph), fusion_groups)
     };
-    #[cfg(feature = "native-accel")]
-    if !fusion_groups.is_empty() {
-        annotate_fusion_groups_with_stack_layout(&c.instructions, &accel_graph, &mut fusion_groups);
-    }
     let semantic_async_metadata = derive_semantic_async_metadata(mir);
 
     Ok(Bytecode {
@@ -66,7 +73,7 @@ pub fn compile(
         layout: c.layout,
         semantic_async_metadata,
         #[cfg(feature = "native-accel")]
-        accel_graph: Some(accel_graph),
+        accel_graph,
         #[cfg(feature = "native-accel")]
         fusion_groups,
         #[cfg(feature = "native-accel")]
@@ -374,6 +381,10 @@ mod tests {
                 .mir_fusion_candidate_group_count,
             0,
             "expected no semantic fusion candidate groups"
+        );
+        assert!(
+            bytecode.accel_graph.is_none(),
+            "expected accel graph to be omitted when semantic fusion signals are absent"
         );
         assert!(
             bytecode.fusion_groups.is_empty(),
