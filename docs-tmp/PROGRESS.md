@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `9642000f` `RM-378: cover alias wildcard function handles`
+  - Added `runmat-core` integration coverage for dependency-alias wildcard imports feeding function-handle lowering:
+    - `compile_input_resolves_function_handle_from_dependency_alias_wildcard_import`
+  - The regression asserts `import statsdep.*; f = @summarize;` compiles with an explicit external function-handle bytecode creation path (`Instr::CreateExternalFunctionHandle`) for the imported dependency symbol.
+  - Validation: `cargo test -p runmat-core compile_input_resolves_function_handle_from_dependency_alias_wildcard_import`, `cargo test -p runmat-core --test semicolon_suppression`.
+
 - `7ed84fa4` `RM-378: drop accel graph when no executable groups`
   - VM bytecode compile now drops accel-graph artifacts when semantic candidate groups exist but no executable semantic-mapped fusion groups survive filtering.
   - This reduces residual bytecode-graph coupling in transitional semantic-candidate/no-executable-group cases by avoiding retention of unused graph artifacts.
