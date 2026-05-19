@@ -1481,6 +1481,87 @@ mod tests {
         let _ = TEST_PROVIDER.free(&handle);
     }
 
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn spawn_pop_releases_nested_handle_object_target_provider_handle() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![151.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Pop, Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        let mut payload = StructValue::new();
+        payload
+            .fields
+            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        state.stack.push(Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        }));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("spawn/pop flow should complete for nested handle-object payload");
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "spawn/pop should clear residency for nested handle-object target handles"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "spawn/pop should release provider storage for nested handle-object target handles"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn spawn_pop_preserves_nested_handle_object_target_handle_when_alias_live() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![161.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Pop, Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        let mut payload = StructValue::new();
+        payload
+            .fields
+            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let task_payload = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        state.stack.push(task_payload.clone());
+        state.vars = vec![task_payload.clone()];
+
+        let mut result_vars = vec![task_payload];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("spawn/pop flow should complete for aliased nested handle-object payload");
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "spawn/pop should preserve residency for nested handle-object target handles still referenced by vars"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "spawn/pop should not release provider storage for nested handle-object target handles still referenced by vars"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
+
     #[test]
     fn await_passes_through_non_spawn_value_operand() {
         let bytecode =
