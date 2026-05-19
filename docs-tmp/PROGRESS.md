@@ -9,6 +9,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 - (pending commit) Plan 7 widen spawn GPU-handle policy boundary coverage
   - Extended VM spawn-policy dispatch tests to cover additional active-path policy boundaries:
     - nested GPU-handle capture traversal via `Value::Cell` (`spawn_policy_rejects_nested_gpu_handles_in_cell_capture`)
+    - closure-capture traversal via `Value::Closure` (`spawn_policy_rejects_gpu_handles_captured_by_closure_values`)
     - explicit missing-provider diagnostic path (`spawn_policy_reports_provider_unavailable_for_gpu_handles`)
   - Both new tests assert stable runtime identifiers (`RunMat:SpawnGpuHandleUnsupported`, `RunMat:SpawnProviderUnavailable`) to keep policy-failure behavior on identifier contracts, not display text.
   - Validation: `cargo test -p runmat-vm spawn_policy_`.

@@ -972,4 +972,28 @@ mod tests {
             "expected missing-provider spawn capture identifier"
         );
     }
+
+    #[test]
+    fn spawn_policy_rejects_gpu_handles_captured_by_closure_values() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
+        let value = Value::Closure(runmat_builtins::Closure {
+            function_name: "worker".to_string(),
+            semantic_function: None,
+            captures: vec![
+                Value::Num(2.0),
+                Value::GpuTensor(GpuTensorHandle {
+                    shape: vec![1],
+                    device_id: 41,
+                    buffer_id: 21,
+                }),
+            ],
+        });
+        let err = enforce_spawn_value_concurrency_policy(&value)
+            .expect_err("reject policy should block closure-captured GPU handles");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:SpawnGpuHandleUnsupported"),
+            "expected closure-capture spawn policy identifier"
+        );
+    }
 }
