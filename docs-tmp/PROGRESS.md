@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `ec74ba1e` `RM-378: harden source-input resolver tests`
+  - Expanded `runmat-config` integration coverage for `resolve_project_source_input_from` contracts:
+    - pass-through behavior for non-entrypoint simple names
+    - explicit named-entrypoint resolution error surfacing (`ResolveProjectSourceInputError::EntrypointResolve`) for invalid module/function targets.
+  - This hardens the shared path-resolution boundary now consumed by both CLI and core path-source execution.
+  - Validation: `cargo test -p runmat-config --test project_manifest resolve_project_source_input_from_returns_plain_candidate_when_name_is_not_entrypoint`, `cargo test -p runmat-config --test project_manifest resolve_project_source_input_from_reports_named_entrypoint_resolution_errors`, `cargo test -p runmat-core source_input_path_errors_for_invalid_named_entrypoint_target`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `git diff --check`.
+
 - `1410839c` `RM-378: dedupe discovered composition loading`
   - Refactored `runmat-config` to share one internal discovered-composition loader (`discover_project_composition_from`) across:
     - `resolve_named_entrypoint_from`
