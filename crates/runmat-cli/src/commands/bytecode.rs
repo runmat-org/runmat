@@ -38,6 +38,15 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
     let Ok(cwd) = std::env::current_dir() else {
         return HashSet::new();
     };
+    let source_path = PathBuf::from(source_name);
+    let local_candidate = if source_path.is_absolute() {
+        source_path
+    } else {
+        cwd.join(&source_path)
+    };
+    if !local_candidate.exists() {
+        return HashSet::new();
+    }
     let Ok(discovered) = discover_project_symbols_from_source_name(source_name, &cwd) else {
         return HashSet::new();
     };
@@ -143,6 +152,7 @@ roots = ["."]
             "function y = summarize(x); y = x; end",
         )
         .expect("write package function");
+        fs::write(tmp.path().join("main.m"), "x = 1;").expect("write source file");
 
         let prev = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(tmp.path()).expect("set cwd");
@@ -198,6 +208,39 @@ roots = ["."]
                 || output.contains("CallSemanticFunctionMulti")
                 || output.contains("CallBuiltinMulti"),
             "expected disassembly to include a call instruction for imported symbol"
+        );
+    }
+
+    #[test]
+    fn discover_known_project_symbols_requires_existing_local_source_path() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            tmp.path().join("+stats/summarize.m"),
+            "function y = summarize(x); y = x; end",
+        )
+        .expect("write package function");
+
+        let prev = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(tmp.path()).expect("set cwd");
+        let symbols = discover_known_project_symbols(Some("virtual/nonexistent_remote.m"));
+        std::env::set_current_dir(prev).expect("restore cwd");
+
+        assert!(
+            symbols.is_empty(),
+            "nonexistent source names should not pull project symbols from local cwd"
         );
     }
 }
