@@ -413,7 +413,7 @@ fn accel_nodes_for_instruction_window(
         .iter()
         .filter(|node| {
             !assigned_nodes.contains(&node.id)
-                && accel_node_has_semantic_signal(node)
+                && accel_node_matches_semantic_window_kind(node, window.kind)
                 && node.span.start >= window.span.start
                 && node.span.end <= window.span.end
         })
@@ -441,6 +441,32 @@ fn accel_node_has_semantic_signal(node: &runmat_accelerate::graph::AccelNode) ->
                 | runmat_accelerate::graph::AccelGraphTag::Transpose
         )
     })
+}
+
+#[cfg(feature = "native-accel")]
+fn accel_node_matches_semantic_window_kind(
+    node: &runmat_accelerate::graph::AccelNode,
+    kind: crate::bytecode::SemanticFusionInstructionKind,
+) -> bool {
+    let has_semantic_signal = accel_node_has_semantic_signal(node);
+    if !has_semantic_signal {
+        return false;
+    }
+    let has_reduction = node
+        .tags
+        .iter()
+        .any(|tag| matches!(tag, runmat_accelerate::graph::AccelGraphTag::Reduction));
+    let has_matmul = node
+        .tags
+        .iter()
+        .any(|tag| matches!(tag, runmat_accelerate::graph::AccelGraphTag::MatMul));
+    match kind {
+        crate::bytecode::SemanticFusionInstructionKind::Elementwise => {
+            !has_reduction && !has_matmul
+        }
+        crate::bytecode::SemanticFusionInstructionKind::Reduction => !has_matmul,
+        crate::bytecode::SemanticFusionInstructionKind::Matmul => true,
+    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -1437,6 +1463,114 @@ mod tests {
         assert_eq!(
             groups[0].kind,
             runmat_accelerate::fusion::FusionKind::ElementwiseChain
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_elementwise_window_excludes_reduction_nodes() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![runmat_accelerate::graph::AccelNode {
+                id: 0,
+                label: runmat_accelerate::graph::AccelNodeLabel::Builtin {
+                    name: "sum".to_string(),
+                },
+                category: runmat_accelerate::graph::AccelOpCategory::Reduction,
+                inputs: vec![0],
+                outputs: vec![1],
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+                tags: vec![runmat_accelerate::graph::AccelGraphTag::Reduction],
+            }],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+            span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+        }];
+        let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
+        assert!(
+            groups.is_empty(),
+            "elementwise semantic windows should not absorb reduction-tagged accel nodes"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_reduction_window_accepts_reduction_nodes() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![runmat_accelerate::graph::AccelNode {
+                id: 0,
+                label: runmat_accelerate::graph::AccelNodeLabel::Builtin {
+                    name: "sum".to_string(),
+                },
+                category: runmat_accelerate::graph::AccelOpCategory::Reduction,
+                inputs: vec![0],
+                outputs: vec![1],
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+                tags: vec![runmat_accelerate::graph::AccelGraphTag::Reduction],
+            }],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+            span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+            kind: crate::bytecode::SemanticFusionInstructionKind::Reduction,
+        }];
+        let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
+        assert_eq!(
+            groups.len(),
+            1,
+            "reduction semantic windows should include reduction-tagged accel nodes"
+        );
+        assert_eq!(groups[0].nodes, vec![0]);
+        assert_eq!(
+            groups[0].kind,
+            runmat_accelerate::fusion::FusionKind::Reduction
         );
     }
 

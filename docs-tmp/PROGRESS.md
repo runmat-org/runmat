@@ -6,6 +6,16 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 enforce semantic window-kind compatibility in fusion-node mapping
+  - VM semantic fusion-window -> accel-node mapping now filters by semantic window kind compatibility (not just generic accel-tag presence):
+    - elementwise windows exclude reduction/matmul-tagged nodes
+    - reduction windows exclude matmul-tagged nodes
+    - matmul windows keep current permissive semantic-signal acceptance
+  - Added compile-level ratchet coverage:
+    - `semantic_elementwise_window_excludes_reduction_nodes`
+    - `semantic_reduction_window_accepts_reduction_nodes`
+  - Validation: `cargo test -p runmat-vm semantic_elementwise_window_excludes_reduction_nodes`, `cargo test -p runmat-vm semantic_reduction_window_accepts_reduction_nodes`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_transpose_nodes`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 semantic-tag-driven fusion-node mapping for semantic windows
   - VM semantic fusion-window -> accel-node mapping now selects candidate nodes using accel semantic tags (`Unary`/`Elementwise`/`Reduction`/`MatMul`/`Transpose`) instead of a hard-coded node-category allowlist.
   - This removes a brittle category coupling that previously excluded transpose-tagged accel nodes from semantic-window fusion groups.
