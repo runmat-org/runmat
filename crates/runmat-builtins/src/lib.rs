@@ -2363,3 +2363,75 @@ pub fn set_static_property_value_in_owner(
         Err(format!("Unknown static property '{class_name}.{prop}'"))
     }
 }
+
+#[cfg(test)]
+mod class_registry_tests {
+    use super::{get_class, lookup_method, register_class, Access, ClassDef, MethodDef};
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
+
+    #[test]
+    fn primitive_classes_expose_static_zeros_method_metadata() {
+        for class_name in ["double", "single", "logical"] {
+            let class_def = get_class(class_name).expect("primitive class should be registered");
+            let method = class_def
+                .methods
+                .get("zeros")
+                .expect("primitive class should expose zeros static method");
+            assert!(method.is_static, "zeros should be static on {class_name}");
+            assert_eq!(method.function_name, "zeros");
+            assert_eq!(method.implicit_class_argument.as_deref(), Some(class_name));
+
+            let (resolved, owner) =
+                lookup_method(class_name, "zeros").expect("lookup should find primitive zeros");
+            assert_eq!(owner, class_name);
+            assert_eq!(resolved.function_name, "zeros");
+            assert_eq!(
+                resolved.implicit_class_argument.as_deref(),
+                Some(class_name)
+            );
+        }
+    }
+
+    #[test]
+    fn method_lookup_uses_parent_class_metadata_chain() {
+        let parent_name = unique_class_name("plan6_parent");
+        let child_name = unique_class_name("plan6_child");
+
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            "parentOnly".to_string(),
+            MethodDef {
+                name: "parentOnly".to_string(),
+                is_static: false,
+                access: Access::Public,
+                function_name: "parentOnly_impl".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let (method, owner) = lookup_method(&child_name, "parentOnly")
+            .expect("child lookup should resolve inherited method through parent metadata");
+        assert_eq!(owner, parent_name);
+        assert_eq!(method.function_name, "parentOnly_impl");
+    }
+}

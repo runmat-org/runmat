@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 6 class-registry metadata ratchets for nominal static/inheritance lookup
+  - Added `runmat-builtins` class-registry tests that ratchet language-facing metadata behavior for runtime/primitive nominal classes:
+    - `primitive_classes_expose_static_zeros_method_metadata`
+    - `method_lookup_uses_parent_class_metadata_chain`
+  - Coverage now asserts primitive class static method metadata (`double`/`single`/`logical` -> `zeros`) and parent-chain method resolution through class metadata lookup.
+  - Validation: `cargo test -p runmat-builtins primitive_classes_expose_static_zeros_method_metadata`, `cargo test -p runmat-builtins method_lookup_uses_parent_class_metadata_chain`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 5 evidence closeout for manifest-driven resolver wiring
   - Re-ran cross-consumer resolver/symbol-discovery tests across config/core/CLI/LSP to verify shared `runmat-config` ownership is active end-to-end:
     - `cargo test -p runmat-config --test project_manifest resolve_project_source_input_from_`

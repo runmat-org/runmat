@@ -103,6 +103,7 @@ This audit maps the active objective to concrete repository evidence and marks e
 - Evidence:
   - shared callable identity/fallback policy in [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs).
   - builtin semantics surface in [semantics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-builtins/src/semantics.rs).
+  - class-registry metadata behavior in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-builtins/src/lib.rs) now has explicit tests for primitive nominal static method metadata (`double`/`single`/`logical` -> `zeros`) and parent-chain method lookup resolution through class metadata (`primitive_classes_expose_static_zeros_method_metadata`, `method_lookup_uses_parent_class_metadata_chain`).
 - Gap:
   - full Plan 6 acceptance criteria not yet closed out across all consumers.
 
