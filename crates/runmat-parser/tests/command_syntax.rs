@@ -177,6 +177,18 @@ fn clc_without_arg_is_command_form() {
 }
 
 #[test]
+fn pause_without_arg_is_command_form() {
+    let program = parse_with_options("pause", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "pause");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected pause command form"),
+    }
+}
+
+#[test]
 fn invalid_keyword_rejected() {
     let err = parse_with_options("grid maybe", ParserOptions::new(CompatMode::Matlab));
     assert!(err.is_err());
