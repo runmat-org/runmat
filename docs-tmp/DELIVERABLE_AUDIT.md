@@ -25,13 +25,13 @@ This audit maps the active objective to concrete repository evidence and marks e
 - Gap:
   - broad consumer migration across all crates remains in progress (see `PLAN.3.md` / `PROGRESS.md`).
 
-### 2) No production legacy path dependence (`partial`)
+### 2) No production legacy path dependence (`met`)
 
 - Evidence:
   - `rg -n "\\bHirProgram\\b|runmat_vm::execute\\b|compile_legacy\\b|LegacyUserFunction\\b" crates` has no hits in production crate code.
   - recent removal/migration commits in `NEXT_STEPS.md`.
-- Gap:
-  - confidence work remains in tests/docs and plan-closeout auditing.
+- Residual watchpoints:
+  - keep this grep in validation cadence to prevent regressions.
 
 ### 3) MATLAB semantics as products (`partial`)
 

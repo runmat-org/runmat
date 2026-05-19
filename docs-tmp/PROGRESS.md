@@ -6,6 +6,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `d4afa838` `RM-378: remove legacy VarId note reference`
+  - Removed the remaining `VarId` mention under `crates/` notes to keep the legacy-path evidence grep unambiguous for active production surfaces.
+  - Validation evidence check: `rg -n "\\bVarId\\b|compile_legacy|LegacyUserFunction|runmat_vm::execute|\\bHirProgram\\b" crates` now returns no matches.
+
 - `bf711150` `RM-378: carry semantic await-site metadata`
   - Bytecode semantic async metadata now carries explicit MIR await-site inventory (`mir_await_site_count`, `mir_await_sites`) alongside spawn-site metadata.
   - VM compile now derives await sites from MIR `Await` terminators scoped to the active entrypoint target, mirroring spawn-site scoping rules.
