@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `40b00c47` `RM-378: thread project symbols into bytecode emit path`
+  - CLI bytecode emission now threads source-context project symbols into lowering: `emit_bytecode` accepts optional source name and feeds `discover_project_symbols_from_source_name(...)` into `LoweringContext::with_known_project_symbols`.
+  - Script `--emit-bytecode` path now passes the resolved script source name, so wildcard import/name resolution in emitted-bytecode mode uses the same manifest/source-index symbol context as normal script execution.
+  - Validation: `cargo test -p runmat --lib commands::script::tests::`, `cargo test -p runmat --lib commands::benchmark::tests::`, `cargo test -p runmat-core --test semicolon_suppression`.
+
 - `af87d84b` `RM-378: cover benchmark module entrypoint error path`
   - Extended benchmark target-resolution coverage with explicit unresolved module/function entrypoint diagnostics, mirroring script-path error-contract expectations.
   - Added `module_function_entrypoint_errors_when_module_file_missing` under benchmark command tests.
