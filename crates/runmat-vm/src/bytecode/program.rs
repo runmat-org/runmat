@@ -176,6 +176,8 @@ pub struct Bytecode {
 pub struct SemanticAsyncMetadata {
     pub mir_spawn_site_count: usize,
     pub mir_spawn_sites: Vec<SemanticSpawnSite>,
+    pub mir_await_site_count: usize,
+    pub mir_await_sites: Vec<SemanticAwaitSite>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,6 +185,13 @@ pub struct SemanticSpawnSite {
     pub function: runmat_hir::FunctionId,
     pub block: runmat_mir::BasicBlockId,
     pub stmt_index: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticAwaitSite {
+    pub function: runmat_hir::FunctionId,
+    pub block: runmat_mir::BasicBlockId,
+    pub resume: runmat_mir::BasicBlockId,
 }
 
 #[cfg(feature = "native-accel")]

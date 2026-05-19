@@ -10,7 +10,7 @@ use crate::layout::derive_layout;
 use runmat_builtins::BuiltinSemanticKind;
 use runmat_hir::{EntrypointId, FunctionId, HirAssembly};
 use runmat_mir::MirAssembly;
-use runmat_mir::{MirRvalue, MirStmtKind};
+use runmat_mir::{MirRvalue, MirStmtKind, MirTerminatorKind};
 use std::collections::HashMap;
 #[cfg(feature = "native-accel")]
 use std::collections::HashSet;
@@ -100,7 +100,8 @@ fn derive_semantic_async_metadata(
     mir: &MirAssembly,
     entrypoint_target: Option<FunctionId>,
 ) -> crate::bytecode::SemanticAsyncMetadata {
-    let mut sites = Vec::new();
+    let mut spawn_sites = Vec::new();
+    let mut await_sites = Vec::new();
     let mut function_ids: Vec<_> = if let Some(function) = entrypoint_target {
         vec![function]
     } else {
@@ -122,18 +123,27 @@ fn derive_semantic_async_metadata(
                     | MirStmtKind::EnvironmentEffect(_) => continue,
                 };
                 if matches!(value, MirRvalue::Spawn(_)) {
-                    sites.push(crate::bytecode::SemanticSpawnSite {
+                    spawn_sites.push(crate::bytecode::SemanticSpawnSite {
                         function: body.function,
                         block: block.id,
                         stmt_index,
                     });
                 }
             }
+            if let MirTerminatorKind::Await { resume, .. } = &block.terminator.kind {
+                await_sites.push(crate::bytecode::SemanticAwaitSite {
+                    function: body.function,
+                    block: block.id,
+                    resume: *resume,
+                });
+            }
         }
     }
     crate::bytecode::SemanticAsyncMetadata {
-        mir_spawn_site_count: sites.len(),
-        mir_spawn_sites: sites,
+        mir_spawn_site_count: spawn_sites.len(),
+        mir_spawn_sites: spawn_sites,
+        mir_await_site_count: await_sites.len(),
+        mir_await_sites: await_sites,
     }
 }
 
@@ -974,6 +984,14 @@ mod tests {
             unique_sites.len() == bytecode.semantic_async_metadata.mir_spawn_sites.len(),
             "spawn site metadata entries should be distinct"
         );
+        assert_eq!(
+            bytecode.semantic_async_metadata.mir_await_site_count, 0,
+            "spawn-only program should not report await sites"
+        );
+        assert!(
+            bytecode.semantic_async_metadata.mir_await_sites.is_empty(),
+            "spawn-only program should have an empty await-site list"
+        );
     }
 
     #[test]
@@ -993,6 +1011,65 @@ mod tests {
         assert!(
             bytecode.semantic_async_metadata.mir_spawn_sites.is_empty(),
             "spawn site list should be empty when only helper bodies contain spawn expressions"
+        );
+        assert_eq!(
+            bytecode.semantic_async_metadata.mir_await_site_count, 0,
+            "program without entrypoint await should not report await sites"
+        );
+    }
+
+    #[test]
+    fn primary_compile_records_semantic_await_site_metadata() {
+        let source = "async function y = inc(x); y = x + 1; end; t = inc(2); z = await(t);";
+        let ast = runmat_parser::parse(source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+
+        assert!(
+            bytecode.semantic_async_metadata.mir_await_site_count > 0,
+            "expected non-zero await site count"
+        );
+        assert!(
+            !bytecode.semantic_async_metadata.mir_await_sites.is_empty(),
+            "expected await site metadata entries"
+        );
+        assert_eq!(
+            bytecode.semantic_async_metadata.mir_await_site_count,
+            bytecode.semantic_async_metadata.mir_await_sites.len(),
+            "await site count should match listed sites"
+        );
+        let unique_sites = bytecode
+            .semantic_async_metadata
+            .mir_await_sites
+            .iter()
+            .map(|site| (site.function, site.block, site.resume))
+            .collect::<std::collections::HashSet<_>>();
+        assert!(
+            unique_sites.len() == bytecode.semantic_async_metadata.mir_await_sites.len(),
+            "await site metadata entries should be distinct"
+        );
+    }
+
+    #[test]
+    fn primary_compile_scopes_await_site_metadata_to_entrypoint_target() {
+        let source = "x = 1; async function z = helper(a); z = await(a); end;";
+        let ast = runmat_parser::parse(source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+
+        assert_eq!(
+            bytecode.semantic_async_metadata.mir_await_site_count,
+            0,
+            "await sites in non-entrypoint helper bodies should not be attributed to the entrypoint bytecode artifact"
+        );
+        assert!(
+            bytecode.semantic_async_metadata.mir_await_sites.is_empty(),
+            "await site list should be empty when only helper bodies contain await expressions"
         );
     }
 
