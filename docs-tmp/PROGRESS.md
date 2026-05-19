@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 5 wire eval-hook lowering to shared source-context symbol discovery
+  - `runmat-core` interactive `input()` eval-hook lowering in `session/run.rs` now uses shared config-owned source-context known-symbol discovery (same ownership boundary as compile/CLI/LSP paths) via `discover_known_project_symbols_from_source_name`.
+  - This removes a remaining active core execution path that previously lowered without shared manifest/source-index symbol context.
+  - Added core run-session regression `discover_known_project_symbols_reads_manifest_source_context`.
+  - Validation: `cargo test -p runmat-core discover_known_project_symbols_reads_manifest_source_context`, `cargo test -p runmat-core source_input_path_`.
+
 - (pending commit) Plan 7 recursive residency clearing for nested GPU-handle values
   - VM acceleration residency clearing now traverses nested runtime values instead of only top-level `Value::GpuTensor`:
     - `Cell`

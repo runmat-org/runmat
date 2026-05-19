@@ -23,6 +23,15 @@ fn mir_local_fact_count_for_entrypoint(
         .count()
 }
 
+fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
+    use runmat_config::discover_known_project_symbols_from_source_name;
+
+    let Ok(cwd) = std::env::current_dir() else {
+        return HashSet::new();
+    };
+    discover_known_project_symbols_from_source_name(source_name, &cwd)
+}
+
 impl RunMatSession {
     /// Execute MATLAB/Octave code
     pub async fn execute(
@@ -237,6 +246,10 @@ impl RunMatSession {
         // executor — futures::executor::block_on — is already synchronous).
         let compat = self.compat_mode;
         let top_level_await_enabled = self.top_level_await_enabled;
+        let source_name_for_eval_hook = self.current_source_name().to_string();
+        let known_project_symbols_for_eval_hook = Arc::new(discover_known_project_symbols(Some(
+            source_name_for_eval_hook.as_str(),
+        )));
         let _eval_hook_guard =
             runmat_runtime::interaction::replace_eval_hook(Some(std::sync::Arc::new(
                 move |expr: String| -> runmat_runtime::interaction::EvalHookFuture {
@@ -246,6 +259,7 @@ impl RunMatSession {
                         expr: String,
                         compat: runmat_parser::CompatMode,
                         top_level_await_enabled: bool,
+                        known_project_symbols: Arc<HashSet<String>>,
                     ) -> Result<Value, RuntimeError> {
                         let wrapped = format!("__runmat_input_result__ = ({expr});");
                         let ast = parse_with_options(&wrapped, ParserOptions::new(compat))
@@ -257,6 +271,7 @@ impl RunMatSession {
                         let lowering = runmat_hir::lower(
                             &ast,
                             &LoweringContext::new(&HashMap::new())
+                                .with_known_project_symbols(&known_project_symbols)
                                 .with_runmat_extensions_enabled(compat.allows_runmat_extensions())
                                 .with_top_level_await_enabled(top_level_await_enabled),
                         )
@@ -285,7 +300,12 @@ impl RunMatSession {
                         // On WASM: await the inner interpret() directly. The JS async
                         // runtime handles both futures as cooperative state-machines and
                         // the WASM linear stack is large enough for the extra frames.
-                        Box::pin(eval_expr(expr, compat, top_level_await_enabled))
+                        Box::pin(eval_expr(
+                            expr,
+                            compat,
+                            top_level_await_enabled,
+                            Arc::clone(&known_project_symbols_for_eval_hook),
+                        ))
                     }
 
                     #[cfg(not(target_arch = "wasm32"))]
@@ -296,6 +316,8 @@ impl RunMatSession {
                         // and awaited asynchronously so the tokio worker thread is never
                         // blocked by a synchronous recv().
                         let (tx, rx) = tokio::sync::oneshot::channel();
+                        let known_project_symbols =
+                            Arc::clone(&known_project_symbols_for_eval_hook);
                         let spawn_result = std::thread::Builder::new()
                             .stack_size(16 * 1024 * 1024)
                             .spawn(move || {
@@ -303,6 +325,7 @@ impl RunMatSession {
                                     expr,
                                     compat,
                                     top_level_await_enabled,
+                                    known_project_symbols,
                                 ));
                                 let _ = tx.send(result);
                             });
@@ -1180,6 +1203,8 @@ fn resolve_path_source_input(path: &str) -> std::result::Result<std::path::PathB
 #[cfg(test)]
 mod tests {
     #[cfg(not(target_arch = "wasm32"))]
+    use super::discover_known_project_symbols;
+    #[cfg(not(target_arch = "wasm32"))]
     use super::source_input_text;
     #[cfg(not(target_arch = "wasm32"))]
     use crate::abi::SourceInput;
@@ -1279,5 +1304,42 @@ function = "main"
         assert!(err
             .to_string()
             .contains("failed to resolve project entrypoint"));
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn discover_known_project_symbols_reads_manifest_source_context() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("+stats")).unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("+stats/summarize.m"),
+            "function y = summarize(x); y = x; end",
+        )
+        .unwrap();
+        fs::write(tmp.path().join("main.m"), "x = 1;").unwrap();
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let symbols = discover_known_project_symbols(Some(
+            tmp.path().join("main.m").to_string_lossy().as_ref(),
+        ));
+
+        std::env::set_current_dir(prev).unwrap();
+        assert!(
+            symbols.contains("stats.summarize"),
+            "source-context discovery should include project symbols for eval-hook lowering"
+        );
     }
 }
