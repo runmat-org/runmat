@@ -284,12 +284,96 @@ fn spawn_task_id_from_value(value: &Value) -> Option<u64> {
     }
 }
 
+fn value_contains_spawn_task_id(value: &Value, task_id: u64) -> bool {
+    if spawn_task_id_from_value(value) == Some(task_id) {
+        return true;
+    }
+    match value {
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .any(|entry| value_contains_spawn_task_id(entry, task_id)),
+        Value::Struct(struct_value) => struct_value
+            .fields
+            .values()
+            .any(|entry| value_contains_spawn_task_id(entry, task_id)),
+        Value::Object(object_value) => object_value
+            .properties
+            .values()
+            .any(|entry| value_contains_spawn_task_id(entry, task_id)),
+        Value::Closure(closure) => closure
+            .captures
+            .iter()
+            .any(|entry| value_contains_spawn_task_id(entry, task_id)),
+        Value::OutputList(values) => values
+            .iter()
+            .any(|entry| value_contains_spawn_task_id(entry, task_id)),
+        Value::Int(_)
+        | Value::Num(_)
+        | Value::Complex(_, _)
+        | Value::Bool(_)
+        | Value::LogicalArray(_)
+        | Value::String(_)
+        | Value::StringArray(_)
+        | Value::CharArray(_)
+        | Value::Tensor(_)
+        | Value::ComplexTensor(_)
+        | Value::GpuTensor(_)
+        | Value::HandleObject(_)
+        | Value::Listener(_)
+        | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
+        | Value::ClassRef(_)
+        | Value::MException(_) => false,
+    }
+}
+
+fn spawn_task_id_still_live(
+    task_id: u64,
+    stack: &[Value],
+    vars: &[Value],
+    context: &crate::bytecode::program::ExecutionContext,
+    excluded_var: Option<usize>,
+    excluded_local: Option<usize>,
+) -> bool {
+    if stack
+        .iter()
+        .any(|value| value_contains_spawn_task_id(value, task_id))
+    {
+        return true;
+    }
+    for (index, value) in vars.iter().enumerate() {
+        if excluded_var == Some(index) {
+            continue;
+        }
+        if value_contains_spawn_task_id(value, task_id) {
+            return true;
+        }
+    }
+    for (index, value) in context.locals.iter().enumerate() {
+        if excluded_local == Some(index) {
+            continue;
+        }
+        if value_contains_spawn_task_id(value, task_id) {
+            return true;
+        }
+    }
+    false
+}
+
 fn retire_spawn_task_id_if_dropped(
     context: &mut crate::bytecode::program::ExecutionContext,
     value: &Value,
+    stack: &[Value],
+    vars: &[Value],
+    excluded_var: Option<usize>,
+    excluded_local: Option<usize>,
 ) {
     if let Some(id) = spawn_task_id_from_value(value) {
-        context.spawned_task_ids.remove(&id);
+        if !spawn_task_id_still_live(id, stack, vars, context, excluded_var, excluded_local) {
+            context.spawned_task_ids.remove(&id);
+        }
     }
 }
 
@@ -297,6 +381,10 @@ fn retire_spawn_task_id_if_replaced(
     context: &mut crate::bytecode::program::ExecutionContext,
     current: &Value,
     incoming: &Value,
+    stack: &[Value],
+    vars: &[Value],
+    excluded_var: Option<usize>,
+    excluded_local: Option<usize>,
 ) {
     let Some(current_id) = spawn_task_id_from_value(current) else {
         return;
@@ -305,7 +393,16 @@ fn retire_spawn_task_id_if_replaced(
     if incoming_id == Some(current_id) {
         return;
     }
-    context.spawned_task_ids.remove(&current_id);
+    if !spawn_task_id_still_live(
+        current_id,
+        stack,
+        vars,
+        context,
+        excluded_var,
+        excluded_local,
+    ) {
+        context.spawned_task_ids.remove(&current_id);
+    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -494,7 +591,15 @@ pub async fn dispatch_instruction(
                 ))?;
             debug::trace_store_var(*pc, *index, &preview);
             if *index < vars.len() {
-                retire_spawn_task_id_if_replaced(context, &vars[*index], &preview);
+                retire_spawn_task_id_if_replaced(
+                    context,
+                    &vars[*index],
+                    &preview,
+                    stack,
+                    vars,
+                    Some(*index),
+                    None,
+                );
                 #[cfg(feature = "native-accel")]
                 clear_overwritten_var_residency_excluding_live_values(
                     &vars[*index],
@@ -522,7 +627,15 @@ pub async fn dispatch_instruction(
                     let local_index = current_frame.locals_start + *offset;
                     if local_index < context.locals.len() {
                         let current_value = context.locals[local_index].clone();
-                        retire_spawn_task_id_if_replaced(context, &current_value, &incoming);
+                        retire_spawn_task_id_if_replaced(
+                            context,
+                            &current_value,
+                            &incoming,
+                            stack,
+                            vars,
+                            None,
+                            Some(local_index),
+                        );
                         #[cfg(feature = "native-accel")]
                         clear_overwritten_local_residency_excluding_live_values(
                             &current_value,
@@ -533,7 +646,15 @@ pub async fn dispatch_instruction(
                         );
                     }
                 } else if *offset < vars.len() {
-                    retire_spawn_task_id_if_replaced(context, &vars[*offset], &incoming);
+                    retire_spawn_task_id_if_replaced(
+                        context,
+                        &vars[*offset],
+                        &incoming,
+                        stack,
+                        vars,
+                        Some(*offset),
+                        None,
+                    );
                     #[cfg(feature = "native-accel")]
                     clear_overwritten_var_residency_excluding_live_values(
                         &vars[*offset],
@@ -565,7 +686,7 @@ pub async fn dispatch_instruction(
         }
         Instr::Pop => {
             if let Some(value) = stack.pop() {
-                retire_spawn_task_id_if_dropped(context, &value);
+                retire_spawn_task_id_if_dropped(context, &value, stack, vars, None, None);
                 #[cfg(feature = "native-accel")]
                 clear_popped_value_residency_excluding_live_values(&value, stack, vars, context);
             }
@@ -622,7 +743,9 @@ pub async fn dispatch_instruction(
             for _ in 0..*local_count {
                 if let Some(value) = context.locals.pop() {
                     if let Some(id) = spawn_task_id_from_value(&value) {
-                        context.spawned_task_ids.remove(&id);
+                        if !spawn_task_id_still_live(id, stack, vars, context, None, None) {
+                            context.spawned_task_ids.remove(&id);
+                        }
                     }
                     #[cfg(feature = "native-accel")]
                     clear_scope_value_residency_excluding_live_values(&value, stack, vars, context);
@@ -1327,7 +1450,7 @@ mod tests {
             context.spawned_task_ids.contains(&0),
             "spawn should register task id before drop"
         );
-        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped);
+        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped, &[], &[], None, None);
         assert!(
             !context.spawned_task_ids.contains(&0),
             "dropping a spawn task handle should retire its task id"
@@ -1360,7 +1483,15 @@ mod tests {
             context.spawned_task_ids.contains(&0),
             "spawn should register task id before replacement"
         );
-        super::retire_spawn_task_id_if_replaced(&mut context, &current, &Value::Num(2.0));
+        super::retire_spawn_task_id_if_replaced(
+            &mut context,
+            &current,
+            &Value::Num(2.0),
+            &[],
+            &[],
+            None,
+            None,
+        );
         assert!(
             !context.spawned_task_ids.contains(&0),
             "replacing task handle with a non-task value should retire its task id"
@@ -1381,10 +1512,40 @@ mod tests {
             context.spawned_task_ids.contains(&0),
             "spawn should register task id before self-replacement"
         );
-        super::retire_spawn_task_id_if_replaced(&mut context, &current, &current);
+        super::retire_spawn_task_id_if_replaced(
+            &mut context,
+            &current,
+            &current,
+            &[],
+            &[],
+            None,
+            None,
+        );
         assert!(
             context.spawned_task_ids.contains(&0),
             "replacing a task handle with itself should keep the task id live"
+        );
+    }
+
+    #[test]
+    fn dropped_spawn_task_handle_keeps_id_when_alias_still_live() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "spawn should register task id before alias drop"
+        );
+        let vars = vec![wrapped.clone()];
+        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped, &[], &vars, None, None);
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "dropping one alias should keep task id when another alias remains live"
         );
     }
 }

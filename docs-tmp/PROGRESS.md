@@ -69,6 +69,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `store_local_overwrite_preserves_provider_handle_when_shared_in_var`
   - Validation: `cargo test -p runmat-vm store_var_overwrite_preserves_provider_handle_when_shared_in_other_var`, `cargo test -p runmat-vm store_local_overwrite_preserves_provider_handle_when_shared_in_var`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
 
+- (pending commit) Plan 7 spawn-task ID retirement shared-liveness preservation
+  - VM dispatch task-ID retirement for dropped/replaced spawn handles now checks live aliases across stack/vars/locals before retiring IDs.
+  - This prevents stale `await` failures when one alias is overwritten/dropped while another alias still carries the same spawn task handle.
+  - Added coverage:
+    - `dropped_spawn_task_handle_keeps_id_when_alias_still_live` (dispatch-level)
+    - `await_succeeds_after_overwriting_one_spawn_handle_alias` (runner-level)
+  - Validation: `cargo test -p runmat-vm dropped_spawn_task_handle_keeps_id_when_alias_still_live`, `cargo test -p runmat-vm await_succeeds_after_overwriting_one_spawn_handle_alias`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 runtime consumer ratchet for class-metadata inheritance lookup
   - Added runtime `exist` builtin coverage that asserts method existence queries consume registered class metadata through inheritance lookup:
     - `exist_method_uses_registered_class_metadata_including_inheritance`

@@ -1271,6 +1271,34 @@ mod tests {
     }
 
     #[test]
+    fn await_succeeds_after_overwriting_one_spawn_handle_alias() {
+        let bytecode = Bytecode::with_instructions(
+            vec![
+                Instr::Spawn,
+                Instr::StoreVar(0),
+                Instr::LoadVar(0),
+                Instr::StoreVar(1),
+                Instr::LoadConst(0.0),
+                Instr::StoreVar(0),
+                Instr::LoadVar(1),
+                Instr::Await,
+                Instr::StoreVar(0),
+                Instr::Return,
+            ],
+            2,
+        );
+        let mut seed_vars = vec![Value::Num(0.0), Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::Num(9.0));
+        state.vars = vec![Value::Num(0.0), Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0), Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("await should succeed when another alias still carries the spawn task handle");
+        assert_eq!(result_vars[0], Value::Num(9.0));
+    }
+
+    #[test]
     fn await_rejects_spawn_task_handle_after_scope_exit_retires_id() {
         let mut task = runmat_builtins::StructValue::new();
         task.fields.insert(
