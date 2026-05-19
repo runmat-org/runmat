@@ -136,20 +136,12 @@ pub fn analyze_document_with_compat_and_source(
 }
 
 fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
-    use runmat_config::discover_project_symbols_from_source_name;
+    use runmat_config::discover_known_project_symbols_from_source_name;
 
-    let Some(source_name) = source_name else {
-        return HashSet::new();
-    };
     let Ok(cwd) = std::env::current_dir() else {
         return HashSet::new();
     };
-    let Ok(discovered) = discover_project_symbols_from_source_name(source_name, &cwd) else {
-        return HashSet::new();
-    };
-    discovered
-        .map(|discovered| discovered.symbols)
-        .unwrap_or_default()
+    discover_known_project_symbols_from_source_name(source_name, &cwd)
 }
 
 fn compile_error_for_lowering(lowering: &LoweringResult) -> Option<CompileError> {

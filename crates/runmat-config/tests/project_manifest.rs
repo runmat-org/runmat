@@ -1,5 +1,6 @@
 use runmat_config::{
-    build_project_composition_graph, build_project_source_index, discover_project_manifest_from,
+    build_project_composition_graph, build_project_source_index,
+    discover_known_project_symbols_from_source_name, discover_project_manifest_from,
     discover_project_symbols_from, discover_project_symbols_from_source_name,
     load_project_manifest, parse_project_manifest_toml, resolve_named_entrypoint_from,
     resolve_project_entrypoint, resolve_project_source_input_from, ResolveProjectSourceInputError,
@@ -298,6 +299,41 @@ roots = ["."]
     assert!(
         discovered.is_none(),
         "colon-style remote names should not trigger local project symbol discovery"
+    );
+}
+
+#[test]
+fn discover_known_project_symbols_from_source_name_returns_symbols_or_empty() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(PROJECT_MANIFEST_FILENAME),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .unwrap();
+    fs::write(tmp.path().join("main.m"), "x = 1;").unwrap();
+
+    let symbols = discover_known_project_symbols_from_source_name(Some("main.m"), tmp.path());
+    assert!(
+        symbols.contains("main"),
+        "known symbols should include local entry source symbol"
+    );
+
+    let empty = discover_known_project_symbols_from_source_name(None, tmp.path());
+    assert!(
+        empty.is_empty(),
+        "missing source name should return empty symbols"
+    );
+
+    let remote = discover_known_project_symbols_from_source_name(Some("remote:main.m"), tmp.path());
+    assert!(
+        remote.is_empty(),
+        "remote-style source names should return empty known symbols"
     );
 }
 

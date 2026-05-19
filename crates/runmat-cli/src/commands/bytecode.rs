@@ -30,20 +30,12 @@ pub fn emit_bytecode(
 }
 
 fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
-    use runmat_config::discover_project_symbols_from_source_name;
+    use runmat_config::discover_known_project_symbols_from_source_name;
 
-    let Some(source_name) = source_name else {
-        return HashSet::new();
-    };
     let Ok(cwd) = std::env::current_dir() else {
         return HashSet::new();
     };
-    let Ok(discovered) = discover_project_symbols_from_source_name(source_name, &cwd) else {
-        return HashSet::new();
-    };
-    discovered
-        .map(|discovered| discovered.symbols)
-        .unwrap_or_default()
+    discover_known_project_symbols_from_source_name(source_name, &cwd)
 }
 
 fn compile_bytecode(lowering: &runmat_hir::LoweringResult) -> Result<runmat_vm::Bytecode> {

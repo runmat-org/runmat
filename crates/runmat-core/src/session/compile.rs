@@ -26,18 +26,13 @@ fn mir_local_fact_count_for_entrypoint(
 }
 
 fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
-    use runmat_config::discover_project_symbols_from_source_name;
+    use runmat_config::discover_known_project_symbols_from_source_name;
 
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(_) => return HashSet::new(),
     };
-    let Ok(discovered) = discover_project_symbols_from_source_name(source_name, &cwd) else {
-        return HashSet::new();
-    };
-    discovered
-        .map(|discovered| discovered.symbols)
-        .unwrap_or_default()
+    discover_known_project_symbols_from_source_name(Some(source_name), &cwd)
 }
 
 impl RunMatSession {

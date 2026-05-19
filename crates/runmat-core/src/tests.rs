@@ -167,6 +167,7 @@ roots = ["."]
         "function y = summarize(x); y = x; end",
     )
     .expect("write dependency symbol");
+    std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     session.set_source_name_override(Some(
@@ -223,6 +224,7 @@ roots = ["."]
         "function y = summarize(x); y = x; end",
     )
     .expect("write dependency function");
+    std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     session.set_source_name_override(Some(
@@ -279,6 +281,7 @@ roots = ["."]
         "function y = summarize(x); y = x; end",
     )
     .expect("write dependency function");
+    std::fs::write(tmp.path().join("main.m"), "x = 1;").expect("write main source");
 
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     session.set_source_name_override(Some(

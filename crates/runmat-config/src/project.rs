@@ -728,6 +728,21 @@ pub fn discover_project_symbols_from_source_name(
     discover_project_symbols_from(&start)
 }
 
+pub fn discover_known_project_symbols_from_source_name(
+    source_name: Option<&str>,
+    cwd: &Path,
+) -> HashSet<String> {
+    let Some(source_name) = source_name else {
+        return HashSet::new();
+    };
+    let Ok(discovered) = discover_project_symbols_from_source_name(source_name, cwd) else {
+        return HashSet::new();
+    };
+    discovered
+        .map(|discovered| discovered.symbols)
+        .unwrap_or_default()
+}
+
 pub fn resolve_project_source_input_from(
     cwd: &Path,
     source_input: &Path,

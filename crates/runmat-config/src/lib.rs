@@ -12,7 +12,8 @@ mod schema;
 
 pub use loader::ConfigLoader;
 pub use project::{
-    build_project_composition_graph, build_project_source_index, discover_project_manifest_from,
+    build_project_composition_graph, build_project_source_index,
+    discover_known_project_symbols_from_source_name, discover_project_manifest_from,
     discover_project_symbols_from, discover_project_symbols_from_source_name,
     load_project_manifest, parse_project_manifest_toml, resolve_named_entrypoint_from,
     resolve_project_entrypoint, resolve_project_source_input_from, DiscoverProjectEntrypointError,

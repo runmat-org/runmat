@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 5 unify source-context known-symbol discovery ownership
+  - Added shared config-layer helper `discover_known_project_symbols_from_source_name(source_name, cwd)` in `runmat-config` to centralize fallback policy (`None` source, discovery errors, remote/path guard fallout -> empty symbol set).
+  - Switched active consumers to this shared helper instead of local duplicate wrappers:
+    - `runmat-core` compile path (`session/compile.rs`)
+    - CLI bytecode emission (`commands/bytecode.rs`)
+    - LSP document analysis (`core/analysis.rs`)
+  - Added config-layer regression `discover_known_project_symbols_from_source_name_returns_symbols_or_empty` and fixed core wildcard-import source-context fixtures to create explicit `main.m` sources for path-guard-compatible discovery coverage.
+  - Validation: `cargo test -p runmat-config discover_known_project_symbols_from_source_name_returns_symbols_or_empty`, `cargo test -p runmat-core compile_input_resolves_wildcard_import_from_project_source_index`, `cargo test -p runmat --lib commands::bytecode::tests::discover_known_project_symbols_reads_manifest_source_context`, `cargo test -p runmat-lsp source_context_symbol_discovery_reads_manifest_project_symbols`.
+
 - (pending commit) Plan 7 assert async policy failures by semantic identifier
   - HIR lowering now emits explicit semantic error identifiers for async policy boundaries:
     - `RunMat:AwaitExtensionDisabled`
