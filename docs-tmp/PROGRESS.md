@@ -26,6 +26,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - The test registers parent/child class metadata and asserts `fieldnames(handle)` emits child class properties, inherited parent properties, and target payload fields in sorted output order.
   - Validation: `cargo test -p runmat-runtime fieldnames_handle_object_includes_inherited_class_properties`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
 
+- (pending commit) Plan 6 class-registry lookup cycle hardening for inherited metadata consumers
+  - `runmat-builtins` class metadata lookup now guards against parent-cycle loops in both:
+    - `lookup_property`
+    - `lookup_method`
+  - Added class-registry coverage:
+    - `method_lookup_handles_parent_cycle`
+    - `property_lookup_handles_parent_cycle`
+    - `property_lookup_uses_parent_class_metadata_chain`
+  - This hardens inherited metadata traversal behavior used by runtime consumers (`getfield`/`setfield` property resolution and `exist(..., 'method')` lookup) against cyclic class-parent metadata.
+  - Validation: `cargo test -p runmat-builtins class_registry_tests`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 runtime consumer ratchet for class-metadata inheritance lookup
   - Added runtime `exist` builtin coverage that asserts method existence queries consume registered class metadata through inheritance lookup:
     - `exist_method_uses_registered_class_metadata_including_inheritance`

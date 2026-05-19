@@ -2297,10 +2297,11 @@ pub fn get_class(name: &str) -> Option<ClassDef> {
 pub fn lookup_property(class_name: &str, prop: &str) -> Option<(PropertyDef, String)> {
     let reg = registry().lock().unwrap();
     let mut current = Some(class_name.to_string());
-    let guard: Option<std::sync::MutexGuard<'_, std::collections::HashMap<String, ClassDef>>> =
-        None;
-    drop(guard);
+    let mut visited = std::collections::HashSet::new();
     while let Some(name) = current {
+        if !visited.insert(name.clone()) {
+            break;
+        }
         if let Some(cls) = reg.get(&name) {
             if let Some(p) = cls.properties.get(prop) {
                 return Some((p.clone(), name));
@@ -2318,7 +2319,11 @@ pub fn lookup_property(class_name: &str, prop: &str) -> Option<(PropertyDef, Str
 pub fn lookup_method(class_name: &str, method: &str) -> Option<(MethodDef, String)> {
     let reg = registry().lock().unwrap();
     let mut current = Some(class_name.to_string());
+    let mut visited = std::collections::HashSet::new();
     while let Some(name) = current {
+        if !visited.insert(name.clone()) {
+            break;
+        }
         if let Some(cls) = reg.get(&name) {
             if let Some(m) = cls.methods.get(method) {
                 return Some((m.clone(), name));
@@ -2366,7 +2371,10 @@ pub fn set_static_property_value_in_owner(
 
 #[cfg(test)]
 mod class_registry_tests {
-    use super::{get_class, lookup_method, register_class, Access, ClassDef, MethodDef};
+    use super::{
+        get_class, lookup_method, lookup_property, register_class, Access, ClassDef, MethodDef,
+        PropertyDef,
+    };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -2433,5 +2441,90 @@ mod class_registry_tests {
             .expect("child lookup should resolve inherited method through parent metadata");
         assert_eq!(owner, parent_name);
         assert_eq!(method.function_name, "parentOnly_impl");
+    }
+
+    #[test]
+    fn method_lookup_handles_parent_cycle() {
+        let class_a = unique_class_name("plan6_cycle_method_a");
+        let class_b = unique_class_name("plan6_cycle_method_b");
+
+        register_class(ClassDef {
+            name: class_a.clone(),
+            parent: Some(class_b.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: class_b.clone(),
+            parent: Some(class_a.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        assert!(
+            lookup_method(&class_a, "missing").is_none(),
+            "cyclic parent metadata should terminate missing method lookup"
+        );
+    }
+
+    #[test]
+    fn property_lookup_uses_parent_class_metadata_chain() {
+        let parent_name = unique_class_name("plan6_property_parent");
+        let child_name = unique_class_name("plan6_property_child");
+
+        let mut parent_properties = HashMap::new();
+        parent_properties.insert(
+            "parentFlag".to_string(),
+            PropertyDef {
+                name: "parentFlag".to_string(),
+                is_static: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: parent_properties,
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let (property, owner) = lookup_property(&child_name, "parentFlag")
+            .expect("child property lookup should resolve inherited property through parent");
+        assert_eq!(owner, parent_name);
+        assert_eq!(property.name, "parentFlag");
+        assert!(!property.is_static);
+    }
+
+    #[test]
+    fn property_lookup_handles_parent_cycle() {
+        let class_a = unique_class_name("plan6_cycle_property_a");
+        let class_b = unique_class_name("plan6_cycle_property_b");
+
+        register_class(ClassDef {
+            name: class_a.clone(),
+            parent: Some(class_b.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: class_b.clone(),
+            parent: Some(class_a.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        assert!(
+            lookup_property(&class_a, "missing").is_none(),
+            "cyclic parent metadata should terminate missing property lookup"
+        );
     }
 }
