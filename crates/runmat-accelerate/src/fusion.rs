@@ -708,6 +708,15 @@ pub fn prepare_fusion_plan(
     semantic_candidate_group_count: usize,
 ) -> Option<Arc<FusionPlan>> {
     let graph = graph?;
+    if semantic_candidate_group_count == 0 {
+        if !groups.is_empty() && fusion_debug_enabled() {
+            log::debug!(
+                "fusion plan preparation: executable bytecode fusion groups present ({}) but semantic candidate groups are absent",
+                groups.len()
+            );
+        }
+        return None;
+    }
     if groups.is_empty() {
         if semantic_candidate_group_count > 0 && fusion_debug_enabled() {
             log::debug!(
@@ -3417,6 +3426,32 @@ mod tests {
         let group = &groups[0];
         assert_eq!(group.nodes, vec![0, 1]);
         assert_eq!(group.kind, FusionKind::ElementwiseChain);
+    }
+
+    #[test]
+    fn prepare_fusion_plan_requires_semantic_candidate_groups() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        assert_eq!(groups.len(), 1);
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 0);
+        assert!(
+            plan.is_none(),
+            "bytecode groups alone should not produce an executable fusion plan without semantic candidate evidence"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_allows_semantic_gated_groups() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        assert_eq!(groups.len(), 1);
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1);
+        assert!(
+            plan.is_some(),
+            "semantic candidate evidence should allow executable fusion plan preparation"
+        );
     }
 
     #[test]
