@@ -192,6 +192,13 @@ fn compile_fusion_plan_exposes_semantic_planner_metadata() {
         snapshot.planner.mir_semantic_instruction_window_count > 0,
         "expected non-zero MIR semantic instruction window count"
     );
+    assert!(
+        snapshot
+            .nodes
+            .iter()
+            .any(|node| node.kind == "SemanticWindow"),
+        "expected semantic window artifacts in compile fusion snapshot"
+    );
 }
 
 #[test]
@@ -234,6 +241,13 @@ fn runtime_fusion_snapshot_exposes_semantic_planner_metadata() {
     assert!(
         snapshot.planner.mir_semantic_instruction_window_count > 0,
         "expected non-zero runtime MIR semantic instruction window count"
+    );
+    assert!(
+        snapshot
+            .nodes
+            .iter()
+            .any(|node| node.kind == "SemanticWindow"),
+        "expected semantic window artifacts in runtime fusion snapshot"
     );
 }
 
