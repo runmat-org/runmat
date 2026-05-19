@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `f3dd3c4b` `RM-378: thread project source symbols into import resolution`
+  - `runmat-core` compile path now discovers project composition/source-index symbols from the active source context and passes them into HIR lowering.
+  - `runmat-hir` wildcard import resolution now accepts project source-index candidates (not only builtins) for both:
+    - direct call target resolution
+    - function-handle target resolution
+  - Added integration regression coverage:
+    - `compile_input_resolves_wildcard_import_from_project_source_index`
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-core compile_input_resolves_wildcard_import_from_project_source_index`, `cargo test -p runmat-core source_input_path_`, `cargo test -p runmat --lib resolve_script_input_`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+
 - `eaadfab5` `RM-378: infer .m for unresolved source paths`
   - Core `SourceInput::Path` resolution now infers `.m` for unresolved file-style path inputs (e.g. `src/main` -> `src/main.m`) before entrypoint-name fallback.
   - CLI script path resolution now applies the same `.m` inference before manifest entrypoint-name fallback.

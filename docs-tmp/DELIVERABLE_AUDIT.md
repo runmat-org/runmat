@@ -59,6 +59,9 @@ This audit maps the active objective to concrete repository evidence and marks e
   - core request-path source loading in [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) now resolves simple named path inputs through the shared discovered-entrypoint resolver before source read.
   - core request-path source loading now also infers `.m` for unresolved file-style path inputs before entrypoint-name fallback in [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs), matching Plan 5 path-target inference behavior.
   - CLI script target resolution now applies the same `.m` inference before named-entrypoint fallback in [script.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-cli/src/commands/script.rs).
+  - core compile/lowering path now discovers composition source-index symbols from source context and passes them into HIR lowering in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs).
+  - HIR wildcard import resolution now uses project source-index symbol candidates for call/function-handle target resolution in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs) via lowering-context symbol inputs from [lowering_context.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering_context.rs).
+  - core integration coverage now includes wildcard import resolution through project source-index symbols (`compile_input_resolves_wildcard_import_from_project_source_index`) in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs).
 - Gap:
   - core/session-level execution now resolves named entrypoint path inputs through composition metadata, but resolver/import consumers are not yet wired end-to-end to consume the composition graph as source-of-truth.
   - source-index discovery, shared entrypoint resolution, and composition-graph loading now exist at config-layer, but downstream resolver consumers have not yet switched to composition-graph/source-index ownership end-to-end.
@@ -95,6 +98,7 @@ This audit maps the active objective to concrete repository evidence and marks e
 
 - Latest executed gates:
   - `cargo fmt --all --check`
+  - `cargo test -p runmat-core compile_input_resolves_wildcard_import_from_project_source_index`
   - `cargo test -p runmat-core source_input_path_`
   - `cargo test -p runmat --lib resolve_script_input_`
   - `cargo test -p runmat-vm primary_compile_emits_explicit_spawn_instruction`
