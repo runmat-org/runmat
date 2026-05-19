@@ -9,7 +9,7 @@ use runmat_builtins::{
     CellArray, CharArray, HandleRef, Listener, ObjectInstance, StructValue, Value,
 };
 use runmat_macros::runtime_builtin;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -145,12 +145,21 @@ fn collect_listener_fieldnames(_listener: &Listener) -> Vec<String> {
 
 fn class_instance_property_names(class_name: &str) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
-    if let Some(class_def) = runmat_builtins::get_class(class_name) {
-        for (name, prop) in &class_def.properties {
+    let mut current = Some(class_name.to_string());
+    let mut visited = HashSet::new();
+    while let Some(name) = current {
+        if !visited.insert(name.clone()) {
+            break;
+        }
+        let Some(class_def) = runmat_builtins::get_class(&name) else {
+            break;
+        };
+        for (prop_name, prop) in &class_def.properties {
             if !prop.is_static {
-                names.insert(name.clone());
+                names.insert(prop_name.clone());
             }
         }
+        current = class_def.parent.clone();
     }
     names
 }
@@ -316,6 +325,62 @@ pub(crate) mod tests {
         };
         let collected = cell_strings(&cell);
         assert_eq!(collected, vec!["Step".to_string(), "Value".to_string()]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fieldnames_object_includes_inherited_class_properties() {
+        let parent_name = "runmat.unittest.FieldnamesParent";
+        let child_name = "runmat.unittest.FieldnamesChild";
+
+        let mut parent = ClassDef {
+            name: parent_name.to_string(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        };
+        parent.properties.insert(
+            "ParentValue".to_string(),
+            PropertyDef {
+                name: "ParentValue".to_string(),
+                is_static: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        runmat_builtins::register_class(parent);
+
+        let mut child = ClassDef {
+            name: child_name.to_string(),
+            parent: Some(parent_name.to_string()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        };
+        child.properties.insert(
+            "ChildValue".to_string(),
+            PropertyDef {
+                name: "ChildValue".to_string(),
+                is_static: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        runmat_builtins::register_class(child);
+
+        let obj = ObjectInstance::new(child_name.to_string());
+        let Value::Cell(cell) = run_fieldnames(Value::Object(obj)).expect("fieldnames object")
+        else {
+            panic!("expected cell array");
+        };
+        let collected = cell_strings(&cell);
+        assert_eq!(
+            collected,
+            vec!["ChildValue".to_string(), "ParentValue".to_string()]
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

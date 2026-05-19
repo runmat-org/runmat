@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 6 runtime fieldnames inheritance-aware class metadata lookup
+  - `fieldnames` class-property discovery now traverses class metadata parent chains (with cycle guard) instead of reading only the immediate class definition.
+  - Added runtime coverage:
+    - `fieldnames_object_includes_inherited_class_properties`
+  - This ratchets runtime object introspection behavior to shared nominal class metadata inheritance semantics.
+  - Validation: `cargo test -p runmat-runtime fieldnames_object_includes_inherited_class_properties`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 runtime consumer ratchet for class-metadata inheritance lookup
   - Added runtime `exist` builtin coverage that asserts method existence queries consume registered class metadata through inheritance lookup:
     - `exist_method_uses_registered_class_metadata_including_inheritance`

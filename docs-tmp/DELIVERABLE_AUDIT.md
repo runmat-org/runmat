@@ -105,6 +105,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - builtin semantics surface in [semantics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-builtins/src/semantics.rs).
   - class-registry metadata behavior in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-builtins/src/lib.rs) now has explicit tests for primitive nominal static method metadata (`double`/`single`/`logical` -> `zeros`) and parent-chain method lookup resolution through class metadata (`primitive_classes_expose_static_zeros_method_metadata`, `method_lookup_uses_parent_class_metadata_chain`).
   - runtime consumer coverage now includes class-metadata inheritance lookup through `exist(..., 'method')` in [exist.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/io/repl_fs/exist.rs) (`exist_method_uses_registered_class_metadata_including_inheritance`), asserting both direct and inherited method resolution via shared class metadata.
+  - runtime object introspection now consumes inherited class-property metadata for `fieldnames` in [fieldnames.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/structs/core/fieldnames.rs), with explicit inheritance coverage (`fieldnames_object_includes_inherited_class_properties`).
 - Gap:
   - full Plan 6 acceptance criteria not yet closed out across all consumers.
 
