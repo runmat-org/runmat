@@ -6,6 +6,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 3/7 import ambiguity/duplicate identifier-contract ratchet
+  - Added stable semantic lowering identifiers for import conflict paths in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs):
+    - `RunMat:ImportAmbiguous` for ambiguous call/handle/import resolution
+    - `RunMat:ImportDuplicate` for duplicate import statements
+  - Tightened VM import ambiguity coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - ambiguity tests now assert `RunMat:ImportAmbiguous` instead of message-substring proxies
+    - duplicate-import classstar test now asserts `RunMat:ImportDuplicate`
+  - Added direct HIR-layer identifier-contract coverage in [lowering_extras.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/lowering_extras.rs):
+    - `import_normalization_and_ambiguity` now asserts `err.identifier == Some("RunMat:ImportAmbiguous")`
+  - Validation: `cargo test -p runmat-vm --test functions import_ambiguity_`, `cargo test -p runmat-vm --test functions import_wildcard_vs_classstar_ambiguity_for_static_method`, `cargo test -p runmat-hir --test lowering_extras import_normalization_and_ambiguity -- --nocapture`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 core execution-attempt stats contract ratchet
   - Tightened execution-attempt accounting in [integration.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/integration.rs):
     - `test_error_recovery_and_continued_execution` now asserts exact `stats.total_executions == 3` (valid run, invalid parse, valid recovery run), replacing the previous loose `2..=3` range.

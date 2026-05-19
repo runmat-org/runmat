@@ -25,6 +25,8 @@ const IDENT_SPAWN_LEXICAL_CAPTURE_UNSUPPORTED: &str = "RunMat:SpawnLexicalCaptur
 const IDENT_UNDEFINED_VARIABLE: &str = "RunMat:UndefinedVariable";
 const IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassPropertyAttributeConflict";
 const IDENT_CLASS_METHOD_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassMethodAttributeConflict";
+const IDENT_IMPORT_AMBIGUOUS: &str = "RunMat:ImportAmbiguous";
+const IDENT_IMPORT_DUPLICATE: &str = "RunMat:ImportDuplicate";
 
 #[derive(Clone)]
 struct SemanticScope {
@@ -1670,7 +1672,8 @@ impl SemanticCtx {
         if specific_matches.len() > 1 {
             return Err(
                 SemanticError::new(format!("ambiguous call target '{name}' via imports"))
-                    .with_span(span),
+                    .with_span(span)
+                    .with_identifier(IDENT_IMPORT_AMBIGUOUS),
             );
         }
         let wildcard_matches: Vec<QualifiedName> = imports
@@ -1686,7 +1689,8 @@ impl SemanticCtx {
             return Err(SemanticError::new(format!(
                 "ambiguous call target '{name}' via wildcard imports"
             ))
-            .with_span(span));
+            .with_span(span)
+            .with_identifier(IDENT_IMPORT_AMBIGUOUS));
         }
         Ok(None)
     }
@@ -1730,7 +1734,8 @@ impl SemanticCtx {
             return Err(SemanticError::new(format!(
                 "ambiguous function handle target '{name}' via imports"
             ))
-            .with_span(span));
+            .with_span(span)
+            .with_identifier(IDENT_IMPORT_AMBIGUOUS));
         }
         if let Some(import) = specific_matches.first() {
             return Ok(crate::FunctionHandleTarget::DefPath(
@@ -1747,7 +1752,8 @@ impl SemanticCtx {
             return Err(SemanticError::new(format!(
                 "ambiguous function handle target '{name}' via wildcard imports"
             ))
-            .with_span(span));
+            .with_span(span)
+            .with_identifier(IDENT_IMPORT_AMBIGUOUS));
         }
         if let Some(qualified) = wildcard_matches.first().cloned() {
             return Ok(crate::FunctionHandleTarget::DefPath(
@@ -1785,7 +1791,8 @@ fn validate_semantic_imports(imports: &[HirImport]) -> Result<(), SemanticError>
                 "duplicate import '{}{}'",
                 path,
                 if import.wildcard { ".*" } else { "" }
-            )));
+            ))
+            .with_identifier(IDENT_IMPORT_DUPLICATE));
         }
     }
 
@@ -1811,7 +1818,8 @@ fn validate_semantic_imports(imports: &[HirImport]) -> Result<(), SemanticError>
                 "ambiguous import for '{}': {}",
                 name,
                 sources.join(", ")
-            )));
+            ))
+            .with_identifier(IDENT_IMPORT_AMBIGUOUS));
         }
     }
     Ok(())

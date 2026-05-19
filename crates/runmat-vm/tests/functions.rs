@@ -50,10 +50,10 @@ fn has_object_num_property(
 }
 
 fn assert_import_ambiguity_error(err: &runmat_runtime::RuntimeError) {
-    let msg = err.message().to_ascii_lowercase();
-    assert!(
-        msg.contains("ambig") || msg.contains("conflict") || msg.contains("duplicate"),
-        "expected import ambiguity/conflict diagnostic, got: {}",
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:ImportAmbiguous"),
+        "expected import ambiguity identifier, got: {}",
         err.message()
     );
 }
@@ -2349,7 +2349,12 @@ fn import_wildcard_vs_classstar_ambiguity_for_static_method() {
 		r = origin();
 	"#;
     let err = compile_semantic_source(program).expect_err("expected duplicate classstar import");
-    assert_import_ambiguity_error(&err);
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:ImportDuplicate"),
+        "expected duplicate import identifier, got: {}",
+        err.message()
+    );
 }
 
 #[test]

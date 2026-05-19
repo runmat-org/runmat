@@ -66,6 +66,7 @@ fn lvalue_assignment_lowering_total() {
 #[test]
 fn import_normalization_and_ambiguity() {
     let ast = parse("import pkg.*; import pkg.sub.Class; import other.Class").unwrap();
-    let result = lower(&ast, &LoweringContext::empty());
-    assert!(result.is_err());
+    let err = lower(&ast, &LoweringContext::empty())
+        .expect_err("ambiguous specific imports should fail during lowering");
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:ImportAmbiguous"));
 }
