@@ -10,6 +10,7 @@ mod stack;
 use crate::bytecode::Instr;
 use crate::interpreter::debug;
 use crate::runtime::workspace::refresh_workspace_state;
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::Value;
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
@@ -102,6 +103,92 @@ pub async fn logical_truth_from_value(value: &Value, label: &str) -> Result<bool
             &format!("{label}: expected scalar logical or numeric value, got {other:?}"),
         )),
     }
+}
+
+fn for_each_gpu_handle_in_value(
+    value: &Value,
+    f: &mut impl FnMut(&GpuTensorHandle) -> Result<(), RuntimeError>,
+) -> Result<(), RuntimeError> {
+    match value {
+        Value::GpuTensor(handle) => f(handle),
+        Value::Cell(cell) => {
+            for elem in &cell.data {
+                for_each_gpu_handle_in_value(elem, f)?;
+            }
+            Ok(())
+        }
+        Value::Struct(struct_value) => {
+            for elem in struct_value.fields.values() {
+                for_each_gpu_handle_in_value(elem, f)?;
+            }
+            Ok(())
+        }
+        Value::Object(object_value) => {
+            for elem in object_value.properties.values() {
+                for_each_gpu_handle_in_value(elem, f)?;
+            }
+            Ok(())
+        }
+        Value::Closure(closure) => {
+            for capture in &closure.captures {
+                for_each_gpu_handle_in_value(capture, f)?;
+            }
+            Ok(())
+        }
+        Value::OutputList(values) => {
+            for elem in values {
+                for_each_gpu_handle_in_value(elem, f)?;
+            }
+            Ok(())
+        }
+        Value::Int(_)
+        | Value::Num(_)
+        | Value::Complex(_, _)
+        | Value::Bool(_)
+        | Value::LogicalArray(_)
+        | Value::String(_)
+        | Value::StringArray(_)
+        | Value::CharArray(_)
+        | Value::Tensor(_)
+        | Value::ComplexTensor(_)
+        | Value::HandleObject(_)
+        | Value::Listener(_)
+        | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
+        | Value::ClassRef(_)
+        | Value::MException(_) => Ok(()),
+    }
+}
+
+fn enforce_spawn_value_concurrency_policy(value: &Value) -> Result<(), RuntimeError> {
+    for_each_gpu_handle_in_value(value, &mut |handle| {
+        let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "SpawnProviderUnavailable",
+                &format!(
+                    "spawn cannot capture GPU handle buffer {} (device {}) without an active provider",
+                    handle.buffer_id, handle.device_id
+                ),
+            )
+        })?;
+        let policy = provider.spawn_handle_concurrency();
+        if matches!(
+            policy,
+            runmat_accelerate_api::SpawnHandleConcurrency::Reject
+        ) {
+            return Err(crate::interpreter::errors::mex(
+                "SpawnGpuHandleUnsupported",
+                &format!(
+                    "spawn cannot capture GPU handle buffer {} on provider '{}' (spawn_handle_concurrency={})",
+                    handle.buffer_id,
+                    provider.device_info(),
+                    policy.as_str()
+                ),
+            ));
+        }
+        Ok(())
+    })
 }
 
 pub async fn dispatch_instruction(
@@ -486,6 +573,9 @@ pub async fn dispatch_instruction(
                     "spawn instruction expected a value on the stack",
                 ));
             }
+            if let Some(top) = stack.last() {
+                enforce_spawn_value_concurrency_policy(top)?;
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -745,5 +835,98 @@ pub async fn dispatch_instruction(
             )))
         }
         _ => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::enforce_spawn_value_concurrency_policy;
+    use runmat_accelerate_api::{
+        AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView,
+        SpawnHandleConcurrency, ThreadProviderGuard,
+    };
+    use runmat_builtins::Value;
+
+    struct RejectSpawnProvider;
+    static REJECT_PROVIDER: RejectSpawnProvider = RejectSpawnProvider;
+
+    impl AccelProvider for RejectSpawnProvider {
+        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+
+        fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async { Err(anyhow::anyhow!("unsupported")) })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "reject-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            41
+        }
+    }
+
+    struct ShareSpawnProvider;
+    static SHARE_PROVIDER: ShareSpawnProvider = ShareSpawnProvider;
+
+    impl AccelProvider for ShareSpawnProvider {
+        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Err(anyhow::anyhow!("unsupported"))
+        }
+
+        fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async { Err(anyhow::anyhow!("unsupported")) })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "share-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            42
+        }
+
+        fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
+            SpawnHandleConcurrency::ImmutableShare
+        }
+    }
+
+    #[test]
+    fn spawn_policy_rejects_gpu_handles_when_provider_disallows_sharing() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
+        let value = Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1],
+            device_id: 41,
+            buffer_id: 7,
+        });
+        let err = enforce_spawn_value_concurrency_policy(&value)
+            .expect_err("reject policy should block spawn capture");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:SpawnGpuHandleUnsupported"),
+            "expected explicit spawn GPU-handle policy error identifier"
+        );
+    }
+
+    #[test]
+    fn spawn_policy_allows_gpu_handles_when_provider_declares_immutable_share() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&SHARE_PROVIDER));
+        let value = Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1],
+            device_id: 42,
+            buffer_id: 9,
+        });
+        enforce_spawn_value_concurrency_policy(&value)
+            .expect("immutable sharing policy should allow spawn capture");
     }
 }

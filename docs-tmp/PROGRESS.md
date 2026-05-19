@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 explicit provider handle spawn-concurrency policy boundary
+  - `runmat-accelerate-api` now exposes provider-declared spawn-handle concurrency policy (`SpawnHandleConcurrency`) with conservative default `Reject`.
+  - VM `Instr::Spawn` dispatch now enforces this boundary for `GpuTensor` handles captured in spawned values (including nested cell/struct/object/closure captures), returning explicit runtime diagnostics when provider policy rejects sharing or when no provider is available for a handle.
+  - Added VM dispatch regressions:
+    - `spawn_policy_rejects_gpu_handles_when_provider_disallows_sharing`
+    - `spawn_policy_allows_gpu_handles_when_provider_declares_immutable_share`
+  - Validation: `cargo test -p runmat-vm spawn_policy_`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`.
+
 - (pending commit) Plan 5 wire manifest/source-index symbol discovery into LSP analysis
   - `runmat-lsp` document analysis now threads source-path context into lowering (`analyze_document_with_compat_and_source`) and reuses shared config-layer discovery (`discover_project_symbols_from_source_name`) before semantic lowering.
   - Native backend reanalysis and wasm document open/change paths now derive file source paths from document URIs and pass them through this shared symbol-discovery boundary.
