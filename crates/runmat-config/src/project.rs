@@ -628,6 +628,33 @@ pub fn discover_project_symbols_from(
     }))
 }
 
+pub fn discover_project_symbols_from_source_name(
+    source_name: &str,
+    cwd: &Path,
+) -> Result<Option<DiscoveredProjectSymbols>, DiscoverProjectSymbolsError> {
+    let source_path = PathBuf::from(source_name);
+    let start = if source_path.is_file() {
+        source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| cwd.to_path_buf())
+    } else if source_path.is_absolute() {
+        source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| cwd.to_path_buf())
+    } else if source_path.components().count() > 1 {
+        let joined = cwd.join(&source_path);
+        joined
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| cwd.to_path_buf())
+    } else {
+        cwd.to_path_buf()
+    };
+    discover_project_symbols_from(&start)
+}
+
 pub fn build_project_composition_graph(
     root_manifest_path: &Path,
 ) -> Result<ProjectCompositionGraph, ProjectCompositionError> {

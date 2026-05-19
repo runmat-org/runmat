@@ -1,7 +1,6 @@
 use super::*;
 use crate::fusion::FusionPlannerMetadata;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 
 fn entrypoint_target_function(
     assembly: &runmat_hir::HirAssembly,
@@ -27,33 +26,13 @@ fn mir_local_fact_count_for_entrypoint(
 }
 
 fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
-    use runmat_config::discover_project_symbols_from;
+    use runmat_config::discover_project_symbols_from_source_name;
 
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(_) => return HashSet::new(),
     };
-    let source_path = PathBuf::from(source_name);
-    let start = if source_path.is_file() {
-        source_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| cwd.clone())
-    } else if source_path.is_absolute() {
-        source_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| cwd.clone())
-    } else if source_path.components().count() > 1 {
-        let joined = cwd.join(&source_path);
-        joined
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| cwd.clone())
-    } else {
-        cwd.clone()
-    };
-    let Ok(discovered) = discover_project_symbols_from(&start) else {
+    let Ok(discovered) = discover_project_symbols_from_source_name(source_name, &cwd) else {
         return HashSet::new();
     };
     discovered

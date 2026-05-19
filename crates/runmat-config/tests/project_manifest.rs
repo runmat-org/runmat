@@ -1,8 +1,8 @@
 use runmat_config::{
     build_project_composition_graph, build_project_source_index, discover_project_manifest_from,
-    discover_project_symbols_from, load_project_manifest, parse_project_manifest_toml,
-    resolve_named_entrypoint_from, resolve_project_entrypoint, ResolvedEntrypointTarget,
-    PROJECT_MANIFEST_FILENAME,
+    discover_project_symbols_from, discover_project_symbols_from_source_name,
+    load_project_manifest, parse_project_manifest_toml, resolve_named_entrypoint_from,
+    resolve_project_entrypoint, ResolvedEntrypointTarget, PROJECT_MANIFEST_FILENAME,
 };
 use std::fs;
 use tempfile::TempDir;
@@ -227,6 +227,30 @@ roots = ["."]
     assert!(discovered.symbols.contains("summarize"));
     assert!(discovered.symbols.contains("statslib.summarize"));
     assert!(discovered.symbols.contains("statsdep.summarize"));
+}
+
+#[test]
+fn discover_project_symbols_from_source_name_uses_cwd_for_plain_name() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(PROJECT_MANIFEST_FILENAME),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .unwrap();
+    fs::write(tmp.path().join("main.m"), "x = 1;").unwrap();
+
+    let discovered = discover_project_symbols_from_source_name("main.m", tmp.path())
+        .expect("discover symbols")
+        .expect("symbols should be discovered");
+
+    assert_eq!(discovered.root_package, "demo");
+    assert!(discovered.symbols.contains("main"));
 }
 
 #[test]
