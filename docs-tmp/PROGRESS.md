@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `341e801c` `RM-378: tighten alias wildcard handle assertion`
+  - Tightened dependency-alias wildcard function-handle regression to assert exact alias-qualified lowering identity (`CreateExternalFunctionHandle("statsdep.summarize")`) instead of a substring match.
+  - This keeps Plan 5 wildcard-import/alias function-handle evidence on a strict semantic identity contract.
+  - Validation: `cargo test -p runmat-core compile_input_resolves_function_handle_from_dependency_alias_wildcard_import`, `cargo test -p runmat-core --test semicolon_suppression`.
+
 - `9642000f` `RM-378: cover alias wildcard function handles`
   - Added `runmat-core` integration coverage for dependency-alias wildcard imports feeding function-handle lowering:
     - `compile_input_resolves_function_handle_from_dependency_alias_wildcard_import`
