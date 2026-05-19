@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 6/7 aggregate-edge cell member RHS shape identifier ratchet
+  - Tightened cell aggregate member-assignment error contracts in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs):
+    - `assign_cell_member` cell-RHS shape mismatch now emits stable identifier `RunMat:CellMemberRhsShapeMismatch` instead of message-only string error conversion.
+  - Added direct unit coverage:
+    - `assign_cell_member_rejects_shape_mismatch_cell_rhs`
+  - Validation: `cargo test -p runmat-vm assign_cell_member_rejects_shape_mismatch_cell_rhs -- --nocapture`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 6/7 object selector-plan identifier normalization ratchet
   - Tightened object paren-expr selector validation/runtime contracts in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
     - unsupported object numeric selector types now emit stable identifier `RunMat:ObjectSelectorTypeUnsupported` (via `mex("ObjectSelectorTypeUnsupported", ...)`) instead of ad hoc string errors.

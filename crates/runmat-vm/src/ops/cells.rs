@@ -157,7 +157,10 @@ where
 {
     let rhs_cell = if let Value::Cell(rc) = &rhs {
         if rc.rows != ca.rows || rc.cols != ca.cols {
-            return Err("Field assignment: cell rhs shape mismatch".into());
+            return Err(mex(
+                "CellMemberRhsShapeMismatch",
+                "field assignment cell RHS shape mismatch",
+            ));
         }
         Some(rc)
     } else {
@@ -454,4 +457,27 @@ fn assign_cell_paren_from_cell(
     }
     *ca.data[lin] = newv;
     Ok(Value::Cell(ca))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::assign_cell_member;
+    use runmat_builtins::{CellArray, StructValue, Value};
+
+    #[test]
+    fn assign_cell_member_rejects_shape_mismatch_cell_rhs() {
+        let base = CellArray::new(
+            vec![
+                Value::Struct(StructValue::new()),
+                Value::Struct(StructValue::new()),
+            ],
+            1,
+            2,
+        )
+        .expect("base cell");
+        let rhs = CellArray::new(vec![Value::Num(1.0)], 1, 1).expect("rhs cell");
+        let err = assign_cell_member(base, "field".to_string(), Value::Cell(rhs), |_old, _new| {})
+            .expect_err("shape mismatch should fail");
+        assert_eq!(err.identifier(), Some("RunMat:CellMemberRhsShapeMismatch"));
+    }
 }
