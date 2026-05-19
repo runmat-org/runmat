@@ -163,6 +163,7 @@ fn derive_semantic_async_metadata(
         mir_spawn_sites: spawn_sites,
         mir_await_site_count: await_sites.len(),
         mir_await_sites: await_sites,
+        runtime_model: crate::bytecode::program::SemanticAsyncRuntimeModel::EagerValueLane,
     }
 }
 
@@ -2248,6 +2249,11 @@ mod tests {
             "spawn site metadata entries should be distinct"
         );
         assert_eq!(
+            bytecode.semantic_async_metadata.runtime_model,
+            crate::bytecode::program::SemanticAsyncRuntimeModel::EagerValueLane,
+            "semantic async metadata should surface the current eager spawn/await runtime model"
+        );
+        assert_eq!(
             bytecode.semantic_async_metadata.mir_await_site_count, 0,
             "spawn-only program should not report await sites"
         );
@@ -2313,6 +2319,11 @@ mod tests {
         assert!(
             unique_sites.len() == bytecode.semantic_async_metadata.mir_await_sites.len(),
             "await site metadata entries should be distinct"
+        );
+        assert_eq!(
+            bytecode.semantic_async_metadata.runtime_model,
+            crate::bytecode::program::SemanticAsyncRuntimeModel::EagerValueLane,
+            "semantic async metadata should surface the current eager spawn/await runtime model"
         );
     }
 

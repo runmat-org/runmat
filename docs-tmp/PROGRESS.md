@@ -6,6 +6,16 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 explicit async runtime-model metadata contract
+  - Added explicit semantic async runtime-model metadata in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs):
+    - `SemanticAsyncRuntimeModel` (current value: `EagerValueLane`)
+    - `SemanticAsyncMetadata.runtime_model`
+  - VM compile now records this runtime model in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), and interpreter startup diagnostics now surface the model in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs).
+  - Updated async metadata ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_records_semantic_spawn_site_metadata`
+    - `primary_compile_records_semantic_await_site_metadata`
+  - Validation: `cargo test -p runmat-vm primary_compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-vm primary_compile_records_semantic_await_site_metadata`, `cargo test -p runmat-vm --test spawn_semantic_lifecycle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo test -p runmat-core --test async_stdin`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 keep semantic fusion groups when accel-node mapping drops out
   - `runmat-vm` compile path in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now falls back to semantic-window-derived fusion groups (empty node lists + semantic span/kind metadata) when semantic instruction windows exist but accel-node mapping produces zero groups.
   - This preserves semantic executable-group scaffolding through bytecode products so runtime fusion-plan preparation can recover/drop groups against the live accel graph, instead of dropping semantic fusion-group artifacts early at compile time.

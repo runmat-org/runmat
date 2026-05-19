@@ -180,6 +180,27 @@ pub struct SemanticAsyncMetadata {
     pub mir_spawn_sites: Vec<SemanticSpawnSite>,
     pub mir_await_site_count: usize,
     pub mir_await_sites: Vec<SemanticAwaitSite>,
+    #[serde(default)]
+    pub runtime_model: SemanticAsyncRuntimeModel,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SemanticAsyncRuntimeModel {
+    EagerValueLane,
+}
+
+impl Default for SemanticAsyncRuntimeModel {
+    fn default() -> Self {
+        Self::EagerValueLane
+    }
+}
+
+impl SemanticAsyncRuntimeModel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::EagerValueLane => "eager_value_lane",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

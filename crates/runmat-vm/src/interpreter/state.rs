@@ -46,9 +46,10 @@ impl InterpreterState {
             || bytecode.semantic_async_metadata.mir_await_site_count > 0
         {
             debug!(
-                "async semantics: compiled bytecode carries {} MIR spawn site(s) and {} MIR await site(s); explicit spawn/await bytecode boundaries are active",
+                "async semantics: compiled bytecode carries {} MIR spawn site(s) and {} MIR await site(s); runtime model={} with explicit spawn/await bytecode boundaries",
                 bytecode.semantic_async_metadata.mir_spawn_site_count,
-                bytecode.semantic_async_metadata.mir_await_site_count
+                bytecode.semantic_async_metadata.mir_await_site_count,
+                bytecode.semantic_async_metadata.runtime_model.as_str()
             );
         }
         Self {
