@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 persist semantic instruction-window fusion metadata on bytecode
+  - VM compile now records semantic fusion instruction windows (instruction span + semantic kind hint) as explicit bytecode metadata in `SemanticFusionMetadata`.
+  - Fusion-group realization now consumes that precomputed semantic window metadata instead of re-deriving windows in the accel-graph realization path.
+  - Added compile-level ratchet assertions that semantic instruction-window metadata is non-empty for fusible programs and that serialized window count matches window entries.
+  - Validation: `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidate_instruction_windows_split_on_non_accel_ops`, `cargo test -p runmat-vm semantic_window_kind_is_not_overridden_by_graph_category`.
+
 - (pending commit) Plan 7 make accel pre-gate assertions control-first, not display-proxy-first
   - Split builtin pre-gate rejection coverage so primary negative contract is explicit control/assertion behavior:
     - `semantic_candidate_accel_capability_gate_rejects_control_assert_builtin`

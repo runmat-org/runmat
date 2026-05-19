@@ -200,6 +200,9 @@ pub struct SemanticFusionMetadata {
     pub mir_fusion_signal_count: usize,
     pub mir_fusion_candidate_group_count: usize,
     pub mir_fusion_candidate_groups: Vec<SemanticFusionCandidateGroup>,
+    pub semantic_instruction_window_count: usize,
+    #[serde(default)]
+    pub semantic_instruction_windows: Vec<SemanticFusionInstructionWindow>,
 }
 
 #[cfg(feature = "native-accel")]
@@ -213,6 +216,21 @@ pub struct SemanticFusionCandidateGroup {
     pub stmt_end: usize,
     #[serde(default)]
     pub source_span: runmat_hir::Span,
+}
+
+#[cfg(feature = "native-accel")]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SemanticFusionInstructionKind {
+    Elementwise,
+    Reduction,
+    Matmul,
+}
+
+#[cfg(feature = "native-accel")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SemanticFusionInstructionWindow {
+    pub span: runmat_accelerate::graph::InstrSpan,
+    pub kind: SemanticFusionInstructionKind,
 }
 
 impl Bytecode {

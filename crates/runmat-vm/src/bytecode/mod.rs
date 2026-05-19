@@ -9,4 +9,7 @@ pub use program::{
     SemanticFunctionRegistry, SemanticSpawnSite,
 };
 #[cfg(feature = "native-accel")]
-pub use program::{SemanticFusionCandidateGroup, SemanticFusionMetadata};
+pub use program::{
+    SemanticFusionCandidateGroup, SemanticFusionInstructionKind, SemanticFusionInstructionWindow,
+    SemanticFusionMetadata,
+};
