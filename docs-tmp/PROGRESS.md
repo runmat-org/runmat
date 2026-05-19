@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 provider-release lifecycle ratchet for handle-object spawned payloads
+  - Added provider-backed VM runner coverage for spawned payloads where GPU handles are nested under `Value::HandleObject` targets:
+    - `spawn_await_completion_releases_nested_handle_object_target_provider_handle`
+    - `spawn_await_completion_preserves_nested_handle_object_target_handle_when_alias_live`
+  - This extends spawn/await completion residency/provider-release evidence beyond direct struct/object/cell payloads to handle-object target traversal.
+  - Validation: `cargo test -p runmat-vm spawn_await_completion_releases_nested_handle_object_target_provider_handle`, `cargo test -p runmat-vm spawn_await_completion_preserves_nested_handle_object_target_handle_when_alias_live`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 handle-object traversal hardening for spawn policy and task-ID liveness
   - VM spawn GPU-handle concurrency policy traversal now recurses through `Value::HandleObject` targets (cycle-safe) so nested provider handles are enforced at spawn boundaries.
   - VM spawn-task ID retirement/liveness now collects task IDs recursively across nested runtime shapes (including `HandleObject` targets) instead of only top-level task structs.
