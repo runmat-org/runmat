@@ -1181,9 +1181,9 @@ fn class_property_attribute_conflicts_error() {
     "#;
     let err =
         compile_semantic_source(program).expect_err("expected class property attribute conflict");
-    let msg = err.message().to_ascii_lowercase();
-    assert!(
-        msg.contains("constant") && msg.contains("dependent"),
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:ClassPropertyAttributeConflict"),
         "unexpected error: {}",
         err.message()
     );
@@ -1203,9 +1203,9 @@ fn class_method_attribute_conflicts_error() {
     "#;
     let err =
         compile_semantic_source(program).expect_err("expected class method attribute conflict");
-    let msg = err.message().to_ascii_lowercase();
-    assert!(
-        msg.contains("abstract") && msg.contains("sealed"),
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:ClassMethodAttributeConflict"),
         "unexpected error: {}",
         err.message()
     );

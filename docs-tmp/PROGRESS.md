@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 3 semantic class-attribute identifier contract ratchet
+  - Added stable semantic-lowering identifiers for class attribute conflict diagnostics in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs):
+    - `RunMat:ClassPropertyAttributeConflict` for incompatible property attribute combinations (for example `Constant` + `Dependent`).
+    - `RunMat:ClassMethodAttributeConflict` for incompatible method attribute combinations (for example `Abstract` + `Sealed`).
+  - Updated VM semantic compile coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) to assert those identifiers directly (`class_property_attribute_conflicts_error`, `class_method_attribute_conflicts_error`) instead of message-substring checks.
+  - Validation: `cargo test -p runmat-vm --test functions class_property_attribute_conflicts_error -- --exact`, `cargo test -p runmat-vm --test functions class_method_attribute_conflicts_error -- --exact`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 identifier-contract hardening for indexing and object overload failures
   - Replaced message-fallback assertions with strict identifier assertions in VM semantic coverage:
     - `index_step_zero_mex` now asserts `RunMat:IndexStepZero`

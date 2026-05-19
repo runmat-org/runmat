@@ -23,6 +23,8 @@ const IDENT_AWAIT_CONTEXT_INVALID: &str = "RunMat:AwaitContextInvalid";
 const IDENT_SPAWN_EXTENSION_DISABLED: &str = "RunMat:SpawnExtensionDisabled";
 const IDENT_SPAWN_LEXICAL_CAPTURE_UNSUPPORTED: &str = "RunMat:SpawnLexicalCaptureUnsupported";
 const IDENT_UNDEFINED_VARIABLE: &str = "RunMat:UndefinedVariable";
+const IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassPropertyAttributeConflict";
+const IDENT_CLASS_METHOD_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassMethodAttributeConflict";
 
 #[derive(Clone)]
 struct SemanticScope {
@@ -2059,12 +2061,14 @@ fn property_attributes(
     if has_static && has_dependent {
         return Err(SemanticError::new(format!(
             "class '{class_name}' properties: attributes 'Static' and 'Dependent' cannot be combined"
-        )));
+        ))
+        .with_identifier(IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT));
     }
     if has_constant && has_dependent {
         return Err(SemanticError::new(format!(
             "class '{class_name}' properties: attributes 'Constant' and 'Dependent' cannot be combined"
-        )));
+        ))
+        .with_identifier(IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT));
     }
     Ok(result)
 }
@@ -2108,7 +2112,8 @@ fn method_attributes(
     if has_abstract && has_sealed {
         return Err(SemanticError::new(format!(
             "class '{class_name}' methods: attributes 'Abstract' and 'Sealed' cannot be combined"
-        )));
+        ))
+        .with_identifier(IDENT_CLASS_METHOD_ATTRIBUTE_CONFLICT));
     }
     Ok(result)
 }

@@ -169,6 +169,12 @@ This audit maps the active objective to concrete repository evidence and marks e
   - core control-flow integration/engine coverage no longer relies on display-proxy assertions for unsupported behavior: [integration.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/integration.rs) (`test_control_flow_execution`) and [engine.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/engine.rs) (`test_execution_with_control_flow`) now assert successful control-flow execution and explicit readback values.
   - core engine execution-surface coverage no longer treats empty/whitespace input behavior as “success or arbitrary error text”: [engine.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/engine.rs) (`test_empty_input_handling`, `test_whitespace_only_input`) now assert successful execution with no runtime diagnostics.
   - core semantic try/catch binding coverage in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs) (`try_catch_binding_uses_semantic_vm`) now asserts the exact bound `err.message` payload shape (`'boom'`) instead of substring matching.
+  - semantic class attribute conflict diagnostics now expose stable identifier contracts in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs):
+    - `RunMat:ClassPropertyAttributeConflict`
+    - `RunMat:ClassMethodAttributeConflict`
+  - VM semantic compile coverage now ratchets these identifier contracts in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `class_property_attribute_conflicts_error`
+    - `class_method_attribute_conflicts_error`
   - VM basics indexing error coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs) no longer relies on message substring checks for key semantic failure paths; `fft_end_arithmetic_out_of_bounds_raises_error` and `scalar_slice_with_nonnumeric_selector_errors` now assert stable identifier contracts (`RunMat:IndexOutOfBounds`/`RunMat:SubscriptOutOfBounds` and `RunMat:UnsupportedIndexType`/`RunMat:SliceNonTensor`).
   - VM control-flow and indexing-property coverage now similarly ratchets identifier contracts for indexing/object-overload failures in [control_flow.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/control_flow.rs) and [indexing_properties.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/indexing_properties.rs):
     - `index_step_zero_mex` -> `RunMat:IndexStepZero`
