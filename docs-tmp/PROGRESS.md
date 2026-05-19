@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 widen spawn GPU-handle policy boundary coverage
+  - Extended VM spawn-policy dispatch tests to cover additional active-path policy boundaries:
+    - nested GPU-handle capture traversal via `Value::Cell` (`spawn_policy_rejects_nested_gpu_handles_in_cell_capture`)
+    - explicit missing-provider diagnostic path (`spawn_policy_reports_provider_unavailable_for_gpu_handles`)
+  - Both new tests assert stable runtime identifiers (`RunMat:SpawnGpuHandleUnsupported`, `RunMat:SpawnProviderUnavailable`) to keep policy-failure behavior on identifier contracts, not display text.
+  - Validation: `cargo test -p runmat-vm spawn_policy_`.
+
 - (pending commit) Plan 5 unify source-context known-symbol discovery ownership
   - Added shared config-layer helper `discover_known_project_symbols_from_source_name(source_name, cwd)` in `runmat-config` to centralize fallback policy (`None` source, discovery errors, remote/path guard fallout -> empty symbol set).
   - Switched active consumers to this shared helper instead of local duplicate wrappers:

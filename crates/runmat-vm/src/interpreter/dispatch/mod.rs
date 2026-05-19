@@ -845,7 +845,7 @@ mod tests {
         AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView,
         SpawnHandleConcurrency, ThreadProviderGuard,
     };
-    use runmat_builtins::Value;
+    use runmat_builtins::{CellArray, Value};
 
     struct RejectSpawnProvider;
     static REJECT_PROVIDER: RejectSpawnProvider = RejectSpawnProvider;
@@ -928,5 +928,48 @@ mod tests {
         });
         enforce_spawn_value_concurrency_policy(&value)
             .expect("immutable sharing policy should allow spawn capture");
+    }
+
+    #[test]
+    fn spawn_policy_rejects_nested_gpu_handles_in_cell_capture() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
+        let nested_cell = CellArray::new(
+            vec![
+                Value::Num(1.0),
+                Value::GpuTensor(GpuTensorHandle {
+                    shape: vec![1],
+                    device_id: 41,
+                    buffer_id: 11,
+                }),
+            ],
+            1,
+            2,
+        )
+        .expect("construct test cell");
+        let value = Value::Cell(nested_cell);
+        let err = enforce_spawn_value_concurrency_policy(&value)
+            .expect_err("reject policy should block nested GPU handle capture");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:SpawnGpuHandleUnsupported"),
+            "expected nested capture rejection identifier"
+        );
+    }
+
+    #[test]
+    fn spawn_policy_reports_provider_unavailable_for_gpu_handles() {
+        let _provider_guard = ThreadProviderGuard::set(None);
+        let value = Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1],
+            device_id: 99,
+            buffer_id: 13,
+        });
+        let err = enforce_spawn_value_concurrency_policy(&value)
+            .expect_err("missing provider should reject spawn GPU handle capture");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:SpawnProviderUnavailable"),
+            "expected missing-provider spawn capture identifier"
+        );
     }
 }
