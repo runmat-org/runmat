@@ -242,9 +242,10 @@ fn chol_multiassign_reports_failure() {
     let input = "A = [1 2; 2 1]; [R, p] = chol(A);";
     let bytecode = compile_semantic_source(input).expect("compile chol multi-assign");
     assert!(
-        bytecode.instructions.iter().any(
-            |instr| matches!(instr, Instr::CallBuiltinMulti(name, 1, 2) if name == "chol")
-        ),
+        bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instr::CallBuiltinMulti(name, 1, 2) if name == "chol")),
         "expected semantic multi-output chol call shape in bytecode"
     );
     let vars = execute_semantic_source(input);

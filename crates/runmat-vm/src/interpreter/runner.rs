@@ -731,7 +731,10 @@ mod tests {
     static TEST_PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
 
     #[cfg(feature = "native-accel")]
-    fn upload_provider_handle(data: Vec<f64>, shape: Vec<usize>) -> runmat_accelerate_api::GpuTensorHandle {
+    fn upload_provider_handle(
+        data: Vec<f64>,
+        shape: Vec<usize>,
+    ) -> runmat_accelerate_api::GpuTensorHandle {
         TEST_PROVIDER
             .upload(&HostTensorView {
                 data: &data,
@@ -841,7 +844,10 @@ mod tests {
         let mut result_vars = vec![Value::Num(0.0)];
         let outcome = block_on(run_interpreter_inner(state, &mut result_vars))
             .expect("interpreter should complete");
-        assert!(matches!(outcome, crate::interpreter::api::InterpreterOutcome::Completed(_)));
+        assert!(matches!(
+            outcome,
+            crate::interpreter::api::InterpreterOutcome::Completed(_)
+        ));
         assert!(
             !fusion_residency::is_resident(&handle),
             "completion should clear residency marks for stack-only GPU handles"
@@ -918,7 +924,8 @@ mod tests {
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
         fusion_residency::mark(&handle);
 
-        let bytecode = Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
         let mut seed_vars = vec![Value::Num(0.0)];
         let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
         state.stack.push(Value::GpuTensor(handle.clone()));
@@ -947,7 +954,8 @@ mod tests {
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
         fusion_residency::mark(&handle);
 
-        let bytecode = Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
         let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
         let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
         state.stack.push(Value::GpuTensor(handle.clone()));

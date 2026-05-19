@@ -139,7 +139,9 @@ mod tests {
     use once_cell::sync::Lazy;
     use runmat_accelerate::fusion_residency;
     use runmat_accelerate::simple_provider::InProcessProvider;
-    use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ThreadProviderGuard};
+    use runmat_accelerate_api::{
+        AccelProvider, GpuTensorHandle, HostTensorView, ThreadProviderGuard,
+    };
     use runmat_builtins::{CellArray, Closure, Value};
 
     static TEST_PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);

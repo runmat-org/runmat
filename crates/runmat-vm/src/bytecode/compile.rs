@@ -53,8 +53,7 @@ pub fn compile(
         &c.instr_spans,
         &semantic_fusion_metadata.mir_fusion_candidate_groups,
     );
-    semantic_fusion_metadata.semantic_instruction_window_count =
-        semantic_instruction_windows.len();
+    semantic_fusion_metadata.semantic_instruction_window_count = semantic_instruction_windows.len();
     semantic_fusion_metadata.semantic_instruction_windows = semantic_instruction_windows.clone();
     #[cfg(feature = "native-accel")]
     let (accel_graph, fusion_groups) = if semantic_fusion_metadata.mir_fusion_candidate_group_count
@@ -525,8 +524,7 @@ fn derive_semantic_fusion_instruction_windows(
             ) && !matches!(
                 run_kind,
                 Some(crate::bytecode::SemanticFusionInstructionKind::Matmul)
-            )
-            {
+            ) {
                 run_kind = Some(crate::bytecode::SemanticFusionInstructionKind::Reduction);
             }
             assigned_instructions.insert(index);
@@ -595,7 +593,8 @@ fn instr_fusion_signal_kind(
                         AccelTag::Unary | AccelTag::Elementwise | AccelTag::Transpose
                     )
                 });
-                has_elementwise.then_some(crate::bytecode::SemanticFusionInstructionKind::Elementwise)
+                has_elementwise
+                    .then_some(crate::bytecode::SemanticFusionInstructionKind::Elementwise)
             }),
         _ => None,
     }
@@ -1349,8 +1348,11 @@ mod tests {
             source_span: runmat_hir::Span { start: 10, end: 11 },
         }];
 
-        let windows =
-            super::derive_semantic_fusion_instruction_windows(&[Instr::Add], &instr_spans, &semantic_candidates);
+        let windows = super::derive_semantic_fusion_instruction_windows(
+            &[Instr::Add],
+            &instr_spans,
+            &semantic_candidates,
+        );
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert_eq!(groups.len(), 1, "expected one semantic fusion group");
         assert_eq!(
@@ -1449,8 +1451,11 @@ mod tests {
             },
         }];
 
-        let windows =
-            super::derive_semantic_fusion_instruction_windows(&[Instr::Add], &instr_spans, &semantic_candidates);
+        let windows = super::derive_semantic_fusion_instruction_windows(
+            &[Instr::Add],
+            &instr_spans,
+            &semantic_candidates,
+        );
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert!(
             groups.is_empty(),
@@ -1509,8 +1514,11 @@ mod tests {
             source_span: runmat_hir::Span { start: 19, end: 25 },
         }];
 
-        let windows =
-            super::derive_semantic_fusion_instruction_windows(&[Instr::Add], &instr_spans, &semantic_candidates);
+        let windows = super::derive_semantic_fusion_instruction_windows(
+            &[Instr::Add],
+            &instr_spans,
+            &semantic_candidates,
+        );
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
         assert!(
             groups.is_empty(),
