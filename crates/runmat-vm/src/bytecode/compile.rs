@@ -60,9 +60,10 @@ pub fn compile(
     } else {
         let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
         let mut fusion_groups = derive_semantic_fusion_groups_from_candidates(
-            &accel_graph,
+            &c.instructions,
             &c.instr_spans,
             &semantic_fusion_metadata.mir_fusion_candidate_groups,
+            &accel_graph,
         );
         if !fusion_groups.is_empty() {
             annotate_fusion_groups_with_stack_layout(
@@ -365,65 +366,35 @@ fn fusion_group_within_semantic_candidate_spans(
 
 #[cfg(feature = "native-accel")]
 fn derive_semantic_fusion_groups_from_candidates(
-    accel_graph: &runmat_accelerate::graph::AccelGraph,
+    instructions: &[Instr],
     instr_spans: &[runmat_hir::Span],
     semantic_candidate_groups: &[crate::bytecode::SemanticFusionCandidateGroup],
+    accel_graph: &runmat_accelerate::graph::AccelGraph,
 ) -> Vec<runmat_accelerate::fusion::FusionGroup> {
+    let semantic_windows = derive_semantic_fusion_instruction_windows(
+        instructions,
+        instr_spans,
+        semantic_candidate_groups,
+    );
     let mut groups = Vec::new();
     let mut assigned_nodes = HashSet::new();
 
-    for semantic_candidate in semantic_candidate_groups {
-        let mut nodes: Vec<_> = accel_graph
-            .nodes
-            .iter()
-            .filter(|node| {
-                !assigned_nodes.contains(&node.id)
-                    && matches!(
-                        node.category,
-                        runmat_accelerate::graph::AccelOpCategory::Elementwise
-                            | runmat_accelerate::graph::AccelOpCategory::Reduction
-                            | runmat_accelerate::graph::AccelOpCategory::MatMul
-                    )
-                    && node_within_semantic_candidate_span(
-                        node,
-                        instr_spans,
-                        semantic_candidate.source_span,
-                    )
-            })
-            .map(|node| node.id)
-            .collect();
+    for window in semantic_windows {
+        let nodes = accel_nodes_for_instruction_window(accel_graph, &window, &assigned_nodes);
         if nodes.is_empty() {
             continue;
         }
-        nodes.sort_unstable_by_key(|node_id| {
-            accel_graph
-                .node(*node_id)
-                .map(|node| (node.span.start, node.span.end, node.id))
-                .unwrap_or((usize::MAX, usize::MAX, *node_id))
-        });
-        nodes.dedup();
         for node_id in &nodes {
             assigned_nodes.insert(*node_id);
         }
-        let span_start = accel_graph
-            .node(*nodes.first().expect("non-empty nodes"))
-            .map(|node| node.span.start)
-            .unwrap_or(0);
-        let span_end = accel_graph
-            .node(*nodes.last().expect("non-empty nodes"))
-            .map(|node| node.span.end)
-            .unwrap_or(span_start);
-        let kind = infer_semantic_fusion_kind(accel_graph, &nodes);
+        let kind = infer_semantic_fusion_kind(accel_graph, &nodes, window.kind);
         let shape = infer_semantic_fusion_shape(accel_graph, &nodes);
         groups.push(runmat_accelerate::fusion::FusionGroup {
             id: groups.len(),
             kind,
             nodes,
             shape,
-            span: runmat_accelerate::graph::InstrSpan {
-                start: span_start,
-                end: span_end,
-            },
+            span: window.span,
             pattern: None,
             stack_layout: None,
         });
@@ -433,27 +404,209 @@ fn derive_semantic_fusion_groups_from_candidates(
 }
 
 #[cfg(feature = "native-accel")]
-fn node_within_semantic_candidate_span(
-    node: &runmat_accelerate::graph::AccelNode,
+fn accel_nodes_for_instruction_window(
+    accel_graph: &runmat_accelerate::graph::AccelGraph,
+    window: &SemanticFusionInstructionWindow,
+    assigned_nodes: &HashSet<runmat_accelerate::graph::NodeId>,
+) -> Vec<runmat_accelerate::graph::NodeId> {
+    let mut nodes: Vec<_> = accel_graph
+        .nodes
+        .iter()
+        .filter(|node| {
+            !assigned_nodes.contains(&node.id)
+                && matches!(
+                    node.category,
+                    runmat_accelerate::graph::AccelOpCategory::Elementwise
+                        | runmat_accelerate::graph::AccelOpCategory::Reduction
+                        | runmat_accelerate::graph::AccelOpCategory::MatMul
+                )
+                && node.span.start >= window.span.start
+                && node.span.end <= window.span.end
+        })
+        .map(|node| node.id)
+        .collect();
+    nodes.sort_unstable_by_key(|node_id| {
+        accel_graph
+            .node(*node_id)
+            .map(|node| (node.span.start, node.span.end, node.id))
+            .unwrap_or((usize::MAX, usize::MAX, *node_id))
+    });
+    nodes.dedup();
+    nodes
+}
+
+#[cfg(feature = "native-accel")]
+fn instruction_within_semantic_candidate_span(
+    instruction_index: usize,
     instr_spans: &[runmat_hir::Span],
     semantic_candidate_span: runmat_hir::Span,
 ) -> bool {
-    if instr_spans.is_empty()
-        || node.span.start > node.span.end
-        || node.span.start >= instr_spans.len()
-    {
+    if instr_spans.is_empty() || instruction_index >= instr_spans.len() {
         return false;
     }
-    let end = node.span.end.min(instr_spans.len().saturating_sub(1));
-    instr_spans[node.span.start..=end]
-        .iter()
-        .all(|span| source_span_contains(semantic_candidate_span, *span))
+    source_span_contains(semantic_candidate_span, instr_spans[instruction_index])
+}
+
+#[cfg(feature = "native-accel")]
+#[derive(Clone, Copy)]
+enum SemanticFusionSignalKind {
+    Elementwise,
+    Reduction,
+    Matmul,
+}
+
+#[cfg(feature = "native-accel")]
+#[derive(Clone)]
+struct SemanticFusionInstructionWindow {
+    span: runmat_accelerate::graph::InstrSpan,
+    kind: SemanticFusionSignalKind,
+}
+
+#[cfg(feature = "native-accel")]
+fn derive_semantic_fusion_instruction_windows(
+    instructions: &[Instr],
+    instr_spans: &[runmat_hir::Span],
+    semantic_candidate_groups: &[crate::bytecode::SemanticFusionCandidateGroup],
+) -> Vec<SemanticFusionInstructionWindow> {
+    if instructions.is_empty() || instr_spans.is_empty() || semantic_candidate_groups.is_empty() {
+        return Vec::new();
+    }
+
+    let mut windows = Vec::new();
+    let mut assigned_instructions = HashSet::new();
+
+    for candidate in semantic_candidate_groups {
+        let mut run_start: Option<usize> = None;
+        let mut run_kind: Option<SemanticFusionSignalKind> = None;
+        for (index, instr) in instructions.iter().enumerate() {
+            if index >= instr_spans.len() || assigned_instructions.contains(&index) {
+                if let Some(start) = run_start.take() {
+                    windows.push(SemanticFusionInstructionWindow {
+                        span: runmat_accelerate::graph::InstrSpan {
+                            start,
+                            end: index.saturating_sub(1),
+                        },
+                        kind: run_kind.unwrap_or(SemanticFusionSignalKind::Elementwise),
+                    });
+                    run_kind = None;
+                }
+                continue;
+            }
+            if !instruction_within_semantic_candidate_span(
+                index,
+                instr_spans,
+                candidate.source_span,
+            ) {
+                if let Some(start) = run_start.take() {
+                    windows.push(SemanticFusionInstructionWindow {
+                        span: runmat_accelerate::graph::InstrSpan {
+                            start,
+                            end: index.saturating_sub(1),
+                        },
+                        kind: run_kind.unwrap_or(SemanticFusionSignalKind::Elementwise),
+                    });
+                    run_kind = None;
+                }
+                continue;
+            }
+            let Some(signal_kind) = instr_fusion_signal_kind(instr) else {
+                if let Some(start) = run_start.take() {
+                    windows.push(SemanticFusionInstructionWindow {
+                        span: runmat_accelerate::graph::InstrSpan {
+                            start,
+                            end: index.saturating_sub(1),
+                        },
+                        kind: run_kind.unwrap_or(SemanticFusionSignalKind::Elementwise),
+                    });
+                    run_kind = None;
+                }
+                continue;
+            };
+
+            if run_start.is_none() {
+                run_start = Some(index);
+                run_kind = Some(signal_kind);
+            } else if matches!(signal_kind, SemanticFusionSignalKind::Matmul) {
+                run_kind = Some(SemanticFusionSignalKind::Matmul);
+            } else if matches!(signal_kind, SemanticFusionSignalKind::Reduction)
+                && !matches!(run_kind, Some(SemanticFusionSignalKind::Matmul))
+            {
+                run_kind = Some(SemanticFusionSignalKind::Reduction);
+            }
+            assigned_instructions.insert(index);
+        }
+        if let Some(start) = run_start.take() {
+            windows.push(SemanticFusionInstructionWindow {
+                span: runmat_accelerate::graph::InstrSpan {
+                    start,
+                    end: instructions.len().saturating_sub(1),
+                },
+                kind: run_kind.unwrap_or(SemanticFusionSignalKind::Elementwise),
+            });
+        }
+    }
+
+    windows
+}
+
+#[cfg(feature = "native-accel")]
+fn instr_fusion_signal_kind(instr: &Instr) -> Option<SemanticFusionSignalKind> {
+    match instr {
+        Instr::Add
+        | Instr::Sub
+        | Instr::Mul
+        | Instr::RightDiv
+        | Instr::LeftDiv
+        | Instr::Pow
+        | Instr::Neg
+        | Instr::UPlus
+        | Instr::Transpose
+        | Instr::ConjugateTranspose
+        | Instr::ElemMul
+        | Instr::ElemDiv
+        | Instr::ElemPow
+        | Instr::ElemLeftDiv
+        | Instr::LessEqual
+        | Instr::Less
+        | Instr::Greater
+        | Instr::GreaterEqual
+        | Instr::Equal
+        | Instr::NotEqual => Some(SemanticFusionSignalKind::Elementwise),
+        Instr::CallBuiltinMulti(name, _, _) => builtin_functions()
+            .iter()
+            .find(|func| func.name == name.as_str())
+            .and_then(|func| {
+                let has_matmul = func
+                    .accel_tags
+                    .iter()
+                    .any(|tag| matches!(tag, AccelTag::MatMul));
+                if has_matmul {
+                    return Some(SemanticFusionSignalKind::Matmul);
+                }
+                let has_reduction = func
+                    .accel_tags
+                    .iter()
+                    .any(|tag| matches!(tag, AccelTag::Reduction));
+                if has_reduction {
+                    return Some(SemanticFusionSignalKind::Reduction);
+                }
+                let has_elementwise = func.accel_tags.iter().any(|tag| {
+                    matches!(
+                        tag,
+                        AccelTag::Unary | AccelTag::Elementwise | AccelTag::Transpose
+                    )
+                });
+                has_elementwise.then_some(SemanticFusionSignalKind::Elementwise)
+            }),
+        _ => None,
+    }
 }
 
 #[cfg(feature = "native-accel")]
 fn infer_semantic_fusion_kind(
     accel_graph: &runmat_accelerate::graph::AccelGraph,
     nodes: &[runmat_accelerate::graph::NodeId],
+    kind_hint: SemanticFusionSignalKind,
 ) -> runmat_accelerate::fusion::FusionKind {
     let mut saw_matmul = false;
     let mut saw_reduction = false;
@@ -471,7 +624,15 @@ fn infer_semantic_fusion_kind(
     } else if saw_reduction {
         runmat_accelerate::fusion::FusionKind::Reduction
     } else {
-        runmat_accelerate::fusion::FusionKind::ElementwiseChain
+        match kind_hint {
+            SemanticFusionSignalKind::Matmul => {
+                runmat_accelerate::fusion::FusionKind::MatmulEpilogue
+            }
+            SemanticFusionSignalKind::Reduction => runmat_accelerate::fusion::FusionKind::Reduction,
+            SemanticFusionSignalKind::Elementwise => {
+                runmat_accelerate::fusion::FusionKind::ElementwiseChain
+            }
+        }
     }
 }
 
@@ -1106,9 +1267,10 @@ mod tests {
         }];
 
         let groups = super::derive_semantic_fusion_groups_from_candidates(
-            &accel_graph,
+            &[Instr::Add, Instr::ElemMul],
             &instr_spans,
             &semantic_candidates,
+            &accel_graph,
         );
         assert_eq!(groups.len(), 1, "expected one semantic-driven fusion group");
         assert_eq!(groups[0].nodes, vec![0, 1]);
@@ -1116,6 +1278,41 @@ mod tests {
             groups[0].kind,
             runmat_accelerate::fusion::FusionKind::ElementwiseChain
         );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_candidate_instruction_windows_split_on_non_accel_ops() {
+        let instructions = vec![Instr::Add, Instr::LoadConst(1.0), Instr::ElemMul];
+        let instr_spans = vec![
+            runmat_hir::Span { start: 10, end: 11 },
+            runmat_hir::Span { start: 11, end: 12 },
+            runmat_hir::Span { start: 12, end: 13 },
+        ];
+        let semantic_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 3,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 3,
+            source_span: runmat_hir::Span { start: 10, end: 13 },
+        }];
+
+        let windows = super::derive_semantic_fusion_instruction_windows(
+            &instructions,
+            &instr_spans,
+            &semantic_candidates,
+        );
+        assert_eq!(
+            windows.len(),
+            2,
+            "expected non-accel instruction boundary to split semantic instruction windows"
+        );
+        assert_eq!(windows[0].span.start, 0);
+        assert_eq!(windows[0].span.end, 0);
+        assert_eq!(windows[1].span.start, 2);
+        assert_eq!(windows[1].span.end, 2);
     }
 
     #[cfg(feature = "native-accel")]
@@ -1173,9 +1370,10 @@ mod tests {
         }];
 
         let groups = super::derive_semantic_fusion_groups_from_candidates(
-            &accel_graph,
+            &[Instr::Add],
             &instr_spans,
             &semantic_candidates,
+            &accel_graph,
         );
         assert!(
             groups.is_empty(),
@@ -1235,9 +1433,10 @@ mod tests {
         }];
 
         let groups = super::derive_semantic_fusion_groups_from_candidates(
-            &accel_graph,
+            &[Instr::Add],
             &instr_spans,
             &semantic_candidates,
+            &accel_graph,
         );
         assert!(
             groups.is_empty(),

@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 derive fusion group boundaries from semantic instruction windows
+  - `runmat-vm` fusion-group construction now derives executable fusion-group instruction windows directly from semantic candidate spans plus accel-capable bytecode instructions, instead of selecting group boundaries from accel-graph node overlap first.
+  - VM compile still builds accel graph artifacts for node realization and stack-layout annotation, but executable group span boundaries are now semantic/bytecode-fact-driven first.
+  - Added compile-unit coverage `semantic_candidate_instruction_windows_split_on_non_accel_ops` to ratchet window splitting at non-accelerable bytecode boundaries.
+  - Validation: `cargo test -p runmat-vm semantic_candidate_instruction_windows_split_on_non_accel_ops`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-core --test fusion_regressions`.
+
 - `f0f21c5c` `RM-378: require containment in fusion-group span filter`
   - Tightened `fusion_group_within_semantic_candidate_spans` to require full instruction-span containment within a single semantic candidate span (instead of permissive overlap), aligning fusion-group semantic span filtering with the stricter containment contract used in pre-gate and node filtering.
   - Removed now-dead overlap helper after containment unification.
