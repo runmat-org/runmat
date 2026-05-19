@@ -222,8 +222,10 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `store_local_overwrite_preserves_provider_handle_when_shared_in_var`
     - `store_var_overwrite_releases_nested_handle_object_provider_handle_when_unaliased`
     - `store_var_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_other_var`
+    - `store_var_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_local`
     - `store_local_overwrite_releases_nested_handle_object_provider_handle_when_unaliased`
     - `store_local_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_var`
+    - `store_local_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_other_local`
   - this closes a second concrete shared-liveness bug class where overwriting one slot could previously free provider storage for handles still referenced in another live slot.
   - VM spawn-task ID retirement for drop/overwrite paths in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs) now checks alias liveness across stack/vars/locals before retiring IDs.
   - spawn-task ID extraction/retirement now traverses nested runtime values (including handle-object targets) in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs), with direct coverage:

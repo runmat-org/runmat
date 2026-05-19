@@ -1158,6 +1158,48 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
+    fn store_var_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_local() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![27.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        let mut payload = StructValue::new();
+        payload
+            .fields
+            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let nested = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        state.vars = vec![nested.clone()];
+        state.stack.push(Value::Num(0.0));
+        state.context.locals.push(nested);
+
+        let mut result_vars = state.vars.clone();
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("store var overwrite should complete when alias lives in locals");
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "store var overwrite should preserve residency for nested handle-object handles still live in locals"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "store var overwrite should not release provider storage for nested handle-object handles still live in locals"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
     fn store_local_overwrite_preserves_provider_handle_when_shared_in_var() {
         use runmat_accelerate::fusion_residency;
 
@@ -1334,6 +1376,60 @@ mod tests {
         assert!(
             block_on(TEST_PROVIDER.download(&handle)).is_ok(),
             "store local overwrite should not release provider storage for nested handle-object handles still live in vars"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn store_local_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_other_local(
+    ) {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![30.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode = Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        let mut payload = StructValue::new();
+        payload
+            .fields
+            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let nested = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        state.stack.push(Value::Num(0.0));
+        state.vars = vec![Value::Num(0.0)];
+        state
+            .context
+            .call_stack
+            .push(crate::bytecode::program::CallFrame {
+                function_name: "<local>".to_string(),
+                return_address: 0,
+                locals_start: 0,
+                locals_count: 2,
+                expected_outputs: 0,
+            });
+        state.context.locals.push(nested.clone());
+        state.context.locals.push(nested);
+
+        let mut result_vars = state.vars.clone();
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("store local overwrite should complete when alias lives in other local");
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "store local overwrite should preserve residency for nested handle-object handles still live in other locals"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "store local overwrite should not release provider storage for nested handle-object handles still live in other locals"
         );
         fusion_residency::clear(&handle);
         let _ = TEST_PROVIDER.free(&handle);

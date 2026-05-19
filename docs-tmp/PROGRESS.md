@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 overwrite liveness ratchet for nested handle-object aliases in locals
+  - Added provider-backed VM runner coverage for overwrite cleanup where nested `HandleObject` aliases remain live via `locals`:
+    - `store_var_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_local`
+    - `store_local_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_other_local`
+  - This extends overwrite-path shared-liveness evidence to local-alias branches beyond var-alias-only cases.
+  - Validation: `cargo test -p runmat-vm store_var_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_local`, `cargo test -p runmat-vm store_local_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_other_local`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 local-slot replacement ID-liveness ratchet for nested handle-object values
   - Added VM dispatch coverage for local-slot overwrite retirement with `excluded_local` semantics when spawn-task handles are nested under `Value::HandleObject` targets:
     - `replaced_nested_spawn_task_handle_in_local_slot_retires_with_excluded_local`
