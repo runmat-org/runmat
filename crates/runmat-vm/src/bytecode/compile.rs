@@ -836,7 +836,7 @@ mod tests {
     #[cfg(feature = "native-accel")]
     #[test]
     fn semantic_candidate_accel_capability_gate_rejects_sink_builtin() {
-        let instructions = vec![Instr::CallBuiltinMulti("disp".to_string(), 1, 0)];
+        let instructions = vec![Instr::CallBuiltinMulti("assert".to_string(), 1, 0)];
         let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
         let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
             id: 0,
@@ -853,7 +853,7 @@ mod tests {
                 &instr_spans,
                 &candidates,
             ),
-            "sink builtin call should not trigger accel-graph construction gate"
+            "control/sink builtin call should not trigger accel-graph construction gate"
         );
     }
 
