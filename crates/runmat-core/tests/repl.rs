@@ -32,7 +32,7 @@ fn unknown_char_produces_error() {
 #[test]
 fn unterminated_string_is_error_token() {
     let result = format_tokens("'oops");
-    assert!(result.contains("Error"));
+    assert_eq!(result.split_whitespace().next(), Some("Error"));
 }
 
 #[test]

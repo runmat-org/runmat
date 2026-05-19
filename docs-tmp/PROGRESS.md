@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 lexer error-token boundary ratchet for formatter compatibility
+  - Tightened token-format compatibility coverage in [repl.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/repl.rs):
+    - `unterminated_string_is_error_token` now asserts the first emitted token is `Error` (`split_whitespace().next() == Some("Error")`) instead of broad substring matching.
+  - Validation: `cargo test -p runmat-core --test repl`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 workspace replace-import stale-binding contract ratchet
   - Tightened stale-variable verification in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs):
     - `workspace_state_roundtrip_replace_only` now asserts the explicit materialization error contract (`"Variable 'z' not found in workspace"`) instead of broad `is_err()` acceptance after replace-only import.
