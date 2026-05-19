@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 6 constructor metadata traversal hardening for cyclic class inheritance
+  - Runtime object construction (`new_object`) now guards class-parent traversal against metadata cycles when collecting inherited default property initialization chain.
+  - Added runtime regression coverage:
+    - `new_object_builtin_handles_class_parent_cycles`
+  - The test registers a cyclic parent relationship across synthetic classes and asserts constructor initialization terminates deterministically while applying defaults from both classes.
+  - Validation: `cargo test -p runmat-runtime new_object_builtin_handles_class_parent_cycles`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 inherited `subsref/subsasgn` metadata gating for VM object member dispatch
   - VM object member dispatch metadata checks now use inheritance-aware class-method lookup for protocol members (`subsref`, `subsasgn`) instead of direct-class-only method maps.
   - Added VM shared call helper coverage:

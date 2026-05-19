@@ -633,9 +633,13 @@ pub(crate) async fn new_object_builtin(class_name: String) -> crate::BuiltinResu
     if let Some(def) = runmat_builtins::get_class(&class_name) {
         // Collect class hierarchy from root to leaf for default initialization
         let mut chain: Vec<runmat_builtins::ClassDef> = Vec::new();
+        let mut visited = std::collections::HashSet::new();
         // Walk up to root
         let mut cursor: Option<String> = Some(def.name.clone());
         while let Some(name) = cursor {
+            if !visited.insert(name.clone()) {
+                break;
+            }
             if let Some(cd) = runmat_builtins::get_class(&name) {
                 chain.push(cd.clone());
                 cursor = cd.parent.clone();
@@ -1657,10 +1661,19 @@ async fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Val
 mod tests {
     use super::*;
     use futures::executor::block_on;
+    use runmat_builtins::{register_class, Access, ClassDef, PropertyDef};
+    use std::collections::HashMap;
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     };
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
 
     #[test]
     fn feval_closure_uses_semantic_function_identity() {
@@ -1801,6 +1814,59 @@ mod tests {
         let value = str2func_builtin(Value::String("Point..origin".to_string()))
             .expect("str2func should succeed");
         assert_eq!(value, Value::FunctionHandle("Point..origin".to_string()));
+    }
+
+    #[test]
+    fn new_object_builtin_handles_class_parent_cycles() {
+        let class_a = unique_class_name("runtime_ctor_cycle_a");
+        let class_b = unique_class_name("runtime_ctor_cycle_b");
+
+        let mut props_a = HashMap::new();
+        props_a.insert(
+            "fromA".to_string(),
+            PropertyDef {
+                name: "fromA".to_string(),
+                is_static: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: Some(Value::Num(1.0)),
+            },
+        );
+        let mut props_b = HashMap::new();
+        props_b.insert(
+            "fromB".to_string(),
+            PropertyDef {
+                name: "fromB".to_string(),
+                is_static: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: Some(Value::Num(2.0)),
+            },
+        );
+
+        register_class(ClassDef {
+            name: class_a.clone(),
+            parent: Some(class_b.clone()),
+            properties: props_a,
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: class_b,
+            parent: Some(class_a.clone()),
+            properties: props_b,
+            methods: HashMap::new(),
+        });
+
+        let value = block_on(new_object_builtin(class_a.clone()))
+            .expect("constructor should terminate under parent-cycle metadata");
+        let Value::Object(obj) = value else {
+            panic!("expected object result");
+        };
+        assert_eq!(obj.class_name, class_a);
+        assert_eq!(obj.properties.get("fromA"), Some(&Value::Num(1.0)));
+        assert_eq!(obj.properties.get("fromB"), Some(&Value::Num(2.0)));
     }
 
     #[test]
