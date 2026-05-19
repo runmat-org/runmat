@@ -4,6 +4,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use futures::executor::block_on;
+use runmat_builtins::Value;
 use runmat_core::{ExecutionStreamKind, RunError, RunMatSession, SessionExecutionResult};
 use runmat_gc::gc_test_context;
 
@@ -159,8 +160,11 @@ fn test_matrix_semicolon_suppression() {
 
     // Matrix creation without semicolon should show result
     let result = block_on(engine.execute("[1, 2, 3]")).unwrap();
-    assert!(result.value.is_some());
-    assert!(result.value.unwrap().to_string().contains("1"));
+    let Some(Value::Tensor(tensor)) = result.value else {
+        panic!("expected tensor result for row-vector literal");
+    };
+    assert_eq!(tensor.shape, vec![1, 3]);
+    assert_eq!(tensor.data, vec![1.0, 2.0, 3.0]);
 
     // Matrix creation with semicolon should suppress output
     let result = block_on(engine.execute("[1, 2, 3];")).unwrap();

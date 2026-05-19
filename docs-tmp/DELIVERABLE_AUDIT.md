@@ -373,6 +373,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - Purpose: reduce display-message coupling and keep runtime behavior tests pinned to stable identifier contracts.
   - Core entrypoint-resolution error coverage in [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) now also asserts runtime identifier contract (`RunMat:EntrypointResolveFailed`) instead of matching rendered error text.
   - Manifest/composition tests in [project_manifest.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/tests/project_manifest.rs) now assert typed error variants/fields (`ProjectManifestLoadError`, `ProjectSourceIndexError`, `ProjectEntrypointResolveError`, `DiscoverProjectEntrypointError`, `ProjectCompositionError`) rather than formatted error strings.
+  - Semicolon suppression matrix-path coverage in [semicolon_suppression.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/semicolon_suppression.rs) now asserts typed tensor contracts (`shape`/`data`) instead of display substring checks.
 
 - Additional Plan 7 heuristic-reduction ratchet:
   - Removed compile-time disjoint-gap, partial-overlap, and covering-span fallbacks in semantic-window node mapping in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).

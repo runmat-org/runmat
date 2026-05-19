@@ -1350,6 +1350,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This keeps manifest/composition contracts pinned to semantic error surfaces and stable fields (`dependency`, `package`, structured variants) instead of rendered error text.
   - Validation: `cargo test -p runmat-config --test project_manifest -- --nocapture`.
 
+- (pending commit) Core semicolon matrix output typed-value ratchet
+  - Updated `crates/runmat-core/tests/semicolon_suppression.rs` `test_matrix_semicolon_suppression` to assert a concrete tensor value (`shape == [1,3]`, `data == [1.0, 2.0, 3.0]`) instead of substring matching on rendered output.
+  - This keeps semicolon-suppression behavior checks aligned to runtime value contracts rather than display formatting.
+  - Validation: `cargo test -p runmat-core --test semicolon_suppression test_matrix_semicolon_suppression -- --nocapture`.
+
 ## Next Resolution Items
 
 - Finish converting remaining legacy test/doc references that imply removed APIs where they block semantic-only confidence.
