@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 semantic-window overlap-tolerance ratchet for accel-node mapping
+  - `runmat-vm` semantic window -> accel-node mapping in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now accepts small partial-overlap boundary drift (<=1 instruction on both boundaries) when strict contained/covering span checks do not match.
+  - This reduces fragility to minor accel-graph span jitter while preserving strict rejection of broad overlap coupling.
+  - Added mapping regression coverage:
+    - `semantic_windows_map_accel_nodes_with_small_boundary_shift_overlap`
+    - `semantic_windows_reject_partial_overlap_with_large_boundary_shift`
+  - Validation: `cargo test -p runmat-vm semantic_windows_`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic async spawn/await lifecycle coverage extension
   - Extended provider-backed semantic lifecycle coverage in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs) to include compiled semantic `async` function flows that execute explicit `spawn` + `await` bytecode boundaries:
     - `semantic_async_spawn_await_overwrite_unaliased_executes_with_scalar_output`

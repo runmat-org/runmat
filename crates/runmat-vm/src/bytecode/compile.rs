@@ -437,11 +437,20 @@ fn accel_node_span_matches_instruction_window(
     let contained_by_window =
         node.span.start >= window.span.start && node.span.end <= window.span.end;
     let covers_window = node.span.start <= window.span.start && node.span.end >= window.span.end;
+    let overlaps_window = node.span.start <= window.span.end && node.span.end >= window.span.start;
     if contained_by_window {
         return true;
     }
     if !covers_window {
-        return false;
+        // Compatibility fallback: accept only small partial-overlap boundary drift
+        // (<=1 instruction on both ends) so minor graph span jitter does not drop
+        // semantic windows, while still rejecting broad or weak overlap coupling.
+        if !overlaps_window {
+            return false;
+        }
+        let start_delta = node.span.start.abs_diff(window.span.start);
+        let end_delta = node.span.end.abs_diff(window.span.end);
+        return start_delta <= 1 && end_delta <= 1;
     }
     let left_extra = window.span.start.saturating_sub(node.span.start);
     let right_extra = node.span.end.saturating_sub(window.span.end);
@@ -1511,6 +1520,110 @@ mod tests {
         assert!(
             groups.is_empty(),
             "semantic windows should reject overly broad covering node spans"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_windows_map_accel_nodes_with_small_boundary_shift_overlap() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![runmat_accelerate::graph::AccelNode {
+                id: 0,
+                label: runmat_accelerate::graph::AccelNodeLabel::Primitive(
+                    runmat_accelerate::graph::PrimitiveOp::Add,
+                ),
+                category: runmat_accelerate::graph::AccelOpCategory::Elementwise,
+                inputs: vec![0, 0],
+                outputs: vec![1],
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 1 },
+                tags: vec![runmat_accelerate::graph::AccelGraphTag::Elementwise],
+            }],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+            span: runmat_accelerate::graph::InstrSpan { start: 1, end: 2 },
+            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+        }];
+        let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
+        assert_eq!(
+            groups.len(),
+            1,
+            "semantic windows should tolerate small boundary-shift overlap in accel node spans"
+        );
+        assert_eq!(groups[0].nodes, vec![0]);
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_windows_reject_partial_overlap_with_large_boundary_shift() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![runmat_accelerate::graph::AccelNode {
+                id: 0,
+                label: runmat_accelerate::graph::AccelNodeLabel::Primitive(
+                    runmat_accelerate::graph::PrimitiveOp::Add,
+                ),
+                category: runmat_accelerate::graph::AccelOpCategory::Elementwise,
+                inputs: vec![0, 0],
+                outputs: vec![1],
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 2 },
+                tags: vec![runmat_accelerate::graph::AccelGraphTag::Elementwise],
+            }],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+            span: runmat_accelerate::graph::InstrSpan { start: 2, end: 3 },
+            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+        }];
+        let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
+        assert!(
+            groups.is_empty(),
+            "semantic windows should reject partial overlap when boundary shift exceeds tolerance"
         );
     }
 
