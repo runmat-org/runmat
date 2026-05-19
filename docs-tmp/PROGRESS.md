@@ -1345,6 +1345,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `ProjectManifestLoadError::{Validation,Parse}`
     - `ProjectSourceIndexError::InvalidSourceRoot`
     - `ProjectEntrypointResolveError::SourceIndex`
+    - `DiscoverProjectEntrypointError::Resolve`
     - `ProjectCompositionError::{MissingDependencyManifest,DuplicatePackageName}`
   - This keeps manifest/composition contracts pinned to semantic error surfaces and stable fields (`dependency`, `package`, structured variants) instead of rendered error text.
   - Validation: `cargo test -p runmat-config --test project_manifest -- --nocapture`.

@@ -899,7 +899,15 @@ function = "main"
 
     let err = resolve_named_entrypoint_from(tmp.path(), "server")
         .expect_err("missing module file should return explicit resolve error");
-    assert!(err
-        .to_string()
-        .contains("failed to resolve project entrypoint"));
+    let runmat_config::DiscoverProjectEntrypointError::Resolve {
+        entrypoint, source, ..
+    } = err
+    else {
+        panic!("expected entrypoint resolve error");
+    };
+    assert_eq!(entrypoint, "server");
+    assert!(matches!(
+        source,
+        ProjectEntrypointResolveError::MissingModuleTarget { .. }
+    ));
 }
