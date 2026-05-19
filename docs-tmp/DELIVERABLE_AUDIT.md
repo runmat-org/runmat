@@ -228,6 +228,8 @@ This audit maps the active objective to concrete repository evidence and marks e
   - spawn-task ID extraction/retirement now traverses nested runtime values (including handle-object targets) in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs), with direct coverage:
     - `dropped_nested_spawn_task_handle_in_handle_object_retires_task_id`
     - `dropped_nested_spawn_task_handle_in_handle_object_keeps_id_when_alias_live`
+    - `replaced_nested_spawn_task_handle_in_handle_object_retires_task_id_when_unaliased`
+    - `replaced_nested_spawn_task_handle_in_handle_object_keeps_id_when_alias_live`
   - coverage now includes alias-preserving task-ID behavior in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs) (`dropped_spawn_task_handle_keeps_id_when_alias_still_live`) and runner-level `await` success after alias overwrite in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) (`await_succeeds_after_overwriting_one_spawn_handle_alias`).
   - this closes a stale-ID bug class where dropping one alias could previously invalidate `await` on another still-live alias.
   - VM interpreter cancellation path now clears residency marks for live stack/variable GPU-handle values before returning `ExecutionCancelled`, and completion now clears stack-only handle residency while preserving live-var handles in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs), with direct coverage in `cancellation_clears_gpu_residency_for_live_values` and `completion_clears_stack_only_gpu_residency`.

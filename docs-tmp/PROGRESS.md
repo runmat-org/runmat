@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 spawn-task ID replacement-liveness ratchet for nested handle-object values
+  - Added VM dispatch coverage for overwrite replacement retirement when spawn-task handles are nested under `Value::HandleObject` targets:
+    - `replaced_nested_spawn_task_handle_in_handle_object_retires_task_id_when_unaliased`
+    - `replaced_nested_spawn_task_handle_in_handle_object_keeps_id_when_alias_live`
+  - This ratchets that replacement-path ID retirement honors nested handle-object traversal and alias-liveness preservation.
+  - Validation: `cargo test -p runmat-vm replaced_nested_spawn_task_handle_in_handle_object_retires_task_id_when_unaliased`, `cargo test -p runmat-vm replaced_nested_spawn_task_handle_in_handle_object_keeps_id_when_alias_live`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 `StoreLocal` lifecycle ratchet for nested handle-object overwrite paths
   - Added provider-backed VM runner coverage for local-slot overwrite cleanup where dropped/shared handles are nested under `Value::HandleObject` values:
     - `store_local_overwrite_releases_nested_handle_object_provider_handle_when_unaliased`

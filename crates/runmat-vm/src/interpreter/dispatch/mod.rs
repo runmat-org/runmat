@@ -1735,4 +1735,75 @@ mod tests {
             "dropping nested alias should keep task id when direct alias remains live"
         );
     }
+
+    #[test]
+    fn replaced_nested_spawn_task_handle_in_handle_object_retires_task_id_when_unaliased() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        let mut payload = StructValue::new();
+        payload.fields.insert("task".to_string(), wrapped);
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let current = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "spawn should register task id before nested replacement"
+        );
+        super::retire_spawn_task_id_if_replaced(
+            &mut context,
+            &current,
+            &Value::Num(0.0),
+            &[],
+            &[],
+            None,
+            None,
+        );
+        assert!(
+            !context.spawned_task_ids.contains(&0),
+            "replacing nested task handle with non-task value should retire its task id"
+        );
+    }
+
+    #[test]
+    fn replaced_nested_spawn_task_handle_in_handle_object_keeps_id_when_alias_live() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        let mut payload = StructValue::new();
+        payload.fields.insert("task".to_string(), wrapped.clone());
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let current = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        let vars = vec![wrapped];
+        super::retire_spawn_task_id_if_replaced(
+            &mut context,
+            &current,
+            &Value::Num(0.0),
+            &[],
+            &vars,
+            None,
+            None,
+        );
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "replacing nested alias should keep task id when a live alias remains"
+        );
+    }
 }
