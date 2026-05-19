@@ -762,7 +762,7 @@ fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<Fu
                     .node(*id)
                     .map(|node| {
                         node_matches_runtime_group_kind(graph, node, &sanitized.kind)
-                            && node_overlaps_or_touches_group_span(node, &sanitized.span)
+                            && node_overlaps_group_span(node, &sanitized.span)
                     })
                     .unwrap_or(false)
             });
@@ -772,7 +772,7 @@ fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<Fu
                     .iter()
                     .filter(|node| {
                         node_matches_runtime_group_kind(graph, node, &sanitized.kind)
-                            && node_overlaps_or_touches_group_span(node, &sanitized.span)
+                            && node_overlaps_group_span(node, &sanitized.span)
                     })
                     .map(|node| node.id)
                     .collect();
@@ -817,14 +817,8 @@ fn node_matches_runtime_group_kind(
     }
 }
 
-fn node_overlaps_or_touches_group_span(node: &AccelNode, span: &InstrSpan) -> bool {
-    if node.span.start <= span.end && node.span.end >= span.start {
-        return true;
-    }
-    if node.span.end < span.start {
-        return span.start.saturating_sub(node.span.end) <= 1;
-    }
-    span.end < node.span.start && node.span.start.saturating_sub(span.end) <= 1
+fn node_overlaps_group_span(node: &AccelNode, span: &InstrSpan) -> bool {
+    node.span.start <= span.end && node.span.end >= span.start
 }
 
 pub fn activate_fusion_plan(plan: Option<Arc<FusionPlan>>) {
@@ -3539,25 +3533,25 @@ mod tests {
     }
 
     #[test]
-    fn prepare_fusion_plan_recovers_empty_group_nodes_from_runtime_graph() {
+    fn prepare_fusion_plan_recovers_empty_group_nodes_from_overlapping_runtime_span() {
         let graph = simple_elementwise_graph();
         let groups = vec![FusionGroup {
             id: 0,
             kind: FusionKind::ElementwiseChain,
             nodes: Vec::new(),
             shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
-            span: InstrSpan { start: 9, end: 9 },
+            span: InstrSpan { start: 10, end: 10 },
             pattern: None,
             stack_layout: None,
         }];
 
         let plan = prepare_fusion_plan(Some(&graph), &groups, 1)
-            .expect("runtime group sanitization should recover nearby elementwise nodes");
+            .expect("runtime group sanitization should recover overlapping elementwise nodes");
         assert_eq!(plan.groups.len(), 1);
         assert_eq!(
             plan.groups[0].group.nodes,
             vec![0],
-            "runtime sanitization should recover the nearest compatible node for empty group mapping"
+            "runtime sanitization should recover a compatible overlapping node for empty group mapping"
         );
     }
 
@@ -3582,25 +3576,26 @@ mod tests {
     }
 
     #[test]
-    fn prepare_fusion_plan_replaces_stale_mapped_nodes_using_runtime_span_recovery() {
+    fn prepare_fusion_plan_replaces_stale_mapped_nodes_using_overlapping_runtime_span_recovery() {
         let graph = simple_elementwise_graph();
         let groups = vec![FusionGroup {
             id: 0,
             kind: FusionKind::ElementwiseChain,
             nodes: vec![1],
             shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
-            span: InstrSpan { start: 9, end: 9 },
+            span: InstrSpan { start: 10, end: 10 },
             pattern: None,
             stack_layout: None,
         }];
 
-        let plan = prepare_fusion_plan(Some(&graph), &groups, 1)
-            .expect("runtime sanitization should recover nearby node when mapped node is stale");
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1).expect(
+            "runtime sanitization should recover overlapping node when mapped node is stale",
+        );
         assert_eq!(plan.groups.len(), 1);
         assert_eq!(
             plan.groups[0].group.nodes,
             vec![0],
-            "stale mapped node outside group span should be dropped and replaced by nearby compatible runtime node"
+            "stale mapped node outside group span should be dropped and replaced by overlapping compatible runtime node"
         );
     }
 

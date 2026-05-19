@@ -361,6 +361,8 @@ This audit maps the active objective to concrete repository evidence and marks e
   - `cargo test -p runmat-vm semantic_windows_reject_accel_nodes_with_large_disjoint_gap -- --nocapture`
   - `cargo test -p runmat-vm semantic_windows_reject_overly_wide_covering_node_spans -- --nocapture`
   - `cargo test -p runmat-vm semantic_windows_ -- --nocapture`
+  - `cargo test -p runmat-accelerate prepare_fusion_plan_ -- --nocapture`
+  - `cargo test -p runmat-accelerate sanitize_runtime_groups -- --nocapture`
   - `cargo check --workspace`
   - `git diff --check`
 
@@ -374,6 +376,12 @@ This audit maps the active objective to concrete repository evidence and marks e
   - Removed compile-time disjoint-gap, partial-overlap, and covering-span fallbacks in semantic-window node mapping in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
   - Compile-time mapping now rejects disjoint, partial-overlap, and covering graph/window spans and leaves that reconciliation to runtime fusion sanitization (`prepare_fusion_plan` -> `sanitize_runtime_groups`) in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs).
   - Updated compile coverage to assert all compile-stage boundaries (`semantic_windows_reject_disjoint_gap_at_compile_mapping_stage`, `semantic_windows_reject_partial_overlap_at_compile_mapping_stage`, `semantic_windows_reject_covering_node_span_at_compile_mapping_stage`).
+
+- Additional Plan 7 runtime sanitization ratchet:
+  - Tightened runtime `sanitize_runtime_groups` span recovery in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs) from overlap-or-touch (`<=1` disjoint gap) to overlap-only.
+  - Updated runtime sanitization coverage to assert overlap-based recovery and stale-node replacement only under overlapping spans:
+    - `prepare_fusion_plan_recovers_empty_group_nodes_from_overlapping_runtime_span`
+    - `prepare_fusion_plan_replaces_stale_mapped_nodes_using_overlapping_runtime_span_recovery`
 
 ## Current Conclusion
 
