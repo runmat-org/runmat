@@ -286,12 +286,14 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `semantic_async_spawn_await_helper_overwrite_releases_unaliased_provider_handle`
     - `semantic_async_spawn_await_struct_helper_releases_unaliased_provider_handle`
     - `semantic_async_spawn_await_cell_helper_releases_unaliased_provider_handle`
+    - `semantic_async_spawn_multi_output_helper_unrequested_handle_releases`
+    - `semantic_async_spawn_varargout_helper_unrequested_handle_releases`
   - Fusion materialized-store write paths now also consume handle-aware exclusion clearing in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs), extending shared-handle preservation beyond interpreter dispatch overwrite hooks.
   - Fusion materialized-store shared-handle preservation is now directly covered by `fusion_writeback_preserves_shared_gpu_handles` in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs).
   - runtime gather/retry GPU recursion now includes `Value::Closure` captures and `Value::OutputList` entries in [dispatcher.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/dispatcher.rs), with explicit nested-provider-unavailable identifier coverage.
 - Blocking gap:
   - executable fusion groups now use semantic/bytecode instruction-window boundaries and semantic kind/shape classification first, and semantic-tag filtering has reduced category-coupled mapping behavior; however, fusion realization still depends on accel-graph node mapping after boundary derivation in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
-  - spawned-task provider-handle policy now has explicit provider declarations plus VM enforcement, and provider-backed release semantics are covered for residency-clear/drop paths (including `Pop`) plus spawn/await completion/cancellation and compiled semantic spawn-overwrite lifecycle flows; semantic async spawn/await lifecycle coverage now includes unaliased helper/callee release behavior via semantic invoker path for direct, struct-nested, and cell-nested helper payloads. Remaining evidence gap is broader async spawned-workload release/cleanup semantics across additional nested output-list and multi-output helper shapes.
+  - spawned-task provider-handle policy now has explicit provider declarations plus VM enforcement, and provider-backed release semantics are covered for residency-clear/drop paths (including `Pop`) plus spawn/await completion/cancellation and compiled semantic spawn-overwrite lifecycle flows; semantic async spawn/await lifecycle coverage now includes unaliased helper/callee release behavior via semantic invoker path for direct, struct-nested, cell-nested, multi-output, and `varargout` helper payload/output shapes. Remaining evidence gap is broader async spawned-workload cleanup coverage for additional nested output-list helper forms plus parallel/true-async execution semantics.
 
 ### 7) Validation cadence (`met` for current slices)
 

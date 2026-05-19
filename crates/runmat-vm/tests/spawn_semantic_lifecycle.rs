@@ -382,4 +382,101 @@ mod tests {
             "async spawn/await cell helper unaliased flow should release provider storage for dropped handle"
         );
     }
+
+    #[test]
+    fn semantic_async_spawn_multi_output_helper_unrequested_handle_releases() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![13.0, 14.0], vec![1, 2]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let source = r#"
+            async function [a,b] = pass_pair(x)
+                a = 0;
+                b = x;
+            end
+
+            async function y = spawn_await_drop_multi_output_unaliased(x)
+                task = spawn(pass_pair(x));
+                tmp = await(task);
+                task = 0;
+                x = 0;
+                tmp = 0;
+                y = 0;
+            end
+        "#;
+        let (function_id, registry, _input_slot) = compile_semantic_function_invocation_fixture(
+            source,
+            "spawn_await_drop_multi_output_unaliased",
+        )
+        .expect("compile semantic async multi-output helper function");
+        let result = block_on(runmat_vm::invoke_semantic_function_value(
+            function_id.0,
+            &[Value::GpuTensor(handle.clone())],
+            1,
+            &registry,
+        ))
+        .expect("semantic async multi-output helper flow should run via semantic invoker");
+        assert_eq!(
+            result,
+            Value::Num(0.0),
+            "async spawn/await multi-output helper unaliased flow should preserve scalar output semantics"
+        );
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "async spawn/await multi-output helper unaliased flow should clear residency for dropped handle"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "async spawn/await multi-output helper unaliased flow should release provider storage for dropped handle"
+        );
+    }
+
+    #[test]
+    fn semantic_async_spawn_varargout_helper_unrequested_handle_releases() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![15.0, 16.0], vec![1, 2]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let source = r#"
+            async function varargout = pass_varargout(x)
+                varargout = {0, x};
+            end
+
+            async function y = spawn_await_drop_varargout_unaliased(x)
+                task = spawn(pass_varargout(x));
+                tmp = await(task);
+                task = 0;
+                x = 0;
+                tmp = 0;
+                y = 0;
+            end
+        "#;
+        let (function_id, registry, _input_slot) = compile_semantic_function_invocation_fixture(
+            source,
+            "spawn_await_drop_varargout_unaliased",
+        )
+        .expect("compile semantic async varargout helper function");
+        let result = block_on(runmat_vm::invoke_semantic_function_value(
+            function_id.0,
+            &[Value::GpuTensor(handle.clone())],
+            1,
+            &registry,
+        ))
+        .expect("semantic async varargout helper flow should run via semantic invoker");
+        assert_eq!(
+            result,
+            Value::Num(0.0),
+            "async spawn/await varargout helper unaliased flow should preserve scalar output semantics"
+        );
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "async spawn/await varargout helper unaliased flow should clear residency for dropped handle"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "async spawn/await varargout helper unaliased flow should release provider storage for dropped handle"
+        );
+    }
 }

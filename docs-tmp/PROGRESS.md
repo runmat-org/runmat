@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 semantic-invoker async multi-output/varargout release evidence ratchet
+  - Extended semantic invoker async lifecycle coverage in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs) with unrequested-output helper shapes that carry GPU handles:
+    - `semantic_async_spawn_multi_output_helper_unrequested_handle_releases`
+    - `semantic_async_spawn_varargout_helper_unrequested_handle_releases`
+  - This ratchets unaliased async helper/callee cleanup for multi-output and `varargout` helper forms when only a single output is requested by the caller.
+  - Validation: `cargo test -p runmat-vm --test spawn_semantic_lifecycle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic-window disjoint-gap tolerance ratchet for accel-node mapping
   - `runmat-vm` semantic window -> accel-node mapping in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now includes a bounded disjoint-gap fallback (<=1 instruction) when strict overlap matching yields no nodes.
   - This reduces dropouts from tiny graph/window span jitter while preserving rejection when disjoint gaps exceed tolerance.
