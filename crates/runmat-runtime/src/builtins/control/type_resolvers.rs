@@ -7,3 +7,7 @@ pub fn step_type(_args: &[Type], _context: &ResolveContext) -> Type {
 pub fn tf_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
 }
+
+pub fn impulse_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Unknown
+}
