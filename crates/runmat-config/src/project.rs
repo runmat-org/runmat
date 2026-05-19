@@ -307,6 +307,30 @@ pub enum ResolveProjectSourceInputError {
     },
 }
 
+#[derive(Debug, Error)]
+enum DiscoverProjectCompositionError {
+    #[error(
+        "failed to build project composition from discovered manifest {manifest_path}: {source}"
+    )]
+    Composition {
+        manifest_path: PathBuf,
+        #[source]
+        source: ProjectCompositionError,
+    },
+    #[error("project composition for {manifest_path} is missing root package `{package}`")]
+    MissingRootPackage {
+        manifest_path: PathBuf,
+        package: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiscoveredProjectComposition {
+    manifest_path: PathBuf,
+    composition: ProjectCompositionGraph,
+    root_package: String,
+}
+
 impl ProjectManifest {
     pub fn validate(&self, project_root: &Path) -> Result<(), ProjectManifestValidationError> {
         let mut messages = Vec::new();
@@ -563,22 +587,32 @@ pub fn resolve_named_entrypoint_from(
     start: &Path,
     entrypoint_name: &str,
 ) -> Result<Option<DiscoveredProjectEntrypoint>, DiscoverProjectEntrypointError> {
-    let Some(manifest_path) = discover_project_manifest_from(start) else {
+    let Some(discovered) = discover_project_composition_from(start).map_err(|err| match err {
+        DiscoverProjectCompositionError::Composition {
+            manifest_path,
+            source,
+        } => DiscoverProjectEntrypointError::Composition {
+            manifest_path,
+            source,
+        },
+        DiscoverProjectCompositionError::MissingRootPackage {
+            manifest_path,
+            package,
+        } => DiscoverProjectEntrypointError::MissingRootPackage {
+            manifest_path,
+            package,
+        },
+    })?
+    else {
         return Ok(None);
     };
-    let composition = build_project_composition_graph(&manifest_path).map_err(|source| {
-        DiscoverProjectEntrypointError::Composition {
-            manifest_path: manifest_path.clone(),
-            source,
-        }
-    })?;
-    let root_package = composition.root_package.clone();
-    let root = composition.packages.get(&root_package).ok_or_else(|| {
-        DiscoverProjectEntrypointError::MissingRootPackage {
-            manifest_path: manifest_path.clone(),
-            package: root_package.clone(),
-        }
-    })?;
+    let manifest_path = discovered.manifest_path.clone();
+    let root_package = discovered.root_package.clone();
+    let root = discovered
+        .composition
+        .packages
+        .get(&root_package)
+        .expect("root package should be present");
     let Some(entrypoint) =
         resolve_project_entrypoint(&root.project_root, &root.manifest, entrypoint_name).map_err(
             |source| DiscoverProjectEntrypointError::Resolve {
@@ -601,25 +635,35 @@ pub fn resolve_named_entrypoint_from(
 pub fn discover_project_symbols_from(
     start: &Path,
 ) -> Result<Option<DiscoveredProjectSymbols>, DiscoverProjectSymbolsError> {
-    let Some(manifest_path) = discover_project_manifest_from(start) else {
+    let Some(discovered) = discover_project_composition_from(start).map_err(|err| match err {
+        DiscoverProjectCompositionError::Composition {
+            manifest_path,
+            source,
+        } => DiscoverProjectSymbolsError::Composition {
+            manifest_path,
+            source,
+        },
+        DiscoverProjectCompositionError::MissingRootPackage {
+            manifest_path,
+            package,
+        } => DiscoverProjectSymbolsError::MissingRootPackage {
+            manifest_path,
+            package,
+        },
+    })?
+    else {
         return Ok(None);
     };
-    let composition = build_project_composition_graph(&manifest_path).map_err(|source| {
-        DiscoverProjectSymbolsError::Composition {
-            manifest_path: manifest_path.clone(),
-            source,
-        }
-    })?;
-    let root_package = composition.root_package.clone();
-    let root = composition.packages.get(&root_package).ok_or_else(|| {
-        DiscoverProjectSymbolsError::MissingRootPackage {
-            manifest_path: manifest_path.clone(),
-            package: root_package.clone(),
-        }
-    })?;
+    let manifest_path = discovered.manifest_path.clone();
+    let root_package = discovered.root_package.clone();
+    let root = discovered
+        .composition
+        .packages
+        .get(&root_package)
+        .expect("root package should be present");
     let root_dependencies = root.dependencies.clone();
     let mut symbols = HashSet::new();
-    for package in composition.packages.values() {
+    for package in discovered.composition.packages.values() {
         for source in &package.source_index.files {
             symbols.insert(source.qualified_name.clone());
             symbols.insert(format!(
@@ -732,6 +776,32 @@ fn is_relative_without_parent(path: &Path) -> bool {
     !path
         .components()
         .any(|component| matches!(component, Component::ParentDir))
+}
+
+fn discover_project_composition_from(
+    start: &Path,
+) -> Result<Option<DiscoveredProjectComposition>, DiscoverProjectCompositionError> {
+    let Some(manifest_path) = discover_project_manifest_from(start) else {
+        return Ok(None);
+    };
+    let composition = build_project_composition_graph(&manifest_path).map_err(|source| {
+        DiscoverProjectCompositionError::Composition {
+            manifest_path: manifest_path.clone(),
+            source,
+        }
+    })?;
+    let root_package = composition.root_package.clone();
+    if !composition.packages.contains_key(&root_package) {
+        return Err(DiscoverProjectCompositionError::MissingRootPackage {
+            manifest_path,
+            package: root_package,
+        });
+    }
+    Ok(Some(DiscoveredProjectComposition {
+        manifest_path,
+        composition,
+        root_package,
+    }))
 }
 
 fn source_input_entrypoint_name_candidate(path: &Path) -> Option<String> {
