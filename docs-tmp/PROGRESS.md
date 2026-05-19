@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 keep async/spawn semantic policy tests on identifier contracts
+  - Removed remaining HIR semantic policy test assertions that matched display-message fragments after identifier checks.
+  - Async/spawn policy regressions in `runmat-hir` now ratchet behavior strictly on stable identifiers (`RunMat:AwaitContextInvalid`, `RunMat:SpawnExtensionDisabled`, `RunMat:AwaitExtensionDisabled`, `RunMat:SpawnLexicalCaptureUnsupported`) rather than diagnostic wording.
+  - Validation: `cargo test -p runmat-hir await_requires_async_function_or_top_level_script`, `cargo test -p runmat-hir lowering_policy_can_disable_top_level_await`, `cargo test -p runmat-hir strict_mode_disables_runmat_extension_calls`, `cargo test -p runmat-hir spawn_rejects_anonymous_function_with_lexical_capture`, `cargo test -p runmat-core execute_request_honors_top_level_await_host_policy`, `cargo test -p runmat-core --test integration test_strict_mode_rejects_runmat_extensions`, `cargo test -p runmat-core --test integration test_request_host_policy_disables_top_level_await`.
+
 - (pending commit) Plan 7 recursive GPU gather detection/materialization for closure/output-list values
   - `runmat-runtime` dispatcher GPU recursion now includes:
     - `Value::Closure` captures

@@ -641,7 +641,6 @@ fn await_requires_async_function_or_top_level_script() {
         err.identifier.as_deref(),
         Some("RunMat:AwaitContextInvalid")
     );
-    assert!(err.message.contains("await is only allowed"));
 
     let assembly = lower_semantic("async function y = f(t); y = await(t); end");
     let function = &assembly.functions[0];
@@ -663,7 +662,6 @@ fn lowering_policy_can_disable_top_level_await() {
         err.identifier.as_deref(),
         Some("RunMat:AwaitContextInvalid")
     );
-    assert!(err.message.contains("await is only allowed"));
 
     let ast = runmat_parser::parse("x = 1;").unwrap();
     let result = lower(
@@ -689,7 +687,6 @@ fn strict_mode_disables_runmat_extension_calls() {
         err.identifier.as_deref(),
         Some("RunMat:SpawnExtensionDisabled")
     );
-    assert!(err.message.contains("spawn is a RunMat extension"));
 
     let ast = runmat_parser::parse("y = await(1);").unwrap();
     let err = lower(
@@ -701,7 +698,6 @@ fn strict_mode_disables_runmat_extension_calls() {
         err.identifier.as_deref(),
         Some("RunMat:AwaitExtensionDisabled")
     );
-    assert!(err.message.contains("await is a RunMat extension"));
 }
 
 #[test]
@@ -712,7 +708,6 @@ fn spawn_rejects_anonymous_function_with_lexical_capture() {
         err.identifier.as_deref(),
         Some("RunMat:SpawnLexicalCaptureUnsupported")
     );
-    assert!(err.message.contains("spawn cannot capture"));
 }
 
 #[test]
