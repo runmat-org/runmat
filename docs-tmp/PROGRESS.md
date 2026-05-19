@@ -6,6 +6,18 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `dfcc7f65` `RM-378: share composition symbol discovery API`
+  - Added shared config-layer composition symbol discovery API: `runmat_config::discover_project_symbols_from`.
+  - The shared API now centralizes:
+    - project manifest discovery
+    - composition graph loading
+    - root dependency alias mapping
+    - symbol set construction (`raw`, `package-qualified`, and `dependency-alias-qualified` names).
+  - `runmat-core` compile path now consumes this shared API for wildcard-import known-project symbol discovery instead of owning a duplicate composition/source-index traversal loop.
+  - Added config integration coverage:
+    - `discover_project_symbols_includes_dependency_alias_qualified_names`
+  - Validation: `cargo test -p runmat-config --test project_manifest discover_project_symbols_includes_dependency_alias_qualified_names`, `cargo test -p runmat-core compile_input_resolves_wildcard_import_from_dependency_alias`, `cargo test -p runmat-core compile_input_resolves_function_handle_from_dependency_alias_wildcard_import`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `git diff --check`.
+
 - `341e801c` `RM-378: tighten alias wildcard handle assertion`
   - Tightened dependency-alias wildcard function-handle regression to assert exact alias-qualified lowering identity (`CreateExternalFunctionHandle("statsdep.summarize")`) instead of a substring match.
   - This keeps Plan 5 wildcard-import/alias function-handle evidence on a strict semantic identity contract.
