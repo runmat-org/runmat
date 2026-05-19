@@ -1327,6 +1327,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - plus existing negative far-span coverage remains.
   - Validation: `cargo test -p runmat-accelerate prepare_fusion_plan_ -- --nocapture`, `cargo test -p runmat-accelerate sanitize_runtime_groups -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
+- (pending commit) Plan 7 compile/runtime fusion reconciliation boundary ratchet
+  - Added `primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes` in `crates/runmat-vm/src/bytecode/compile.rs`.
+  - The test locks the intended boundary:
+    - compile emits semantic-window fusion scaffolding with `group.nodes` empty (no compile-time accel-node assignment),
+    - runtime `prepare_fusion_plan(...)` reconciles executable groups by assigning node IDs from the accel graph.
+  - This guards against regressions that re-introduce compile-time node reconciliation or bypass runtime plan preparation as the executable-node boundary.
+  - Validation: `cargo test -p runmat-vm --features native-accel primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`.
+
 ## Next Resolution Items
 
 - Finish converting remaining legacy test/doc references that imply removed APIs where they block semantic-only confidence.

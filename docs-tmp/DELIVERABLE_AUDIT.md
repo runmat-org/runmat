@@ -379,6 +379,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - Tightened missing-tag compile mapping fallback to category-compatible matching only (instead of unconditional acceptance), with direct regression coverage: `semantic_windows_without_tags_reject_category_mismatch`.
   - Compile now emits fusion-group scaffolding from semantic instruction windows without compile-time node assignment, delegating node reconciliation to runtime plan preparation.
   - Compile-time accel-node mapping helper path used for historical fusion-node assignment is now test-only, removing that path from production compilation.
+  - Added explicit boundary coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs): `primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes` asserts compile-time groups remain node-empty and runtime `prepare_fusion_plan(...)` performs executable node reconciliation.
 
 - Additional Plan 7 runtime sanitization ratchet:
   - Tightened runtime `sanitize_runtime_groups` span recovery in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs) from overlap-or-touch (`<=1` disjoint gap) to overlap-only, then to contained-span-only.

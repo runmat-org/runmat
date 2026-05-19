@@ -821,6 +821,8 @@ mod tests {
     use super::compile;
     use crate::Instr;
     use futures::executor::block_on;
+    #[cfg(feature = "native-accel")]
+    use runmat_accelerate::fusion::prepare_fusion_plan;
     use runmat_builtins::Value;
     use runmat_hir::{lower, CallableFallbackPolicy, FunctionId, LoweringContext};
     use runmat_mir::lowering::lower_assembly;
@@ -928,6 +930,48 @@ mod tests {
                 .iter()
                 .all(|window| window.span.end >= window.span.start),
             "expected semantic instruction windows to carry valid instruction spans"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes() {
+        let ast = runmat_parser::parse("x = 1 + 2; y = x * 3;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        assert!(
+            bytecode.accel_graph.is_some(),
+            "expected accel graph when semantic fusion candidates/windows exist"
+        );
+        assert!(
+            !bytecode.fusion_groups.is_empty(),
+            "expected semantic-window fusion scaffolds"
+        );
+        assert!(
+            bytecode
+                .fusion_groups
+                .iter()
+                .all(|group| group.nodes.is_empty()),
+            "compile should not assign accel node IDs to semantic-window groups"
+        );
+
+        let runtime_plan = prepare_fusion_plan(
+            bytecode.accel_graph.as_ref(),
+            &bytecode.fusion_groups,
+            bytecode
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_group_count,
+        )
+        .expect("runtime fusion planning should reconcile executable groups");
+        assert!(
+            runtime_plan
+                .groups
+                .iter()
+                .any(|group| !group.group.nodes.is_empty()),
+            "runtime fusion planning should reconcile node IDs from accel graph"
         );
     }
 
