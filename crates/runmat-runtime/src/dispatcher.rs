@@ -16,6 +16,8 @@ pub fn value_contains_gpu(value: &Value) -> bool {
         Value::Cell(ca) => ca.data.iter().any(|ptr| value_contains_gpu(ptr)),
         Value::Struct(sv) => sv.fields.values().any(value_contains_gpu),
         Value::Object(obj) => obj.properties.values().any(value_contains_gpu),
+        Value::Closure(closure) => closure.captures.iter().any(value_contains_gpu),
+        Value::OutputList(values) => values.iter().any(value_contains_gpu),
         _ => false,
     }
 }
@@ -142,6 +144,20 @@ fn gather_if_needed_async_impl<'a>(
                     *value = gather_if_needed_async_impl(value).await?;
                 }
                 Ok(Value::Object(cloned))
+            }
+            Value::Closure(closure) => {
+                let mut cloned = closure.clone();
+                for value in &mut cloned.captures {
+                    *value = gather_if_needed_async_impl(value).await?;
+                }
+                Ok(Value::Closure(cloned))
+            }
+            Value::OutputList(values) => {
+                let mut gathered = Vec::with_capacity(values.len());
+                for value in values {
+                    gathered.push(gather_if_needed_async_impl(value).await?);
+                }
+                Ok(Value::OutputList(gathered))
             }
             other => Ok(other.clone()),
         }
@@ -309,5 +325,69 @@ async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>
         Ok(Some(gathered_args))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{gather_if_needed_async, value_contains_gpu};
+    use runmat_accelerate_api::{GpuTensorHandle, ThreadProviderGuard};
+    use runmat_builtins::{Closure, Value};
+
+    #[test]
+    fn value_contains_gpu_detects_nested_closure_captures() {
+        let value = Value::Closure(Closure {
+            function_name: "worker".to_string(),
+            semantic_function: None,
+            captures: vec![Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1],
+                device_id: 999,
+                buffer_id: 42,
+            })],
+        });
+        assert!(value_contains_gpu(&value));
+    }
+
+    #[test]
+    fn value_contains_gpu_detects_output_list_entries() {
+        let value = Value::OutputList(vec![
+            Value::Num(1.0),
+            Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1],
+                device_id: 998,
+                buffer_id: 43,
+            }),
+        ]);
+        assert!(value_contains_gpu(&value));
+    }
+
+    #[test]
+    fn gather_if_needed_reports_provider_unavailable_for_nested_output_list_gpu() {
+        let _provider_guard = ThreadProviderGuard::set(None);
+        let value = Value::OutputList(vec![Value::GpuTensor(GpuTensorHandle {
+            shape: vec![1],
+            device_id: 997,
+            buffer_id: 44,
+        })]);
+        let err = futures::executor::block_on(gather_if_needed_async(&value))
+            .expect_err("missing provider should fail nested output-list gather");
+        assert_eq!(err.identifier(), Some("RunMat:gather:ProviderUnavailable"));
+    }
+
+    #[test]
+    fn gather_if_needed_reports_provider_unavailable_for_closure_capture_gpu() {
+        let _provider_guard = ThreadProviderGuard::set(None);
+        let value = Value::Closure(Closure {
+            function_name: "worker".to_string(),
+            semantic_function: None,
+            captures: vec![Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1],
+                device_id: 996,
+                buffer_id: 45,
+            })],
+        });
+        let err = futures::executor::block_on(gather_if_needed_async(&value))
+            .expect_err("missing provider should fail closure-captured gather");
+        assert_eq!(err.identifier(), Some("RunMat:gather:ProviderUnavailable"));
     }
 }

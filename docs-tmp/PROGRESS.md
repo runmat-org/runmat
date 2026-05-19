@@ -6,6 +6,18 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 recursive GPU gather detection/materialization for closure/output-list values
+  - `runmat-runtime` dispatcher GPU recursion now includes:
+    - `Value::Closure` captures
+    - `Value::OutputList` entries
+  - This applies to both detection (`value_contains_gpu`) and gather materialization (`gather_if_needed_async`), closing a runtime retry/gather seam where nested GPU handles in these value lanes could previously evade gather/error boundaries.
+  - Added runtime regressions:
+    - `value_contains_gpu_detects_nested_closure_captures`
+    - `value_contains_gpu_detects_output_list_entries`
+    - `gather_if_needed_reports_provider_unavailable_for_nested_output_list_gpu`
+    - `gather_if_needed_reports_provider_unavailable_for_closure_capture_gpu`
+  - Validation: `cargo test -p runmat-runtime value_contains_gpu_detects`, `cargo test -p runmat-runtime gather_if_needed_reports_provider_unavailable`.
+
 - (pending commit) Plan 5 wire eval-hook lowering to shared source-context symbol discovery
   - `runmat-core` interactive `input()` eval-hook lowering in `session/run.rs` now uses shared config-owned source-context known-symbol discovery (same ownership boundary as compile/CLI/LSP paths) via `discover_known_project_symbols_from_source_name`.
   - This removes a remaining active core execution path that previously lowered without shared manifest/source-index symbol context.
