@@ -27,8 +27,8 @@ use runmat_accelerate_api::{
     ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult,
     ProviderScanDirection, ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult,
     ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison,
-    SortOrder, SortResult, SortRowsColumnSpec, UnionOptions, UnionResult, UniqueOptions,
-    UniqueResult, WgpuBufferRef, WgpuContextHandle,
+    SortOrder, SortResult, SortRowsColumnSpec, SpawnHandleConcurrency, UnionOptions, UnionResult,
+    UniqueOptions, UniqueResult, WgpuBufferRef, WgpuContextHandle,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
@@ -13831,6 +13831,11 @@ impl AccelProvider for WgpuProvider {
     fn device_id(&self) -> u32 {
         self.runtime_device_id
     }
+
+    fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
+        SpawnHandleConcurrency::SynchronizedMutation
+    }
+
     fn gather_linear(
         &self,
         source: &GpuTensorHandle,

@@ -8,6 +8,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - (pending commit) Plan 7 explicit provider handle spawn-concurrency policy boundary
   - `runmat-accelerate-api` now exposes provider-declared spawn-handle concurrency policy (`SpawnHandleConcurrency`) with conservative default `Reject`.
+  - Production providers now explicitly declare synchronized handle-sharing semantics across spawn boundaries:
+    - `InProcessProvider` -> `SynchronizedMutation`
+    - `WgpuProvider` -> `SynchronizedMutation`
   - VM `Instr::Spawn` dispatch now enforces this boundary for `GpuTensor` handles captured in spawned values (including nested cell/struct/object/closure captures), returning explicit runtime diagnostics when provider policy rejects sharing or when no provider is available for a handle.
   - Added VM dispatch regressions:
     - `spawn_policy_rejects_gpu_handles_when_provider_disallows_sharing`

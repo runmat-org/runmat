@@ -119,11 +119,14 @@ This audit maps the active objective to concrete repository evidence and marks e
   - VM bytecode semantic async metadata now carries explicit MIR await-site inventory (`mir_await_site_count`, `mir_await_sites`) in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs), derived from MIR await terminators in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
   - MIR await boundaries now lower through explicit bytecode `Instr::Await` handling in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs), [instr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/instr.rs), [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs), and [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs), making async boundary opcodes explicit on both Spawn and Await paths.
   - provider/runtime spawn-handle sharing policy is now explicit through [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate-api/src/lib.rs) (`SpawnHandleConcurrency`) and enforced at VM spawn execution boundary in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs), including nested capture traversal and explicit `RunMat:SpawnGpuHandleUnsupported` / `RunMat:SpawnProviderUnavailable` diagnostics.
+  - production providers now declare their spawn-sharing policy explicitly:
+    - [simple_provider.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/simple_provider.rs) -> `SynchronizedMutation`
+    - [provider_impl.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/backend/wgpu/provider_impl.rs) -> `SynchronizedMutation`
   - runtime/provider decision telemetry exists in [native_auto.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/native_auto.rs).
   - residency hooks exist in accelerate runtime.
 - Blocking gap:
   - executable fusion groups now use semantic/bytecode instruction-window boundaries first, but fusion realization still depends on accel-graph node mapping/shape artifacts after boundary derivation in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
-  - spawned-task provider-handle policy now has an explicit runtime rejection/allow surface, but production providers still rely on default/rejection semantics and there is not yet end-to-end evidence for non-reject shared-handle execution lifecycle (completion/cancellation/drop) across real provider backends.
+  - spawned-task provider-handle policy now has explicit provider declarations plus VM enforcement, but there is not yet end-to-end evidence for shared-handle execution lifecycle (completion/cancellation/drop/release) across real provider-backed spawned workloads.
 
 ### 7) Validation cadence (`met` for current slices)
 
