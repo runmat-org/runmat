@@ -339,6 +339,48 @@ roots = ["."]
 }
 
 #[test]
+fn compile_input_does_not_leak_local_project_symbols_for_colon_remote_name() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        tmp.path().join("+stats/summarize.m"),
+        "function y = summarize(x); y = x; end",
+    )
+    .expect("write package function");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let previous = std::env::current_dir().expect("cwd");
+    std::env::set_current_dir(tmp.path()).expect("set cwd");
+    session.set_source_name_override(Some("remote:main.m".to_string()));
+    let prepared = session
+        .compile_input("import stats.*; y = summarize(1);")
+        .expect("compile");
+    session.set_source_name_override(None);
+    std::env::set_current_dir(previous).expect("restore cwd");
+
+    assert!(
+        !prepared
+            .lowering()
+            .semantic_index
+            .calls
+            .iter()
+            .any(|call| matches!(call.kind, runmat_hir::CallKind::PackageFunction(_))),
+        "colon-style remote source names should not pull local project symbols into wildcard import resolution"
+    );
+}
+
+#[test]
 fn end_offset_indexing_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "A = [1, 2, 3]; y = A(end-1);";

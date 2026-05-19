@@ -28,6 +28,12 @@ fn mir_local_fact_count_for_entrypoint(
 fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
     use runmat_config::discover_project_symbols_from_source_name;
 
+    // Remote/virtual source naming (for example `remote:main.m`) must not trigger
+    // local composition symbol discovery.
+    if source_name.contains(':') {
+        return HashSet::new();
+    }
+
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(_) => return HashSet::new(),

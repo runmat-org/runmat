@@ -35,6 +35,9 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
     let Some(source_name) = source_name else {
         return HashSet::new();
     };
+    if source_name.contains(':') {
+        return HashSet::new();
+    }
     let Ok(cwd) = std::env::current_dir() else {
         return HashSet::new();
     };
@@ -241,6 +244,40 @@ roots = ["."]
         assert!(
             symbols.is_empty(),
             "nonexistent source names should not pull project symbols from local cwd"
+        );
+    }
+
+    #[test]
+    fn discover_known_project_symbols_rejects_colon_remote_name() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            tmp.path().join("+stats/summarize.m"),
+            "function y = summarize(x); y = x; end",
+        )
+        .expect("write package function");
+        fs::write(tmp.path().join("main.m"), "x = 1;").expect("write source file");
+
+        let prev = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(tmp.path()).expect("set cwd");
+        let symbols = discover_known_project_symbols(Some("remote:main.m"));
+        std::env::set_current_dir(prev).expect("restore cwd");
+
+        assert!(
+            symbols.is_empty(),
+            "colon-style remote source names should not pull project symbols from local cwd"
         );
     }
 }
