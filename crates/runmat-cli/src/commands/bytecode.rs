@@ -35,13 +35,20 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
     let Some(source_name) = source_name else {
         return HashSet::new();
     };
-    if source_name.contains(':') {
-        return HashSet::new();
-    }
     let Ok(cwd) = std::env::current_dir() else {
         return HashSet::new();
     };
     let source_path = PathBuf::from(source_name);
+    if source_name.contains(':') {
+        let local_candidate = if source_path.is_absolute() {
+            source_path.clone()
+        } else {
+            cwd.join(&source_path)
+        };
+        if !local_candidate.exists() {
+            return HashSet::new();
+        }
+    }
     let local_candidate = if source_path.is_absolute() {
         source_path
     } else {
