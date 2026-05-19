@@ -17,6 +17,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 surface semantic candidate source spans in fusion snapshot diagnostics
+  - `runmat-core` fusion snapshot semantic-candidate node labels and decision reasons now include semantic candidate source-span ranges.
+  - This makes semantic candidate evidence traceable in planner artifacts to concrete source regions used for executable-group semantic alignment.
+  - Updated fusion snapshot unit coverage to assert source-span propagation in semantic-candidate labels/reasons.
+  - Validation: `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --lib fusion::snapshot::tests::semantic_candidate_groups_emit_nodes_with_bytecode_groups`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic source-span alignment for executable bytecode fusion groups
   - `runmat-vm` semantic fusion candidate groups now carry merged source spans for each MIR candidate run.
   - VM compile now filters detected bytecode fusion groups against semantic candidate source-span overlap (via instruction-source spans), so executable fusion groups are retained only when they intersect semantic candidate regions.

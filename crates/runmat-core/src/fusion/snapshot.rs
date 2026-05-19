@@ -157,8 +157,14 @@ fn append_semantic_candidate_artifacts(
             id: node_id.clone(),
             kind: "SemanticCandidate".to_string(),
             label: format!(
-                "semantic-run f={:?} b={:?} stmts=[{}..{}] signals={}",
-                group.function, group.block, group.stmt_start, group.stmt_end, group.signal_count
+                "semantic-run f={:?} b={:?} stmts=[{}..{}] span=[{}..{}] signals={}",
+                group.function,
+                group.block,
+                group.stmt_start,
+                group.stmt_end,
+                group.source_span.start,
+                group.source_span.end,
+                group.signal_count
             ),
             shape: Vec::new(),
             residency: None,
@@ -173,8 +179,12 @@ fn append_semantic_candidate_artifacts(
             node_id: node_id.clone(),
             fused: false,
             reason: Some(format!(
-                "semantic-candidate signals={} {} accel-graph={}",
-                group.signal_count, bytecode_group_state, accel_graph_state
+                "semantic-candidate signals={} span=[{}..{}] {} accel-graph={}",
+                group.signal_count,
+                group.source_span.start,
+                group.source_span.end,
+                bytecode_group_state,
+                accel_graph_state
             )),
             thresholds: None,
         });
@@ -241,6 +251,7 @@ mod tests {
                 block: runmat_mir::BasicBlockId(0),
                 stmt_start: 1,
                 stmt_end: 4,
+                source_span: runmat_hir::Span { start: 10, end: 18 },
             }],
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
@@ -263,8 +274,8 @@ mod tests {
                 .reason
                 .as_deref()
                 .unwrap_or("")
-                .contains("semantic-candidate signals=3"),
-            "expected semantic candidate signal annotation"
+                .contains("semantic-candidate signals=3 span=[10..18]"),
+            "expected semantic candidate signal + source span annotation"
         );
     }
 
@@ -288,6 +299,7 @@ mod tests {
                 block: runmat_mir::BasicBlockId(2),
                 stmt_start: 0,
                 stmt_end: 2,
+                source_span: runmat_hir::Span { start: 20, end: 30 },
             }],
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
@@ -309,6 +321,13 @@ mod tests {
                 .iter()
                 .any(|node| node.id == "semantic-candidate-1"),
             "expected semantic candidate node"
+        );
+        assert!(
+            snapshot
+                .nodes
+                .iter()
+                .any(|node| node.label.contains("span=[20..30]")),
+            "expected semantic candidate node label to include source span"
         );
     }
 
