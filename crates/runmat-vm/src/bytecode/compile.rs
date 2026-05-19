@@ -428,7 +428,6 @@ fn derive_semantic_fusion_groups_preserving_unmapped_windows(
 }
 
 #[cfg(feature = "native-accel")]
-#[allow(dead_code)]
 fn derive_semantic_fusion_groups_from_instruction_windows(
     semantic_instruction_windows: &[crate::bytecode::SemanticFusionInstructionWindow],
 ) -> Vec<runmat_accelerate::fusion::FusionGroup> {
