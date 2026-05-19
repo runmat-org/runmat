@@ -6,6 +6,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `45570878` `RM-378: centralize source-input path resolution`
+  - Added shared config-layer source-input path resolver:
+    - `runmat_config::resolve_project_source_input_from(cwd, source_input)`
+  - The shared resolver now centralizes:
+    - direct file/path acceptance
+    - optional `.m` inference for extensionless path-like inputs
+    - single-segment named entrypoint fallback through composition discovery.
+  - Migrated both consumers to the shared resolver:
+    - CLI `resolve_script_input` in `runmat-cli`
+    - core ABI path-source resolution (`SourceInput::Path`) in `runmat-core`.
+  - Added config integration coverage:
+    - `resolve_project_source_input_from_infers_m_extension`
+    - `resolve_project_source_input_from_resolves_named_entrypoint`
+  - Validation: `cargo test -p runmat-config --test project_manifest resolve_project_source_input_from_infers_m_extension`, `cargo test -p runmat-config --test project_manifest resolve_project_source_input_from_resolves_named_entrypoint`, `cargo test -p runmat --lib resolve_script_input_`, `cargo test -p runmat-core source_input_path_`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `git diff --check`.
+
 - `26b67af5` `RM-378: centralize symbol discovery start path`
   - Added shared config-layer source-name discovery helper: `runmat_config::discover_project_symbols_from_source_name(source_name, cwd)`.
   - This centralizes source-name -> project-discovery start-path derivation in `runmat-config` and removes the remaining duplicate heuristic logic from `runmat-core` compile.
