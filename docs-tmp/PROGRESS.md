@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `af87d84b` `RM-378: cover benchmark module entrypoint error path`
+  - Extended benchmark target-resolution coverage with explicit unresolved module/function entrypoint diagnostics, mirroring script-path error-contract expectations.
+  - Added `module_function_entrypoint_errors_when_module_file_missing` under benchmark command tests.
+  - Validation: `cargo test -p runmat --lib commands::benchmark::tests::`.
+
 - `2bfe761f` `RM-378: resolve benchmark targets via manifest entrypoints`
   - `runmat-cli` benchmark command now resolves input targets through shared config-layer source-input resolution (`resolve_project_source_input_from`) before file read, matching script/core manifest-driven path semantics.
   - This extends Plan 5 entrypoint-resolution wiring from `script` into another active CLI execution path (`benchmark`) so named entrypoints and module/function targets resolve consistently.
