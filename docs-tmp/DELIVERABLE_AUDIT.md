@@ -197,5 +197,5 @@ Objective is **not achieved**.
 
 Highest-impact unresolved areas:
 
-1. Plan 5 end-to-end composition wiring (CLI/core + resolver graph + source index).
-2. Plan 7 shift from bytecode-first fusion planning to semantic/MIR/analysis-driven planning.
+1. Plan 6 closeout across runtime, analysis, and metadata consumers for unified nominal class/builtin metadata.
+2. Plan 7 shift from bytecode-first fusion realization to semantic/MIR/analysis-driven planning, including remaining accel-graph realization dependency and async spawn-provider lifecycle evidence gaps.
