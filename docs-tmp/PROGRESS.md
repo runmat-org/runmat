@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `6cb30a56` `RM-378: assert chol multi-output bytecode shape`
+  - Tightened VM basics `chol` multi-assign coverage by asserting semantic bytecode lowers `[R, p] = chol(A)` to explicit multi-output builtin call shape (`Instr::CallBuiltinMulti("chol", 1, 2)`) before runtime value assertions.
+  - This reduces remaining multi-output argument/output-shape smoke coverage by enforcing a concrete semantic-lowering contract.
+  - Validation: `cargo test -p runmat-vm chol_multiassign_reports_failure`.
+
 - `5db3726c` `RM-378: ratchet object end-range payload in VM basics`
   - Tightened `runmat-vm` basics coverage for object end-range assignment by asserting semantic bytecode carries the rich `end` arithmetic payload shape (`end*1 - 1/2`) in `Instr::StoreSliceExpr` (`EndExpr::Sub(Mul(End, Const), Div(Const, Const))`) before runtime execution assertions.
   - This moves object range-end protocol coverage from execution-only smoke behavior to an explicit semantic bytecode contract check.
