@@ -44,7 +44,7 @@ impl InterpreterState {
         }
         if bytecode.semantic_async_metadata.mir_spawn_site_count > 0 {
             debug!(
-                "spawn semantics: compiled bytecode carries {} MIR spawn site(s); runtime task-handle materialization remains transitional",
+                "spawn semantics: compiled bytecode carries {} MIR spawn site(s); explicit spawn op executes on the async value lane",
                 bytecode.semantic_async_metadata.mir_spawn_site_count
             );
         }

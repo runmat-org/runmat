@@ -1716,9 +1716,9 @@ impl Compiler {
                 Ok(())
             }
             MirRvalue::Spawn(operand) => {
-                // Until task handles are materialized in runtime values, keep spawn values in the
-                // same value lane as the lowered future operand.
-                self.compile_mir_operand(operand)
+                self.compile_mir_operand(operand)?;
+                self.emit(Instr::Spawn);
+                Ok(())
             }
         }
     }

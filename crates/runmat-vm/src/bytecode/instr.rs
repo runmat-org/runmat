@@ -215,6 +215,8 @@ pub enum Instr {
     // `feval` keeps the callable value on the stack instead of naming the target statically.
     CallFevalMulti(usize, usize),
     CallFevalExpandMultiOutput(Vec<ArgSpec>, usize),
+    // Explicit async spawn boundary. Current runtime keeps value-lane identity.
+    Spawn,
 
     // Stack and exception-control operations.
     Swap,
@@ -425,6 +427,7 @@ impl Instr {
             | Instr::DeclarePersistent(_)
             | Instr::DeclareGlobalNamed(_, _)
             | Instr::DeclarePersistentNamed(_, _) => effect(0, 0),
+            Instr::Spawn => effect(1, 1),
             Instr::EmitStackTop { .. } => effect(1, 1),
             Instr::EmitVar { .. } => effect(0, 0),
             Instr::StochasticEvolution => None,

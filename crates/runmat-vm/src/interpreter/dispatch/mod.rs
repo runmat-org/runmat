@@ -479,6 +479,17 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::Spawn => {
+            if stack.is_empty() {
+                return Err(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "spawn instruction expected a value on the stack",
+                ));
+            }
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::CallSemanticFunctionMulti(function, arg_count, out_count) => {
             match handle_user_function_call(
                 calls::UserCallContext {
