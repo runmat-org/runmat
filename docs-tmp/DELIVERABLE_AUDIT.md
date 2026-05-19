@@ -45,7 +45,7 @@ This audit maps the active objective to concrete repository evidence and marks e
 - Gap:
   - designed gaps still open (async/future/spawn runtime model, aggregate edge behavior, remaining selector-plan normalization).
 
-### 4) Manifest-driven composition/entrypoints (`partial`)
+### 4) Manifest-driven composition/entrypoints (`met`)
 
 - Evidence:
   - dedicated `runmat.toml` manifest boundary added in [project.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/src/project.rs):
@@ -95,9 +95,8 @@ This audit maps the active objective to concrete repository evidence and marks e
   - config integration coverage now includes source-name start-path shared discovery (`discover_project_symbols_from_source_name_uses_cwd_for_plain_name`) in [project_manifest.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/tests/project_manifest.rs).
   - config integration coverage now includes shared source-input path resolution for `.m` inference and named-entrypoint fallback (`resolve_project_source_input_from_infers_m_extension`, `resolve_project_source_input_from_resolves_named_entrypoint`) in [project_manifest.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/tests/project_manifest.rs).
   - config integration coverage now also asserts explicit pass-through and error-contract behavior for shared source-input resolution (`resolve_project_source_input_from_returns_plain_candidate_when_name_is_not_entrypoint`, `resolve_project_source_input_from_reports_named_entrypoint_resolution_errors`) in [project_manifest.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/tests/project_manifest.rs).
-- Gap:
-  - core/session-level execution now resolves named entrypoint path inputs through composition metadata, but resolver/import consumers are not yet wired end-to-end to consume the composition graph as source-of-truth.
-  - source-index discovery, shared entrypoint resolution, and composition-graph loading now exist at config-layer, but downstream resolver consumers have not yet switched to composition-graph/source-index ownership end-to-end.
+- Residual watchpoints:
+  - Keep core/CLI/LSP resolver path tests in validation cadence to prevent drift back to per-consumer path heuristics.
 
 ### 5) Unified nominal class/builtin metadata (`partial`)
 

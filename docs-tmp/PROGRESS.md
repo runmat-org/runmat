@@ -6,6 +6,16 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 5 evidence closeout for manifest-driven resolver wiring
+  - Re-ran cross-consumer resolver/symbol-discovery tests across config/core/CLI/LSP to verify shared `runmat-config` ownership is active end-to-end:
+    - `cargo test -p runmat-config --test project_manifest resolve_project_source_input_from_`
+    - `cargo test -p runmat-core source_input_path_`
+    - `cargo test -p runmat-core compile_input_resolves_wildcard_import_`
+    - `cargo test -p runmat --lib resolve_script_input_`
+    - `cargo test -p runmat --lib resolve_benchmark_input_`
+    - `cargo test -p runmat-lsp source_context_symbol_discovery_reads_manifest_project_symbols`
+  - Updated deliverable audit status for manifest-driven composition/entrypoint wiring from `partial` to `met`, leaving only regression watchpoint coverage.
+
 - (pending commit) Plan 7 semantic-window mapping fallback for untagged accel nodes
   - VM semantic fusion-group mapping now keeps span-matched accel nodes eligible when accel-graph semantic tags are absent, instead of dropping semantic windows solely due missing node tags.
   - Kind mismatch filtering for explicitly-tagged reduction/matmul nodes remains enforced.
