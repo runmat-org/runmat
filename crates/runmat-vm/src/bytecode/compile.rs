@@ -57,9 +57,6 @@ pub fn compile(
                 &c.instr_spans,
                 &semantic_fusion_metadata.mir_fusion_candidate_groups,
             );
-            if fusion_groups.is_empty() {
-                fusion_groups = accel_graph.detect_fusion_groups();
-            }
             if !fusion_groups.is_empty() {
                 annotate_fusion_groups_with_stack_layout(
                     &c.instructions,
@@ -877,6 +874,71 @@ mod tests {
         assert_eq!(
             groups[0].kind,
             runmat_accelerate::fusion::FusionKind::ElementwiseChain
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_candidates_without_overlap_do_not_build_fusion_groups() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![runmat_accelerate::graph::AccelNode {
+                id: 0,
+                label: runmat_accelerate::graph::AccelNodeLabel::Primitive(
+                    runmat_accelerate::graph::PrimitiveOp::Add,
+                ),
+                category: runmat_accelerate::graph::AccelOpCategory::Elementwise,
+                inputs: vec![0, 0],
+                outputs: vec![1],
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+                tags: vec![runmat_accelerate::graph::AccelGraphTag::Elementwise],
+            }],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let instr_spans = vec![runmat_hir::Span { start: 10, end: 11 }];
+        let semantic_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 1,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 1,
+            source_span: runmat_hir::Span {
+                start: 100,
+                end: 101,
+            },
+        }];
+
+        let groups = super::derive_semantic_fusion_groups_from_candidates(
+            &accel_graph,
+            &instr_spans,
+            &semantic_candidates,
+        );
+        assert!(
+            groups.is_empty(),
+            "expected no semantic-driven fusion groups when candidate spans do not overlap instruction source spans"
         );
     }
 
