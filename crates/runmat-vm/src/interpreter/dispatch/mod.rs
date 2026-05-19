@@ -336,6 +336,44 @@ fn clear_scope_value_residency_excluding_live_values(
     crate::accel::residency::clear_value_excluding(dropped_local, &Value::OutputList(live));
 }
 
+#[cfg(feature = "native-accel")]
+fn clear_overwritten_var_residency_excluding_live_values(
+    overwritten: &Value,
+    overwritten_index: usize,
+    stack: &[Value],
+    vars: &[Value],
+    context: &crate::bytecode::program::ExecutionContext,
+) {
+    let mut live = Vec::with_capacity(stack.len() + vars.len() + context.locals.len());
+    live.extend(stack.iter().cloned());
+    for (idx, value) in vars.iter().enumerate() {
+        if idx != overwritten_index {
+            live.push(value.clone());
+        }
+    }
+    live.extend(context.locals.iter().cloned());
+    crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live));
+}
+
+#[cfg(feature = "native-accel")]
+fn clear_overwritten_local_residency_excluding_live_values(
+    overwritten: &Value,
+    overwritten_local_index: usize,
+    stack: &[Value],
+    vars: &[Value],
+    context: &crate::bytecode::program::ExecutionContext,
+) {
+    let mut live = Vec::with_capacity(stack.len() + vars.len() + context.locals.len());
+    live.extend(stack.iter().cloned());
+    live.extend(vars.iter().cloned());
+    for (idx, value) in context.locals.iter().enumerate() {
+        if idx != overwritten_local_index {
+            live.push(value.clone());
+        }
+    }
+    crate::accel::residency::clear_value_excluding(overwritten, &Value::OutputList(live));
+}
+
 pub async fn dispatch_instruction(
     meta: DispatchMeta<'_>,
     state: DispatchState<'_>,
@@ -457,6 +495,14 @@ pub async fn dispatch_instruction(
             debug::trace_store_var(*pc, *index, &preview);
             if *index < vars.len() {
                 retire_spawn_task_id_if_replaced(context, &vars[*index], &preview);
+                #[cfg(feature = "native-accel")]
+                clear_overwritten_var_residency_excluding_live_values(
+                    &vars[*index],
+                    *index,
+                    stack,
+                    vars,
+                    context,
+                );
             }
             store_var(
                 stack,
@@ -477,9 +523,25 @@ pub async fn dispatch_instruction(
                     if local_index < context.locals.len() {
                         let current_value = context.locals[local_index].clone();
                         retire_spawn_task_id_if_replaced(context, &current_value, &incoming);
+                        #[cfg(feature = "native-accel")]
+                        clear_overwritten_local_residency_excluding_live_values(
+                            &current_value,
+                            local_index,
+                            stack,
+                            vars,
+                            context,
+                        );
                     }
                 } else if *offset < vars.len() {
                     retire_spawn_task_id_if_replaced(context, &vars[*offset], &incoming);
+                    #[cfg(feature = "native-accel")]
+                    clear_overwritten_var_residency_excluding_live_values(
+                        &vars[*offset],
+                        *offset,
+                        stack,
+                        vars,
+                        context,
+                    );
                 }
             }
             store_local(

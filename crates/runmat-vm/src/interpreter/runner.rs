@@ -80,11 +80,6 @@ fn clear_residency(value: &Value) {
     accel_residency::clear_value(value);
 }
 
-#[cfg(feature = "native-accel")]
-fn clear_residency_before_overwrite(current: &Value, incoming: &Value) {
-    accel_residency::clear_value_excluding(current, incoming)
-}
-
 pub async fn invoke_semantic_function_value(
     function: usize,
     args: &[Value],
@@ -424,23 +419,14 @@ async fn run_interpreter_inner(
             #[cfg(feature = "native-accel")]
             clear_residency(value);
         };
-        let mut store_var_before_overwrite = |current: &Value, incoming: &Value| {
-            #[cfg(feature = "native-accel")]
-            clear_residency_before_overwrite(current, incoming);
-        };
+        let mut store_var_before_overwrite = |_current: &Value, _incoming: &Value| {};
         let mut store_var_after_store = |stored_index: usize, stored_value: &Value| {
             if let Some(ref aliases) = store_var_global_aliases {
                 runtime_globals::update_global_store(stored_index, stored_value, aliases);
             }
         };
-        let mut store_local_before_local_overwrite = |current: &Value, incoming: &Value| {
-            #[cfg(feature = "native-accel")]
-            clear_residency_before_overwrite(current, incoming);
-        };
-        let mut store_local_before_var_overwrite = |current: &Value, incoming: &Value| {
-            #[cfg(feature = "native-accel")]
-            clear_residency_before_overwrite(current, incoming);
-        };
+        let mut store_local_before_local_overwrite = |_current: &Value, _incoming: &Value| {};
+        let mut store_local_before_var_overwrite = |_current: &Value, _incoming: &Value| {};
         let mut store_local_after_fallback_store =
             |func_name: &str, stored_offset: usize, stored_value: &Value| {
                 runtime_globals::update_persistent_local_store(
@@ -663,7 +649,7 @@ async fn run_interpreter_inner(
     {
         let live_vars = Value::OutputList(vars.clone());
         for value in &stack {
-            clear_residency_before_overwrite(value, &live_vars);
+            accel_residency::clear_value_excluding(value, &live_vars);
         }
     }
     sync_initial_vars(initial_vars, &vars);
@@ -969,6 +955,85 @@ mod tests {
         assert!(
             block_on(TEST_PROVIDER.download(&handle)).is_ok(),
             "exit scope should not release provider storage for handles still referenced by vars"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn store_var_overwrite_preserves_provider_handle_when_shared_in_other_var() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![19.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode = Bytecode::with_instructions(vec![Instr::StoreVar(0), Instr::Return], 2);
+        let mut seed_vars = vec![
+            Value::GpuTensor(handle.clone()),
+            Value::GpuTensor(handle.clone()),
+        ];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::Num(0.0));
+        state.vars = vec![
+            Value::GpuTensor(handle.clone()),
+            Value::GpuTensor(handle.clone()),
+        ];
+
+        let mut result_vars = state.vars.clone();
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("store var should complete");
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "store var overwrite should preserve residency for handles still live in other vars"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "store var overwrite should not release provider storage for handles still live in other vars"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn store_local_overwrite_preserves_provider_handle_when_shared_in_var() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![23.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode = Bytecode::with_instructions(vec![Instr::StoreLocal(0), Instr::Return], 1);
+        let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::Num(0.0));
+        state.vars = vec![Value::GpuTensor(handle.clone())];
+        state
+            .context
+            .call_stack
+            .push(crate::bytecode::program::CallFrame {
+                function_name: "<local>".to_string(),
+                return_address: 0,
+                locals_start: 0,
+                locals_count: 1,
+                expected_outputs: 0,
+            });
+        state.context.locals.push(Value::GpuTensor(handle.clone()));
+
+        let mut result_vars = state.vars.clone();
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("store local should complete");
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "store local overwrite should preserve residency for handles still live in vars"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "store local overwrite should not release provider storage for handles still live in vars"
         );
         fusion_residency::clear(&handle);
         let _ = TEST_PROVIDER.free(&handle);

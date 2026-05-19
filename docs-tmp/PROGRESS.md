@@ -61,6 +61,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `await_rejects_spawn_task_handle_after_scope_exit_retires_id`
   - Validation: `cargo test -p runmat-vm exit_scope_releases_local_only_provider_handle`, `cargo test -p runmat-vm exit_scope_preserves_provider_handle_when_still_live_in_vars`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
 
+- (pending commit) Plan 7 overwrite-path provider-handle shared-liveness preservation
+  - VM dispatch overwrite cleanup for `Instr::StoreVar` and `Instr::StoreLocal` now uses live-value exclusion across stack/vars/locals instead of current-vs-incoming-only exclusion.
+  - This prevents releasing provider storage for a handle being overwritten in one slot when the same handle remains live in another slot.
+  - Added VM runner coverage:
+    - `store_var_overwrite_preserves_provider_handle_when_shared_in_other_var`
+    - `store_local_overwrite_preserves_provider_handle_when_shared_in_var`
+  - Validation: `cargo test -p runmat-vm store_var_overwrite_preserves_provider_handle_when_shared_in_other_var`, `cargo test -p runmat-vm store_local_overwrite_preserves_provider_handle_when_shared_in_var`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 runtime consumer ratchet for class-metadata inheritance lookup
   - Added runtime `exist` builtin coverage that asserts method existence queries consume registered class metadata through inheritance lookup:
     - `exist_method_uses_registered_class_metadata_including_inheritance`
