@@ -60,7 +60,7 @@ pub fn compile(
             }
             (Some(accel_graph), fusion_groups)
         };
-    let semantic_async_metadata = derive_semantic_async_metadata(mir);
+    let semantic_async_metadata = derive_semantic_async_metadata(mir, entrypoint_target);
 
     Ok(Bytecode {
         instructions: c.instructions,
@@ -83,9 +83,16 @@ pub fn compile(
     })
 }
 
-fn derive_semantic_async_metadata(mir: &MirAssembly) -> crate::bytecode::SemanticAsyncMetadata {
+fn derive_semantic_async_metadata(
+    mir: &MirAssembly,
+    entrypoint_target: Option<FunctionId>,
+) -> crate::bytecode::SemanticAsyncMetadata {
     let mut sites = Vec::new();
-    let mut function_ids: Vec<_> = mir.bodies.keys().copied().collect();
+    let mut function_ids: Vec<_> = if let Some(function) = entrypoint_target {
+        vec![function]
+    } else {
+        mir.bodies.keys().copied().collect()
+    };
     function_ids.sort_by_key(|id| id.0);
     for function_id in function_ids {
         let Some(body) = mir.bodies.get(&function_id) else {
@@ -494,6 +501,26 @@ mod tests {
         assert!(
             unique_sites.len() == bytecode.semantic_async_metadata.mir_spawn_sites.len(),
             "spawn site metadata entries should be distinct"
+        );
+    }
+
+    #[test]
+    fn primary_compile_scopes_spawn_site_metadata_to_entrypoint_target() {
+        let source = "x = 1; function z = helper(a); fut = make(); z = spawn(fut); end;";
+        let ast = runmat_parser::parse(source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+
+        assert_eq!(
+            bytecode.semantic_async_metadata.mir_spawn_site_count,
+            0,
+            "spawn sites in non-entrypoint helper bodies should not be attributed to the entrypoint bytecode artifact"
+        );
+        assert!(
+            bytecode.semantic_async_metadata.mir_spawn_sites.is_empty(),
+            "spawn site list should be empty when only helper bodies contain spawn expressions"
         );
     }
 

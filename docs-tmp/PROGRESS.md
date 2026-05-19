@@ -17,6 +17,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 scope semantic spawn-site metadata to compiled entrypoint target
+  - `runmat-vm` bytecode compile now derives semantic async/spawn metadata from the selected entrypoint target MIR body instead of aggregating across every MIR body.
+  - This prevents helper-function spawn sites from being attributed to active entrypoint bytecode artifacts and keeps async boundary metadata aligned to the active execution path.
+  - Added `runmat-vm` regression coverage:
+    - `primary_compile_scopes_spawn_site_metadata_to_entrypoint_target`
+  - Validation: `cargo test -p runmat-vm primary_compile_scopes_spawn_site_metadata_to_entrypoint_target`, `cargo test -p runmat-vm primary_compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-vm --test basics`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 scope semantic fusion metadata to compiled entrypoint target
   - `runmat-vm` bytecode compile now derives semantic fusion signal/candidate metadata from the selected entrypoint target MIR body instead of aggregating across every MIR body in the assembly.
   - This prevents non-entrypoint helper functions from falsely opening fusion gating for the active executable bytecode path.
