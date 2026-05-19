@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 semantic-window-driven fusion compile gating
+  - `runmat-vm` compile-time fusion setup in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now gates accel-graph realization directly on semantic instruction windows (`semantic_instruction_windows.is_empty()`) rather than a second bytecode accel-capability heuristic pass.
+  - This removes duplicated bytecode capability gating from the runtime compile path and makes executable fusion-group admission depend on semantic-window artifacts first, with accel graph used for node realization/stack-layout annotation after that gate.
+  - Validation: `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`, `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 3 private-property access identifier contract ratchet
   - Added stable `RunMat:PropertyPrivateAccess` diagnostics across both VM object resolution and runtime object-field builtins:
     - [resolve.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/object/resolve.rs)

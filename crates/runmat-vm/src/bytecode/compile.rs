@@ -58,11 +58,8 @@ pub fn compile(
     #[cfg(feature = "native-accel")]
     let (accel_graph, fusion_groups) = if semantic_fusion_metadata.mir_fusion_candidate_group_count
         == 0
-        || !semantic_candidates_touch_accel_capable_instruction(
-            &c.instructions,
-            &c.instr_spans,
-            &semantic_fusion_metadata.mir_fusion_candidate_groups,
-        ) {
+        || semantic_instruction_windows.is_empty()
+    {
         (None, Vec::new())
     } else {
         let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
@@ -282,7 +279,7 @@ fn source_span_contains(outer: runmat_hir::Span, inner: runmat_hir::Span) -> boo
     outer.start <= inner.start && inner.end <= outer.end
 }
 
-#[cfg(feature = "native-accel")]
+#[cfg(all(feature = "native-accel", test))]
 fn semantic_candidates_touch_accel_capable_instruction(
     instructions: &[Instr],
     instr_spans: &[runmat_hir::Span],
@@ -304,7 +301,7 @@ fn semantic_candidates_touch_accel_capable_instruction(
         })
 }
 
-#[cfg(feature = "native-accel")]
+#[cfg(all(feature = "native-accel", test))]
 fn instr_is_accel_capable(instr: &Instr) -> bool {
     match instr {
         Instr::Add
