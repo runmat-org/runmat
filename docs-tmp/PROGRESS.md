@@ -6,6 +6,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 runtime fusion-group sanitization for semantic window mapping drift
+  - `runmat-accelerate` fusion-plan preparation in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs) now sanitizes compile-provided semantic fusion groups against the runtime accel graph before executable planning:
+    - filters stale/mismatched node IDs
+    - enforces kind-compatible node membership
+    - recovers empty groups from nearby compatible runtime nodes (bounded overlap/touch tolerance)
+    - drops groups that remain unresolved after sanitization
+  - Added runtime-plan ratchet coverage:
+    - `prepare_fusion_plan_recovers_empty_group_nodes_from_runtime_graph`
+    - `prepare_fusion_plan_rejects_empty_group_nodes_when_runtime_graph_is_too_far`
+  - Validation: `cargo test -p runmat-accelerate prepare_fusion_plan_recovers_empty_group_nodes_from_runtime_graph`, `cargo test -p runmat-accelerate prepare_fusion_plan_rejects_empty_group_nodes_when_runtime_graph_is_too_far`, `cargo test -p runmat-accelerate prepare_fusion_plan_requires_semantic_candidate_groups`, `cargo test -p runmat-accelerate prepare_fusion_plan_allows_semantic_gated_groups`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic-invoker async nested-unrequested varargout release ratchet
   - Extended semantic invoker async lifecycle coverage in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs) with nested-unrequested output cleanup:
     - `semantic_async_spawn_varargout_nested_unrequested_handle_releases`

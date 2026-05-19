@@ -726,6 +726,15 @@ pub fn prepare_fusion_plan(
         }
         return None;
     }
+    let groups = sanitize_runtime_groups(graph, groups);
+    if groups.is_empty() {
+        if fusion_debug_enabled() {
+            log::debug!(
+                "fusion plan preparation: semantic-gated bytecode groups could not be reconciled against runtime accel graph nodes"
+            );
+        }
+        return None;
+    }
     let key = graph as *const AccelGraph as usize;
     if let Some(plan) = PLAN_CACHE
         .read()
@@ -735,12 +744,84 @@ pub fn prepare_fusion_plan(
         return Some(plan);
     }
 
-    let plan = FusionPlan::from_graph(graph, groups);
+    let plan = FusionPlan::from_graph(graph, &groups);
     let plan = Arc::new(plan);
     if let Ok(mut guard) = PLAN_CACHE.write() {
         guard.insert(key, Arc::downgrade(&plan));
     }
     Some(plan)
+}
+
+fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<FusionGroup> {
+    groups
+        .iter()
+        .filter_map(|group| {
+            let mut sanitized = group.clone();
+            sanitized.nodes.retain(|id| {
+                graph
+                    .node(*id)
+                    .map(|node| node_matches_runtime_group_kind(graph, node, &sanitized.kind))
+                    .unwrap_or(false)
+            });
+            if sanitized.nodes.is_empty() {
+                sanitized.nodes = graph
+                    .nodes
+                    .iter()
+                    .filter(|node| {
+                        node_matches_runtime_group_kind(graph, node, &sanitized.kind)
+                            && node_overlaps_or_touches_group_span(node, &sanitized.span)
+                    })
+                    .map(|node| node.id)
+                    .collect();
+            }
+            sanitized.nodes.sort_unstable_by_key(|node_id| {
+                graph
+                    .node(*node_id)
+                    .map(|node| (node.span.start, node.span.end, node.id))
+                    .unwrap_or((usize::MAX, usize::MAX, *node_id))
+            });
+            sanitized.nodes.dedup();
+            if sanitized.nodes.is_empty() {
+                None
+            } else {
+                Some(sanitized)
+            }
+        })
+        .collect()
+}
+
+fn node_matches_runtime_group_kind(
+    graph: &AccelGraph,
+    node: &AccelNode,
+    kind: &FusionKind,
+) -> bool {
+    match kind {
+        FusionKind::ElementwiseChain => {
+            node.is_elementwise()
+                || node.category == AccelOpCategory::Transpose
+                || is_elementwise_max_min(graph, node)
+        }
+        FusionKind::Reduction => node.is_reduction(),
+        FusionKind::MatmulEpilogue => {
+            node.category == AccelOpCategory::MatMul
+                || node.is_elementwise()
+                || node.category == AccelOpCategory::Transpose
+        }
+        FusionKind::CenteredGram
+        | FusionKind::ImageNormalize
+        | FusionKind::PowerStepNormalize
+        | FusionKind::ExplainedVariance => true,
+    }
+}
+
+fn node_overlaps_or_touches_group_span(node: &AccelNode, span: &InstrSpan) -> bool {
+    if node.span.start <= span.end && node.span.end >= span.start {
+        return true;
+    }
+    if node.span.end < span.start {
+        return span.start.saturating_sub(node.span.end) <= 1;
+    }
+    span.end < node.span.start && node.span.start.saturating_sub(span.end) <= 1
 }
 
 pub fn activate_fusion_plan(plan: Option<Arc<FusionPlan>>) {
@@ -3451,6 +3532,49 @@ mod tests {
         assert!(
             plan.is_some(),
             "semantic candidate evidence should allow executable fusion plan preparation"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_recovers_empty_group_nodes_from_runtime_graph() {
+        let graph = simple_elementwise_graph();
+        let groups = vec![FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: Vec::new(),
+            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            span: InstrSpan { start: 9, end: 9 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1)
+            .expect("runtime group sanitization should recover nearby elementwise nodes");
+        assert_eq!(plan.groups.len(), 1);
+        assert_eq!(
+            plan.groups[0].group.nodes,
+            vec![0],
+            "runtime sanitization should recover the nearest compatible node for empty group mapping"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_rejects_empty_group_nodes_when_runtime_graph_is_too_far() {
+        let graph = simple_elementwise_graph();
+        let groups = vec![FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: Vec::new(),
+            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            span: InstrSpan { start: 20, end: 20 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1);
+        assert!(
+            plan.is_none(),
+            "runtime sanitization should reject empty group mapping when no compatible nearby nodes exist"
         );
     }
 
