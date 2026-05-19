@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `a44db54a` `RM-378: tighten fusion-node span containment filter`
+  - Tightened semantic fusion-group derivation filter so accel-graph nodes qualify only when their mapped instruction spans are fully contained by semantic candidate spans (no partial boundary overlap acceptance).
+  - Added regression `semantic_candidates_with_partial_overlap_do_not_build_fusion_groups`.
+  - Validation: `cargo test -p runmat-vm semantic_candidates_with_partial_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_rejects_partial_span_overlap`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`.
+
 - `40b00c47` `RM-378: thread project symbols into bytecode emit path`
   - CLI bytecode emission now threads source-context project symbols into lowering: `emit_bytecode` accepts optional source name and feeds `discover_project_symbols_from_source_name(...)` into `LoweringContext::with_known_project_symbols`.
   - Script `--emit-bytecode` path now passes the resolved script source name, so wildcard import/name resolution in emitted-bytecode mode uses the same manifest/source-index symbol context as normal script execution.
