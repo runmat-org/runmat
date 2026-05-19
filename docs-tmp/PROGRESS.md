@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 semantic-tag-driven fusion-node mapping for semantic windows
+  - VM semantic fusion-window -> accel-node mapping now selects candidate nodes using accel semantic tags (`Unary`/`Elementwise`/`Reduction`/`MatMul`/`Transpose`) instead of a hard-coded node-category allowlist.
+  - This removes a brittle category coupling that previously excluded transpose-tagged accel nodes from semantic-window fusion groups.
+  - Added compile regression coverage `semantic_candidates_build_fusion_groups_from_transpose_nodes` to ratchet transpose node inclusion under semantic window mapping.
+  - Validation: `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_transpose_nodes`, `cargo test -p runmat-vm semantic_window_kind_is_not_overridden_by_graph_category`, `cargo fmt --all --check`.
+
 - (pending commit) Validation cadence keep workspace check green
   - `cargo check --workspace` was failing on `runmat-lsp` due `-D warnings` dead-code rejection for `analyze_document_with_compat`.
   - Added a narrow non-test dead-code allowance guard on that helper (`#[cfg_attr(not(test), allow(dead_code))]`) in `crates/runmat-lsp/src/core/analysis.rs`.

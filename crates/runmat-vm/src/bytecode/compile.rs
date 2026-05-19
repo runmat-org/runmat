@@ -413,12 +413,7 @@ fn accel_nodes_for_instruction_window(
         .iter()
         .filter(|node| {
             !assigned_nodes.contains(&node.id)
-                && matches!(
-                    node.category,
-                    runmat_accelerate::graph::AccelOpCategory::Elementwise
-                        | runmat_accelerate::graph::AccelOpCategory::Reduction
-                        | runmat_accelerate::graph::AccelOpCategory::MatMul
-                )
+                && accel_node_has_semantic_signal(node)
                 && node.span.start >= window.span.start
                 && node.span.end <= window.span.end
         })
@@ -432,6 +427,20 @@ fn accel_nodes_for_instruction_window(
     });
     nodes.dedup();
     nodes
+}
+
+#[cfg(feature = "native-accel")]
+fn accel_node_has_semantic_signal(node: &runmat_accelerate::graph::AccelNode) -> bool {
+    node.tags.iter().any(|tag| {
+        matches!(
+            tag,
+            runmat_accelerate::graph::AccelGraphTag::Unary
+                | runmat_accelerate::graph::AccelGraphTag::Elementwise
+                | runmat_accelerate::graph::AccelGraphTag::Reduction
+                | runmat_accelerate::graph::AccelGraphTag::MatMul
+                | runmat_accelerate::graph::AccelGraphTag::Transpose
+        )
+    })
 }
 
 #[cfg(feature = "native-accel")]
@@ -1359,6 +1368,75 @@ mod tests {
             groups[0].kind,
             runmat_accelerate::fusion::FusionKind::ElementwiseChain,
             "semantic instruction-window kind should drive fusion kind classification"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_candidates_build_fusion_groups_from_transpose_nodes() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![runmat_accelerate::graph::AccelNode {
+                id: 0,
+                label: runmat_accelerate::graph::AccelNodeLabel::Primitive(
+                    runmat_accelerate::graph::PrimitiveOp::Transpose,
+                ),
+                category: runmat_accelerate::graph::AccelOpCategory::Transpose,
+                inputs: vec![0],
+                outputs: vec![1],
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+                tags: vec![runmat_accelerate::graph::AccelGraphTag::Transpose],
+            }],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let instr_spans = vec![runmat_hir::Span { start: 10, end: 11 }];
+        let semantic_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 1,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 1,
+            source_span: runmat_hir::Span { start: 10, end: 11 },
+        }];
+
+        let windows = super::derive_semantic_fusion_instruction_windows(
+            &[Instr::Transpose],
+            &instr_spans,
+            &semantic_candidates,
+        );
+        let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
+        assert_eq!(
+            groups.len(),
+            1,
+            "expected transpose-tagged accel node to participate in semantic fusion-group mapping"
+        );
+        assert_eq!(groups[0].nodes, vec![0]);
+        assert_eq!(
+            groups[0].kind,
+            runmat_accelerate::fusion::FusionKind::ElementwiseChain
         );
     }
 
