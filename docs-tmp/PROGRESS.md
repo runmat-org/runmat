@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `f08b9e0d` `RM-378: cover logical-only candidate pre-gate`
+  - Added compile-level `runmat-vm` regression:
+    - `primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops`
+  - The test asserts semantic candidate groups can exist while accel graph and executable fusion groups remain omitted when candidate overlap maps only to non-accelerable logical bytecode operations.
+  - Validation: `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops`, `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `git diff --check`.
+
 - `06789be1` `RM-378: gate accel graph on accel-capable bytecode`
   - VM compile now adds a semantic-candidate pre-gate that requires candidate-overlapping accel-capable bytecode instructions before building accel graph artifacts.
   - When semantic candidate spans map only to non-accelerable instructions (for example logical ops), VM compile now skips accel-graph construction early and leaves executable fusion groups empty.
