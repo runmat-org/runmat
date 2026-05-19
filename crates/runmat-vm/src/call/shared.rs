@@ -437,15 +437,11 @@ pub(crate) async fn call_object_member_subsasgn(
 }
 
 pub(crate) fn class_defines_member_subsref(class: &runmat_builtins::ClassDef) -> bool {
-    class
-        .methods
-        .contains_key(ObjectIndexOp::Subsref.protocol_name())
+    runmat_builtins::lookup_method(&class.name, ObjectIndexOp::Subsref.protocol_name()).is_some()
 }
 
 pub(crate) fn class_defines_member_subsasgn(class: &runmat_builtins::ClassDef) -> bool {
-    class
-        .methods
-        .contains_key(ObjectIndexOp::Subsasgn.protocol_name())
+    runmat_builtins::lookup_method(&class.name, ObjectIndexOp::Subsasgn.protocol_name()).is_some()
 }
 
 pub(crate) async fn call_object_index_descriptor_method(
@@ -808,9 +804,18 @@ mod tests {
     use crate::bytecode::ArgSpec;
     use crate::bytecode::EndExpr;
     use futures::executor::block_on;
-    use runmat_builtins::{HandleRef, Value};
+    use runmat_builtins::{register_class, Access, ClassDef, HandleRef, MethodDef, Value};
     use runmat_hir::{CallableFallbackPolicy, CallableIdentity, FunctionId};
     use runmat_hir::{QualifiedName, SymbolName};
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
 
     #[test]
     fn object_index_descriptor_serializes_protocol_args_once() {
@@ -903,6 +908,80 @@ mod tests {
             super::external_qualified_display_name("pkg.Point", "origin"),
             "pkg.Point.origin"
         );
+    }
+
+    #[test]
+    fn class_defines_member_subsref_includes_inherited_method_metadata() {
+        let parent_name = unique_class_name("vm_subsref_parent");
+        let child_name = unique_class_name("vm_subsref_child");
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            OBJECT_PROTOCOL_SUBSREF.to_string(),
+            MethodDef {
+                name: OBJECT_PROTOCOL_SUBSREF.to_string(),
+                is_static: false,
+                access: Access::Public,
+                function_name: "subsref_impl".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let child = ClassDef {
+            name: child_name,
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        };
+        assert!(super::class_defines_member_subsref(&child));
+    }
+
+    #[test]
+    fn class_defines_member_subsasgn_includes_inherited_method_metadata() {
+        let parent_name = unique_class_name("vm_subsasgn_parent");
+        let child_name = unique_class_name("vm_subsasgn_child");
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            OBJECT_PROTOCOL_SUBSASGN.to_string(),
+            MethodDef {
+                name: OBJECT_PROTOCOL_SUBSASGN.to_string(),
+                is_static: false,
+                access: Access::Public,
+                function_name: "subsasgn_impl".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let child = ClassDef {
+            name: child_name,
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        };
+        assert!(super::class_defines_member_subsasgn(&child));
     }
 
     #[test]

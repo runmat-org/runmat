@@ -118,6 +118,10 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `store_member_updates_inherited_static_property_owner_slot`
     - `load_static_member_resolves_inherited_static_method`
   - this ratchets class-ref static member resolution/writeback to parent metadata ownership behavior instead of direct-class-only lookup assumptions.
+  - VM object member protocol gating now consumes inheritance-aware method metadata in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs), so `subsref`/`subsasgn` fallback checks are no longer limited to direct-class method maps.
+  - explicit coverage now asserts inherited protocol-method detection for child classes:
+    - `class_defines_member_subsref_includes_inherited_method_metadata`
+    - `class_defines_member_subsasgn_includes_inherited_method_metadata`
 - Gap:
   - full Plan 6 acceptance criteria not yet closed out across all consumers.
 

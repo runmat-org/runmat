@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 6 inherited `subsref/subsasgn` metadata gating for VM object member dispatch
+  - VM object member dispatch metadata checks now use inheritance-aware class-method lookup for protocol members (`subsref`, `subsasgn`) instead of direct-class-only method maps.
+  - Added VM shared call helper coverage:
+    - `class_defines_member_subsref_includes_inherited_method_metadata`
+    - `class_defines_member_subsasgn_includes_inherited_method_metadata`
+  - This ratchets object member fallback dispatch gating to unified nominal class metadata inheritance semantics.
+  - Validation: `cargo test -p runmat-vm class_defines_member_subsref_includes_inherited_method_metadata`, `cargo test -p runmat-vm class_defines_member_subsasgn_includes_inherited_method_metadata`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 VM object static-member inheritance consumer ratchets
   - Added VM object resolution coverage that asserts inherited class metadata controls static member read/write resolution through child class refs:
     - `load_static_member_resolves_inherited_static_property_value`
