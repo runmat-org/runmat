@@ -1297,14 +1297,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Removed compile-time semantic-window node mapping fallbacks for:
     - small disjoint graph/window gaps
     - small partial-overlap boundary drift
+    - bounded covering-node span coupling
     in `crates/runmat-vm/src/bytecode/compile.rs`.
-  - Compile mapping now accepts only contained-window or bounded-cover spans; disjoint/partial-overlap reconciliation remains runtime-owned via fusion plan sanitization in `runmat-accelerate`.
+  - Compile mapping now accepts only contained-window spans; disjoint/partial-overlap/covering-span reconciliation remains runtime-owned via fusion plan sanitization in `runmat-accelerate`.
   - Updated compile tests to codify stricter compile behavior:
     - renamed `semantic_windows_map_accel_nodes_with_small_disjoint_gap`
     - now `semantic_windows_reject_disjoint_gap_at_compile_mapping_stage` asserting no compile-time mapping for disjoint spans.
     - renamed `semantic_windows_map_accel_nodes_with_small_boundary_shift_overlap`
     - now `semantic_windows_reject_partial_overlap_at_compile_mapping_stage` asserting no compile-time mapping for partial-overlap spans.
-  - Validation: `cargo test -p runmat-vm semantic_windows_reject_disjoint_gap_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_partial_overlap_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_map_accel_nodes_that_cover_window_span -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_accel_nodes_with_large_disjoint_gap -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
+    - renamed `semantic_windows_map_accel_nodes_that_cover_window_span`
+    - now `semantic_windows_reject_covering_node_span_at_compile_mapping_stage` asserting no compile-time mapping for covering spans.
+  - Validation: `cargo test -p runmat-vm semantic_windows_reject_disjoint_gap_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_partial_overlap_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_covering_node_span_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_overly_wide_covering_node_spans -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
 ## Next Resolution Items
 
