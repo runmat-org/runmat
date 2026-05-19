@@ -515,7 +515,7 @@ Current ratchet status:
 - Simple VM basics execution tests for arithmetic, zero-output builtin calls, and `nextpow2` now run semantic bytecode.
 - Additional VM basics execution tests for complex literals, leading-dot numeric forms, elementwise division, `chol`, `uint16`, and `atan2` RHS expressions now run semantic bytecode.
 - FFT `end/2` range materialization, complex range assignment, multidimensional `end` ranges, out-of-bounds `end+1`, variable-offset `end`, builtin/user-function-call `end` expressions, pow/leftdiv end-expression combinations, and `fftn`/`ifftn` indexing basics now run semantic bytecode.
-- Remaining VM basics ratchets are semantic bytecode/accel-graph shape assertions (including multi-output argument shape and object range-end protocol payloads).
+- Remaining VM basics ratchets are semantic bytecode/accel-graph shape assertions (primarily multi-output argument shape coverage).
 - Matrix-division execution tests now run semantic bytecode, including accel-graph shape assertions.
 - Loop execution tests now run semantic bytecode, including the stochastic-evolution instruction-shape assertion.
 - VM `for` terminator lowering now supports non-range iterables through column iteration (`for v = A`) by materializing `A(:, k)` columns in bytecode, and control-flow semantic VM tests now cover matrix-column loop accumulation.

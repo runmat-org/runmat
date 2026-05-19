@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `5db3726c` `RM-378: ratchet object end-range payload in VM basics`
+  - Tightened `runmat-vm` basics coverage for object end-range assignment by asserting semantic bytecode carries the rich `end` arithmetic payload shape (`end*1 - 1/2`) in `Instr::StoreSliceExpr` (`EndExpr::Sub(Mul(End, Const), Div(Const, Const))`) before runtime execution assertions.
+  - This moves object range-end protocol coverage from execution-only smoke behavior to an explicit semantic bytecode contract check.
+  - Validation: `cargo test -p runmat-vm object_range_end_assignment_accepts_rich_end_expression_payload`.
+
 - `26450a6c` `RM-378: widen non-accel builtin gate coverage`
   - Expanded `runmat-vm` accel-capability pre-gate negative coverage from a single sentinel builtin to multiple explicit non-accelerable builtins:
     - `assert` (control/assertion)
