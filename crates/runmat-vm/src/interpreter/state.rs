@@ -63,6 +63,9 @@ impl InterpreterState {
             fusion_plan: prepare_fusion_plan(
                 bytecode.accel_graph.as_ref(),
                 &bytecode.fusion_groups,
+                bytecode
+                    .semantic_fusion_metadata
+                    .mir_fusion_candidate_group_count,
             ),
             bytecode,
         }

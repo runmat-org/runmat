@@ -705,9 +705,16 @@ fn fusion_debug_enabled() -> bool {
 pub fn prepare_fusion_plan(
     graph: Option<&AccelGraph>,
     groups: &[FusionGroup],
+    semantic_candidate_group_count: usize,
 ) -> Option<Arc<FusionPlan>> {
     let graph = graph?;
     if groups.is_empty() {
+        if semantic_candidate_group_count > 0 && fusion_debug_enabled() {
+            log::debug!(
+                "fusion plan preparation: semantic candidate groups present ({}) but executable bytecode fusion groups are empty",
+                semantic_candidate_group_count
+            );
+        }
         return None;
     }
     let key = graph as *const AccelGraph as usize;
