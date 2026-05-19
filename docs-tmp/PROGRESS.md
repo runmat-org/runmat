@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 6 deliverable audit closeout to `met`
+  - Completed production consumer audit for nominal class/builtin metadata usage across runtime+VM callsites.
+  - Verified class metadata consumers route through inheritance-aware lookup boundaries and cycle-safe traversal paths (`lookup_method`/`lookup_property` plus cycle-guarded parent traversal in `isa`, `fieldnames`, and constructor hierarchy walk).
+  - Updated deliverable audit status for item 5 from `partial` to `met`.
+  - Added regression watchpoint grep to prevent direct-class-only method dispatch reintroduction:
+    - `rg -n "cls\\.methods\\.get\\(|class_def\\.methods\\.get\\(" crates/runmat-runtime/src crates/runmat-vm/src`
+
 - (pending commit) Plan 7 semantic-window mapping tolerates accel-node span widening
   - VM semantic fusion-group node mapping now accepts accel nodes that fully cover a semantic instruction-window span, in addition to strict contained-by-window nodes.
   - This keeps semantic-window realization robust to accel-graph span widening while remaining stricter than arbitrary overlap matching.

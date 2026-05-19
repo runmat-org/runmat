@@ -98,7 +98,7 @@ This audit maps the active objective to concrete repository evidence and marks e
 - Residual watchpoints:
   - Keep core/CLI/LSP resolver path tests in validation cadence to prevent drift back to per-consumer path heuristics.
 
-### 5) Unified nominal class/builtin metadata (`partial`)
+### 5) Unified nominal class/builtin metadata (`met`)
 
 - Evidence:
   - shared callable identity/fallback policy in [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs).
@@ -132,8 +132,10 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `constructor_fallback_skips_private_or_non_static_constructor_methods`
   - runtime object construction hierarchy walk in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now guards parent traversal against class metadata cycles while applying inherited default-property initialization.
   - explicit runtime coverage (`new_object_builtin_handles_class_parent_cycles`) now ratchets deterministic constructor behavior for cyclic parent metadata graphs.
-- Gap:
-  - full Plan 6 acceptance criteria not yet closed out across all consumers.
+- Residual watchpoints:
+  - Keep a grep check in cadence to prevent reintroduction of direct-class-only method/property dispatch:
+    - `rg -n "cls\\.methods\\.get\\(|class_def\\.methods\\.get\\(" crates/runmat-runtime/src crates/runmat-vm/src`
+  - Keep inheritance/cycle consumer ratchet tests in cadence across runtime+VM metadata consumers (`isa`, `fieldnames`, `getfield`/`setfield`, object member/static dispatch, constructor fallback).
 
 ### 6) Semantic-fact-driven accel/fusion (`open`)
 
@@ -242,5 +244,4 @@ Objective is **not achieved**.
 
 Highest-impact unresolved areas:
 
-1. Plan 6 closeout across runtime, analysis, and metadata consumers for unified nominal class/builtin metadata.
-2. Plan 7 shift from bytecode-first fusion realization to semantic/MIR/analysis-driven planning, including remaining accel-graph realization dependency and async spawn-provider lifecycle evidence gaps.
+1. Plan 7 shift from bytecode-first fusion realization to semantic/MIR/analysis-driven planning, including remaining accel-graph realization dependency and async spawn-provider lifecycle evidence gaps.
