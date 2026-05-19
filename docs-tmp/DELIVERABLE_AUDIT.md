@@ -188,7 +188,8 @@ This audit maps the active objective to concrete repository evidence and marks e
   - provider-backed spawned-task lifecycle coverage now also includes nested payload shapes in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs):
     - `spawn_pop_releases_nested_closure_captured_provider_handle`
     - `spawn_await_completion_releases_nested_output_list_provider_handle`
-  - this extends release-semantics evidence beyond direct `GpuTensor` payloads to nested closure-capture and output-list task payloads.
+    - `spawn_await_completion_releases_nested_struct_provider_handle`
+  - this extends release-semantics evidence beyond direct `GpuTensor` payloads to nested closure-capture, output-list, and struct task payloads.
   - VM `Instr::ExitScope` local-drop cleanup in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs) now applies handle-aware live-value exclusion (stack + vars + remaining locals) before residency/provider release.
   - provider-backed runner coverage in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) now asserts both sides of this contract:
     - `exit_scope_releases_local_only_provider_handle`

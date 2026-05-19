@@ -703,7 +703,7 @@ mod tests {
     use crate::bytecode::Instr;
     use crate::interpreter::api::InterpreterState;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, Closure, Value};
+    use runmat_builtins::{CellArray, Closure, StructValue, Value};
     use runmat_hir::FunctionId;
     use std::sync::{atomic::AtomicBool, Arc};
     #[cfg(feature = "native-accel")]
@@ -1226,6 +1226,40 @@ mod tests {
         assert!(
             block_on(TEST_PROVIDER.download(&handle)).is_err(),
             "spawn/await completion should release provider storage for nested output-list payload handles"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn spawn_await_completion_releases_nested_struct_provider_handle() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![81.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        let mut payload = StructValue::new();
+        payload
+            .fields
+            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
+        state.stack.push(Value::Struct(payload));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("spawn/await flow should complete for nested struct payload");
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "spawn/await completion should clear residency for nested struct payload handles"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "spawn/await completion should release provider storage for nested struct payload handles"
         );
     }
 

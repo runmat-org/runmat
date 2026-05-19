@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 nested struct payload provider-release lifecycle ratchet
+  - Added VM runner coverage for spawned payloads that carry provider handles through nested struct runtime value shapes:
+    - `spawn_await_completion_releases_nested_struct_provider_handle`
+  - This extends spawn/await lifecycle cleanup evidence beyond closure/output-list payloads to struct-nested handle payloads.
+  - Validation: `cargo test -p runmat-vm spawn_await_completion_releases_nested_struct_provider_handle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 deliverable audit closeout to `met`
   - Completed production consumer audit for nominal class/builtin metadata usage across runtime+VM callsites.
   - Verified class metadata consumers route through inheritance-aware lookup boundaries and cycle-safe traversal paths (`lookup_method`/`lookup_property` plus cycle-guarded parent traversal in `isa`, `fieldnames`, and constructor hierarchy walk).
