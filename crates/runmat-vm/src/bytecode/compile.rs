@@ -40,24 +40,21 @@ pub fn compile(
     #[cfg(feature = "native-accel")]
     let semantic_fusion_metadata = derive_semantic_fusion_metadata(mir);
     #[cfg(feature = "native-accel")]
-    let (accel_graph, fusion_groups) = if semantic_fusion_metadata.mir_fusion_signal_count == 0 {
-        (None, Vec::new())
-    } else {
-        let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
-        let mut fusion_groups = if semantic_fusion_metadata.mir_fusion_candidate_group_count == 0 {
-            Vec::new()
+    let (accel_graph, fusion_groups) =
+        if semantic_fusion_metadata.mir_fusion_candidate_group_count == 0 {
+            (None, Vec::new())
         } else {
-            accel_graph.detect_fusion_groups()
+            let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
+            let mut fusion_groups = accel_graph.detect_fusion_groups();
+            if !fusion_groups.is_empty() {
+                annotate_fusion_groups_with_stack_layout(
+                    &c.instructions,
+                    &accel_graph,
+                    &mut fusion_groups,
+                );
+            }
+            (Some(accel_graph), fusion_groups)
         };
-        if !fusion_groups.is_empty() {
-            annotate_fusion_groups_with_stack_layout(
-                &c.instructions,
-                &accel_graph,
-                &mut fusion_groups,
-            );
-        }
-        (Some(accel_graph), fusion_groups)
-    };
     let semantic_async_metadata = derive_semantic_async_metadata(mir);
 
     Ok(Bytecode {
@@ -384,11 +381,41 @@ mod tests {
         );
         assert!(
             bytecode.accel_graph.is_none(),
-            "expected accel graph to be omitted when semantic fusion signals are absent"
+            "expected accel graph to be omitted when semantic candidate groups are absent"
         );
         assert!(
             bytecode.fusion_groups.is_empty(),
             "expected bytecode fusion groups to be gated off when semantic candidates are absent"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group() {
+        let ast = runmat_parser::parse("x = 1 + 2;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+
+        assert!(
+            bytecode.semantic_fusion_metadata.mir_fusion_signal_count > 0,
+            "expected non-zero fusion signal count for arithmetic operation"
+        );
+        assert_eq!(
+            bytecode
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_group_count,
+            0,
+            "expected no semantic candidate groups for a single-operation run"
+        );
+        assert!(
+            bytecode.accel_graph.is_none(),
+            "expected accel graph omission to follow semantic candidate-group gating"
+        );
+        assert!(
+            bytecode.fusion_groups.is_empty(),
+            "expected no executable bytecode fusion groups without semantic candidates"
         );
     }
 

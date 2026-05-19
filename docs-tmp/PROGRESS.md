@@ -17,6 +17,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 candidate-group-gated accel graph construction in VM compile
+  - `runmat-vm` bytecode compile now omits accel graph construction unless semantic fusion candidate groups are present (`mir_fusion_candidate_group_count > 0`).
+  - This removes the remaining `signals>0 but no semantic candidate groups` path that still built accel graph artifacts, tightening compile-time fusion artifact creation to semantic candidate evidence.
+  - Added `runmat-vm` regression coverage:
+    - `primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`
+  - Validation: `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`, `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm --test basics`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic-gated fusion snapshot decisions for bytecode-group mismatch
   - `runmat-core` fusion snapshot decisions for bytecode fusion groups are now gated by semantic candidate-group evidence from planner metadata.
   - When bytecode fusion groups are present but `mir_fusion_candidate_group_count == 0`, snapshot decisions are now marked `fused: false` with explicit semantic-gating reason (`semantic-candidate-groups=0`) instead of reporting unconditional fused status.
