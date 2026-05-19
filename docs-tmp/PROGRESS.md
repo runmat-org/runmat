@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Validation ratchet tighten try/catch message-binding assertion shape
+  - Core semantic try/catch binding coverage now asserts the exact bound message value shape for `y = err.message` (`'boom'`) instead of substring matching.
+  - Updated test: `try_catch_binding_uses_semantic_vm` in `crates/runmat-core/src/tests.rs`.
+  - Validation: `cargo test -p runmat-core try_catch_binding_uses_semantic_vm`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Validation ratchet replace VM indexing error display proxies with identifier assertions
   - Tightened VM basics error coverage to assert stable semantic error identifiers instead of display-message substring proxies:
     - `fft_end_arithmetic_out_of_bounds_raises_error` now asserts `RunMat:IndexOutOfBounds` / `RunMat:SubscriptOutOfBounds`.

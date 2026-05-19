@@ -2090,10 +2090,21 @@ fn try_catch_binding_uses_semantic_vm() {
     );
 
     let outcome = block_on(session.execute_outcome(source)).expect("exec succeeds");
-    assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
-            && upsert.value.to_string().contains("boom")
-    }));
+    let y_message = outcome
+        .workspace_delta
+        .upserts
+        .iter()
+        .find_map(|upsert| match &upsert.key {
+            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y" => {
+                Some(upsert.value.to_string())
+            }
+            _ => None,
+        })
+        .expect("try/catch binding should materialize y");
+    assert!(
+        y_message == "'boom'",
+        "unexpected catch message payload: {y_message:?}"
+    );
 }
 
 #[test]
