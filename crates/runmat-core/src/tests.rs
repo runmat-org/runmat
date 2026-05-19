@@ -2437,6 +2437,28 @@ fn arrayfun_runtime_string_callback_uses_semantic_resolver() {
 }
 
 #[test]
+fn cellfun_unresolved_external_callback_reports_undefined_function_identifier() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_outcome("C = {2}; y = cellfun('pkg.callback', C);"))
+        .expect("unresolved external cellfun callback should surface a runtime diagnostic");
+    assert!(outcome.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:UndefinedFunction"
+            && matches!(diagnostic.severity, abi::DiagnosticSeverity::Error)
+    }));
+}
+
+#[test]
+fn arrayfun_unresolved_external_callback_reports_undefined_function_identifier() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let outcome = block_on(session.execute_outcome("A = [2, 3]; y = arrayfun('pkg.callback', A);"))
+        .expect("unresolved external arrayfun callback should surface a runtime diagnostic");
+    assert!(outcome.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "RunMat:UndefinedFunction"
+            && matches!(diagnostic.severity, abi::DiagnosticSeverity::Error)
+    }));
+}
+
+#[test]
 fn direct_session_function_call_uses_semantic_registry() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     block_on(session.execute_outcome("seed = 0;\nfunction z = inc(x)\n  z = x + 1;\nend"))
