@@ -4,7 +4,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use futures::executor::block_on;
-use runmat_core::{ExecutionStreamKind, RunMatSession};
+use runmat_core::{ExecutionStreamKind, RunError, RunMatSession};
 use runmat_gc::gc_test_context;
 
 #[test]
@@ -30,7 +30,10 @@ fn clear_command_clears_workspace_state() {
     assert!(result.workspace.values.is_empty());
 
     let err = block_on(engine.execute("x")).unwrap_err();
-    assert!(err.to_string().contains("Undefined variable: x"));
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic undefined-variable error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
 }
 
 #[test]
@@ -45,7 +48,10 @@ fn clear_all_command_form_clears_workspace_state() {
     assert!(result.workspace.values.is_empty());
 
     let err = block_on(engine.execute("y")).unwrap_err();
-    assert!(err.to_string().contains("Undefined variable: y"));
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic undefined-variable error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
 }
 
 #[test]
@@ -61,7 +67,10 @@ fn clear_named_variable_removes_only_that_binding() {
     assert_eq!(result.workspace.values[0].name, "y");
 
     let err = block_on(engine.execute("x")).unwrap_err();
-    assert!(err.to_string().contains("Undefined variable: x"));
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic undefined-variable error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
 
     let y_value = block_on(engine.execute("y")).unwrap();
     assert!(y_value.error.is_none());

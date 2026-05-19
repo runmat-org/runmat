@@ -153,6 +153,30 @@ fn clear_all_stringifies_bare_word_arg() {
 }
 
 #[test]
+fn clear_without_arg_is_command_form() {
+    let program = parse_with_options("clear", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "clear");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected clear command form"),
+    }
+}
+
+#[test]
+fn clc_without_arg_is_command_form() {
+    let program = parse_with_options("clc", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::CommandCall(name, args, _), false, _) => {
+            assert_eq!(name, "clc");
+            assert!(args.is_empty());
+        }
+        _ => panic!("expected clc command form"),
+    }
+}
+
+#[test]
 fn invalid_keyword_rejected() {
     let err = parse_with_options("grid maybe", ParserOptions::new(CompatMode::Matlab));
     assert!(err.is_err());

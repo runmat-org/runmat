@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Command-form semantic preservation while tightening undefined-variable assertions
+  - Parser command-form gating now treats `StringifyWords` verbs as zero-arg-capable and includes explicit `clc` command classification, restoring semantic command parsing for `clear;`, `close;`, and `clc;`.
+  - Added parser coverage in `command_syntax.rs`:
+    - `clear_without_arg_is_command_form`
+    - `clc_without_arg_is_command_form`
+  - `runmat-core` command-control coverage now asserts semantic undefined-variable identifier contracts (`RunMat:UndefinedVariable`) instead of message substring matching.
+  - Validation: `cargo test -p runmat-parser --test command_syntax`, `cargo test -p runmat-core --test command_controls`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Semantic identifier contract for undefined-variable lowering
   - Added explicit HIR lowering identifier `RunMat:UndefinedVariable` for unresolved identifier reads in `lower_expr_semantic_requested`.
   - Updated VM semantic test helper to preserve lowering identifiers by converting `SemanticError` through `runmat_vm::CompileError` instead of debug-string wrapping.

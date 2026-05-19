@@ -90,6 +90,10 @@ const COMMAND_VERBS: &[CommandVerb] = &[
         arg_kind: CommandArgKind::Any,
     },
     CommandVerb {
+        name: "clc",
+        arg_kind: CommandArgKind::Any,
+    },
+    CommandVerb {
         name: "close",
         arg_kind: CommandArgKind::StringifyWords,
     },
@@ -146,6 +150,12 @@ impl Parser {
             command,
             Some(CommandVerb {
                 arg_kind: CommandArgKind::Keyword { optional: true, .. },
+                ..
+            })
+        ) || matches!(
+            command,
+            Some(CommandVerb {
+                arg_kind: CommandArgKind::StringifyWords,
                 ..
             })
         );
