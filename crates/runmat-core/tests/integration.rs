@@ -99,7 +99,10 @@ fn test_error_recovery_and_continued_execution() {
 
         // Execute invalid code
         let result2 = block_on(engine.execute("y = [1, 2,")); // Incomplete
-        assert!(result2.is_err());
+        match result2 {
+            Err(RunError::Syntax(_)) => {}
+            other => panic!("expected syntax error for incomplete matrix literal, got {other:?}"),
+        }
 
         // Engine should recover and continue working
         let result3 = block_on(engine.execute("z = 3"));

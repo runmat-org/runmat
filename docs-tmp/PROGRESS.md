@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 core integration parse-stage contract ratchet
+  - Tightened broad error handling in [integration.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/integration.rs):
+    - `test_error_recovery_and_continued_execution` now asserts `Err(RunError::Syntax(_))` for the intentionally incomplete matrix literal path, instead of a generic `is_err()` check.
+  - This keeps recovery-path coverage pinned to parser-stage contract boundaries rather than any error surface.
+  - Validation: `cargo test -p runmat-core --test integration`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 core syntax-failure stage-contract ratchet
   - Tightened broad parse/syntax failure checks in [engine.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/engine.rs):
     - `test_parse_error_handling`
