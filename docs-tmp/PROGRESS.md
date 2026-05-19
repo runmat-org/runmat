@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `1410839c` `RM-378: dedupe discovered composition loading`
+  - Refactored `runmat-config` to share one internal discovered-composition loader (`discover_project_composition_from`) across:
+    - `resolve_named_entrypoint_from`
+    - `discover_project_symbols_from`
+  - This removes duplicated manifest-discovery, composition-graph-load, and root-package verification logic in those APIs while preserving behavior and diagnostics.
+  - Validation: `cargo test -p runmat-config --test project_manifest discover_project_symbols_includes_dependency_alias_qualified_names`, `cargo test -p runmat-config --test project_manifest resolve_named_entrypoint_from_discovers_and_resolves`, `cargo test -p runmat-config --test project_manifest resolve_named_entrypoint_from_reports_resolution_errors`, `cargo test -p runmat --lib resolve_script_input_`, `cargo test -p runmat-core source_input_path_`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `git diff --check`.
+
 - `45570878` `RM-378: centralize source-input path resolution`
   - Added shared config-layer source-input path resolver:
     - `runmat_config::resolve_project_source_input_from(cwd, source_input)`
