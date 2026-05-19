@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `2bfe761f` `RM-378: resolve benchmark targets via manifest entrypoints`
+  - `runmat-cli` benchmark command now resolves input targets through shared config-layer source-input resolution (`resolve_project_source_input_from`) before file read, matching script/core manifest-driven path semantics.
+  - This extends Plan 5 entrypoint-resolution wiring from `script` into another active CLI execution path (`benchmark`) so named entrypoints and module/function targets resolve consistently.
+  - Added benchmark command unit coverage for:
+    - named entrypoint -> path target resolution
+    - relative path `.m` inference
+    - module/function entrypoint -> source-root file resolution
+  - Validation: `cargo test -p runmat --lib commands::benchmark::tests::`, `cargo test -p runmat-core --test semicolon_suppression`.
+
 - `7fe6791d` `RM-378: require candidate span containment in accel gate`
   - Tightened VM compile semantic pre-gate matching from permissive span overlap to full instruction-span containment within semantic candidate source spans for accel-capable instruction qualification.
   - Added coverage: `semantic_candidate_accel_capability_gate_rejects_partial_span_overlap`, asserting boundary-only/partial overlap no longer qualifies a candidate for accel-graph construction.
