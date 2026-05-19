@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `0b65a6b4` `RM-378: tighten atan2 expansion bytecode contract`
+  - Strengthened VM basics multi-output argument expansion ratchet for `atan2(g())` by asserting:
+    - explicit `CallBuiltinExpandMultiOutput("atan2", specs, 1)` shape with `ArgSpec { is_expand: true, expand_all: true, num_indices: 0 }`
+    - absence of fixed-arity fallback shape `CallBuiltinMulti("atan2", 2, 1)` in that path.
+  - This tightens remaining VM basics multi-output argument-shape coverage to a concrete semantic bytecode contract.
+  - Validation: `cargo test -p runmat-vm atan2_multi_output_argument_path_unpacks_before_call`.
+
 - `6cb30a56` `RM-378: assert chol multi-output bytecode shape`
   - Tightened VM basics `chol` multi-assign coverage by asserting semantic bytecode lowers `[R, p] = chol(A)` to explicit multi-output builtin call shape (`Instr::CallBuiltinMulti("chol", 1, 2)`) before runtime value assertions.
   - This reduces remaining multi-output argument/output-shape smoke coverage by enforcing a concrete semantic-lowering contract.
