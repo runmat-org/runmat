@@ -6,6 +6,16 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 handle-object target recursion for residency/provider-release lifecycle
+  - VM residency traversal now recurses through `Value::HandleObject` targets for both:
+    - residency/provider clear on drop (`clear_value` path)
+    - shared-liveness exclusion keep-set collection (`clear_value_excluding` path)
+  - Added cycle-safe target traversal guards (visited target pointer set) to prevent recursion loops when handle-object targets are cyclic.
+  - Added VM residency coverage:
+    - `clear_value_releases_gpu_handles_nested_in_handle_object_target`
+    - `clear_value_excluding_preserves_handles_referenced_in_handle_object_target`
+  - Validation: `cargo test -p runmat-vm clear_value_releases_gpu_handles_nested_in_handle_object_target`, `cargo test -p runmat-vm clear_value_excluding_preserves_handles_referenced_in_handle_object_target`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 nested struct payload provider-release lifecycle ratchet
   - Added VM runner coverage for spawned payloads that carry provider handles through nested struct runtime value shapes:
     - `spawn_await_completion_releases_nested_struct_provider_handle`
