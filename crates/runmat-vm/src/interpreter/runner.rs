@@ -1333,6 +1333,72 @@ mod tests {
         let _ = TEST_PROVIDER.free(&handle);
     }
 
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn spawn_await_completion_releases_nested_cell_provider_handle() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![111.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        let payload =
+            CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).expect("cell payload");
+        state.stack.push(Value::Cell(payload));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("spawn/await flow should complete for nested cell payload");
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "spawn/await completion should clear residency for nested cell payload handles"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "spawn/await completion should release provider storage for nested cell payload handles"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn spawn_await_completion_preserves_nested_cell_handle_when_alias_live() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![121.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        let payload =
+            CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).expect("cell payload");
+        state.stack.push(Value::Cell(payload.clone()));
+        state.vars = vec![Value::Cell(payload.clone())];
+
+        let mut result_vars = vec![Value::Cell(payload)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("spawn/await flow should complete for aliased nested cell payload");
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "spawn/await completion should preserve residency for nested cell handles still referenced by vars"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "spawn/await completion should not release provider storage for nested cell handles still referenced by vars"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
+
     #[test]
     fn await_passes_through_non_spawn_value_operand() {
         let bytecode =
