@@ -659,6 +659,13 @@ async fn run_interpreter_inner(
         pc += 1;
     }
     interpreter_timing.flush_host_span("loop_complete", None);
+    #[cfg(feature = "native-accel")]
+    {
+        let live_vars = Value::OutputList(vars.clone());
+        for value in &stack {
+            clear_residency_before_overwrite(value, &live_vars);
+        }
+    }
     sync_initial_vars(initial_vars, &vars);
     Ok(InterpreterOutcome::Completed(vars))
 }
@@ -703,9 +710,12 @@ pub async fn interpret_function_with_counts(
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_semantic_outputs, interpret_with_vars, semantic_output_value};
+    use super::{
+        collect_semantic_outputs, interpret_with_vars, run_interpreter_inner, semantic_output_value,
+    };
     use crate::bytecode::program::{Bytecode, SemanticFunctionBytecode};
     use crate::bytecode::Instr;
+    use crate::interpreter::api::InterpreterState;
     use futures::executor::block_on;
     use runmat_builtins::{CellArray, Value};
     use runmat_hir::FunctionId;
@@ -786,6 +796,36 @@ mod tests {
         assert!(
             !fusion_residency::is_resident(&handle),
             "cancelled execution should clear residency marks for live GPU handles"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn completion_clears_stack_only_gpu_residency() {
+        use runmat_accelerate::fusion_residency;
+        use runmat_accelerate_api::GpuTensorHandle;
+
+        let handle = GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: 0,
+            buffer_id: 777_002,
+        };
+        fusion_residency::mark(&handle);
+        assert!(fusion_residency::is_resident(&handle));
+
+        let bytecode = Bytecode::with_instructions(Vec::new(), 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::GpuTensor(handle.clone()));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let outcome = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("interpreter should complete");
+        assert!(matches!(outcome, crate::interpreter::api::InterpreterOutcome::Completed(_)));
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "completion should clear residency marks for stack-only GPU handles"
         );
     }
 }
