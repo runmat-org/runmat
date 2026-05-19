@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 remove graph-derived shape inference from semantic fusion groups
+  - VM semantic fusion-group construction now assigns `ShapeInfo::Unknown` directly instead of inferring shape from accel-graph node outputs, reducing semantic group-planning dependency on graph-derived shape artifacts.
+  - Added ratchet assertion in `semantic_candidates_build_fusion_groups_from_accel_graph_nodes` that semantic groups keep `ShapeInfo::Unknown`.
+  - Validation: `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-core --test fusion_regressions`.
+
 - (pending commit) Plan 7 release provider-backed GPU handles during residency clear
   - VM residency clear paths now perform best-effort provider `free` for dropped GPU handles (in addition to residency/metadata clearing), so overwrite/drop paths release provider storage rather than only clearing fusion residency marks.
   - `clear_value_excluding` still preserves shared handles through existing incoming-handle exclusion logic.

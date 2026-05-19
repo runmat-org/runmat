@@ -388,12 +388,11 @@ fn derive_semantic_fusion_groups_from_candidates(
             assigned_nodes.insert(*node_id);
         }
         let kind = infer_semantic_fusion_kind(window.kind);
-        let shape = infer_semantic_fusion_shape(accel_graph, &nodes);
         groups.push(runmat_accelerate::fusion::FusionGroup {
             id: groups.len(),
             kind,
             nodes,
-            shape,
+            shape: runmat_accelerate::graph::ShapeInfo::Unknown,
             span: window.span,
             pattern: None,
             stack_layout: None,
@@ -613,23 +612,6 @@ fn infer_semantic_fusion_kind(
             runmat_accelerate::fusion::FusionKind::ElementwiseChain
         }
     }
-}
-
-#[cfg(feature = "native-accel")]
-fn infer_semantic_fusion_shape(
-    accel_graph: &runmat_accelerate::graph::AccelGraph,
-    nodes: &[runmat_accelerate::graph::NodeId],
-) -> runmat_accelerate::graph::ShapeInfo {
-    for node_id in nodes.iter().rev() {
-        if let Some(node) = accel_graph.node(*node_id) {
-            if let Some(value_id) = node.outputs.first() {
-                if let Some(value) = accel_graph.value(*value_id) {
-                    return value.shape.clone();
-                }
-            }
-        }
-    }
-    runmat_accelerate::graph::ShapeInfo::Unknown
 }
 
 #[cfg(feature = "native-accel")]
@@ -1256,6 +1238,10 @@ mod tests {
         assert_eq!(
             groups[0].kind,
             runmat_accelerate::fusion::FusionKind::ElementwiseChain
+        );
+        assert_eq!(
+            groups[0].shape,
+            runmat_accelerate::graph::ShapeInfo::Unknown
         );
     }
 
