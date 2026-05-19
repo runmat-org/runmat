@@ -57,6 +57,13 @@ pub fn compile(
                     &accel_graph,
                     &mut fusion_groups,
                 );
+                fusion_groups.retain(|group| {
+                    fusion_group_has_semantic_candidate_overlap(
+                        group,
+                        &c.instr_spans,
+                        &semantic_fusion_metadata.mir_fusion_candidate_groups,
+                    )
+                });
             }
             (Some(accel_graph), fusion_groups)
         };
@@ -166,13 +173,16 @@ fn derive_semantic_fusion_candidate_groups(
                     | MirStmtKind::WorkspaceEffect { .. }
                     | MirStmtKind::EnvironmentEffect(_) => {
                         if run_len >= 2 {
+                            let stmt_start = stmt_index - run_len;
+                            let stmt_end = stmt_index;
                             groups.push(crate::bytecode::SemanticFusionCandidateGroup {
                                 id: groups.len(),
                                 signal_count: run_len,
                                 function: body.function,
                                 block: block.id,
-                                stmt_start: stmt_index - run_len,
-                                stmt_end: stmt_index,
+                                stmt_start,
+                                stmt_end,
+                                source_span: merge_stmt_run_span(block, stmt_start, stmt_end),
                             });
                         }
                         run_len = 0;
@@ -184,31 +194,81 @@ fn derive_semantic_fusion_candidate_groups(
                     run_len += 1;
                 } else {
                     if run_len >= 2 {
+                        let stmt_start = stmt_index - run_len;
+                        let stmt_end = stmt_index;
                         groups.push(crate::bytecode::SemanticFusionCandidateGroup {
                             id: groups.len(),
                             signal_count: run_len,
                             function: body.function,
                             block: block.id,
-                            stmt_start: stmt_index - run_len,
-                            stmt_end: stmt_index,
+                            stmt_start,
+                            stmt_end,
+                            source_span: merge_stmt_run_span(block, stmt_start, stmt_end),
                         });
                     }
                     run_len = 0;
                 }
             }
             if run_len >= 2 {
+                let stmt_start = block.statements.len() - run_len;
+                let stmt_end = block.statements.len();
                 groups.push(crate::bytecode::SemanticFusionCandidateGroup {
                     id: groups.len(),
                     signal_count: run_len,
                     function: body.function,
                     block: block.id,
-                    stmt_start: block.statements.len() - run_len,
-                    stmt_end: block.statements.len(),
+                    stmt_start,
+                    stmt_end,
+                    source_span: merge_stmt_run_span(block, stmt_start, stmt_end),
                 });
             }
         }
     }
     (signal_count, groups)
+}
+
+#[cfg(feature = "native-accel")]
+fn merge_stmt_run_span(
+    block: &runmat_mir::BasicBlock,
+    stmt_start: usize,
+    stmt_end: usize,
+) -> runmat_hir::Span {
+    let mut iter = block.statements[stmt_start..stmt_end]
+        .iter()
+        .map(|stmt| stmt.span);
+    let Some(first) = iter.next() else {
+        return runmat_hir::Span::default();
+    };
+    iter.fold(first, runmat_hir::merge_span)
+}
+
+#[cfg(feature = "native-accel")]
+fn source_spans_overlap(lhs: runmat_hir::Span, rhs: runmat_hir::Span) -> bool {
+    lhs.start < rhs.end && rhs.start < lhs.end
+}
+
+#[cfg(feature = "native-accel")]
+fn fusion_group_has_semantic_candidate_overlap(
+    group: &runmat_accelerate::fusion::FusionGroup,
+    instr_spans: &[runmat_hir::Span],
+    semantic_candidate_groups: &[crate::bytecode::SemanticFusionCandidateGroup],
+) -> bool {
+    if instr_spans.is_empty()
+        || group.span.start > group.span.end
+        || group.span.start >= instr_spans.len()
+    {
+        return false;
+    }
+    let end = group.span.end.min(instr_spans.len().saturating_sub(1));
+    let candidate_spans: Vec<_> = semantic_candidate_groups
+        .iter()
+        .map(|group| group.source_span)
+        .collect();
+    instr_spans[group.span.start..=end].iter().any(|span| {
+        candidate_spans
+            .iter()
+            .any(|candidate| source_spans_overlap(*span, *candidate))
+    })
 }
 
 #[cfg(feature = "native-accel")]
@@ -381,6 +441,14 @@ mod tests {
                 .all(|group| group.stmt_end > group.stmt_start),
             "expected candidate groups to carry non-empty statement spans"
         );
+        assert!(
+            bytecode
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_groups
+                .iter()
+                .all(|group| group.source_span.end > group.source_span.start),
+            "expected candidate groups to carry non-empty source spans"
+        );
     }
 
     #[cfg(feature = "native-accel")]
@@ -467,6 +535,60 @@ mod tests {
         assert!(
             bytecode.fusion_groups.is_empty(),
             "entrypoint with no semantic candidates should not emit executable fusion groups"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn fusion_group_semantic_overlap_uses_source_spans() {
+        let instr_spans = vec![
+            runmat_hir::Span { start: 0, end: 2 },
+            runmat_hir::Span { start: 2, end: 4 },
+            runmat_hir::Span { start: 4, end: 6 },
+        ];
+        let group = runmat_accelerate::fusion::FusionGroup {
+            id: 0,
+            kind: runmat_accelerate::fusion::FusionKind::ElementwiseChain,
+            nodes: vec![],
+            shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+            span: runmat_accelerate::graph::InstrSpan { start: 1, end: 2 },
+            pattern: None,
+            stack_layout: None,
+        };
+        let overlapping_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 2,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 1,
+            source_span: runmat_hir::Span { start: 3, end: 5 },
+        }];
+        let non_overlapping_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 2,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 1,
+            source_span: runmat_hir::Span { start: 8, end: 10 },
+        }];
+
+        assert!(
+            super::fusion_group_has_semantic_candidate_overlap(
+                &group,
+                &instr_spans,
+                &overlapping_candidates
+            ),
+            "expected overlap when instruction source span intersects semantic candidate span"
+        );
+        assert!(
+            !super::fusion_group_has_semantic_candidate_overlap(
+                &group,
+                &instr_spans,
+                &non_overlapping_candidates
+            ),
+            "expected no overlap when instruction source spans are disjoint from semantic candidate spans"
         );
     }
 

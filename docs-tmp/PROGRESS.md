@@ -17,6 +17,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 semantic source-span alignment for executable bytecode fusion groups
+  - `runmat-vm` semantic fusion candidate groups now carry merged source spans for each MIR candidate run.
+  - VM compile now filters detected bytecode fusion groups against semantic candidate source-span overlap (via instruction-source spans), so executable fusion groups are retained only when they intersect semantic candidate regions.
+  - This tightens executable fusion candidate construction toward semantic evidence rather than bytecode graph shape alone.
+  - Added `runmat-vm` regression coverage:
+    - `fusion_group_semantic_overlap_uses_source_spans`
+    - strengthened `primary_compile_records_semantic_fusion_metadata` with source-span assertions
+  - Validation: `cargo test -p runmat-vm fusion_group_semantic_overlap_uses_source_spans`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-vm primary_compile_scopes_semantic_fusion_metadata_to_entrypoint_target`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 scope fusion planner MIR local-fact counts to active entrypoint
   - `runmat-core` fusion snapshot planner metadata now counts MIR local facts only for the active entrypoint target function in both:
     - preview path (`compile_fusion_plan`)

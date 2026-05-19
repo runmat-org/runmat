@@ -202,6 +202,8 @@ pub struct SemanticFusionCandidateGroup {
     pub block: runmat_mir::BasicBlockId,
     pub stmt_start: usize,
     pub stmt_end: usize,
+    #[serde(default)]
+    pub source_span: runmat_hir::Span,
 }
 
 impl Bytecode {
