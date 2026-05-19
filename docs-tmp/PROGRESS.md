@@ -45,6 +45,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - The `setfield` ratchet verifies static-property assignment rejection still applies when the static property is declared on an ancestor class.
   - Validation: `cargo test -p runmat-runtime getfield_inherited_dependent_property_uses_parent_metadata`, `cargo test -p runmat-runtime setfield_rejects_inherited_static_property_assignment`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
 
+- (pending commit) Plan 7 nested spawned-payload provider-release lifecycle ratchets
+  - Added VM runner coverage for spawned payloads that carry provider handles through nested runtime value shapes:
+    - `spawn_pop_releases_nested_closure_captured_provider_handle`
+    - `spawn_await_completion_releases_nested_output_list_provider_handle`
+  - This ratchets that spawn lifecycle cleanup (`Pop` and `Await` completion) releases provider-backed handles for nested `Closure` captures and `OutputList` payloads, not only direct scalar `GpuTensor` payloads.
+  - Validation: `cargo test -p runmat-vm spawn_pop_releases_nested_closure_captured_provider_handle`, `cargo test -p runmat-vm spawn_await_completion_releases_nested_output_list_provider_handle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 runtime consumer ratchet for class-metadata inheritance lookup
   - Added runtime `exist` builtin coverage that asserts method existence queries consume registered class metadata through inheritance lookup:
     - `exist_method_uses_registered_class_metadata_including_inheritance`

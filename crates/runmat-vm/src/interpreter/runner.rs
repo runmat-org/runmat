@@ -717,7 +717,7 @@ mod tests {
     use crate::bytecode::Instr;
     use crate::interpreter::api::InterpreterState;
     use futures::executor::block_on;
-    use runmat_builtins::{CellArray, Value};
+    use runmat_builtins::{CellArray, Closure, Value};
     use runmat_hir::FunctionId;
     use std::sync::{atomic::AtomicBool, Arc};
     #[cfg(feature = "native-accel")]
@@ -1036,6 +1036,72 @@ mod tests {
         );
         fusion_residency::clear(&handle);
         let _ = TEST_PROVIDER.free(&handle);
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn spawn_pop_releases_nested_closure_captured_provider_handle() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![61.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Pop, Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::Closure(Closure {
+            function_name: "worker".to_string(),
+            semantic_function: None,
+            captures: vec![Value::GpuTensor(handle.clone())],
+        }));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("spawn/pop should complete for closure payload");
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "spawn/pop should clear residency for nested closure-captured payload handles"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "spawn/pop should release provider storage for nested closure-captured payload handles"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn spawn_await_completion_releases_nested_output_list_provider_handle() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![71.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state
+            .stack
+            .push(Value::OutputList(vec![Value::GpuTensor(handle.clone())]));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("spawn/await flow should complete for nested output payload");
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "spawn/await completion should clear residency for nested output-list payload handles"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "spawn/await completion should release provider storage for nested output-list payload handles"
+        );
     }
 
     #[test]
