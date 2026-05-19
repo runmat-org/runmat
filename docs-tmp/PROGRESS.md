@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 classify fusion-group kind from semantic windows, not accel-node category overrides
+  - VM compile semantic-fusion grouping now derives `FusionKind` directly from semantic instruction-window signal kind hints (`Elementwise`/`Reduction`/`Matmul`) instead of allowing accel-graph node-category scans to override classification.
+  - This keeps group-kind planning on semantic instruction facts while retaining accel-graph use for node realization and shape extraction.
+  - Added compile-unit regression `semantic_window_kind_is_not_overridden_by_graph_category`.
+  - Validation: `cargo test -p runmat-vm semantic_window_kind_is_not_overridden_by_graph_category`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-core --test fusion_regressions`.
+
 - (pending commit) Plan 7 keep async/spawn semantic policy tests on identifier contracts
   - Removed remaining HIR semantic policy test assertions that matched display-message fragments after identifier checks.
   - Async/spawn policy regressions in `runmat-hir` now ratchet behavior strictly on stable identifiers (`RunMat:AwaitContextInvalid`, `RunMat:SpawnExtensionDisabled`, `RunMat:AwaitExtensionDisabled`, `RunMat:SpawnLexicalCaptureUnsupported`) rather than diagnostic wording.

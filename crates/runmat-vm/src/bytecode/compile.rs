@@ -387,7 +387,7 @@ fn derive_semantic_fusion_groups_from_candidates(
         for node_id in &nodes {
             assigned_nodes.insert(*node_id);
         }
-        let kind = infer_semantic_fusion_kind(accel_graph, &nodes, window.kind);
+        let kind = infer_semantic_fusion_kind(window.kind);
         let shape = infer_semantic_fusion_shape(accel_graph, &nodes);
         groups.push(runmat_accelerate::fusion::FusionGroup {
             id: groups.len(),
@@ -604,34 +604,13 @@ fn instr_fusion_signal_kind(instr: &Instr) -> Option<SemanticFusionSignalKind> {
 
 #[cfg(feature = "native-accel")]
 fn infer_semantic_fusion_kind(
-    accel_graph: &runmat_accelerate::graph::AccelGraph,
-    nodes: &[runmat_accelerate::graph::NodeId],
     kind_hint: SemanticFusionSignalKind,
 ) -> runmat_accelerate::fusion::FusionKind {
-    let mut saw_matmul = false;
-    let mut saw_reduction = false;
-    for node_id in nodes {
-        if let Some(node) = accel_graph.node(*node_id) {
-            match node.category {
-                runmat_accelerate::graph::AccelOpCategory::MatMul => saw_matmul = true,
-                runmat_accelerate::graph::AccelOpCategory::Reduction => saw_reduction = true,
-                _ => {}
-            }
-        }
-    }
-    if saw_matmul {
-        runmat_accelerate::fusion::FusionKind::MatmulEpilogue
-    } else if saw_reduction {
-        runmat_accelerate::fusion::FusionKind::Reduction
-    } else {
-        match kind_hint {
-            SemanticFusionSignalKind::Matmul => {
-                runmat_accelerate::fusion::FusionKind::MatmulEpilogue
-            }
-            SemanticFusionSignalKind::Reduction => runmat_accelerate::fusion::FusionKind::Reduction,
-            SemanticFusionSignalKind::Elementwise => {
-                runmat_accelerate::fusion::FusionKind::ElementwiseChain
-            }
+    match kind_hint {
+        SemanticFusionSignalKind::Matmul => runmat_accelerate::fusion::FusionKind::MatmulEpilogue,
+        SemanticFusionSignalKind::Reduction => runmat_accelerate::fusion::FusionKind::Reduction,
+        SemanticFusionSignalKind::Elementwise => {
+            runmat_accelerate::fusion::FusionKind::ElementwiseChain
         }
     }
 }
@@ -1277,6 +1256,71 @@ mod tests {
         assert_eq!(
             groups[0].kind,
             runmat_accelerate::fusion::FusionKind::ElementwiseChain
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_window_kind_is_not_overridden_by_graph_category() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![runmat_accelerate::graph::AccelNode {
+                id: 0,
+                label: runmat_accelerate::graph::AccelNodeLabel::Primitive(
+                    runmat_accelerate::graph::PrimitiveOp::Add,
+                ),
+                category: runmat_accelerate::graph::AccelOpCategory::Reduction,
+                inputs: vec![0, 0],
+                outputs: vec![1],
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+                tags: vec![runmat_accelerate::graph::AccelGraphTag::Elementwise],
+            }],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let instr_spans = vec![runmat_hir::Span { start: 10, end: 11 }];
+        let semantic_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 1,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 1,
+            source_span: runmat_hir::Span { start: 10, end: 11 },
+        }];
+
+        let groups = super::derive_semantic_fusion_groups_from_candidates(
+            &[Instr::Add],
+            &instr_spans,
+            &semantic_candidates,
+            &accel_graph,
+        );
+        assert_eq!(groups.len(), 1, "expected one semantic fusion group");
+        assert_eq!(
+            groups[0].kind,
+            runmat_accelerate::fusion::FusionKind::ElementwiseChain,
+            "semantic instruction-window kind should drive fusion kind classification"
         );
     }
 
