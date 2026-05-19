@@ -188,6 +188,10 @@ fn compile_fusion_plan_exposes_semantic_planner_metadata() {
         snapshot.planner.mir_fusion_candidate_group_count > 0,
         "expected non-zero MIR fusion candidate group count"
     );
+    assert!(
+        snapshot.planner.mir_semantic_instruction_window_count > 0,
+        "expected non-zero MIR semantic instruction window count"
+    );
 }
 
 #[test]
@@ -227,6 +231,10 @@ fn runtime_fusion_snapshot_exposes_semantic_planner_metadata() {
         snapshot.planner.mir_fusion_candidate_group_count > 0,
         "expected non-zero runtime MIR fusion candidate group count"
     );
+    assert!(
+        snapshot.planner.mir_semantic_instruction_window_count > 0,
+        "expected non-zero runtime MIR semantic instruction window count"
+    );
 }
 
 #[test]
@@ -251,6 +259,10 @@ fn compile_fusion_plan_exposes_semantic_candidates_without_bytecode_groups() {
     assert!(
         snapshot.planner.mir_fusion_candidate_group_count > 0,
         "expected non-zero MIR fusion candidate group count"
+    );
+    assert!(
+        snapshot.planner.mir_semantic_instruction_window_count > 0,
+        "expected non-zero MIR semantic instruction window count"
     );
     if snapshot.nodes.is_empty() {
         assert!(

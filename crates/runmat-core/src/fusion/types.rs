@@ -14,6 +14,7 @@ pub struct FusionPlannerMetadata {
     pub mir_diagnostic_count: usize,
     pub mir_fusion_signal_count: usize,
     pub mir_fusion_candidate_group_count: usize,
+    pub mir_semantic_instruction_window_count: usize,
 }
 
 impl Default for FusionPlannerMetadata {
@@ -24,6 +25,7 @@ impl Default for FusionPlannerMetadata {
             mir_diagnostic_count: 0,
             mir_fusion_signal_count: 0,
             mir_fusion_candidate_group_count: 0,
+            mir_semantic_instruction_window_count: 0,
         }
     }
 }

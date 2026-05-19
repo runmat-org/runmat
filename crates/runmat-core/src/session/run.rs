@@ -435,6 +435,9 @@ impl RunMatSession {
                     mir_fusion_candidate_group_count: bytecode
                         .semantic_fusion_metadata
                         .mir_fusion_candidate_group_count,
+                    mir_semantic_instruction_window_count: bytecode
+                        .semantic_fusion_metadata
+                        .semantic_instruction_window_count,
                 }),
             )
         } else {

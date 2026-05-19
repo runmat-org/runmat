@@ -225,6 +225,10 @@ impl RunMatSession {
                     .bytecode
                     .semantic_fusion_metadata
                     .mir_fusion_candidate_group_count,
+                mir_semantic_instruction_window_count: prepared
+                    .bytecode
+                    .semantic_fusion_metadata
+                    .semantic_instruction_window_count,
             }),
         ))
     }

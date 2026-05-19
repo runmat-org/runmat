@@ -53,9 +53,10 @@ pub(crate) fn build_fusion_snapshot(
                 node_id: "semantic-candidate-summary".to_string(),
                 fused: false,
                 reason: Some(format!(
-                    "mir-signals={} mir-candidate-groups={} bytecode-groups=0 accel-graph={}",
+                    "mir-signals={} mir-candidate-groups={} semantic-windows={} bytecode-groups=0 accel-graph={}",
                     planner.mir_fusion_signal_count,
                     planner.mir_fusion_candidate_group_count,
+                    planner.mir_semantic_instruction_window_count,
                     accel_graph_state
                 )),
                 thresholds: None,
@@ -217,6 +218,7 @@ mod tests {
                 mir_diagnostic_count: 0,
                 mir_fusion_signal_count: 2,
                 mir_fusion_candidate_group_count: 1,
+                mir_semantic_instruction_window_count: 1,
             }),
         )
         .expect("semantic candidate summary snapshot");
@@ -259,6 +261,7 @@ mod tests {
                 mir_diagnostic_count: 0,
                 mir_fusion_signal_count: 3,
                 mir_fusion_candidate_group_count: 1,
+                mir_semantic_instruction_window_count: 1,
             }),
         )
         .expect("semantic candidate snapshot");
@@ -307,6 +310,7 @@ mod tests {
                 mir_diagnostic_count: 0,
                 mir_fusion_signal_count: 2,
                 mir_fusion_candidate_group_count: 1,
+                mir_semantic_instruction_window_count: 1,
             }),
         )
         .expect("fusion snapshot");
@@ -351,6 +355,7 @@ mod tests {
                 mir_diagnostic_count: 0,
                 mir_fusion_signal_count: 2,
                 mir_fusion_candidate_group_count: 0,
+                mir_semantic_instruction_window_count: 0,
             }),
         )
         .expect("snapshot");

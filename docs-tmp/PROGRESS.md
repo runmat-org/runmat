@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 propagate semantic instruction-window counts through fusion planner metadata
+  - Core fusion planner metadata now includes semantic instruction-window counts sourced from VM bytecode semantic fusion metadata.
+  - Both compile-time preview (`compile_fusion_plan`) and runtime emission (`execute_outcome` with fusion snapshots enabled) now propagate this count.
+  - Fusion snapshot summary diagnostics now include semantic-window counts when bytecode groups are absent.
+  - Added/updated coverage in `runmat-core` fusion snapshot and fusion regression tests to assert non-zero semantic-window counts for fusible scripts.
+  - Validation: `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core fusion::snapshot::tests::`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 persist semantic instruction-window fusion metadata on bytecode
   - VM compile now records semantic fusion instruction windows (instruction span + semantic kind hint) as explicit bytecode metadata in `SemanticFusionMetadata`.
   - Fusion-group realization now consumes that precomputed semantic window metadata instead of re-deriving windows in the accel-graph realization path.
