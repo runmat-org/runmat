@@ -415,6 +415,21 @@ fn accel_nodes_for_instruction_window(
         })
         .map(|node| node.id)
         .collect();
+    if nodes.is_empty() {
+        // Compatibility fallback: tolerate tiny disjoint span gaps (<=1 instruction)
+        // when strict overlap matching yields no nodes, so minor graph/span jitter
+        // does not drop semantic windows entirely.
+        nodes = accel_graph
+            .nodes
+            .iter()
+            .filter(|node| {
+                !assigned_nodes.contains(&node.id)
+                    && accel_node_matches_semantic_window_kind(node, window.kind)
+                    && accel_node_span_within_small_disjoint_gap(node, window)
+            })
+            .map(|node| node.id)
+            .collect();
+    }
     nodes.sort_unstable_by_key(|node_id| {
         accel_graph
             .node(*node_id)
@@ -455,6 +470,20 @@ fn accel_node_span_matches_instruction_window(
     let left_extra = window.span.start.saturating_sub(node.span.start);
     let right_extra = node.span.end.saturating_sub(window.span.end);
     left_extra <= 1 && right_extra <= 1
+}
+
+#[cfg(feature = "native-accel")]
+fn accel_node_span_within_small_disjoint_gap(
+    node: &runmat_accelerate::graph::AccelNode,
+    window: &crate::bytecode::SemanticFusionInstructionWindow,
+) -> bool {
+    if node.span.end < window.span.start {
+        window.span.start.saturating_sub(node.span.end) <= 1
+    } else if window.span.end < node.span.start {
+        node.span.start.saturating_sub(window.span.end) <= 1
+    } else {
+        false
+    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -1624,6 +1653,110 @@ mod tests {
         assert!(
             groups.is_empty(),
             "semantic windows should reject partial overlap when boundary shift exceeds tolerance"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_windows_map_accel_nodes_with_small_disjoint_gap() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![runmat_accelerate::graph::AccelNode {
+                id: 0,
+                label: runmat_accelerate::graph::AccelNodeLabel::Primitive(
+                    runmat_accelerate::graph::PrimitiveOp::Add,
+                ),
+                category: runmat_accelerate::graph::AccelOpCategory::Elementwise,
+                inputs: vec![0, 0],
+                outputs: vec![1],
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+                tags: vec![runmat_accelerate::graph::AccelGraphTag::Elementwise],
+            }],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+            span: runmat_accelerate::graph::InstrSpan { start: 1, end: 1 },
+            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+        }];
+        let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
+        assert_eq!(
+            groups.len(),
+            1,
+            "semantic windows should tolerate small disjoint span gaps in accel node mapping"
+        );
+        assert_eq!(groups[0].nodes, vec![0]);
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_windows_reject_accel_nodes_with_large_disjoint_gap() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![runmat_accelerate::graph::AccelNode {
+                id: 0,
+                label: runmat_accelerate::graph::AccelNodeLabel::Primitive(
+                    runmat_accelerate::graph::PrimitiveOp::Add,
+                ),
+                category: runmat_accelerate::graph::AccelOpCategory::Elementwise,
+                inputs: vec![0, 0],
+                outputs: vec![1],
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+                tags: vec![runmat_accelerate::graph::AccelGraphTag::Elementwise],
+            }],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+            span: runmat_accelerate::graph::InstrSpan { start: 3, end: 3 },
+            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+        }];
+        let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
+        assert!(
+            groups.is_empty(),
+            "semantic windows should reject accel-node mapping when disjoint span gap exceeds tolerance"
         );
     }
 

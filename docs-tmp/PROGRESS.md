@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 semantic-window disjoint-gap tolerance ratchet for accel-node mapping
+  - `runmat-vm` semantic window -> accel-node mapping in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now includes a bounded disjoint-gap fallback (<=1 instruction) when strict overlap matching yields no nodes.
+  - This reduces dropouts from tiny graph/window span jitter while preserving rejection when disjoint gaps exceed tolerance.
+  - Added mapping regression coverage:
+    - `semantic_windows_map_accel_nodes_with_small_disjoint_gap`
+    - `semantic_windows_reject_accel_nodes_with_large_disjoint_gap`
+  - Validation: `cargo test -p runmat-vm semantic_windows_map_accel_nodes_with_small_disjoint_gap`, `cargo test -p runmat-vm semantic_windows_reject_accel_nodes_with_large_disjoint_gap`, `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic-invoker async cell-helper release evidence ratchet
   - Extended semantic invoker async lifecycle coverage in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs) with cell-nested helper payload release behavior:
     - `semantic_async_spawn_await_cell_helper_releases_unaliased_provider_handle`

@@ -202,6 +202,10 @@ This audit maps the active objective to concrete repository evidence and marks e
   - compile-level coverage now also ratchets both sides of this partial-overlap boundary:
     - `semantic_windows_map_accel_nodes_with_small_boundary_shift_overlap`
     - `semantic_windows_reject_partial_overlap_with_large_boundary_shift`
+  - semantic fusion-window node mapping now also tolerates small disjoint span gaps (<=1 instruction) when strict overlap matching yields no candidate nodes, while preserving rejection for larger disjoint gaps.
+  - compile-level coverage now also ratchets both sides of this disjoint-gap boundary:
+    - `semantic_windows_map_accel_nodes_with_small_disjoint_gap`
+    - `semantic_windows_reject_accel_nodes_with_large_disjoint_gap`
   - provider/runtime spawn-handle sharing policy is now explicit through [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate-api/src/lib.rs) (`SpawnHandleConcurrency`) and enforced at VM spawn execution boundary in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs), including nested capture traversal and explicit `RunMat:SpawnGpuHandleUnsupported` / `RunMat:SpawnProviderUnavailable` diagnostics.
   - VM dispatch coverage now explicitly ratchets nested-capture (`Value::Cell`, `Value::Closure`) and provider-unavailable policy failures at the spawn boundary in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs) tests (`spawn_policy_rejects_nested_gpu_handles_in_cell_capture`, `spawn_policy_rejects_gpu_handles_captured_by_closure_values`, `spawn_policy_reports_provider_unavailable_for_gpu_handles`).
   - spawn GPU-handle policy traversal now also recurses through handle-object targets in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs), with direct coverage `spawn_policy_rejects_gpu_handles_nested_in_handle_object_target`.
