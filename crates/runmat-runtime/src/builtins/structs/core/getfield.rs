@@ -1075,6 +1075,47 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn getfield_inherited_dependent_property_uses_parent_metadata() {
+        let parent_name = "runmat.unittest.GetfieldDependentParent";
+        let child_name = "runmat.unittest.GetfieldDependentChild";
+
+        let mut parent = ClassDef {
+            name: parent_name.to_string(),
+            parent: None,
+            properties: std::collections::HashMap::new(),
+            methods: std::collections::HashMap::new(),
+        };
+        parent.properties.insert(
+            "p".to_string(),
+            PropertyDef {
+                name: "p".to_string(),
+                is_static: false,
+                is_dependent: true,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        runmat_builtins::register_class(parent);
+
+        runmat_builtins::register_class(ClassDef {
+            name: child_name.to_string(),
+            parent: Some(parent_name.to_string()),
+            properties: std::collections::HashMap::new(),
+            methods: std::collections::HashMap::new(),
+        });
+
+        let mut obj = ObjectInstance::new(child_name.to_string());
+        obj.properties
+            .insert("p_backing".to_string(), Value::Num(17.0));
+
+        let result =
+            run_getfield(Value::Object(obj), vec![Value::from("p")]).expect("inherited dependent");
+        assert_eq!(result, Value::Num(17.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn getfield_invalid_handle_errors() {
         let target = unsafe { GcPtr::from_raw(Box::into_raw(Box::new(Value::Num(1.0)))) };
         let handle = HandleRef {

@@ -1460,6 +1460,51 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn setfield_rejects_inherited_static_property_assignment() {
+        let parent_name = "runmat.unittest.StaticSetfieldParent";
+        let child_name = "runmat.unittest.StaticSetfieldChild";
+
+        let mut parent = ClassDef {
+            name: parent_name.to_string(),
+            parent: None,
+            properties: Default::default(),
+            methods: Default::default(),
+        };
+        parent.properties.insert(
+            "version".to_string(),
+            PropertyDef {
+                name: "version".to_string(),
+                is_static: true,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        runmat_builtins::register_class(parent);
+        runmat_builtins::register_class(ClassDef {
+            name: child_name.to_string(),
+            parent: Some(parent_name.to_string()),
+            properties: Default::default(),
+            methods: Default::default(),
+        });
+
+        let obj = ObjectInstance::new(child_name.to_string());
+        let err = error_message(
+            run_setfield(
+                Value::Object(obj),
+                vec![Value::from("version"), Value::Num(2.0)],
+            )
+            .expect_err("setfield should reject inherited static property writes"),
+        );
+        assert!(
+            err.contains("Property 'version' is static"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn setfield_updates_handle_target() {
         let mut inner = StructValue::new();
         inner.fields.insert("x".to_string(), Value::Num(0.0));
