@@ -161,6 +161,17 @@ async fn gather_value(value: &Value) -> BuiltinResult<Value> {
 }
 
 fn parse_fid(value: &Value) -> BuiltinResult<i32> {
+    fn checked_f64_to_i32(n: f64) -> BuiltinResult<i32> {
+        if n < i32::MIN as f64 || n > i32::MAX as f64 {
+            return Err(fgetl_error("fgetl: file identifier is out of range"));
+        }
+        Ok(n as i32)
+    }
+
+    fn checked_i64_to_i32(n: i64) -> BuiltinResult<i32> {
+        i32::try_from(n).map_err(|_| fgetl_error("fgetl: file identifier is out of range"))
+    }
+
     match value {
         Value::Num(n) => {
             if !n.is_finite() {
@@ -171,9 +182,9 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
                     "fgetl: file identifier must be an integer scalar",
                 ));
             }
-            Ok(*n as i32)
+            checked_f64_to_i32(*n)
         }
-        Value::Int(i) => Ok(i.to_i64() as i32),
+        Value::Int(i) => checked_i64_to_i32(i.to_i64()),
         Value::Tensor(t) if t.data.len() == 1 => {
             let n = t.data[0];
             if !n.is_finite() {
@@ -184,7 +195,7 @@ fn parse_fid(value: &Value) -> BuiltinResult<i32> {
                     "fgetl: file identifier must be an integer scalar",
                 ));
             }
-            Ok(n as i32)
+            checked_f64_to_i32(n)
         }
         _ => Err(fgetl_error(
             "fgetl: file identifier must be a numeric scalar",
@@ -204,6 +215,7 @@ pub(crate) mod tests {
     use crate::builtins::io::filetext::{fopen, registry};
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
+    use runmat_builtins::{IntValue, Tensor};
     use runmat_time::system_time_now;
     use std::path::{Path, PathBuf};
     use std::time::UNIX_EPOCH;
@@ -267,6 +279,27 @@ pub(crate) mod tests {
             }
             other => panic!("expected empty char array, got {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn parse_fid_rejects_values_outside_i32_range() {
+        let too_large =
+            unwrap_error_message(parse_fid(&Value::Num(i32::MAX as f64 + 1.0)).unwrap_err());
+        assert_eq!(too_large, "fgetl: file identifier is out of range");
+
+        let too_small =
+            unwrap_error_message(parse_fid(&Value::Num(i32::MIN as f64 - 1.0)).unwrap_err());
+        assert_eq!(too_small, "fgetl: file identifier is out of range");
+
+        let int_too_large = unwrap_error_message(
+            parse_fid(&Value::Int(IntValue::I64(i32::MAX as i64 + 1))).unwrap_err(),
+        );
+        assert_eq!(int_too_large, "fgetl: file identifier is out of range");
+
+        let tensor = Tensor::new(vec![i32::MAX as f64 + 1.0], vec![1, 1]).expect("tensor");
+        let tensor_too_large = unwrap_error_message(parse_fid(&Value::Tensor(tensor)).unwrap_err());
+        assert_eq!(tensor_too_large, "fgetl: file identifier is out of range");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
