@@ -369,8 +369,7 @@ fn fusion_group_within_semantic_candidate_spans(
     })
 }
 
-#[cfg(feature = "native-accel")]
-#[allow(dead_code)]
+#[cfg(all(feature = "native-accel", test))]
 fn derive_semantic_fusion_groups_from_candidates(
     semantic_instruction_windows: &[crate::bytecode::SemanticFusionInstructionWindow],
     accel_graph: &runmat_accelerate::graph::AccelGraph,
@@ -448,7 +447,7 @@ fn derive_semantic_fusion_groups_from_instruction_windows(
         .collect()
 }
 
-#[cfg(feature = "native-accel")]
+#[cfg(all(feature = "native-accel", test))]
 fn accel_nodes_for_instruction_window(
     accel_graph: &runmat_accelerate::graph::AccelGraph,
     window: &crate::bytecode::SemanticFusionInstructionWindow,
@@ -474,7 +473,7 @@ fn accel_nodes_for_instruction_window(
     nodes
 }
 
-#[cfg(feature = "native-accel")]
+#[cfg(all(feature = "native-accel", test))]
 fn accel_node_span_matches_instruction_window(
     node: &runmat_accelerate::graph::AccelNode,
     window: &crate::bytecode::SemanticFusionInstructionWindow,
@@ -484,7 +483,7 @@ fn accel_node_span_matches_instruction_window(
     node.span.start >= window.span.start && node.span.end <= window.span.end
 }
 
-#[cfg(feature = "native-accel")]
+#[cfg(all(feature = "native-accel", test))]
 fn accel_node_has_semantic_signal(node: &runmat_accelerate::graph::AccelNode) -> bool {
     node.tags.iter().any(|tag| {
         matches!(
@@ -498,7 +497,7 @@ fn accel_node_has_semantic_signal(node: &runmat_accelerate::graph::AccelNode) ->
     })
 }
 
-#[cfg(feature = "native-accel")]
+#[cfg(all(feature = "native-accel", test))]
 fn accel_node_matches_semantic_window_kind(
     node: &runmat_accelerate::graph::AccelNode,
     kind: crate::bytecode::SemanticFusionInstructionKind,

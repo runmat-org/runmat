@@ -1311,6 +1311,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Tightened missing-tag fallback in semantic window mapping: absent graph tags now require accel-category compatibility (`Elementwise|Transpose` for elementwise windows, `Reduction` for reduction windows, `MatMul` for matmul windows) instead of unconditional admission.
   - Compile path now emits fusion groups from semantic instruction windows without compile-time node assignment (`derive_semantic_fusion_groups_from_instruction_windows`), making runtime fusion plan preparation the sole node-reconciliation boundary.
   - This further reduces compile-time accel-graph coupling and advances Plan 7 toward semantic-window-owned planning artifacts.
+  - Legacy compile-time node-mapping helper path (`derive_semantic_fusion_groups_from_candidates` and its accel-node matching helpers) is now explicitly test-only, removing this fallback surface from production builds.
   - Validation: `cargo test -p runmat-vm semantic_windows_reject_disjoint_gap_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_partial_overlap_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_covering_node_span_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_overly_wide_covering_node_spans -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 runtime fusion sanitization heuristic reduction
