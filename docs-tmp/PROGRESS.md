@@ -17,6 +17,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 semantic candidate artifacts always surfaced in fusion snapshots
+  - `runmat-core` fusion snapshot generation now appends semantic candidate nodes/decisions even when bytecode accel fusion groups are present, instead of limiting semantic candidate artifacts to the bytecode-empty fallback path.
+  - Snapshot decisions now explicitly annotate both semantic signal strength and bytecode-group presence, improving semantic-vs-bytecode planner coverage visibility while runtime fusion execution remains unchanged.
+  - Added core unit regression coverage for mixed snapshots (bytecode group + semantic candidate group both present).
+  - Validation: `cargo test -p runmat-core semantic_candidate_groups_emit_nodes_with_bytecode_groups`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic fusion candidate-group artifacts and snapshot nodes
   - `runmat-vm` semantic fusion metadata now carries explicit candidate-group artifacts (`mir_fusion_candidate_groups`) in addition to aggregate counts.
   - Candidate groups are derived from contiguous MIR semantic fusion-signal runs during bytecode compile and recorded on the bytecode artifact boundary.
