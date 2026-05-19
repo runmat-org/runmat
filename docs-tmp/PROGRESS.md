@@ -13,10 +13,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `Object`
     - `Closure` captures
     - `OutputList`
+  - VM overwrite residency clearing now preserves shared nested handles by clearing only handles that are absent from the incoming value (`clear_value_excluding`), avoiding premature de-residency when values share GPU-handle storage during replacement.
   - This closes a lifecycle gap where nested GPU handles could remain residency-marked after value replacement/clear paths.
   - Added `runmat-vm` unit coverage:
     - `clear_value_releases_nested_gpu_handles_in_cells`
     - `clear_value_releases_nested_gpu_handles_in_closure_captures`
+    - `clear_value_excluding_preserves_shared_handles`
   - Validation: `cargo test -p runmat-vm clear_value_releases_nested_gpu_handles`.
 
 - (pending commit) Plan 7 widen spawn GPU-handle policy boundary coverage

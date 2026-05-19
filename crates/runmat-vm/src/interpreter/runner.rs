@@ -81,8 +81,8 @@ fn clear_residency(value: &Value) {
 }
 
 #[cfg(feature = "native-accel")]
-fn same_gpu_handle(lhs: &Value, rhs: &Value) -> bool {
-    accel_residency::same_gpu_handle(lhs, rhs)
+fn clear_residency_before_overwrite(current: &Value, incoming: &Value) {
+    accel_residency::clear_value_excluding(current, incoming)
 }
 
 pub async fn invoke_semantic_function_value(
@@ -415,9 +415,7 @@ async fn run_interpreter_inner(
         };
         let mut store_var_before_overwrite = |current: &Value, incoming: &Value| {
             #[cfg(feature = "native-accel")]
-            if !same_gpu_handle(current, incoming) {
-                clear_residency(current);
-            }
+            clear_residency_before_overwrite(current, incoming);
         };
         let mut store_var_after_store = |stored_index: usize, stored_value: &Value| {
             if let Some(ref aliases) = store_var_global_aliases {
@@ -426,15 +424,11 @@ async fn run_interpreter_inner(
         };
         let mut store_local_before_local_overwrite = |current: &Value, incoming: &Value| {
             #[cfg(feature = "native-accel")]
-            if !same_gpu_handle(current, incoming) {
-                clear_residency(current);
-            }
+            clear_residency_before_overwrite(current, incoming);
         };
         let mut store_local_before_var_overwrite = |current: &Value, incoming: &Value| {
             #[cfg(feature = "native-accel")]
-            if !same_gpu_handle(current, incoming) {
-                clear_residency(current);
-            }
+            clear_residency_before_overwrite(current, incoming);
         };
         let mut store_local_after_fallback_store =
             |func_name: &str, stored_offset: usize, stored_value: &Value| {
