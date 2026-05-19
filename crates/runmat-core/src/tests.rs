@@ -290,9 +290,9 @@ roots = ["."]
     assert!(
         prepared.bytecode.instructions.iter().any(|instr| matches!(
             instr,
-            runmat_vm::Instr::CreateExternalFunctionHandle(name) if name.contains("summarize")
+            runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "statsdep.summarize"
         )),
-        "wildcard dependency-alias function handle should lower to external function-handle bytecode"
+        "wildcard dependency-alias function handle should lower to exact alias-qualified external function-handle bytecode"
     );
 }
 
