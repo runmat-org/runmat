@@ -122,6 +122,10 @@ This audit maps the active objective to concrete repository evidence and marks e
   - explicit coverage now asserts inherited protocol-method detection for child classes:
     - `class_defines_member_subsref_includes_inherited_method_metadata`
     - `class_defines_member_subsasgn_includes_inherited_method_metadata`
+  - VM object member resolution in [resolve.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/object/resolve.rs) now has end-to-end inherited protocol dispatch coverage for missing member read/write behavior:
+    - `load_member_uses_inherited_subsref_for_missing_property`
+    - `store_member_uses_inherited_subsasgn_for_missing_property`
+  - this ratchets that child-class member fallback behavior executes inherited `subsref`/`subsasgn` handlers with concrete runtime outcomes, not just metadata-presence checks.
   - runtime object construction hierarchy walk in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now guards parent traversal against class metadata cycles while applying inherited default-property initialization.
   - explicit runtime coverage (`new_object_builtin_handles_class_parent_cycles`) now ratchets deterministic constructor behavior for cyclic parent metadata graphs.
 - Gap:

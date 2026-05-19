@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 6 end-to-end inherited object protocol dispatch ratchets
+  - Added VM object resolution coverage asserting missing member read/write paths dispatch through inherited protocol methods, not only direct-class protocol metadata:
+    - `load_member_uses_inherited_subsref_for_missing_property`
+    - `store_member_uses_inherited_subsasgn_for_missing_property`
+  - Both tests register parent/child class metadata and verify child object member access routes into inherited `subsref`/`subsasgn` runtime handlers with concrete semantic outcomes.
+  - Validation: `cargo test -p runmat-vm load_member_uses_inherited_subsref_for_missing_property`, `cargo test -p runmat-vm store_member_uses_inherited_subsasgn_for_missing_property`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 constructor metadata traversal hardening for cyclic class inheritance
   - Runtime object construction (`new_object`) now guards class-parent traversal against metadata cycles when collecting inherited default property initialization chain.
   - Added runtime regression coverage:

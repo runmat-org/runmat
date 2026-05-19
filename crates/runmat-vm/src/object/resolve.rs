@@ -251,9 +251,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{load_static_member, store_member};
+    use super::{load_member, load_static_member, store_member};
     use runmat_builtins::{
-        get_static_property_value, register_class, Access, ClassDef, MethodDef, PropertyDef, Value,
+        get_static_property_value, register_class, Access, ClassDef, MethodDef, ObjectInstance,
+        PropertyDef, Value,
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -381,5 +382,83 @@ mod tests {
             panic!("expected static method lookup to return closure");
         };
         assert_eq!(closure.function_name, "build_impl");
+    }
+
+    #[test]
+    fn load_member_uses_inherited_subsref_for_missing_property() {
+        let parent_name = unique_class_name("vm_subsref_parent");
+        let child_name = unique_class_name("vm_subsref_child");
+
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            "subsref".to_string(),
+            MethodDef {
+                name: "subsref".to_string(),
+                is_static: false,
+                access: Access::Public,
+                function_name: "OverIdx.subsref".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let obj = Value::Object(ObjectInstance::new(child_name));
+        let value = futures::executor::block_on(load_member(obj, "missing".to_string(), false))
+            .expect("missing member should dispatch to inherited subsref");
+        assert_eq!(value, Value::Num(77.0));
+    }
+
+    #[test]
+    fn store_member_uses_inherited_subsasgn_for_missing_property() {
+        let parent_name = unique_class_name("vm_subsasgn_parent");
+        let child_name = unique_class_name("vm_subsasgn_child");
+
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            "subsasgn".to_string(),
+            MethodDef {
+                name: "subsasgn".to_string(),
+                is_static: false,
+                access: Access::Public,
+                function_name: "OverIdx.subsasgn".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let out = futures::executor::block_on(store_member(
+            Value::Object(ObjectInstance::new(child_name)),
+            "missing".to_string(),
+            Value::Num(13.0),
+            false,
+            |_old, _new| {},
+        ))
+        .expect("missing member store should dispatch to inherited subsasgn");
+        let Value::Object(obj) = out else {
+            panic!("expected object result from inherited subsasgn");
+        };
+        assert_eq!(obj.properties.get("missing"), Some(&Value::Num(13.0)));
     }
 }
