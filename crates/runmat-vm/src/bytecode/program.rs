@@ -7,7 +7,7 @@ use runmat_accelerate::FusionGroup;
 use runmat_builtins::{Type, Value};
 use runmat_hir::FunctionId;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct CallFrame {
@@ -23,6 +23,8 @@ pub struct ExecutionContext {
     pub call_stack: Vec<CallFrame>,
     pub locals: Vec<Value>,
     pub instruction_pointer: usize,
+    pub spawned_task_ids: HashSet<u64>,
+    pub next_spawn_task_id: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

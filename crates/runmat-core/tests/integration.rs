@@ -185,15 +185,17 @@ fn test_request_host_policy_disables_top_level_await() {
 }
 
 #[test]
-fn test_await_rejects_non_spawn_task_operand_at_runtime() {
+fn test_await_passes_through_non_spawn_operand_at_runtime() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
         let result = block_on(engine.execute("y = await(1);"))
-            .expect("execution should return runtime result envelope");
-        let err = result
-            .error
-            .expect("await on non-task value should produce runtime error");
-        assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+            .expect("execution should complete successfully");
+        assert!(
+            result.error.is_none(),
+            "await pass-through for non-task values should not error"
+        );
+        let readback = block_on(engine.execute("y")).expect("readback should succeed");
+        assert_eq!(readback.value, Some(runmat_builtins::Value::Num(1.0)));
     });
 }
 

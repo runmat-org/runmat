@@ -11,7 +11,7 @@ use crate::bytecode::Instr;
 use crate::interpreter::debug;
 use crate::runtime::workspace::refresh_workspace_state;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{StructValue, Value};
+use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
@@ -192,35 +192,68 @@ fn enforce_spawn_value_concurrency_policy(value: &Value) -> Result<(), RuntimeEr
 }
 
 const SPAWN_TASK_KIND_FIELD: &str = "__runmat_spawn_kind";
+const SPAWN_TASK_ID_FIELD: &str = "__runmat_spawn_id";
 const SPAWN_TASK_PAYLOAD_FIELD: &str = "__runmat_spawn_payload";
 const SPAWN_TASK_KIND_VALUE: &str = "task";
 
-fn wrap_spawned_value(value: Value) -> Value {
+fn allocate_spawn_task_id(context: &mut crate::bytecode::program::ExecutionContext) -> u64 {
+    loop {
+        let candidate = context.next_spawn_task_id;
+        context.next_spawn_task_id = context.next_spawn_task_id.wrapping_add(1);
+        if context.spawned_task_ids.insert(candidate) {
+            return candidate;
+        }
+    }
+}
+
+fn wrap_spawned_value(
+    context: &mut crate::bytecode::program::ExecutionContext,
+    value: Value,
+) -> Value {
+    let task_id = allocate_spawn_task_id(context);
     let mut task = StructValue::new();
     task.fields.insert(
         SPAWN_TASK_KIND_FIELD.to_string(),
         Value::String(SPAWN_TASK_KIND_VALUE.to_string()),
+    );
+    task.fields.insert(
+        SPAWN_TASK_ID_FIELD.to_string(),
+        Value::Int(IntValue::U64(task_id)),
     );
     task.fields
         .insert(SPAWN_TASK_PAYLOAD_FIELD.to_string(), value);
     Value::Struct(task)
 }
 
-fn unwrap_spawned_value(value: Value) -> Result<Value, RuntimeError> {
+fn unwrap_spawned_value(
+    context: &mut crate::bytecode::program::ExecutionContext,
+    value: Value,
+) -> Result<Value, RuntimeError> {
     let Value::Struct(task) = value else {
-        return Err(crate::interpreter::errors::mex(
-            "AwaitOperandInvalid",
-            "await expected a spawned task handle value",
-        ));
+        // Until async-call futures have a dedicated runtime lane, await currently
+        // preserves legacy/pass-through behavior for non-task values.
+        return Ok(value);
     };
     let is_spawn_task = matches!(
         task.fields.get(SPAWN_TASK_KIND_FIELD),
         Some(Value::String(kind)) if kind == SPAWN_TASK_KIND_VALUE
     );
     if !is_spawn_task {
+        return Ok(Value::Struct(task));
+    }
+    let task_id = match task.fields.get(SPAWN_TASK_ID_FIELD) {
+        Some(Value::Int(IntValue::U64(id))) => *id,
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "AwaitOperandInvalid",
+                "await task handle is missing a valid task identifier",
+            ))
+        }
+    };
+    if !context.spawned_task_ids.remove(&task_id) {
         return Err(crate::interpreter::errors::mex(
             "AwaitOperandInvalid",
-            "await expected a spawned task handle value",
+            "await task handle is stale or was already consumed",
         ));
     }
     task.fields
@@ -634,7 +667,7 @@ pub async fn dispatch_instruction(
                 )
             })?;
             enforce_spawn_value_concurrency_policy(&value)?;
-            stack.push(wrap_spawned_value(value));
+            stack.push(wrap_spawned_value(context, value));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -646,7 +679,7 @@ pub async fn dispatch_instruction(
                     "await instruction expected a value on the stack",
                 )
             })?;
-            stack.push(unwrap_spawned_value(value)?);
+            stack.push(unwrap_spawned_value(context, value)?);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -902,13 +935,15 @@ pub async fn dispatch_instruction(
 mod tests {
     use super::{
         enforce_spawn_value_concurrency_policy, unwrap_spawned_value, wrap_spawned_value,
-        SPAWN_TASK_KIND_FIELD, SPAWN_TASK_KIND_VALUE, SPAWN_TASK_PAYLOAD_FIELD,
+        SPAWN_TASK_ID_FIELD, SPAWN_TASK_KIND_FIELD, SPAWN_TASK_KIND_VALUE,
+        SPAWN_TASK_PAYLOAD_FIELD,
     };
+    use crate::bytecode::program::ExecutionContext;
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView,
         SpawnHandleConcurrency, ThreadProviderGuard,
     };
-    use runmat_builtins::{CellArray, Value};
+    use runmat_builtins::{CellArray, IntValue, Value};
 
     struct RejectSpawnProvider;
     static REJECT_PROVIDER: RejectSpawnProvider = RejectSpawnProvider;
@@ -1062,21 +1097,43 @@ mod tests {
 
     #[test]
     fn spawn_value_wrap_roundtrips_through_await_unwrap() {
-        let wrapped = wrap_spawned_value(Value::Num(3.0));
-        let unwrapped = unwrap_spawned_value(wrapped).expect("await should unwrap spawn task");
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(3.0));
+        let unwrapped =
+            unwrap_spawned_value(&mut context, wrapped).expect("await should unwrap spawn task");
         assert_eq!(unwrapped, Value::Num(3.0));
     }
 
     #[test]
-    fn await_unwrap_rejects_non_spawn_value() {
-        let err =
-            unwrap_spawned_value(Value::Num(3.0)).expect_err("await should reject non-task value");
-        assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+    fn await_unwrap_passes_through_non_spawn_value() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let value = unwrap_spawned_value(&mut context, Value::Num(3.0))
+            .expect("await should pass through non-task value");
+        assert_eq!(value, Value::Num(3.0));
     }
 
     #[test]
     fn spawn_wrapper_uses_explicit_task_fields() {
-        let wrapped = wrap_spawned_value(Value::Num(5.0));
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(5.0));
         let Value::Struct(task) = wrapped else {
             panic!("spawn should produce a struct-backed task handle");
         };
@@ -1088,5 +1145,31 @@ mod tests {
             task.fields.get(SPAWN_TASK_PAYLOAD_FIELD),
             Some(&Value::Num(5.0))
         );
+        assert_eq!(
+            task.fields.get(SPAWN_TASK_ID_FIELD),
+            Some(&Value::Int(IntValue::U64(0)))
+        );
+    }
+
+    #[test]
+    fn await_unwrap_rejects_stale_spawn_task_id() {
+        let mut wrap_context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut wrap_context, Value::Num(9.0));
+        let mut await_context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let err = unwrap_spawned_value(&mut await_context, wrapped)
+            .expect_err("await should reject stale/unregistered task ids");
+        assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
     }
 }

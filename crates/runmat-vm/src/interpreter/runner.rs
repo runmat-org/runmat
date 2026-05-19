@@ -1039,16 +1039,17 @@ mod tests {
     }
 
     #[test]
-    fn await_rejects_non_spawn_task_operand() {
-        let bytecode = Bytecode::with_instructions(vec![Instr::Await, Instr::Return], 1);
+    fn await_passes_through_non_spawn_value_operand() {
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Await, Instr::StoreVar(0), Instr::Return], 1);
         let mut seed_vars = vec![Value::Num(0.0)];
         let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
         state.stack.push(Value::Num(7.0));
         state.vars = vec![Value::Num(0.0)];
 
         let mut result_vars = vec![Value::Num(0.0)];
-        let err = block_on(run_interpreter_inner(state, &mut result_vars))
-            .expect_err("await should reject non-task operand");
-        assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("await should pass through non-task operand");
+        assert_eq!(result_vars[0], Value::Num(7.0));
     }
 }

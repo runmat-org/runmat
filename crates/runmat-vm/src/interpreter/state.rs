@@ -57,6 +57,8 @@ impl InterpreterState {
                 call_stack: Vec::new(),
                 locals: Vec::new(),
                 instruction_pointer: 0,
+                spawned_task_ids: std::collections::HashSet::new(),
+                next_spawn_task_id: 0,
             },
             try_stack: Vec::new(),
             last_exception: None,
