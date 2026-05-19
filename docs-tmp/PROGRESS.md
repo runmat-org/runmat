@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 assert async policy failures by semantic identifier
+  - HIR lowering now emits explicit semantic error identifiers for async policy boundaries:
+    - `RunMat:AwaitExtensionDisabled`
+    - `RunMat:AwaitContextInvalid`
+    - `RunMat:SpawnExtensionDisabled`
+    - `RunMat:SpawnLexicalCaptureUnsupported`
+  - Core and HIR policy regressions now assert identifier contracts directly instead of display-text fragments for strict-mode `spawn` and top-level-await host-policy rejection paths.
+  - Validation: `cargo test -p runmat-hir await_requires_async_function_or_top_level_script`, `cargo test -p runmat-hir lowering_policy_can_disable_top_level_await`, `cargo test -p runmat-hir strict_mode_disables_runmat_extension_calls`, `cargo test -p runmat-hir spawn_rejects_anonymous_function_with_lexical_capture`, `cargo test -p runmat-core execute_request_honors_top_level_await_host_policy`, `cargo test -p runmat-core --test integration test_strict_mode_rejects_runmat_extensions`, `cargo test -p runmat-core --test integration test_request_host_policy_disables_top_level_await`.
+
 - (pending commit) Plan 7 explicit provider handle spawn-concurrency policy boundary
   - `runmat-accelerate-api` now exposes provider-declared spawn-handle concurrency policy (`SpawnHandleConcurrency`) with conservative default `Reject`.
   - Production providers now explicitly declare synchronized handle-sharing semantics across spawn boundaries:

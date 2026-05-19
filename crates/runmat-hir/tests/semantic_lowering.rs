@@ -637,6 +637,10 @@ fn await_and_spawn_lower_to_explicit_semantic_forms() {
 fn await_requires_async_function_or_top_level_script() {
     let ast = runmat_parser::parse("function y = f(t); y = await(t); end").unwrap();
     let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:AwaitContextInvalid")
+    );
     assert!(err.message.contains("await is only allowed"));
 
     let assembly = lower_semantic("async function y = f(t); y = await(t); end");
@@ -655,6 +659,10 @@ fn lowering_policy_can_disable_top_level_await() {
         &LoweringContext::empty().with_top_level_await_enabled(false),
     )
     .unwrap_err();
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:AwaitContextInvalid")
+    );
     assert!(err.message.contains("await is only allowed"));
 
     let ast = runmat_parser::parse("x = 1;").unwrap();
@@ -677,6 +685,10 @@ fn strict_mode_disables_runmat_extension_calls() {
         &LoweringContext::empty().with_runmat_extensions_enabled(false),
     )
     .unwrap_err();
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:SpawnExtensionDisabled")
+    );
     assert!(err.message.contains("spawn is a RunMat extension"));
 
     let ast = runmat_parser::parse("y = await(1);").unwrap();
@@ -685,6 +697,10 @@ fn strict_mode_disables_runmat_extension_calls() {
         &LoweringContext::empty().with_runmat_extensions_enabled(false),
     )
     .unwrap_err();
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:AwaitExtensionDisabled")
+    );
     assert!(err.message.contains("await is a RunMat extension"));
 }
 
@@ -692,6 +708,10 @@ fn strict_mode_disables_runmat_extension_calls() {
 fn spawn_rejects_anonymous_function_with_lexical_capture() {
     let ast = runmat_parser::parse("function y = f(x); y = spawn(@() x); end").unwrap();
     let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:SpawnLexicalCaptureUnsupported")
+    );
     assert!(err.message.contains("spawn cannot capture"));
 }
 

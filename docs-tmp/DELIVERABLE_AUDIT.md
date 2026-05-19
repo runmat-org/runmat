@@ -38,6 +38,7 @@ This audit maps the active objective to concrete repository evidence and marks e
 - Evidence:
   - semantic coverage ratchets tracked in [NEXT_STEPS.md](/Users/nallana/Source/runmat-acc-2/runmat/docs-tmp/NEXT_STEPS.md).
   - HIR/MIR semantic model in [TARGET_MODEL.md](/Users/nallana/Source/runmat-acc-2/runmat/docs-tmp/TARGET_MODEL.md).
+  - async extension/policy semantic failures now carry explicit stable identifiers in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs) (`RunMat:AwaitExtensionDisabled`, `RunMat:AwaitContextInvalid`, `RunMat:SpawnExtensionDisabled`, `RunMat:SpawnLexicalCaptureUnsupported`) with core/HIR assertion coverage in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs), [integration.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/integration.rs), and [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs).
 - Gap:
   - designed gaps still open (async/future/spawn runtime model, aggregate edge behavior, remaining selector-plan normalization).
 

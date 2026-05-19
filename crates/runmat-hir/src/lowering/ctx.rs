@@ -18,6 +18,11 @@ use crate::{
 use runmat_parser::{BinOp, Expr as AstExpr, Program as AstProgram, Stmt as AstStmt, UnOp};
 use std::collections::{HashMap, HashSet};
 
+const IDENT_AWAIT_EXTENSION_DISABLED: &str = "RunMat:AwaitExtensionDisabled";
+const IDENT_AWAIT_CONTEXT_INVALID: &str = "RunMat:AwaitContextInvalid";
+const IDENT_SPAWN_EXTENSION_DISABLED: &str = "RunMat:SpawnExtensionDisabled";
+const IDENT_SPAWN_LEXICAL_CAPTURE_UNSUPPORTED: &str = "RunMat:SpawnLexicalCaptureUnsupported";
+
 #[derive(Clone)]
 struct SemanticScope {
     owner: FunctionId,
@@ -1115,13 +1120,15 @@ impl SemanticCtx {
                         return Err(SemanticError::new(
                             "await is a RunMat extension and is not available in MATLAB strict mode",
                         )
-                        .with_span(span));
+                        .with_span(span)
+                        .with_identifier(IDENT_AWAIT_EXTENSION_DISABLED));
                     }
                     if !self.current_allows_await() {
                         return Err(SemanticError::new(
                             "await is only allowed in async functions or top-level script code",
                         )
-                        .with_span(span));
+                        .with_span(span)
+                        .with_identifier(IDENT_AWAIT_CONTEXT_INVALID));
                     }
                     HirExprKind::Await(Box::new(args.into_iter().next().unwrap()))
                 } else if name == SPAWN_EXTENSION_NAME && args.len() == 1 {
@@ -1129,14 +1136,16 @@ impl SemanticCtx {
                         return Err(SemanticError::new(
                             "spawn is a RunMat extension and is not available in MATLAB strict mode",
                         )
-                        .with_span(span));
+                        .with_span(span)
+                        .with_identifier(IDENT_SPAWN_EXTENSION_DISABLED));
                     }
                     let arg = args.into_iter().next().unwrap();
                     if self.spawn_arg_captures_lexical_binding(&arg) {
                         return Err(SemanticError::new(
                             "spawn cannot capture outer lexical bindings in this context",
                         )
-                        .with_span(span));
+                        .with_span(span)
+                        .with_identifier(IDENT_SPAWN_LEXICAL_CAPTURE_UNSUPPORTED));
                     }
                     HirExprKind::Spawn(Box::new(arg))
                 } else if matches!(name.as_str(), NARGIN_BUILTIN_NAME | NARGOUT_BUILTIN_NAME) {

@@ -126,10 +126,12 @@ fn execute_request_honors_top_level_await_host_policy() {
         workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(11)),
     }))
     .expect_err("request should reject top-level await when host policy disables it");
-
-    assert!(
-        err.to_string().contains("await is only allowed"),
-        "unexpected top-level-await policy error: {err}"
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic top-level-await policy error");
+    };
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:AwaitContextInvalid")
     );
 }
 

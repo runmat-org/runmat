@@ -4,7 +4,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use futures::executor::block_on;
-use runmat_core::{abi, CompatMode, RunMatSession};
+use runmat_core::{abi, CompatMode, RunError, RunMatSession};
 use runmat_gc::{gc_test_context, GcConfig};
 use runmat_time::Instant;
 use std::thread;
@@ -146,9 +146,12 @@ fn test_strict_mode_rejects_runmat_extensions() {
         engine.set_compat_mode(CompatMode::Strict);
         let err = block_on(engine.execute("t = spawn(1);"))
             .expect_err("strict mode should reject RunMat extensions");
-        assert!(
-            err.to_string().contains("spawn is a RunMat extension"),
-            "unexpected strict-mode error: {err}"
+        let RunError::Semantic(err) = err else {
+            panic!("expected semantic strict-mode error");
+        };
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:SpawnExtensionDisabled")
         );
     });
 }
@@ -171,10 +174,12 @@ fn test_request_host_policy_disables_top_level_await() {
             workspace: abi::WorkspaceHandle(uuid::Uuid::from_u128(13)),
         }))
         .expect_err("request should reject top-level await when host policy disables it");
-
-        assert!(
-            err.to_string().contains("await is only allowed"),
-            "unexpected top-level-await policy error: {err}"
+        let RunError::Semantic(err) = err else {
+            panic!("expected semantic top-level-await policy error");
+        };
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:AwaitContextInvalid")
         );
     });
 }
