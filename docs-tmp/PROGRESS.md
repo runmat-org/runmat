@@ -6,6 +6,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 recursive residency clearing for nested GPU-handle values
+  - VM acceleration residency clearing now traverses nested runtime values instead of only top-level `Value::GpuTensor`:
+    - `Cell`
+    - `Struct`
+    - `Object`
+    - `Closure` captures
+    - `OutputList`
+  - This closes a lifecycle gap where nested GPU handles could remain residency-marked after value replacement/clear paths.
+  - Added `runmat-vm` unit coverage:
+    - `clear_value_releases_nested_gpu_handles_in_cells`
+    - `clear_value_releases_nested_gpu_handles_in_closure_captures`
+  - Validation: `cargo test -p runmat-vm clear_value_releases_nested_gpu_handles`.
+
 - (pending commit) Plan 7 widen spawn GPU-handle policy boundary coverage
   - Extended VM spawn-policy dispatch tests to cover additional active-path policy boundaries:
     - nested GPU-handle capture traversal via `Value::Cell` (`spawn_policy_rejects_nested_gpu_handles_in_cell_capture`)
