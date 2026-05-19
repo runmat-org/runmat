@@ -248,3 +248,138 @@ where
 {
     store_member(base, name, rhs, allow_init, on_write).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{load_static_member, store_member};
+    use runmat_builtins::{
+        get_static_property_value, register_class, Access, ClassDef, MethodDef, PropertyDef, Value,
+    };
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
+
+    #[test]
+    fn load_static_member_resolves_inherited_static_property_value() {
+        let parent_name = unique_class_name("vm_static_parent");
+        let child_name = unique_class_name("vm_static_child");
+
+        let mut parent_properties = HashMap::new();
+        parent_properties.insert(
+            "version".to_string(),
+            PropertyDef {
+                name: "version".to_string(),
+                is_static: true,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: Some(Value::Num(1.0)),
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: parent_properties,
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        runmat_builtins::set_static_property_value(&parent_name, "version", Value::Num(3.0));
+        let value = load_static_member(&child_name, "version")
+            .expect("inherited static property should resolve through parent metadata owner");
+        assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
+    fn store_member_updates_inherited_static_property_owner_slot() {
+        let parent_name = unique_class_name("vm_store_static_parent");
+        let child_name = unique_class_name("vm_store_static_child");
+
+        let mut parent_properties = HashMap::new();
+        parent_properties.insert(
+            "version".to_string(),
+            PropertyDef {
+                name: "version".to_string(),
+                is_static: true,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: Some(Value::Num(1.0)),
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: parent_properties,
+            methods: HashMap::new(),
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let out = futures::executor::block_on(store_member(
+            Value::ClassRef(child_name.clone()),
+            "version".to_string(),
+            Value::Num(9.0),
+            false,
+            |_old, _new| {},
+        ))
+        .expect("storing inherited static property via child class ref should succeed");
+        assert_eq!(out, Value::ClassRef(child_name));
+        assert_eq!(
+            get_static_property_value(&parent_name, "version"),
+            Some(Value::Num(9.0))
+        );
+    }
+
+    #[test]
+    fn load_static_member_resolves_inherited_static_method() {
+        let parent_name = unique_class_name("vm_method_parent");
+        let child_name = unique_class_name("vm_method_child");
+
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            "build".to_string(),
+            MethodDef {
+                name: "build".to_string(),
+                is_static: true,
+                access: Access::Public,
+                function_name: "build_impl".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let value = load_static_member(&child_name, "build")
+            .expect("inherited static method should resolve through parent metadata");
+        let Value::Closure(closure) = value else {
+            panic!("expected static method lookup to return closure");
+        };
+        assert_eq!(closure.function_name, "build_impl");
+    }
+}

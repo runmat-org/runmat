@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 6 VM object static-member inheritance consumer ratchets
+  - Added VM object resolution coverage that asserts inherited class metadata controls static member read/write resolution through child class refs:
+    - `load_static_member_resolves_inherited_static_property_value`
+    - `store_member_updates_inherited_static_property_owner_slot`
+    - `load_static_member_resolves_inherited_static_method`
+  - These tests verify inherited static properties/methods resolve through parent metadata ownership and that static property writes through child class refs update the owner class slot.
+  - Validation: `cargo test -p runmat-vm load_static_member_resolves_inherited_static_property_value`, `cargo test -p runmat-vm store_member_updates_inherited_static_property_owner_slot`, `cargo test -p runmat-vm load_static_member_resolves_inherited_static_method`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 metadata traversal hardening for `isa` inheritance
   - `isa` class inheritance traversal now guards against parent-cycle metadata loops during nominal class ancestry checks.
   - Added runtime regression coverage:

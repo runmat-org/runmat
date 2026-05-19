@@ -113,6 +113,11 @@ This audit maps the active objective to concrete repository evidence and marks e
   - runtime object introspection now consumes inherited class-property metadata for `fieldnames` in [fieldnames.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/structs/core/fieldnames.rs), with explicit inheritance coverage (`fieldnames_object_includes_inherited_class_properties`).
   - runtime handle-object introspection now also ratchets inherited class-property metadata for `fieldnames(handle)` in [fieldnames.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/structs/core/fieldnames.rs) (`fieldnames_handle_object_includes_inherited_class_properties`), covering child+parent metadata plus target payload fields.
   - runtime nominal ancestry checks for `isa` in [isa.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/introspection/isa.rs) are now cycle-safe with explicit cyclic-parent metadata coverage (`isa_inheritance_walk_handles_parent_cycles`), reducing metadata traversal fragility.
+  - VM object static-member resolution paths in [resolve.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/object/resolve.rs) now have explicit inherited metadata consumer coverage:
+    - `load_static_member_resolves_inherited_static_property_value`
+    - `store_member_updates_inherited_static_property_owner_slot`
+    - `load_static_member_resolves_inherited_static_method`
+  - this ratchets class-ref static member resolution/writeback to parent metadata ownership behavior instead of direct-class-only lookup assumptions.
 - Gap:
   - full Plan 6 acceptance criteria not yet closed out across all consumers.
 
