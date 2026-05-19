@@ -435,18 +435,10 @@ fn oop_negative_missing_subsref_mex() {
     let program = r#"
         __register_test_classes();
         o = new_object('NoIdx'); % class without subsref
-        try
-            x = o(1);
-        catch e
-            err = e;
-        end
+        x = o(1);
     "#;
-    let out = execute_semantic_source(program);
-    if let Err(err) = out {
-        assert!(
-            err.identifier() == Some("RunMat:MissingSubsref") || err.message().contains("subsref")
-        );
-    }
+    let err = execute_semantic_source(program).expect_err("missing subsref should fail");
+    assert_eq!(err.identifier(), Some("RunMat:MissingSubsref"));
 }
 
 #[test]
@@ -454,17 +446,8 @@ fn oop_negative_missing_subsasgn_mex() {
     let program = r#"
         __register_test_classes();
         o = new_object('NoIdx'); % class without subsasgn
-        try
-            o(1) = 5;
-        catch e
-            err = e;
-        end
+        o(1) = 5;
     "#;
-    let out = execute_semantic_source(program);
-    if let Err(err) = out {
-        assert!(
-            err.identifier() == Some("RunMat:MissingSubsasgn")
-                || err.message().contains("subsasgn")
-        );
-    }
+    let err = execute_semantic_source(program).expect_err("missing subsasgn should fail");
+    assert_eq!(err.identifier(), Some("RunMat:MissingSubsasgn"));
 }

@@ -1,7 +1,8 @@
 use crate::bytecode::EndExpr;
 use crate::call::descriptor::{execute_callable_descriptor, CallableCallKind, CallableDescriptor};
 use crate::call::shared::{
-    call_object_index_descriptor_method, expand_brace_values, ObjectIndexDescriptor,
+    call_object_index_descriptor_method, class_defines_member_subsasgn,
+    class_defines_member_subsref, expand_brace_values, ObjectIndexDescriptor, ObjectIndexOp,
 };
 use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
@@ -20,6 +21,32 @@ use std::pin::Pin;
 
 fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
     format!("{context}: {}", err.message()).into()
+}
+
+fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Option<RuntimeError> {
+    let class_name = match base {
+        Value::Object(obj) => obj.class_name.as_str(),
+        Value::HandleObject(handle) => handle.class_name.as_str(),
+        _ => return None,
+    };
+    let class = runmat_builtins::get_class(class_name)?;
+    let supported = match op {
+        ObjectIndexOp::Subsref => class_defines_member_subsref(&class),
+        ObjectIndexOp::Subsasgn => class_defines_member_subsasgn(&class),
+    };
+    if supported {
+        return None;
+    }
+    match op {
+        ObjectIndexOp::Subsref => Some(crate::interpreter::errors::mex(
+            "MissingSubsref",
+            "class does not define subsref for indexing operation",
+        )),
+        ObjectIndexOp::Subsasgn => Some(crate::interpreter::errors::mex(
+            "MissingSubsasgn",
+            "class does not define subsasgn for indexed assignment",
+        )),
+    }
 }
 
 async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, RuntimeError> {
@@ -161,6 +188,12 @@ async fn execute_brace_operation(
         BraceIndexOperation::ReadSingle => {
             let value = match base {
                 Value::Object(obj) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsref,
+                    ) {
+                        return Err(err);
+                    }
                     call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                         Value::Object(obj),
                         crate::call::shared::ObjectIndexSelector::IndexValues {
@@ -170,6 +203,12 @@ async fn execute_brace_operation(
                     .await?
                 }
                 Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsref,
+                    ) {
+                        return Err(err);
+                    }
                     call_object_index_descriptor_method(ObjectIndexDescriptor::subsref_brace(
                         Value::HandleObject(handle),
                         crate::call::shared::ObjectIndexSelector::IndexValues {
@@ -207,6 +246,12 @@ async fn execute_brace_operation(
         BraceIndexOperation::Store { rhs } => {
             let value = match base {
                 Value::Object(obj) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
                     call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
                         Value::Object(obj),
                         crate::call::shared::ObjectIndexSelector::IndexValues {
@@ -217,6 +262,12 @@ async fn execute_brace_operation(
                     .await?
                 }
                 Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
                     call_object_index_descriptor_method(ObjectIndexDescriptor::subsasgn_brace(
                         Value::HandleObject(handle),
                         crate::call::shared::ObjectIndexSelector::IndexValues {
@@ -508,6 +559,11 @@ pub async fn dispatch_indexing(
             ))?;
             match &base {
                 Value::Object(_) | Value::HandleObject(_) => {
+                    if let Some(err) =
+                        missing_member_index_overload_error(&base, ObjectIndexOp::Subsref)
+                    {
+                        return Err(err);
+                    }
                     let descriptor = ObjectIndexDescriptor::subsref_paren(
                         base,
                         crate::call::shared::ObjectIndexSelector::IndexValues {
@@ -650,6 +706,12 @@ pub async fn dispatch_indexing(
             clear_value_residency(&base);
             match base {
                 Value::Object(obj) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
                     let descriptor = ObjectIndexDescriptor::subsasgn_paren(
                         Value::Object(obj),
                         crate::call::shared::ObjectIndexSelector::ScalarIndices { indices },
@@ -658,6 +720,12 @@ pub async fn dispatch_indexing(
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
                     let descriptor = ObjectIndexDescriptor::subsasgn_paren(
                         Value::HandleObject(handle),
                         crate::call::shared::ObjectIndexSelector::ScalarIndices { indices },
@@ -733,6 +801,12 @@ pub async fn dispatch_indexing(
             };
             match base {
                 Value::Object(obj) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsref,
+                    ) {
+                        return Err(err);
+                    }
                     let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
                         Value::Object(obj),
                         *dims,
@@ -743,6 +817,12 @@ pub async fn dispatch_indexing(
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsref,
+                    ) {
+                        return Err(err);
+                    }
                     let descriptor = ObjectIndexDescriptor::subsref_paren_from_slice(
                         Value::HandleObject(handle),
                         *dims,
@@ -924,6 +1004,12 @@ pub async fn dispatch_indexing(
             ))?;
             match base {
                 Value::Object(obj) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
                     let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_slice(
                         Value::Object(obj),
                         *dims,
@@ -935,6 +1021,12 @@ pub async fn dispatch_indexing(
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
                     let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_slice(
                         Value::HandleObject(handle),
                         *dims,
@@ -1479,6 +1571,12 @@ pub async fn dispatch_indexing(
                     stack.push(updated);
                 }
                 Value::Object(obj) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::Object(obj.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
                     let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_expr_slice(
                         Value::Object(obj),
                         *dims,
@@ -1495,6 +1593,12 @@ pub async fn dispatch_indexing(
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
                 Value::HandleObject(handle) => {
+                    if let Some(err) = missing_member_index_overload_error(
+                        &Value::HandleObject(handle.clone()),
+                        ObjectIndexOp::Subsasgn,
+                    ) {
+                        return Err(err);
+                    }
                     let descriptor = ObjectIndexDescriptor::subsasgn_paren_from_expr_slice(
                         Value::HandleObject(handle),
                         *dims,

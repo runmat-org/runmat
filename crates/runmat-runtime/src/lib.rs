@@ -433,6 +433,15 @@ async fn subsasgn_dispatch(
                 current_requested_outputs(),
             )
             .await
+            .map_err(|err| {
+                if is_undefined_function_error(&err) {
+                    build_runtime_error("class does not define subsasgn for indexed assignment")
+                        .with_identifier("RunMat:MissingSubsasgn")
+                        .build()
+                } else {
+                    err
+                }
+            })
         }
         other => Err((format!("subsasgn: receiver must be object, got {other:?}")).into()),
     }
@@ -454,6 +463,15 @@ async fn subsref_dispatch(obj: Value, kind: String, payload: Value) -> crate::Bu
                 current_requested_outputs(),
             )
             .await
+            .map_err(|err| {
+                if is_undefined_function_error(&err) {
+                    build_runtime_error("class does not define subsref for indexing operation")
+                        .with_identifier("RunMat:MissingSubsref")
+                        .build()
+                } else {
+                    err
+                }
+            })
         }
         other => Err((format!("subsref: receiver must be object, got {other:?}")).into()),
     }

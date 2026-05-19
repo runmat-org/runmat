@@ -79,6 +79,13 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("colon").build()
 }
 
+fn zero_increment_error() -> crate::RuntimeError {
+    build_runtime_error("colon: increment must be nonzero")
+        .with_builtin("colon")
+        .with_identifier("RunMat:IndexStepZero")
+        .build()
+}
+
 #[runtime_builtin(
     name = "colon",
     category = "array/creation",
@@ -121,7 +128,7 @@ async fn colon_builtin(
     } else {
         let step_scalar = parse_real_scalar("colon", step_or_end).await?;
         if step_scalar.value == 0.0 {
-            return Err(builtin_error("colon: increment must be nonzero"));
+            return Err(zero_increment_error());
         }
         let stop_scalar = parse_real_scalar("colon", rest[0].clone()).await?;
         let char_mode =
@@ -154,7 +161,7 @@ fn build_sequence(
         ));
     }
     if step == 0.0 {
-        return Err(builtin_error("colon: increment must be nonzero"));
+        return Err(zero_increment_error());
     }
 
     let plan = plan_progression(start, step, stop)?;

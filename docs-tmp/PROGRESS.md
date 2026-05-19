@@ -6,6 +6,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 identifier-contract hardening for indexing and object overload failures
+  - Replaced message-fallback assertions with strict identifier assertions in VM semantic coverage:
+    - `index_step_zero_mex` now asserts `RunMat:IndexStepZero`
+    - `unsupported_cell_index_type_mex` now asserts `RunMat:CellIndexType`
+    - `oop_negative_missing_subsref_mex` now asserts `RunMat:MissingSubsref`
+    - `oop_negative_missing_subsasgn_mex` now asserts `RunMat:MissingSubsasgn`
+  - Added concrete identifier emission where gaps were discovered:
+    - `colon` zero-increment failures now carry `RunMat:IndexStepZero` in [colon.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/array/creation/colon.rs).
+    - object-index dispatch for missing class overloads now emits `RunMat:MissingSubsref` / `RunMat:MissingSubsasgn` via runtime dispatch normalization in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs), and VM indexing dispatch now guards object indexing descriptor paths consistently in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs).
+  - Validation: `cargo test -p runmat-vm --test control_flow`, `cargo test -p runmat-vm --test indexing_properties`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 completion-boundary residency keep-set ratchet for local aliases
   - Updated VM interpreter completion cleanup in `run_interpreter_inner` to preserve live handles referenced by `context.locals` when clearing stack-dropped values.
   - Added/ratcheted runner coverage for spawned payload alias liveness through locals at completion/pop boundaries:

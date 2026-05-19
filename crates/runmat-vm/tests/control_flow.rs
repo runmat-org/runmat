@@ -291,12 +291,7 @@ fn slice_non_tensor_mex() {
 fn index_step_zero_mex() {
     let src = "A = [1 2 3 4]; B = A(1:0:3);";
     let err = execute_semantic_error(src);
-    assert!(
-        err.identifier() == Some("RunMat:IndexStepZero")
-            || err.message().contains("Range step cannot be zero")
-            || err.message().contains("dimension must be >= 1")
-            || err.message().contains("increment must be nonzero")
-    );
+    assert_eq!(err.identifier(), Some("RunMat:IndexStepZero"));
 }
 
 #[test]
@@ -305,9 +300,5 @@ fn unsupported_cell_index_type_mex() {
     // Force unsupported type by passing a string as index
     let src2 = "C = {1,2,3}; r = C{'a'};";
     let err2 = execute_semantic_error(src2);
-    // Current runtime path attempts numeric coercion and reports conversion failure
-    assert!(
-        err2.identifier() == Some("RunMat:CellIndexType")
-            || err2.message().contains("cannot convert CharArray")
-    );
+    assert_eq!(err2.identifier(), Some("RunMat:CellIndexType"));
 }
