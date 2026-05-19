@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `26b67af5` `RM-378: centralize symbol discovery start path`
+  - Added shared config-layer source-name discovery helper: `runmat_config::discover_project_symbols_from_source_name(source_name, cwd)`.
+  - This centralizes source-name -> project-discovery start-path derivation in `runmat-config` and removes the remaining duplicate heuristic logic from `runmat-core` compile.
+  - Added config integration coverage:
+    - `discover_project_symbols_from_source_name_uses_cwd_for_plain_name`
+  - Validation: `cargo test -p runmat-config --test project_manifest discover_project_symbols_from_source_name_uses_cwd_for_plain_name`, `cargo test -p runmat-config --test project_manifest discover_project_symbols_includes_dependency_alias_qualified_names`, `cargo test -p runmat-core compile_input_resolves_wildcard_import_from_dependency_alias`, `cargo test -p runmat-core compile_input_resolves_function_handle_from_dependency_alias_wildcard_import`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `git diff --check`.
+
 - `dfcc7f65` `RM-378: share composition symbol discovery API`
   - Added shared config-layer composition symbol discovery API: `runmat_config::discover_project_symbols_from`.
   - The shared API now centralizes:
