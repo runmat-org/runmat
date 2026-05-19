@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `bf711150` `RM-378: carry semantic await-site metadata`
+  - Bytecode semantic async metadata now carries explicit MIR await-site inventory (`mir_await_site_count`, `mir_await_sites`) alongside spawn-site metadata.
+  - VM compile now derives await sites from MIR `Await` terminators scoped to the active entrypoint target, mirroring spawn-site scoping rules.
+  - Added regression coverage:
+    - `primary_compile_records_semantic_await_site_metadata`
+    - `primary_compile_scopes_await_site_metadata_to_entrypoint_target`
+    - strengthened `primary_compile_records_semantic_spawn_site_metadata` with await-site absence assertions for spawn-only programs
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm primary_compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-vm primary_compile_records_semantic_await_site_metadata`, `cargo test -p runmat-vm primary_compile_scopes_await_site_metadata_to_entrypoint_target`, `cargo test -p runmat-vm primary_compile_emits_explicit_spawn_instruction`, `cargo test -p runmat-vm primary_compile_interprets_async_call_and_await_via_semantic_value_lane`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+
 - `2c12e33d` `RM-378: emit explicit await bytecode boundary`
   - MIR `Await` terminators now lower to an explicit `Instr::Await` bytecode opcode instead of implicitly relying on operand-lane behavior.
   - VM dispatch/runner now handle `Instr::Await` explicitly, and Turbine marks `Instr::Await` as interpreter-only.

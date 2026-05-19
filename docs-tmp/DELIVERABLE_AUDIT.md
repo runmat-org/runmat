@@ -80,13 +80,14 @@ This audit maps the active objective to concrete repository evidence and marks e
   - fusion snapshot emission now includes semantic candidate nodes/decisions both when bytecode fusion groups are empty and when they are present, and this semantic path no longer hard-requires accel graph presence in [snapshot.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/fusion/snapshot.rs).
   - runtime fusion-plan preparation now consumes semantic candidate-group counts at the VM/accelerate boundary in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs) and [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs), with explicit transition diagnostics when semantic candidates exist but executable bytecode groups are absent.
   - VM bytecode now carries explicit semantic async/spawn metadata (`semantic_async_metadata`) in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs), derived from MIR spawn sites in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), and surfaced at interpreter setup in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs) so spawned-task transition semantics are explicit at runtime boundaries.
+  - VM bytecode semantic async metadata now carries explicit MIR await-site inventory (`mir_await_site_count`, `mir_await_sites`) in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs), derived from MIR await terminators in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
   - MIR await boundaries now lower through explicit bytecode `Instr::Await` handling in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs), [instr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/instr.rs), [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs), and [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs), making async boundary opcodes explicit on both Spawn and Await paths.
   - runtime/provider decision telemetry exists in [native_auto.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/native_auto.rs).
   - residency hooks exist in accelerate runtime.
 - Blocking gap:
-  - primary fusion candidate construction is still primarily bytecode/accel-graph driven (now semantically gated but not yet replaced):
-    - [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) builds accel graph from bytecode instructions and then calls `detect_fusion_groups`.
-  - explicit spawned-task provider-handle lifetime semantics remain incomplete; compiler still has transitional spawn comment in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs:1719).
+  - executable fusion group construction remains tied to bytecode accel-graph artifacts (though semantically candidate-group-gated and candidate-span-derived):
+    - [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) still builds bytecode accel graph artifacts and maps semantic candidate spans onto graph nodes (`derive_semantic_fusion_groups_from_candidates`) as the execution-group boundary.
+  - explicit spawned-task provider-handle lifetime/concurrency semantics remain incomplete in runtime/provider boundaries (no full Plan 7 closeout evidence yet).
 
 ### 7) Validation cadence (`met` for current slices)
 
@@ -99,10 +100,12 @@ This audit maps the active objective to concrete repository evidence and marks e
   - `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`
   - `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`
   - `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`
+  - `cargo test -p runmat-vm primary_compile_records_semantic_spawn_site_metadata`
+  - `cargo test -p runmat-vm primary_compile_records_semantic_await_site_metadata`
+  - `cargo test -p runmat-vm primary_compile_scopes_await_site_metadata_to_entrypoint_target`
   - `cargo test -p runmat-core --test fusion_regressions`
   - `cargo test -p runmat-core --test semicolon_suppression`
   - `cargo check --workspace`
-  - `git diff --check`
   - `git diff --check`
 
 ## Current Conclusion
