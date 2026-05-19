@@ -4,7 +4,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use futures::executor::block_on;
-use runmat_core::{ExecutionStreamKind, RunMatSession, SessionExecutionResult};
+use runmat_core::{ExecutionStreamKind, RunError, RunMatSession, SessionExecutionResult};
 use runmat_gc::gc_test_context;
 
 /// Test basic semicolon suppression behavior
@@ -189,11 +189,11 @@ fn test_errors_always_shown() {
 
     // Error without semicolon
     let result = block_on(engine.execute("undefined_var"));
-    assert!(result.is_err() || result.unwrap().error.is_some());
+    assert_undefined_variable_identifier(result);
 
     // Error with semicolon should still be shown
     let result = block_on(engine.execute("undefined_var;"));
-    assert!(result.is_err() || result.unwrap().error.is_some());
+    assert_undefined_variable_identifier(result);
 }
 
 /// Test that type information is shown for semicolon-suppressed assignments
@@ -267,6 +267,26 @@ fn collect_stdout_stream(result: &SessionExecutionResult) -> String {
         .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
         .map(|entry| entry.text.as_str())
         .collect::<String>()
+}
+
+fn assert_undefined_variable_identifier(result: Result<SessionExecutionResult, RunError>) {
+    match result {
+        Err(RunError::Semantic(err)) => {
+            assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
+        }
+        Err(RunError::Runtime(err)) => {
+            assert_eq!(err.identifier(), Some("RunMat:UndefinedVariable"));
+        }
+        Err(other) => {
+            panic!("expected semantic/runtime undefined-variable error, got: {other:?}");
+        }
+        Ok(exec) => {
+            let err = exec
+                .error
+                .expect("expected execution-level undefined-variable error");
+            assert_eq!(err.identifier(), Some("RunMat:UndefinedVariable"));
+        }
+    }
 }
 
 #[test]

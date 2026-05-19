@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 tighten semicolon error-path assertions to identifier contracts
+  - Replaced weak “any error” checks in [semicolon_suppression.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/semicolon_suppression.rs) (`test_errors_always_shown`) with stable undefined-variable identifier assertions (`RunMat:UndefinedVariable`) for both semicolon and non-semicolon paths.
+  - This removes a remaining display/error-surface proxy in core semicolon behavior coverage and keeps the failure contract semantic.
+  - Validation: `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 runtime fusion-group sanitization for semantic window mapping drift
   - `runmat-accelerate` fusion-plan preparation in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs) now sanitizes compile-provided semantic fusion groups against the runtime accel graph before executable planning:
     - filters stale/mismatched node IDs
