@@ -179,7 +179,11 @@ fn class_inherits(class_name: &str, requested_lower: &str) -> bool {
         return true;
     }
     let mut cursor = Some(class_name.to_string());
+    let mut visited = std::collections::HashSet::new();
     while let Some(name) = cursor {
+        if !visited.insert(name.clone()) {
+            break;
+        }
         if name.eq_ignore_ascii_case(requested_lower) {
             return true;
         }
@@ -203,6 +207,14 @@ pub(crate) mod tests {
     };
     use runmat_gc_api::GcPtr;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
@@ -349,6 +361,33 @@ pub(crate) mod tests {
         assert_eq!(handle_result, Value::Bool(true));
         let exact = isa_builtin(obj, Value::from(class_name)).expect("isa");
         assert_eq!(exact, Value::Bool(true));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn isa_inheritance_walk_handles_parent_cycles() {
+        let class_a = unique_class_name("runmat.unittest.CycleA");
+        let class_b = unique_class_name("runmat.unittest.CycleB");
+
+        runmat_builtins::register_class(ClassDef {
+            name: class_a.clone(),
+            parent: Some(class_b.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        runmat_builtins::register_class(ClassDef {
+            name: class_b.clone(),
+            parent: Some(class_a.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let obj = Value::Object(ObjectInstance::new(class_a.clone()));
+        let not_found = isa_builtin(obj.clone(), Value::from("nonexistentType")).expect("isa");
+        assert_eq!(not_found, Value::Bool(false));
+
+        let parent_match = isa_builtin(obj, Value::from(class_b)).expect("isa");
+        assert_eq!(parent_match, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 6 metadata traversal hardening for `isa` inheritance
+  - `isa` class inheritance traversal now guards against parent-cycle metadata loops during nominal class ancestry checks.
+  - Added runtime regression coverage:
+    - `isa_inheritance_walk_handles_parent_cycles`
+  - The test registers a cyclic parent relationship across synthetic classes and asserts `isa` returns deterministically (`false` for missing target, `true` for reachable parent class) without loop behavior.
+  - Validation: `cargo test -p runmat-runtime isa_inheritance_walk_handles_parent_cycles`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 runtime fieldnames inheritance-aware class metadata lookup
   - `fieldnames` class-property discovery now traverses class metadata parent chains (with cycle guard) instead of reading only the immediate class definition.
   - Added runtime coverage:
