@@ -84,7 +84,7 @@ impl WgpuProvider {
 
 fn window_lengths(len: usize, periodic: bool) -> Result<(u32, u32)> {
     if len > u32::MAX as usize || (periodic && len == u32::MAX as usize) {
-        return Err(anyhow!("window: length exceeds GPU limits"));
+        return Err(WindowLengthError::LengthExceedsGpuLimits.into());
     }
     let logical_u32 = len as u32;
     let total_u32 = if periodic {
@@ -95,14 +95,23 @@ fn window_lengths(len: usize, periodic: bool) -> Result<(u32, u32)> {
     Ok((logical_u32, total_u32))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+enum WindowLengthError {
+    #[error("window length exceeds GPU limits")]
+    LengthExceedsGpuLimits,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::window_lengths;
+    use super::{window_lengths, WindowLengthError};
 
     #[test]
     fn periodic_window_rejects_u32_max_len() {
         let err = window_lengths(u32::MAX as usize, true).expect_err("expected overflow guard");
-        assert!(err.to_string().contains("length exceeds GPU limits"));
+        assert!(matches!(
+            err.downcast_ref::<WindowLengthError>(),
+            Some(WindowLengthError::LengthExceedsGpuLimits)
+        ));
     }
 
     #[test]
