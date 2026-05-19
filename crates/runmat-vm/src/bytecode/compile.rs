@@ -71,7 +71,11 @@ pub fn compile(
                     )
                 });
             }
-            (Some(accel_graph), fusion_groups)
+            if fusion_groups.is_empty() {
+                (None, Vec::new())
+            } else {
+                (Some(accel_graph), fusion_groups)
+            }
         };
     let semantic_async_metadata = derive_semantic_async_metadata(mir, entrypoint_target);
 
