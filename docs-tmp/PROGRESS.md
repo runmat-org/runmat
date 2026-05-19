@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 overwrite liveness ratchet for direct-handle aliases in locals
+  - Added provider-backed VM runner coverage for overwrite cleanup where direct `GpuTensor` aliases remain live via `locals`:
+    - `store_var_overwrite_preserves_provider_handle_when_shared_in_local`
+    - `store_local_overwrite_preserves_provider_handle_when_shared_in_other_local`
+  - This extends overwrite-path shared-liveness evidence to local-alias branches for direct handles (not only var aliases).
+  - Validation: `cargo test -p runmat-vm store_var_overwrite_preserves_provider_handle_when_shared_in_local`, `cargo test -p runmat-vm store_local_overwrite_preserves_provider_handle_when_shared_in_other_local`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 overwrite liveness ratchet for nested handle-object aliases in locals
   - Added provider-backed VM runner coverage for overwrite cleanup where nested `HandleObject` aliases remain live via `locals`:
     - `store_var_overwrite_preserves_nested_handle_object_provider_handle_when_shared_in_local`
