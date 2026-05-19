@@ -243,6 +243,60 @@ roots = ["."]
 }
 
 #[test]
+fn compile_input_resolves_function_handle_from_dependency_alias_wildcard_import() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let dep_root = tmp.path().join("deps/statslib");
+    std::fs::create_dir_all(&dep_root).expect("create dependency dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+
+[dependencies]
+statsdep = { path = "deps/statslib" }
+"#,
+    )
+    .expect("write root manifest");
+    std::fs::write(
+        dep_root.join("runmat.toml"),
+        r#"
+[package]
+name = "statslib"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write dependency manifest");
+    std::fs::write(
+        dep_root.join("summarize.m"),
+        "function y = summarize(x); y = x; end",
+    )
+    .expect("write dependency function");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    session.set_source_name_override(Some(
+        tmp.path().join("main.m").to_string_lossy().to_string(),
+    ));
+    let prepared = session
+        .compile_input("import statsdep.*; f = @summarize;")
+        .expect("compile");
+    session.set_source_name_override(None);
+
+    assert!(
+        prepared.bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::CreateExternalFunctionHandle(name) if name.contains("summarize")
+        )),
+        "wildcard dependency-alias function handle should lower to external function-handle bytecode"
+    );
+}
+
+#[test]
 fn end_offset_indexing_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "A = [1, 2, 3]; y = A(end-1);";
