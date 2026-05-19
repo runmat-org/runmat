@@ -38,13 +38,19 @@ pub fn compile(
         })
         .unwrap_or_default();
     #[cfg(feature = "native-accel")]
+    let semantic_fusion_metadata = derive_semantic_fusion_metadata(mir);
+    #[cfg(feature = "native-accel")]
     let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
     #[cfg(feature = "native-accel")]
-    let mut fusion_groups = accel_graph.detect_fusion_groups();
+    let mut fusion_groups = if semantic_fusion_metadata.mir_fusion_candidate_group_count == 0 {
+        Vec::new()
+    } else {
+        accel_graph.detect_fusion_groups()
+    };
     #[cfg(feature = "native-accel")]
-    annotate_fusion_groups_with_stack_layout(&c.instructions, &accel_graph, &mut fusion_groups);
-    #[cfg(feature = "native-accel")]
-    let semantic_fusion_metadata = derive_semantic_fusion_metadata(mir);
+    if !fusion_groups.is_empty() {
+        annotate_fusion_groups_with_stack_layout(&c.instructions, &accel_graph, &mut fusion_groups);
+    }
     let semantic_async_metadata = derive_semantic_async_metadata(mir);
 
     Ok(Bytecode {
@@ -350,6 +356,28 @@ mod tests {
                 .iter()
                 .all(|group| group.stmt_end > group.stmt_start),
             "expected candidate groups to carry non-empty statement spans"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn primary_compile_semantically_gates_bytecode_fusion_groups() {
+        let ast = runmat_parser::parse("x = 1;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+
+        assert_eq!(
+            bytecode
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_group_count,
+            0,
+            "expected no semantic fusion candidate groups"
+        );
+        assert!(
+            bytecode.fusion_groups.is_empty(),
+            "expected bytecode fusion groups to be gated off when semantic candidates are absent"
         );
     }
 
