@@ -1806,4 +1806,73 @@ mod tests {
             "replacing nested alias should keep task id when a live alias remains"
         );
     }
+
+    #[test]
+    fn replaced_nested_spawn_task_handle_in_local_slot_retires_with_excluded_local() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        let mut payload = StructValue::new();
+        payload.fields.insert("task".to_string(), wrapped);
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let current = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        context.locals.push(current.clone());
+        super::retire_spawn_task_id_if_replaced(
+            &mut context,
+            &current,
+            &Value::Num(0.0),
+            &[],
+            &[],
+            None,
+            Some(0),
+        );
+        assert!(
+            !context.spawned_task_ids.contains(&0),
+            "local-slot replacement should retire nested task id when excluded local is the only alias"
+        );
+    }
+
+    #[test]
+    fn replaced_nested_spawn_task_handle_in_local_slot_keeps_id_when_other_local_alias_live() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        let mut payload = StructValue::new();
+        payload.fields.insert("task".to_string(), wrapped.clone());
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let current = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        context.locals.push(current.clone());
+        context.locals.push(wrapped);
+        super::retire_spawn_task_id_if_replaced(
+            &mut context,
+            &current,
+            &Value::Num(0.0),
+            &[],
+            &[],
+            None,
+            Some(0),
+        );
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "local-slot replacement should keep nested task id when another local alias remains live"
+        );
+    }
 }

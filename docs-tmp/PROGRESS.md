@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 local-slot replacement ID-liveness ratchet for nested handle-object values
+  - Added VM dispatch coverage for local-slot overwrite retirement with `excluded_local` semantics when spawn-task handles are nested under `Value::HandleObject` targets:
+    - `replaced_nested_spawn_task_handle_in_local_slot_retires_with_excluded_local`
+    - `replaced_nested_spawn_task_handle_in_local_slot_keeps_id_when_other_local_alias_live`
+  - This ratchets `StoreLocal`-path ID retirement correctness for nested task handles across unaliased and alias-live local replacement states.
+  - Validation: `cargo test -p runmat-vm replaced_nested_spawn_task_handle_in_local_slot_retires_with_excluded_local`, `cargo test -p runmat-vm replaced_nested_spawn_task_handle_in_local_slot_keeps_id_when_other_local_alias_live`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 `StoreLocal` overwrite release-path ratchet for direct handles
   - Added provider-backed VM runner coverage for direct local-slot overwrite cleanup when no live alias remains:
     - `store_local_overwrite_releases_provider_handle_when_unaliased`
