@@ -448,7 +448,6 @@ fn instruction_within_semantic_candidate_span(
 }
 
 #[cfg(feature = "native-accel")]
-#[cfg(feature = "native-accel")]
 fn derive_semantic_fusion_instruction_windows(
     instructions: &[Instr],
     instr_spans: &[runmat_hir::Span],
