@@ -4,6 +4,25 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+## Latest Committed Slices (2026-05-19)
+
+- `7d1478f3` `RM-378: emit explicit spawn bytecode boundary`
+  - MIR `Spawn` now lowers to an explicit `Instr::Spawn` bytecode opcode instead of silently aliasing the future operand lane.
+  - VM dispatch/runner now handle `Instr::Spawn` explicitly; Turbine marks it interpreter-only.
+  - Added regression coverage: `primary_compile_emits_explicit_spawn_instruction`.
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm primary_compile_emits_explicit_spawn_instruction`, `cargo test -p runmat-vm primary_compile_interprets_async_call_and_await_via_semantic_value_lane`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+
+- `b44e43bf` `RM-378: remove bytecode fusion fallback from semantic candidates`
+  - VM compile no longer falls back to `detect_fusion_groups()` when semantic candidate-derived fusion groups are empty.
+  - This tightens executable fusion-group construction to semantic candidate evidence only.
+  - Added regression coverage: `semantic_candidates_without_overlap_do_not_build_fusion_groups`.
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+
+- `e3ee0fb6` `RM-378: derive fusion groups from semantic candidates`
+  - VM compile now derives executable fusion groups from semantic candidate source spans mapped onto accel-graph nodes (`derive_semantic_fusion_groups_from_candidates`) before semantic span retention.
+  - Added regression coverage: `semantic_candidates_build_fusion_groups_from_accel_graph_nodes`.
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+
 ## Plan Status Snapshot
 
 - Plan 0: semantic HIR type model in place.
