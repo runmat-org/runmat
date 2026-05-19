@@ -293,6 +293,21 @@ fn retire_spawn_task_id_if_dropped(
     }
 }
 
+fn retire_spawn_task_id_if_replaced(
+    context: &mut crate::bytecode::program::ExecutionContext,
+    current: &Value,
+    incoming: &Value,
+) {
+    let Some(current_id) = spawn_task_id_from_value(current) else {
+        return;
+    };
+    let incoming_id = spawn_task_id_from_value(incoming);
+    if incoming_id == Some(current_id) {
+        return;
+    }
+    context.spawned_task_ids.remove(&current_id);
+}
+
 #[cfg(feature = "native-accel")]
 fn clear_popped_value_residency_excluding_live_values(
     popped: &Value,
@@ -426,6 +441,9 @@ pub async fn dispatch_instruction(
                     "stack underflow",
                 ))?;
             debug::trace_store_var(*pc, *index, &preview);
+            if *index < vars.len() {
+                retire_spawn_task_id_if_replaced(context, &vars[*index], &preview);
+            }
             store_var(
                 stack,
                 vars,
@@ -439,6 +457,17 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::StoreLocal(offset) => {
+            if let Some(incoming) = stack.last().cloned() {
+                if let Some(current_frame) = context.call_stack.last() {
+                    let local_index = current_frame.locals_start + *offset;
+                    if local_index < context.locals.len() {
+                        let current_value = context.locals[local_index].clone();
+                        retire_spawn_task_id_if_replaced(context, &current_value, &incoming);
+                    }
+                } else if *offset < vars.len() {
+                    retire_spawn_task_id_if_replaced(context, &vars[*offset], &incoming);
+                }
+            }
             store_local(
                 stack,
                 context,
@@ -1234,6 +1263,48 @@ mod tests {
         assert!(
             super::spawn_task_id_from_value(&Value::Struct(non_task)).is_none(),
             "only spawn task structs should expose task ids"
+        );
+    }
+
+    #[test]
+    fn replaced_spawn_task_id_is_retired_when_incoming_differs() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let current = wrap_spawned_value(&mut context, Value::Num(1.0));
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "spawn should register task id before replacement"
+        );
+        super::retire_spawn_task_id_if_replaced(&mut context, &current, &Value::Num(2.0));
+        assert!(
+            !context.spawned_task_ids.contains(&0),
+            "replacing task handle with a non-task value should retire its task id"
+        );
+    }
+
+    #[test]
+    fn replacing_with_same_spawn_task_keeps_id_registered() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let current = wrap_spawned_value(&mut context, Value::Num(3.0));
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "spawn should register task id before self-replacement"
+        );
+        super::retire_spawn_task_id_if_replaced(&mut context, &current, &current);
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "replacing a task handle with itself should keep the task id live"
         );
     }
 }

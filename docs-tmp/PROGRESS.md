@@ -7,11 +7,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 ## Latest Committed Slices (2026-05-19)
 
 - (pending commit) Plan 7 retire dropped spawn-task IDs on VM value-drop boundaries
-  - VM dispatch now retires registered spawn-task IDs when spawned task-handle values are dropped via `Instr::Pop` and `Instr::ExitScope`, preventing stale growth in `ExecutionContext.spawned_task_ids` for un-awaited dropped handles.
+  - VM dispatch now retires registered spawn-task IDs when spawned task-handle values are dropped or replaced across value-drop boundaries:
+    - `Instr::Pop`
+    - `Instr::ExitScope`
+    - overwrite paths in `Instr::StoreVar` / `Instr::StoreLocal`
+  - Replacement retirement is ID-aware and preserves live IDs on self-reassignment (`t = t`) while retiring IDs when replaced by a different/non-task value.
   - Added dispatch regression coverage:
     - `dropped_spawn_task_handle_retires_task_id`
     - `spawn_task_id_extraction_ignores_non_task_structs`
-  - Validation: `cargo test -p runmat-vm dropped_spawn_task_handle_retires_task_id`, `cargo test -p runmat-vm spawn_task_id_extraction_ignores_non_task_structs`, `cargo test -p runmat-vm spawn_`, `cargo test -p runmat-vm await_`, `cargo fmt --all --check`.
+    - `replaced_spawn_task_id_is_retired_when_incoming_differs`
+    - `replacing_with_same_spawn_task_keeps_id_registered`
+  - Validation: `cargo test -p runmat-vm dropped_spawn_task_handle_retires_task_id`, `cargo test -p runmat-vm spawn_task_id_extraction_ignores_non_task_structs`, `cargo test -p runmat-vm replaced_spawn_task_id_is_retired_when_incoming_differs`, `cargo test -p runmat-vm replacing_with_same_spawn_task_keeps_id_registered`, `cargo test -p runmat-vm spawn_`, `cargo test -p runmat-vm await_`, `cargo fmt --all --check`.
 
 - (pending commit) Plan 7 enforce semantic window-kind compatibility in fusion-node mapping
   - VM semantic fusion-window -> accel-node mapping now filters by semantic window kind compatibility (not just generic accel-tag presence):
