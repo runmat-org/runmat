@@ -238,6 +238,9 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `replaced_nested_spawn_task_handle_in_local_slot_retires_with_excluded_local`
     - `replaced_nested_spawn_task_handle_in_local_slot_keeps_id_when_other_local_alias_live`
   - coverage now includes alias-preserving task-ID behavior in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs) (`dropped_spawn_task_handle_keeps_id_when_alias_still_live`) and runner-level `await` success after alias overwrite in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) (`await_succeeds_after_overwriting_one_spawn_handle_alias`).
+  - runner-level alias-liveness coverage in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) now also includes local-slot alias overwrite flows:
+    - `await_succeeds_after_overwriting_one_local_spawn_handle_alias`
+    - `await_succeeds_after_overwriting_var_alias_when_local_spawn_handle_alias_live`
   - this closes a stale-ID bug class where dropping one alias could previously invalidate `await` on another still-live alias.
   - VM interpreter cancellation path now clears residency marks for live stack/variable GPU-handle values before returning `ExecutionCancelled`, and completion now clears stack-only handle residency while preserving live-var handles in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs), with direct coverage in `cancellation_clears_gpu_residency_for_live_values` and `completion_clears_stack_only_gpu_residency`.
   - Fusion materialized-store write paths now also consume handle-aware exclusion clearing in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs), extending shared-handle preservation beyond interpreter dispatch overwrite hooks.

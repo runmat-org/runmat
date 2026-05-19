@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 await-flow ratchet for local-slot spawn-handle aliases
+  - Added runner-level await-flow coverage for spawn-handle alias liveness when aliases are carried through local slots:
+    - `await_succeeds_after_overwriting_one_local_spawn_handle_alias`
+    - `await_succeeds_after_overwriting_var_alias_when_local_spawn_handle_alias_live`
+  - This extends stale-ID/alias-liveness execution evidence beyond var-only alias flows to local-slot alias replacement flows.
+  - Validation: `cargo test -p runmat-vm await_succeeds_after_overwriting_one_local_spawn_handle_alias`, `cargo test -p runmat-vm await_succeeds_after_overwriting_var_alias_when_local_spawn_handle_alias_live`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 overwrite liveness ratchet for direct-handle aliases in locals
   - Added provider-backed VM runner coverage for overwrite cleanup where direct `GpuTensor` aliases remain live via `locals`:
     - `store_var_overwrite_preserves_provider_handle_when_shared_in_local`

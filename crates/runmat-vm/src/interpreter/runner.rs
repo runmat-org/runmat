@@ -2103,6 +2103,86 @@ mod tests {
     }
 
     #[test]
+    fn await_succeeds_after_overwriting_one_local_spawn_handle_alias() {
+        let bytecode = Bytecode::with_instructions(
+            vec![
+                Instr::Spawn,
+                Instr::StoreLocal(0),
+                Instr::LoadLocal(0),
+                Instr::StoreLocal(1),
+                Instr::LoadConst(0.0),
+                Instr::StoreLocal(0),
+                Instr::LoadLocal(1),
+                Instr::Await,
+                Instr::StoreVar(0),
+                Instr::Return,
+            ],
+            1,
+        );
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::Num(9.0));
+        state.vars = vec![Value::Num(0.0)];
+        state
+            .context
+            .call_stack
+            .push(crate::bytecode::program::CallFrame {
+                function_name: "<local>".to_string(),
+                return_address: 0,
+                locals_start: 0,
+                locals_count: 2,
+                expected_outputs: 0,
+            });
+        state.context.locals = vec![Value::Num(0.0), Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars)).expect(
+            "await should succeed when another local alias still carries the spawn task handle",
+        );
+        assert_eq!(result_vars[0], Value::Num(9.0));
+    }
+
+    #[test]
+    fn await_succeeds_after_overwriting_var_alias_when_local_spawn_handle_alias_live() {
+        let bytecode = Bytecode::with_instructions(
+            vec![
+                Instr::Spawn,
+                Instr::StoreLocal(0),
+                Instr::LoadLocal(0),
+                Instr::StoreVar(0),
+                Instr::LoadConst(0.0),
+                Instr::StoreVar(0),
+                Instr::LoadLocal(0),
+                Instr::Await,
+                Instr::StoreVar(0),
+                Instr::Return,
+            ],
+            1,
+        );
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::Num(9.0));
+        state.vars = vec![Value::Num(0.0)];
+        state
+            .context
+            .call_stack
+            .push(crate::bytecode::program::CallFrame {
+                function_name: "<local>".to_string(),
+                return_address: 0,
+                locals_start: 0,
+                locals_count: 1,
+                expected_outputs: 0,
+            });
+        state.context.locals = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars)).expect(
+            "await should succeed when var alias is overwritten but local alias still carries the spawn task handle",
+        );
+        assert_eq!(result_vars[0], Value::Num(9.0));
+    }
+
+    #[test]
     fn await_rejects_spawn_task_handle_after_scope_exit_retires_id() {
         let mut task = runmat_builtins::StructValue::new();
         task.fields.insert(
