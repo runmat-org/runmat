@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 async interaction handler failure identifier-contract ratchet
+  - Tightened core stdin interaction coverage in [async_stdin.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/async_stdin.rs):
+    - `pending_handler_returns_error` now asserts stable runtime identifier `RunMat:interaction:AsyncHandlerError` instead of accepting any error surface.
+    - `pause` interaction flows in async stdin tests now execute via explicit builtin call form `pause()` to keep the ratchet scoped to runtime interaction semantics.
+  - Validation: `cargo test -p runmat-core --test async_stdin`, `cargo test -p runmat-vm --test spawn_semantic_lifecycle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic async multi-task await lifecycle ratchet
   - Extended semantic invoker async lifecycle coverage in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs) with multi-outstanding spawn-task flows:
     - `semantic_async_spawn_parallel_await_keeps_retained_handle_and_releases_dropped_handle`

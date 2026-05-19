@@ -3,7 +3,7 @@
 use anyhow::Result;
 use futures::executor::block_on;
 use runmat_builtins::Value;
-use runmat_core::{InputRequest, InputRequestKind, InputResponse, RunMatSession};
+use runmat_core::{InputRequest, InputRequestKind, InputResponse, RunError, RunMatSession};
 use runmat_runtime::interaction::force_interactive_stdin_for_tests;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -133,7 +133,7 @@ fn pause_uses_keypress_handler() -> Result<()> {
     });
 
     let result =
-        block_on(session.execute("pause; value = 1; value")).map_err(anyhow::Error::new)?;
+        block_on(session.execute("pause(); value = 1; value")).map_err(anyhow::Error::new)?;
     let value = result.value.expect("execution should produce a value");
     assert_eq!(value_as_f64(&value), Some(1.0));
     assert_eq!(result.stdin_events.len(), 1);
@@ -154,7 +154,22 @@ fn pending_handler_returns_error() -> Result<()> {
         Err("input handler is unavailable".to_string())
     });
 
-    let result = block_on(session.execute("pause; value = 1; value"));
-    assert!(result.is_err() || result.as_ref().is_ok_and(|res| res.error.is_some()));
+    let result = block_on(session.execute("pause(); value = 1; value"));
+    match result {
+        Err(RunError::Runtime(err)) => {
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:interaction:AsyncHandlerError")
+            );
+        }
+        Err(other) => panic!("expected runtime interaction error, got: {other:?}"),
+        Ok(exec) => {
+            let err = exec.error.expect("expected execution-level runtime error");
+            assert_eq!(
+                err.identifier(),
+                Some("RunMat:interaction:AsyncHandlerError")
+            );
+        }
+    }
     Ok(())
 }
