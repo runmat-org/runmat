@@ -326,4 +326,40 @@ function = "main"
             tmp.path().join("src/app/server.m").canonicalize().unwrap()
         );
     }
+
+    #[test]
+    fn module_function_entrypoint_errors_when_module_file_missing() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "server"
+module = "app.server"
+function = "main"
+"#,
+        )
+        .unwrap();
+
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let err = resolve_benchmark_input(PathBuf::from("server"))
+            .expect_err("missing module file should return explicit error");
+        std::env::set_current_dir(original).unwrap();
+
+        let message = err.to_string();
+        assert!(
+            message.contains("module/function target")
+                || message.contains("did not resolve under configured source roots"),
+            "unexpected error message: {message}"
+        );
+    }
 }
