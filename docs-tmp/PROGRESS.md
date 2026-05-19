@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `eaadfab5` `RM-378: infer .m for unresolved source paths`
+  - Core `SourceInput::Path` resolution now infers `.m` for unresolved file-style path inputs (e.g. `src/main` -> `src/main.m`) before entrypoint-name fallback.
+  - CLI script path resolution now applies the same `.m` inference before manifest entrypoint-name fallback.
+  - Added regression coverage:
+    - `runmat-core`: `source_input_path_infers_m_extension_for_relative_path`
+    - `runmat-cli`: `resolve_script_input_infers_m_extension_for_relative_path`
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-core source_input_path_`, `cargo test -p runmat --lib resolve_script_input_`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+
 - `d4afa838` `RM-378: remove legacy VarId note reference`
   - Removed the remaining `VarId` mention under `crates/` notes to keep the legacy-path evidence grep unambiguous for active production surfaces.
   - Validation evidence check: `rg -n "\\bVarId\\b|compile_legacy|LegacyUserFunction|runmat_vm::execute|\\bHirProgram\\b" crates` now returns no matches.

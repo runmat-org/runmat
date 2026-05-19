@@ -57,6 +57,8 @@ This audit maps the active objective to concrete repository evidence and marks e
   - CLI run-path integration in [script.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-cli/src/commands/script.rs) now resolves manifest entrypoint names through the shared discovered-entrypoint resolver for both path targets and module/function targets.
   - config-layer composition graph loading remains in [project.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-config/src/project.rs) via `build_project_composition_graph`, including local path dependency manifest loading and per-package source indexes.
   - core request-path source loading in [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) now resolves simple named path inputs through the shared discovered-entrypoint resolver before source read.
+  - core request-path source loading now also infers `.m` for unresolved file-style path inputs before entrypoint-name fallback in [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs), matching Plan 5 path-target inference behavior.
+  - CLI script target resolution now applies the same `.m` inference before named-entrypoint fallback in [script.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-cli/src/commands/script.rs).
 - Gap:
   - core/session-level execution now resolves named entrypoint path inputs through composition metadata, but resolver/import consumers are not yet wired end-to-end to consume the composition graph as source-of-truth.
   - source-index discovery, shared entrypoint resolution, and composition-graph loading now exist at config-layer, but downstream resolver consumers have not yet switched to composition-graph/source-index ownership end-to-end.
@@ -93,6 +95,8 @@ This audit maps the active objective to concrete repository evidence and marks e
 
 - Latest executed gates:
   - `cargo fmt --all --check`
+  - `cargo test -p runmat-core source_input_path_`
+  - `cargo test -p runmat --lib resolve_script_input_`
   - `cargo test -p runmat-vm primary_compile_emits_explicit_spawn_instruction`
   - `cargo test -p runmat-vm primary_compile_interprets_async_call_and_await_via_semantic_value_lane`
   - `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`
