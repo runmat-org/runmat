@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 handle-object traversal hardening for spawn policy and task-ID liveness
+  - VM spawn GPU-handle concurrency policy traversal now recurses through `Value::HandleObject` targets (cycle-safe) so nested provider handles are enforced at spawn boundaries.
+  - VM spawn-task ID retirement/liveness now collects task IDs recursively across nested runtime shapes (including `HandleObject` targets) instead of only top-level task structs.
+  - Added VM dispatch coverage:
+    - `spawn_policy_rejects_gpu_handles_nested_in_handle_object_target`
+    - `dropped_nested_spawn_task_handle_in_handle_object_retires_task_id`
+    - `dropped_nested_spawn_task_handle_in_handle_object_keeps_id_when_alias_live`
+  - Validation: `cargo test -p runmat-vm spawn_policy_rejects_gpu_handles_nested_in_handle_object_target`, `cargo test -p runmat-vm dropped_nested_spawn_task_handle_in_handle_object_retires_task_id`, `cargo test -p runmat-vm dropped_nested_spawn_task_handle_in_handle_object_keeps_id_when_alias_live`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Validation ratchet tighten try/catch message-binding assertion shape
   - Core semantic try/catch binding coverage now asserts the exact bound message value shape for `y = err.message` (`'boom'`) instead of substring matching.
   - Updated test: `try_catch_binding_uses_semantic_vm` in `crates/runmat-core/src/tests.rs`.

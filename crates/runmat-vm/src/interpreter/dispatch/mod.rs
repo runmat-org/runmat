@@ -14,7 +14,7 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
@@ -109,35 +109,52 @@ fn for_each_gpu_handle_in_value(
     value: &Value,
     f: &mut impl FnMut(&GpuTensorHandle) -> Result<(), RuntimeError>,
 ) -> Result<(), RuntimeError> {
+    let mut visited_handle_targets = HashSet::new();
+    for_each_gpu_handle_in_value_with_visited(value, f, &mut visited_handle_targets)
+}
+
+fn for_each_gpu_handle_in_value_with_visited(
+    value: &Value,
+    f: &mut impl FnMut(&GpuTensorHandle) -> Result<(), RuntimeError>,
+    visited_handle_targets: &mut HashSet<usize>,
+) -> Result<(), RuntimeError> {
     match value {
         Value::GpuTensor(handle) => f(handle),
         Value::Cell(cell) => {
             for elem in &cell.data {
-                for_each_gpu_handle_in_value(elem, f)?;
+                for_each_gpu_handle_in_value_with_visited(elem, f, visited_handle_targets)?;
             }
             Ok(())
         }
         Value::Struct(struct_value) => {
             for elem in struct_value.fields.values() {
-                for_each_gpu_handle_in_value(elem, f)?;
+                for_each_gpu_handle_in_value_with_visited(elem, f, visited_handle_targets)?;
             }
             Ok(())
         }
         Value::Object(object_value) => {
             for elem in object_value.properties.values() {
-                for_each_gpu_handle_in_value(elem, f)?;
+                for_each_gpu_handle_in_value_with_visited(elem, f, visited_handle_targets)?;
             }
             Ok(())
         }
         Value::Closure(closure) => {
             for capture in &closure.captures {
-                for_each_gpu_handle_in_value(capture, f)?;
+                for_each_gpu_handle_in_value_with_visited(capture, f, visited_handle_targets)?;
             }
             Ok(())
         }
         Value::OutputList(values) => {
             for elem in values {
-                for_each_gpu_handle_in_value(elem, f)?;
+                for_each_gpu_handle_in_value_with_visited(elem, f, visited_handle_targets)?;
+            }
+            Ok(())
+        }
+        Value::HandleObject(handle) => {
+            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            if visited_handle_targets.insert(raw_target) {
+                let target = unsafe { &*handle.target.as_raw() };
+                for_each_gpu_handle_in_value_with_visited(target, f, visited_handle_targets)?;
             }
             Ok(())
         }
@@ -151,7 +168,6 @@ fn for_each_gpu_handle_in_value(
         | Value::CharArray(_)
         | Value::Tensor(_)
         | Value::ComplexTensor(_)
-        | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
@@ -284,30 +300,56 @@ fn spawn_task_id_from_value(value: &Value) -> Option<u64> {
     }
 }
 
-fn value_contains_spawn_task_id(value: &Value, task_id: u64) -> bool {
-    if spawn_task_id_from_value(value) == Some(task_id) {
-        return true;
+fn collect_spawn_task_ids_in_value(value: &Value, output: &mut HashSet<u64>) {
+    let mut visited_handle_targets = HashSet::new();
+    collect_spawn_task_ids_in_value_with_visited(value, output, &mut visited_handle_targets);
+}
+
+fn collect_spawn_task_ids_in_value_with_visited(
+    value: &Value,
+    output: &mut HashSet<u64>,
+    visited_handle_targets: &mut HashSet<usize>,
+) {
+    if let Some(task_id) = spawn_task_id_from_value(value) {
+        output.insert(task_id);
     }
     match value {
-        Value::Cell(cell) => cell
-            .data
-            .iter()
-            .any(|entry| value_contains_spawn_task_id(entry, task_id)),
-        Value::Struct(struct_value) => struct_value
-            .fields
-            .values()
-            .any(|entry| value_contains_spawn_task_id(entry, task_id)),
-        Value::Object(object_value) => object_value
-            .properties
-            .values()
-            .any(|entry| value_contains_spawn_task_id(entry, task_id)),
-        Value::Closure(closure) => closure
-            .captures
-            .iter()
-            .any(|entry| value_contains_spawn_task_id(entry, task_id)),
-        Value::OutputList(values) => values
-            .iter()
-            .any(|entry| value_contains_spawn_task_id(entry, task_id)),
+        Value::Cell(cell) => {
+            for entry in &cell.data {
+                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+            }
+        }
+        Value::Struct(struct_value) => {
+            for entry in struct_value.fields.values() {
+                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+            }
+        }
+        Value::Object(object_value) => {
+            for entry in object_value.properties.values() {
+                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+            }
+        }
+        Value::Closure(closure) => {
+            for entry in &closure.captures {
+                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+            }
+        }
+        Value::OutputList(values) => {
+            for entry in values {
+                collect_spawn_task_ids_in_value_with_visited(entry, output, visited_handle_targets);
+            }
+        }
+        Value::HandleObject(handle) => {
+            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            if visited_handle_targets.insert(raw_target) {
+                let target = unsafe { &*handle.target.as_raw() };
+                collect_spawn_task_ids_in_value_with_visited(
+                    target,
+                    output,
+                    visited_handle_targets,
+                );
+            }
+        }
         Value::Int(_)
         | Value::Num(_)
         | Value::Complex(_, _)
@@ -319,7 +361,63 @@ fn value_contains_spawn_task_id(value: &Value, task_id: u64) -> bool {
         | Value::Tensor(_)
         | Value::ComplexTensor(_)
         | Value::GpuTensor(_)
-        | Value::HandleObject(_)
+        | Value::Listener(_)
+        | Value::FunctionHandle(_)
+        | Value::ExternalFunctionHandle(_)
+        | Value::SemanticFunctionHandle { .. }
+        | Value::ClassRef(_)
+        | Value::MException(_) => {}
+    }
+}
+
+fn value_contains_spawn_task_id(value: &Value, task_id: u64) -> bool {
+    let mut visited_handle_targets = HashSet::new();
+    value_contains_spawn_task_id_with_visited(value, task_id, &mut visited_handle_targets)
+}
+
+fn value_contains_spawn_task_id_with_visited(
+    value: &Value,
+    task_id: u64,
+    visited_handle_targets: &mut HashSet<usize>,
+) -> bool {
+    if spawn_task_id_from_value(value) == Some(task_id) {
+        return true;
+    }
+    match value {
+        Value::Cell(cell) => cell.data.iter().any(|entry| {
+            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
+        }),
+        Value::Struct(struct_value) => struct_value.fields.values().any(|entry| {
+            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
+        }),
+        Value::Object(object_value) => object_value.properties.values().any(|entry| {
+            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
+        }),
+        Value::Closure(closure) => closure.captures.iter().any(|entry| {
+            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
+        }),
+        Value::OutputList(values) => values.iter().any(|entry| {
+            value_contains_spawn_task_id_with_visited(entry, task_id, visited_handle_targets)
+        }),
+        Value::HandleObject(handle) => {
+            let raw_target = unsafe { handle.target.as_raw() } as usize;
+            if !visited_handle_targets.insert(raw_target) {
+                return false;
+            }
+            let target = unsafe { &*handle.target.as_raw() };
+            value_contains_spawn_task_id_with_visited(target, task_id, visited_handle_targets)
+        }
+        Value::Int(_)
+        | Value::Num(_)
+        | Value::Complex(_, _)
+        | Value::Bool(_)
+        | Value::LogicalArray(_)
+        | Value::String(_)
+        | Value::StringArray(_)
+        | Value::CharArray(_)
+        | Value::Tensor(_)
+        | Value::ComplexTensor(_)
+        | Value::GpuTensor(_)
         | Value::Listener(_)
         | Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
@@ -370,7 +468,9 @@ fn retire_spawn_task_id_if_dropped(
     excluded_var: Option<usize>,
     excluded_local: Option<usize>,
 ) {
-    if let Some(id) = spawn_task_id_from_value(value) {
+    let mut task_ids = HashSet::new();
+    collect_spawn_task_ids_in_value(value, &mut task_ids);
+    for id in task_ids {
         if !spawn_task_id_still_live(id, stack, vars, context, excluded_var, excluded_local) {
             context.spawned_task_ids.remove(&id);
         }
@@ -386,22 +486,27 @@ fn retire_spawn_task_id_if_replaced(
     excluded_var: Option<usize>,
     excluded_local: Option<usize>,
 ) {
-    let Some(current_id) = spawn_task_id_from_value(current) else {
-        return;
-    };
-    let incoming_id = spawn_task_id_from_value(incoming);
-    if incoming_id == Some(current_id) {
+    let mut current_ids = HashSet::new();
+    collect_spawn_task_ids_in_value(current, &mut current_ids);
+    if current_ids.is_empty() {
         return;
     }
-    if !spawn_task_id_still_live(
-        current_id,
-        stack,
-        vars,
-        context,
-        excluded_var,
-        excluded_local,
-    ) {
-        context.spawned_task_ids.remove(&current_id);
+    let mut incoming_ids = HashSet::new();
+    collect_spawn_task_ids_in_value(incoming, &mut incoming_ids);
+    for current_id in current_ids {
+        if incoming_ids.contains(&current_id) {
+            continue;
+        }
+        if !spawn_task_id_still_live(
+            current_id,
+            stack,
+            vars,
+            context,
+            excluded_var,
+            excluded_local,
+        ) {
+            context.spawned_task_ids.remove(&current_id);
+        }
     }
 }
 
@@ -1206,7 +1311,7 @@ mod tests {
         AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView,
         SpawnHandleConcurrency, ThreadProviderGuard,
     };
-    use runmat_builtins::{CellArray, IntValue, StructValue, Value};
+    use runmat_builtins::{CellArray, HandleRef, IntValue, StructValue, Value};
 
     struct RejectSpawnProvider;
     static REJECT_PROVIDER: RejectSpawnProvider = RejectSpawnProvider;
@@ -1355,6 +1460,33 @@ mod tests {
             err.identifier(),
             Some("RunMat:SpawnGpuHandleUnsupported"),
             "expected closure-capture spawn policy identifier"
+        );
+    }
+
+    #[test]
+    fn spawn_policy_rejects_gpu_handles_nested_in_handle_object_target() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
+        let mut payload = StructValue::new();
+        payload.fields.insert(
+            "nested".to_string(),
+            Value::GpuTensor(GpuTensorHandle {
+                shape: vec![1],
+                device_id: 41,
+                buffer_id: 31,
+            }),
+        );
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let value = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        let err = enforce_spawn_value_concurrency_policy(&value)
+            .expect_err("reject policy should block handle-object nested GPU handle capture");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:SpawnGpuHandleUnsupported"),
+            "expected handle-object nested capture rejection identifier"
         );
     }
 
@@ -1546,6 +1678,61 @@ mod tests {
         assert!(
             context.spawned_task_ids.contains(&0),
             "dropping one alias should keep task id when another alias remains live"
+        );
+    }
+
+    #[test]
+    fn dropped_nested_spawn_task_handle_in_handle_object_retires_task_id() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        let mut payload = StructValue::new();
+        payload.fields.insert("task".to_string(), wrapped.clone());
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let nested = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "spawn should register task id before nested drop"
+        );
+        super::retire_spawn_task_id_if_dropped(&mut context, &nested, &[], &[], None, None);
+        assert!(
+            !context.spawned_task_ids.contains(&0),
+            "dropping nested spawn task handle should retire its task id"
+        );
+    }
+
+    #[test]
+    fn dropped_nested_spawn_task_handle_in_handle_object_keeps_id_when_alias_live() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        let mut payload = StructValue::new();
+        payload.fields.insert("task".to_string(), wrapped.clone());
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let nested = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        let vars = vec![wrapped.clone()];
+        super::retire_spawn_task_id_if_dropped(&mut context, &nested, &[], &vars, None, None);
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "dropping nested alias should keep task id when direct alias remains live"
         );
     }
 }
