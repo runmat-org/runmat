@@ -264,10 +264,10 @@ fn fusion_group_within_semantic_candidate_spans(
         .iter()
         .map(|group| group.source_span)
         .collect();
-    instr_spans[group.span.start..=end].iter().all(|span| {
-        candidate_spans
+    candidate_spans.iter().any(|candidate| {
+        instr_spans[group.span.start..=end]
             .iter()
-            .any(|candidate| source_spans_overlap(*span, *candidate))
+            .all(|span| source_spans_overlap(*span, *candidate))
     })
 }
 
@@ -606,6 +606,49 @@ mod tests {
                 &non_overlapping_candidates
             ),
             "expected no overlap when instruction source spans are disjoint from semantic candidate spans"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage() {
+        let instr_spans = vec![
+            runmat_hir::Span { start: 0, end: 2 },
+            runmat_hir::Span { start: 2, end: 4 },
+        ];
+        let group = runmat_accelerate::fusion::FusionGroup {
+            id: 0,
+            kind: runmat_accelerate::fusion::FusionKind::ElementwiseChain,
+            nodes: vec![],
+            shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+            span: runmat_accelerate::graph::InstrSpan { start: 0, end: 1 },
+            pattern: None,
+            stack_layout: None,
+        };
+        let split_candidates = vec![
+            crate::bytecode::SemanticFusionCandidateGroup {
+                id: 0,
+                signal_count: 1,
+                function: runmat_hir::FunctionId(0),
+                block: runmat_mir::BasicBlockId(0),
+                stmt_start: 0,
+                stmt_end: 1,
+                source_span: runmat_hir::Span { start: 0, end: 2 },
+            },
+            crate::bytecode::SemanticFusionCandidateGroup {
+                id: 1,
+                signal_count: 1,
+                function: runmat_hir::FunctionId(0),
+                block: runmat_mir::BasicBlockId(0),
+                stmt_start: 1,
+                stmt_end: 2,
+                source_span: runmat_hir::Span { start: 2, end: 4 },
+            },
+        ];
+
+        assert!(
+            !super::fusion_group_within_semantic_candidate_spans(&group, &instr_spans, &split_candidates),
+            "expected rejection when bytecode group coverage requires unioning multiple semantic candidate spans"
         );
     }
 

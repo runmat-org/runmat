@@ -17,6 +17,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 require single-semantic-candidate span coverage per executable bytecode fusion group
+  - `runmat-vm` semantic-span fusion-group filter now requires a bytecode fusion group's full instruction-span range to be covered by one semantic candidate span, rather than allowing coverage by unioning multiple candidate spans.
+  - This removes residual cross-candidate bytecode grouping leakage and tightens executable fusion group retention to single semantic candidate regions.
+  - Added `runmat-vm` regression coverage:
+    - `fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`
+  - Validation: `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`, `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 strict semantic-span coverage filter for executable bytecode fusion groups
   - `runmat-vm` bytecode fusion-group filtering now requires full instruction-span coverage by semantic candidate source spans (not just any-overlap).
   - This further constrains executable bytecode fusion groups to semantic candidate regions and reduces residual bytecode-graph-driven latitude in candidate retention.
