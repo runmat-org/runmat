@@ -1,6 +1,6 @@
 # Deliverable Audit
 
-Date: 2026-05-18
+Date: 2026-05-19
 
 This audit maps the active objective to concrete repository evidence and marks each item as `met`, `partial`, or `open`.
 
@@ -80,6 +80,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - fusion snapshot emission now includes semantic candidate nodes/decisions both when bytecode fusion groups are empty and when they are present, and this semantic path no longer hard-requires accel graph presence in [snapshot.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/fusion/snapshot.rs).
   - runtime fusion-plan preparation now consumes semantic candidate-group counts at the VM/accelerate boundary in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs) and [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs), with explicit transition diagnostics when semantic candidates exist but executable bytecode groups are absent.
   - VM bytecode now carries explicit semantic async/spawn metadata (`semantic_async_metadata`) in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs), derived from MIR spawn sites in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), and surfaced at interpreter setup in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs) so spawned-task transition semantics are explicit at runtime boundaries.
+  - MIR await boundaries now lower through explicit bytecode `Instr::Await` handling in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs), [instr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/instr.rs), [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs), and [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs), making async boundary opcodes explicit on both Spawn and Await paths.
   - runtime/provider decision telemetry exists in [native_auto.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/native_auto.rs).
   - residency hooks exist in accelerate runtime.
 - Blocking gap:
@@ -90,10 +91,18 @@ This audit maps the active objective to concrete repository evidence and marks e
 ### 7) Validation cadence (`met` for current slices)
 
 - Latest executed gates:
-  - `cargo test -p runmat-config`
   - `cargo fmt --all --check`
+  - `cargo test -p runmat-vm primary_compile_emits_explicit_spawn_instruction`
+  - `cargo test -p runmat-vm primary_compile_interprets_async_call_and_await_via_semantic_value_lane`
+  - `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`
+  - `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`
+  - `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`
+  - `cargo test -p runmat-vm fusion_group_semantic_span_filter_rejects_multi_candidate_union_coverage`
+  - `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`
+  - `cargo test -p runmat-core --test fusion_regressions`
   - `cargo test -p runmat-core --test semicolon_suppression`
   - `cargo check --workspace`
+  - `git diff --check`
   - `git diff --check`
 
 ## Current Conclusion
