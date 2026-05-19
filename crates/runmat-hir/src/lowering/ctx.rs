@@ -41,6 +41,7 @@ struct SemanticCtx {
     function_input_signatures: HashMap<String, (usize, bool)>,
     function_output_signatures: HashMap<String, (usize, bool)>,
     external_function_names: HashMap<String, FunctionId>,
+    known_project_symbols: HashSet<String>,
     captures: HashMap<FunctionId, Vec<CapturedBinding>>,
 }
 
@@ -57,6 +58,21 @@ pub fn lower(
 }
 
 impl SemanticCtx {
+    fn qualified_name_string(name: &QualifiedName) -> String {
+        name.0
+            .iter()
+            .map(|segment| segment.0.as_str())
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+
+    fn wildcard_candidate_is_resolvable(&self, qualified: &QualifiedName) -> bool {
+        qualified.display_name().as_deref().is_some_and(is_builtin)
+            || self
+                .known_project_symbols
+                .contains(&Self::qualified_name_string(qualified))
+    }
+
     fn wildcard_import_candidate(import_path: &QualifiedName, name: &str) -> QualifiedName {
         let mut segments = import_path.0.clone();
         segments.push(SymbolName(name.to_string()));
@@ -88,6 +104,7 @@ impl SemanticCtx {
             function_input_signatures: HashMap::new(),
             function_output_signatures: HashMap::new(),
             external_function_names: context.semantic_functions.clone(),
+            known_project_symbols: context.known_project_symbols.clone(),
             captures: HashMap::new(),
         };
 
@@ -1648,7 +1665,7 @@ impl SemanticCtx {
             .iter()
             .filter(|import| import.wildcard)
             .map(|import| Self::wildcard_import_candidate(&import.path, name))
-            .filter(|qualified| qualified.display_name().as_deref().is_some_and(is_builtin))
+            .filter(|qualified| self.wildcard_candidate_is_resolvable(qualified))
             .collect();
         if wildcard_matches.len() == 1 {
             return Ok(Some(def_path_for_import_path(&wildcard_matches[0])));
@@ -1712,7 +1729,7 @@ impl SemanticCtx {
             .iter()
             .filter(|import| import.wildcard)
             .map(|import| Self::wildcard_import_candidate(&import.path, name))
-            .filter(|qualified| qualified.display_name().as_deref().is_some_and(is_builtin))
+            .filter(|qualified| self.wildcard_candidate_is_resolvable(qualified))
             .collect();
         if wildcard_matches.len() > 1 {
             return Err(SemanticError::new(format!(

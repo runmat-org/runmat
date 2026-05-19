@@ -113,6 +113,13 @@ pub(crate) struct PreparedExecution {
     next_semantic_function_id_after_success: usize,
 }
 
+impl PreparedExecution {
+    #[cfg(test)]
+    pub(crate) fn lowering(&self) -> &LoweringResult {
+        &self.lowering
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct SessionWorkspaceBinding {
     pub(crate) key: crate::abi::WorkspaceBindingKey,

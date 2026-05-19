@@ -1,5 +1,7 @@
 use super::*;
 use crate::fusion::FusionPlannerMetadata;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 fn entrypoint_target_function(
     assembly: &runmat_hir::HirAssembly,
@@ -24,6 +26,48 @@ fn mir_local_fact_count_for_entrypoint(
         .count()
 }
 
+fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
+    use runmat_config::{build_project_composition_graph, discover_project_manifest_from};
+
+    let mut symbols = HashSet::new();
+    let cwd = match std::env::current_dir() {
+        Ok(cwd) => cwd,
+        Err(_) => return symbols,
+    };
+    let source_path = PathBuf::from(source_name);
+    let start = if source_path.is_file() {
+        source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| cwd.clone())
+    } else if source_path.is_absolute() {
+        source_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| cwd.clone())
+    } else if source_path.components().count() > 1 {
+        let joined = cwd.join(&source_path);
+        joined
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| cwd.clone())
+    } else {
+        cwd.clone()
+    };
+    let Some(manifest_path) = discover_project_manifest_from(&start) else {
+        return symbols;
+    };
+    let Ok(composition) = build_project_composition_graph(&manifest_path) else {
+        return symbols;
+    };
+    for package in composition.packages.values() {
+        for source in &package.source_index.files {
+            symbols.insert(source.qualified_name.clone());
+        }
+    }
+    symbols
+}
+
 impl RunMatSession {
     pub(crate) fn compile_input(
         &mut self,
@@ -39,10 +83,12 @@ impl RunMatSession {
             let _span = info_span!("runtime.lower").entered();
             let semantic_function_names = self.semantic_function_registry.names.clone();
             let workspace_bindings = self.lowering_workspace_bindings();
+            let known_project_symbols = discover_known_project_symbols(&source_name);
             runmat_hir::lower(
                 &ast,
                 &LoweringContext::new(&workspace_bindings)
                     .with_semantic_functions(&semantic_function_names)
+                    .with_known_project_symbols(&known_project_symbols)
                     .with_runmat_extensions_enabled(self.compat_mode.allows_runmat_extensions())
                     .with_top_level_await_enabled(self.top_level_await_enabled),
             )?
