@@ -294,6 +294,19 @@ pub enum DiscoverProjectSymbolsError {
     },
 }
 
+#[derive(Debug, Error)]
+pub enum ResolveProjectSourceInputError {
+    #[error(
+        "failed to resolve named project entrypoint `{entrypoint}` from working directory {cwd}: {source}"
+    )]
+    EntrypointResolve {
+        cwd: PathBuf,
+        entrypoint: String,
+        #[source]
+        source: DiscoverProjectEntrypointError,
+    },
+}
+
 impl ProjectManifest {
     pub fn validate(&self, project_root: &Path) -> Result<(), ProjectManifestValidationError> {
         let mut messages = Vec::new();
@@ -655,6 +668,46 @@ pub fn discover_project_symbols_from_source_name(
     discover_project_symbols_from(&start)
 }
 
+pub fn resolve_project_source_input_from(
+    cwd: &Path,
+    source_input: &Path,
+) -> Result<PathBuf, ResolveProjectSourceInputError> {
+    let candidate = if source_input.is_absolute() {
+        source_input.to_path_buf()
+    } else {
+        cwd.join(source_input)
+    };
+    if candidate.is_file() {
+        return Ok(source_input.to_path_buf());
+    }
+    if source_input.extension().is_none() {
+        let with_ext = if source_input.is_absolute() {
+            source_input.with_extension("m")
+        } else {
+            cwd.join(source_input).with_extension("m")
+        };
+        if with_ext.is_file() {
+            return Ok(source_input.with_extension("m"));
+        }
+    }
+
+    let Some(entrypoint_name) = source_input_entrypoint_name_candidate(source_input) else {
+        return Ok(source_input.to_path_buf());
+    };
+    let Some(discovered) =
+        resolve_named_entrypoint_from(cwd, &entrypoint_name).map_err(|source| {
+            ResolveProjectSourceInputError::EntrypointResolve {
+                cwd: cwd.to_path_buf(),
+                entrypoint: entrypoint_name.clone(),
+                source,
+            }
+        })?
+    else {
+        return Ok(source_input.to_path_buf());
+    };
+    Ok(discovered.entrypoint.source_file)
+}
+
 pub fn build_project_composition_graph(
     root_manifest_path: &Path,
 ) -> Result<ProjectCompositionGraph, ProjectCompositionError> {
@@ -679,6 +732,20 @@ fn is_relative_without_parent(path: &Path) -> bool {
     !path
         .components()
         .any(|component| matches!(component, Component::ParentDir))
+}
+
+fn source_input_entrypoint_name_candidate(path: &Path) -> Option<String> {
+    if path.extension().is_some() {
+        return None;
+    }
+    if path.components().count() != 1 {
+        return None;
+    }
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn resolve_entrypoint_path(project_root: &Path, path: &Path) -> Option<PathBuf> {

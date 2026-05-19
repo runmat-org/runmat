@@ -1150,23 +1150,8 @@ fn source_input_text(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn resolve_path_source_input(path: &str) -> std::result::Result<std::path::PathBuf, RunError> {
-    use runmat_config::resolve_named_entrypoint_from;
-    use std::path::{Path, PathBuf};
-
-    let candidate = PathBuf::from(path);
-    if candidate.is_file() {
-        return Ok(candidate);
-    }
-    if candidate.extension().is_none() {
-        let candidate_with_m = candidate.with_extension("m");
-        if candidate_with_m.is_file() {
-            return Ok(candidate_with_m);
-        }
-    }
-
-    let Some(entrypoint_name) = entrypoint_name_candidate(Path::new(path)) else {
-        return Ok(candidate);
-    };
+    use runmat_config::resolve_project_source_input_from;
+    use std::path::Path;
 
     let cwd = std::env::current_dir().map_err(|err| {
         RunError::Runtime(
@@ -1178,39 +1163,18 @@ fn resolve_path_source_input(path: &str) -> std::result::Result<std::path::PathB
         )
     })?;
 
-    let Some(discovered) =
-        resolve_named_entrypoint_from(&cwd, &entrypoint_name).map_err(|err| {
-            RunError::Runtime(
-                build_runtime_error(format!(
-                    "failed to resolve named project entrypoint '{}' from working directory {}: {}",
-                    entrypoint_name,
-                    cwd.display(),
-                    err
-                ))
-                .with_identifier("RunMat:EntrypointResolveFailed")
-                .build(),
-            )
-        })?
-    else {
-        return Ok(candidate);
-    };
-
-    Ok(discovered.entrypoint.source_file)
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn entrypoint_name_candidate(path: &std::path::Path) -> Option<String> {
-    if path.extension().is_some() {
-        return None;
-    }
-    if path.components().count() != 1 {
-        return None;
-    }
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(ToOwned::to_owned)
+    resolve_project_source_input_from(&cwd, Path::new(path)).map_err(|err| {
+        RunError::Runtime(
+            build_runtime_error(format!(
+                "failed to resolve source input '{}' from working directory {}: {}",
+                path,
+                cwd.display(),
+                err
+            ))
+            .with_identifier("RunMat:EntrypointResolveFailed")
+            .build(),
+        )
+    })
 }
 
 #[cfg(test)]

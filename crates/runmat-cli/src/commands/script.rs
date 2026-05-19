@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use log::{info, warn};
-use runmat_config::{resolve_named_entrypoint_from, ResolvedEntrypointTarget, RunMatConfig};
+use runmat_config::{
+    resolve_project_source_input_from, ResolveProjectSourceInputError, RunMatConfig,
+};
 use runmat_core::{
     abi::{DiagnosticSeverity, ExecutionOutcome, RuntimeFlow},
     TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
@@ -45,70 +47,16 @@ pub async fn execute_script_with_args(
 }
 
 fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
-    if script.exists() {
-        return Ok(script);
-    }
-    if script.extension().is_none() {
-        let with_m = script.with_extension("m");
-        if with_m.exists() {
-            return Ok(with_m);
-        }
-    }
     let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
-    let Some(name) = entrypoint_name_candidate(&script) else {
-        return Ok(script);
-    };
-    let Some(discovered) = resolve_named_entrypoint_from(&cwd, &name).map_err(|err| {
-        anyhow::anyhow!(
-            "failed to resolve named project entrypoint '{}' from working directory {}: {}",
-            name,
-            cwd.display(),
-            err
-        )
-    })?
-    else {
-        return Ok(script);
-    };
-    match discovered.entrypoint.target {
-        ResolvedEntrypointTarget::Path => info!(
-            "Resolved project entrypoint '{}' via {} path -> {}",
-            name,
-            discovered.manifest_path.display(),
-            discovered.entrypoint.source_file.display()
-        ),
-        ResolvedEntrypointTarget::ModuleFunction => info!(
-            "Resolved project entrypoint '{}' via {} module={} function={} -> {}",
-            name,
-            discovered.manifest_path.display(),
-            discovered
-                .entrypoint
-                .module
-                .as_deref()
-                .unwrap_or("<unknown>"),
-            discovered
-                .entrypoint
-                .function
-                .as_deref()
-                .unwrap_or("<unknown>"),
-            discovered.entrypoint.source_file.display()
-        ),
-    }
-    Ok(discovered.entrypoint.source_file)
-}
-
-fn entrypoint_name_candidate(script: &Path) -> Option<String> {
-    if script.extension().is_some() {
-        return None;
-    }
-    if script.components().count() != 1 {
-        return None;
-    }
-    script
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(ToOwned::to_owned)
+    resolve_project_source_input_from(&cwd, &script).map_err(|err| match err {
+        ResolveProjectSourceInputError::EntrypointResolve { .. } => {
+            anyhow::anyhow!(
+                "failed to resolve script target '{}': {}",
+                script.display(),
+                err
+            )
+        }
+    })
 }
 
 pub(crate) async fn execute_script_contents(

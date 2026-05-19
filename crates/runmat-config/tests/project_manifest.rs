@@ -2,7 +2,8 @@ use runmat_config::{
     build_project_composition_graph, build_project_source_index, discover_project_manifest_from,
     discover_project_symbols_from, discover_project_symbols_from_source_name,
     load_project_manifest, parse_project_manifest_toml, resolve_named_entrypoint_from,
-    resolve_project_entrypoint, ResolvedEntrypointTarget, PROJECT_MANIFEST_FILENAME,
+    resolve_project_entrypoint, resolve_project_source_input_from, ResolvedEntrypointTarget,
+    PROJECT_MANIFEST_FILENAME,
 };
 use std::fs;
 use tempfile::TempDir;
@@ -251,6 +252,46 @@ roots = ["."]
 
     assert_eq!(discovered.root_package, "demo");
     assert!(discovered.symbols.contains("main"));
+}
+
+#[test]
+fn resolve_project_source_input_from_infers_m_extension() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+
+    let resolved = resolve_project_source_input_from(tmp.path(), std::path::Path::new("src/main"))
+        .expect("resolve source input");
+    assert_eq!(resolved, std::path::PathBuf::from("src/main.m"));
+}
+
+#[test]
+fn resolve_project_source_input_from_resolves_named_entrypoint() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+    fs::write(
+        tmp.path().join(PROJECT_MANIFEST_FILENAME),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "main"
+path = "src/main"
+"#,
+    )
+    .unwrap();
+
+    let resolved = resolve_project_source_input_from(tmp.path(), std::path::Path::new("main"))
+        .expect("resolve source input");
+    assert_eq!(
+        resolved.canonicalize().unwrap(),
+        tmp.path().join("src/main.m").canonicalize().unwrap()
+    );
 }
 
 #[test]
