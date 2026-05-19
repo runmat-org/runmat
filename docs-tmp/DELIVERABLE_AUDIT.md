@@ -271,12 +271,14 @@ This audit maps the active objective to concrete repository evidence and marks e
   - provider-backed semantic spawned-workload lifecycle coverage now also exists in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs), executing compiled semantic function bodies (HIR->MIR->VM function bytecode) instead of synthetic interpreter-state setup:
     - `semantic_spawn_overwrite_releases_unaliased_provider_handle`
     - `semantic_spawn_overwrite_preserves_provider_handle_when_alias_retained`
+    - `semantic_async_spawn_await_overwrite_unaliased_executes_with_scalar_output`
+    - `semantic_async_spawn_await_overwrite_preserves_provider_handle_when_alias_retained`
   - Fusion materialized-store write paths now also consume handle-aware exclusion clearing in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs), extending shared-handle preservation beyond interpreter dispatch overwrite hooks.
   - Fusion materialized-store shared-handle preservation is now directly covered by `fusion_writeback_preserves_shared_gpu_handles` in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs).
   - runtime gather/retry GPU recursion now includes `Value::Closure` captures and `Value::OutputList` entries in [dispatcher.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/dispatcher.rs), with explicit nested-provider-unavailable identifier coverage.
 - Blocking gap:
   - executable fusion groups now use semantic/bytecode instruction-window boundaries and semantic kind/shape classification first, and semantic-tag filtering has reduced category-coupled mapping behavior; however, fusion realization still depends on accel-graph node mapping after boundary derivation in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
-  - spawned-task provider-handle policy now has explicit provider declarations plus VM enforcement, and provider-backed release semantics are covered for residency-clear/drop paths (including `Pop`) plus spawn/await completion/cancellation and compiled semantic spawn-overwrite lifecycle flows. Remaining evidence gap is fully asynchronous spawned workload execution semantics beyond current immediate spawn-handle lifecycle/cleanup coverage.
+  - spawned-task provider-handle policy now has explicit provider declarations plus VM enforcement, and provider-backed release semantics are covered for residency-clear/drop paths (including `Pop`) plus spawn/await completion/cancellation and compiled semantic spawn-overwrite lifecycle flows; semantic async spawn/await lifecycle execution coverage is now present for scalar-output and alias-retention flows. Remaining evidence gap is full async spawned-workload release/cleanup semantics for unaliased async helper/callee shapes.
 
 ### 7) Validation cadence (`met` for current slices)
 

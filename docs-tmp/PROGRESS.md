@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 semantic async spawn/await lifecycle coverage extension
+  - Extended provider-backed semantic lifecycle coverage in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs) to include compiled semantic `async` function flows that execute explicit `spawn` + `await` bytecode boundaries:
+    - `semantic_async_spawn_await_overwrite_unaliased_executes_with_scalar_output`
+    - `semantic_async_spawn_await_overwrite_preserves_provider_handle_when_alias_retained`
+  - Async alias-retained flow now ratchets provider residency/storage preservation through semantic function bytecode execution; unaliased async flow currently ratchets execution/output contract while deeper async release semantics remain tracked as an open Plan 7 gap.
+  - Validation: `cargo test -p runmat-vm --test spawn_semantic_lifecycle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic spawned-workload lifecycle evidence ratchet
   - Added provider-backed VM integration coverage that executes compiled semantic functions (not synthetic stack setup) for `spawn(...)` overwrite/drop flows in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs):
     - `semantic_spawn_overwrite_releases_unaliased_provider_handle`

@@ -29,7 +29,7 @@ mod tests {
     fn compile_semantic_function_bytecode(
         source: &str,
         function_name: &str,
-    ) -> Result<(Bytecode, usize), RuntimeError> {
+    ) -> Result<(Bytecode, usize, usize), RuntimeError> {
         let ast = runmat_parser::parse(source).map_err(|err| RuntimeError::new(err.to_string()))?;
         let hir = lower(&ast, &LoweringContext::empty())
             .map_err(|err| RuntimeError::new(err.to_string()))?;
@@ -53,6 +53,10 @@ mod tests {
             .input_slots
             .first()
             .ok_or_else(|| RuntimeError::new("semantic function missing input slot"))?;
+        let output_slot = *function_bytecode
+            .output_slots
+            .first()
+            .ok_or_else(|| RuntimeError::new("semantic function missing output slot"))?;
 
         let mut bytecode = Bytecode::with_instructions(
             function_bytecode.instructions.clone(),
@@ -62,7 +66,7 @@ mod tests {
         bytecode.call_arg_spans = function_bytecode.call_arg_spans.clone();
         bytecode.semantic_functions = registry;
 
-        Ok((bytecode, input_slot))
+        Ok((bytecode, input_slot, output_slot))
     }
 
     fn result_contains_handle(
@@ -92,7 +96,7 @@ mod tests {
                 y = 0;
             end
         "#;
-        let (bytecode, input_slot) =
+        let (bytecode, input_slot, _) =
             compile_semantic_function_bytecode(source, "spawn_drop_unaliased")
                 .expect("compile semantic function");
 
@@ -131,7 +135,7 @@ mod tests {
                 y = alias;
             end
         "#;
-        let (bytecode, input_slot) =
+        let (bytecode, input_slot, _) =
             compile_semantic_function_bytecode(source, "spawn_drop_with_alias")
                 .expect("compile semantic function");
 
@@ -151,6 +155,85 @@ mod tests {
         assert!(
             block_on(TEST_PROVIDER.download(&handle)).is_ok(),
             "aliased spawn/drop flow should preserve provider storage for retained alias handle"
+        );
+
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
+
+    #[test]
+    fn semantic_async_spawn_await_overwrite_unaliased_executes_with_scalar_output() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![5.0, 6.0], vec![1, 2]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let source = r#"
+            async function y = spawn_await_drop_unaliased(x)
+                task = spawn(x);
+                tmp = await(task);
+                task = 0;
+                x = 0;
+                tmp = 0;
+                y = 0;
+            end
+        "#;
+        let (bytecode, input_slot, output_slot) =
+            compile_semantic_function_bytecode(source, "spawn_await_drop_unaliased")
+                .expect("compile semantic async function");
+
+        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        vars[input_slot] = Value::GpuTensor(handle.clone());
+
+        let result = block_on(runmat_vm::interpret_function(&bytecode, vars))
+            .expect("semantic async spawn/await function should run");
+        assert_eq!(
+            result.get(output_slot),
+            Some(&Value::Num(0.0)),
+            "async spawn/await unaliased drop flow should preserve scalar output semantics"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
+
+    #[test]
+    fn semantic_async_spawn_await_overwrite_preserves_provider_handle_when_alias_retained() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![7.0, 8.0], vec![1, 2]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let source = r#"
+            async function y = spawn_await_drop_with_alias(x)
+                alias = x;
+                task = spawn(x);
+                tmp = await(task);
+                task = 0;
+                x = 0;
+                tmp = 0;
+                y = alias;
+            end
+        "#;
+        let (bytecode, input_slot, _) =
+            compile_semantic_function_bytecode(source, "spawn_await_drop_with_alias")
+                .expect("compile semantic async function");
+
+        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        vars[input_slot] = Value::GpuTensor(handle.clone());
+
+        let result = block_on(runmat_vm::interpret_function(&bytecode, vars))
+            .expect("semantic async spawn/await alias function should run");
+        assert!(
+            result_contains_handle(&result, &handle),
+            "async spawn/await aliased flow should retain the handle when returned by alias"
+        );
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "async spawn/await aliased flow should preserve residency for retained alias handle"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "async spawn/await aliased flow should preserve provider storage for retained alias handle"
         );
 
         fusion_residency::clear(&handle);
