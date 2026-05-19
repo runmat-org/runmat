@@ -170,11 +170,6 @@ where
 }
 
 #[inline]
-pub fn pop(stack: &mut Vec<Value>) {
-    let _ = stack.pop();
-}
-
-#[inline]
 pub fn swap(stack: &mut Vec<Value>) -> Result<(), RuntimeError> {
     let (b, a) = pop2(stack)?;
     stack.push(a);

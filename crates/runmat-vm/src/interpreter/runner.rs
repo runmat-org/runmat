@@ -720,6 +720,25 @@ mod tests {
     use runmat_builtins::{CellArray, Value};
     use runmat_hir::FunctionId;
     use std::sync::{atomic::AtomicBool, Arc};
+    #[cfg(feature = "native-accel")]
+    use {
+        once_cell::sync::Lazy,
+        runmat_accelerate::simple_provider::InProcessProvider,
+        runmat_accelerate_api::{AccelProvider, HostTensorView, ThreadProviderGuard},
+    };
+
+    #[cfg(feature = "native-accel")]
+    static TEST_PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
+
+    #[cfg(feature = "native-accel")]
+    fn upload_provider_handle(data: Vec<f64>, shape: Vec<usize>) -> runmat_accelerate_api::GpuTensorHandle {
+        TEST_PROVIDER
+            .upload(&HostTensorView {
+                data: &data,
+                shape: &shape,
+            })
+            .expect("upload should succeed")
+    }
 
     fn test_function(varargout_slot: Option<usize>) -> SemanticFunctionBytecode {
         SemanticFunctionBytecode {
@@ -827,5 +846,65 @@ mod tests {
             !fusion_residency::is_resident(&handle),
             "completion should clear residency marks for stack-only GPU handles"
         );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn pop_releases_stack_only_provider_handle() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![9.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode = Bytecode::with_instructions(vec![Instr::Pop, Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::GpuTensor(handle.clone()));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("interpreter should complete");
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "pop should clear residency for stack-only handles"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "pop should release provider storage for stack-only handles"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn pop_preserves_provider_handle_when_still_live_in_vars() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![11.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode = Bytecode::with_instructions(vec![Instr::Pop, Instr::Return], 1);
+        let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::GpuTensor(handle.clone()));
+        state.vars = vec![Value::GpuTensor(handle.clone())];
+
+        let mut result_vars = vec![Value::GpuTensor(handle.clone())];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("interpreter should complete");
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "pop should preserve residency for handles still referenced by vars"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "pop should not release provider storage for handles still referenced by vars"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
     }
 }

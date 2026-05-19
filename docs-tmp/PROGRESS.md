@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 clear dropped GPU handles on `Instr::Pop` with live-handle exclusion
+  - VM `Instr::Pop` now applies residency/provider-handle cleanup for dropped values, while excluding handles still referenced by live stack/var/local values to avoid premature release.
+  - Removed now-dead `ops::stack::pop` helper after dispatch migration.
+  - Added provider-backed runner regressions:
+    - `pop_releases_stack_only_provider_handle`
+    - `pop_preserves_provider_handle_when_still_live_in_vars`
+  - Validation: `cargo test -p runmat-vm pop_releases_stack_only_provider_handle`, `cargo test -p runmat-vm pop_preserves_provider_handle_when_still_live_in_vars`, `cargo test -p runmat-vm spawn_policy_`.
+
 - (pending commit) Plan 7 remove graph-derived shape inference from semantic fusion groups
   - VM semantic fusion-group construction now assigns `ShapeInfo::Unknown` directly instead of inferring shape from accel-graph node outputs, reducing semantic group-planning dependency on graph-derived shape artifacts.
   - Added ratchet assertion in `semantic_candidates_build_fusion_groups_from_accel_graph_nodes` that semantic groups keep `ShapeInfo::Unknown`.

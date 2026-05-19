@@ -191,6 +191,20 @@ fn enforce_spawn_value_concurrency_policy(value: &Value) -> Result<(), RuntimeEr
     })
 }
 
+#[cfg(feature = "native-accel")]
+fn clear_popped_value_residency_excluding_live_values(
+    popped: &Value,
+    stack: &[Value],
+    vars: &[Value],
+    context: &crate::bytecode::program::ExecutionContext,
+) {
+    let mut live = Vec::with_capacity(stack.len() + vars.len() + context.locals.len());
+    live.extend(stack.iter().cloned());
+    live.extend(vars.iter().cloned());
+    live.extend(context.locals.iter().cloned());
+    crate::accel::residency::clear_value_excluding(popped, &Value::OutputList(live));
+}
+
 pub async fn dispatch_instruction(
     meta: DispatchMeta<'_>,
     state: DispatchState<'_>,
@@ -343,7 +357,10 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::Pop => {
-            crate::ops::stack::pop(stack);
+            if let Some(value) = stack.pop() {
+                #[cfg(feature = "native-accel")]
+                clear_popped_value_residency_excluding_live_values(&value, stack, vars, context);
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
