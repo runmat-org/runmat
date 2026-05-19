@@ -1157,6 +1157,12 @@ fn resolve_path_source_input(path: &str) -> std::result::Result<std::path::PathB
     if candidate.is_file() {
         return Ok(candidate);
     }
+    if candidate.extension().is_none() {
+        let candidate_with_m = candidate.with_extension("m");
+        if candidate_with_m.is_file() {
+            return Ok(candidate_with_m);
+        }
+    }
 
     let Some(entrypoint_name) = entrypoint_name_candidate(Path::new(path)) else {
         return Ok(candidate);
@@ -1257,6 +1263,26 @@ path = "src/main"
             "resolved source path should match manifest entrypoint target"
         );
         assert_eq!(source_text, "x = 1;");
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn source_input_path_infers_m_extension_for_relative_path() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let (source_name, source_text) =
+            source_input_text(SourceInput::Path("src/main".to_string()))
+                .expect("path without extension should infer .m");
+
+        std::env::set_current_dir(prev).unwrap();
+
+        assert!(source_name.ends_with("src/main.m"));
+        assert_eq!(source_text.trim(), "x = 1;");
     }
 
     #[test]

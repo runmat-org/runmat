@@ -48,6 +48,12 @@ fn resolve_script_input(script: PathBuf) -> Result<PathBuf> {
     if script.exists() {
         return Ok(script);
     }
+    if script.extension().is_none() {
+        let with_m = script.with_extension("m");
+        if with_m.exists() {
+            return Ok(with_m);
+        }
+    }
     let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
     let Some(name) = entrypoint_name_candidate(&script) else {
         return Ok(script);
@@ -452,6 +458,24 @@ path = "src/main"
             resolved.canonicalize().unwrap(),
             tmp.path().join("src/main.m").canonicalize().unwrap()
         );
+    }
+
+    #[test]
+    fn resolve_script_input_infers_m_extension_for_relative_path() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let resolved =
+            resolve_script_input(PathBuf::from("src/main")).expect("should infer .m extension");
+
+        std::env::set_current_dir(prev).unwrap();
+
+        assert_eq!(resolved, PathBuf::from("src/main.m"));
     }
 
     #[test]
