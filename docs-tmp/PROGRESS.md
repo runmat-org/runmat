@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 3/7 VM static-property missing-name identifier ratchet
+  - Tightened VM semantic function coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `unqualified_static_property_without_imports_errors` now asserts stable identifier `RunMat:UndefinedVariable` instead of message-fragment matching (`undefined`/`not found` text).
+  - Validation: `cargo test -p runmat-vm unqualified_static_property_without_imports_errors -- --nocapture`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 6/7 aggregate-edge cell member RHS shape identifier ratchet
   - Tightened cell aggregate member-assignment error contracts in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs):
     - `assign_cell_member` cell-RHS shape mismatch now emits stable identifier `RunMat:CellMemberRhsShapeMismatch` instead of message-only string error conversion.

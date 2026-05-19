@@ -1128,15 +1128,7 @@ fn unqualified_static_property_without_imports_errors() {
         v = staticValue;
     "#;
     let err = compile_semantic_source(program).expect_err("expected missing static property error");
-    let msg = err.message().to_ascii_lowercase();
-    assert!(
-        msg.contains("staticvalue")
-            && (msg.contains("undefined")
-                || msg.contains("unresolved")
-                || msg.contains("not found")),
-        "unexpected error: {}",
-        err.message()
-    );
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedVariable"));
 }
 
 #[test]
