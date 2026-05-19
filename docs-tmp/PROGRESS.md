@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `06789be1` `RM-378: gate accel graph on accel-capable bytecode`
+  - VM compile now adds a semantic-candidate pre-gate that requires candidate-overlapping accel-capable bytecode instructions before building accel graph artifacts.
+  - When semantic candidate spans map only to non-accelerable instructions (for example logical ops), VM compile now skips accel-graph construction early and leaves executable fusion groups empty.
+  - Added `runmat-vm` unit ratchets:
+    - `semantic_candidate_accel_capability_gate_rejects_logical_ops`
+    - `semantic_candidate_accel_capability_gate_accepts_binary_ops`
+  - Validation: `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_rejects_logical_ops`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_accepts_binary_ops`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `git diff --check`.
+
 - `ec74ba1e` `RM-378: harden source-input resolver tests`
   - Expanded `runmat-config` integration coverage for `resolve_project_source_input_from` contracts:
     - pass-through behavior for non-entrypoint simple names
