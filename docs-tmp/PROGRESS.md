@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 release provider-backed GPU handles during residency clear
+  - VM residency clear paths now perform best-effort provider `free` for dropped GPU handles (in addition to residency/metadata clearing), so overwrite/drop paths release provider storage rather than only clearing fusion residency marks.
+  - `clear_value_excluding` still preserves shared handles through existing incoming-handle exclusion logic.
+  - Added provider-backed residency regressions in `accel/residency.rs`:
+    - `clear_value_releases_provider_storage_for_dropped_handle`
+    - `clear_value_excluding_preserves_shared_handles` now also asserts provider storage release/preservation behavior.
+  - Validation: `cargo test -p runmat-vm clear_value_`, `cargo test -p runmat-vm cancellation_clears_gpu_residency_for_live_values`, `cargo test -p runmat-vm completion_clears_stack_only_gpu_residency`, `cargo test -p runmat-vm spawn_policy_`.
+
 - (pending commit) Plan 7 clear transient GPU residency marks on cancellation and completion
   - VM interpreter loop now clears residency markers for live stack/variable values before returning `ExecutionCancelled`, preventing cancellation exits from leaving stale fusion residency state for GPU-handle values.
   - VM interpreter completion now clears residency marks for stack-only (non-live-var) GPU-handle values while preserving residency for handles still present in live vars.

@@ -27,7 +27,13 @@ fn clear_handles_in_value_excluding(value: &Value, keep_ids: &HashSet<u64>) {
     match value {
         Value::GpuTensor(handle) => {
             if !keep_ids.contains(&handle.buffer_id) {
+                if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
+                    let _ = provider.free(handle);
+                }
                 runmat_accelerate::fusion_residency::clear(handle);
+                runmat_accelerate_api::clear_handle_logical(handle);
+                runmat_accelerate_api::clear_handle_storage(handle);
+                runmat_accelerate_api::clear_handle_transpose(handle);
             }
         }
         Value::Cell(cell) => {
@@ -129,9 +135,23 @@ fn collect_gpu_buffer_ids(value: &Value, output: &mut HashSet<u64>) {
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
     use super::{clear_value, clear_value_excluding};
+    use futures::executor::block_on;
+    use once_cell::sync::Lazy;
     use runmat_accelerate::fusion_residency;
-    use runmat_accelerate_api::GpuTensorHandle;
+    use runmat_accelerate::simple_provider::InProcessProvider;
+    use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, ThreadProviderGuard};
     use runmat_builtins::{CellArray, Closure, Value};
+
+    static TEST_PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
+
+    fn upload_handle(data: Vec<f64>, shape: Vec<usize>) -> GpuTensorHandle {
+        TEST_PROVIDER
+            .upload(&HostTensorView {
+                data: &data,
+                shape: &shape,
+            })
+            .expect("upload should succeed")
+    }
 
     #[test]
     fn clear_value_releases_nested_gpu_handles_in_cells() {
@@ -177,20 +197,15 @@ mod tests {
 
     #[test]
     fn clear_value_excluding_preserves_shared_handles() {
-        let shared = GpuTensorHandle {
-            shape: vec![1],
-            device_id: 9,
-            buffer_id: 9001,
-        };
-        let old_only = GpuTensorHandle {
-            shape: vec![1],
-            device_id: 9,
-            buffer_id: 9002,
-        };
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let shared = upload_handle(vec![1.0], vec![1]);
+        let old_only = upload_handle(vec![2.0], vec![1]);
         fusion_residency::mark(&shared);
         fusion_residency::mark(&old_only);
         assert!(fusion_residency::is_resident(&shared));
         assert!(fusion_residency::is_resident(&old_only));
+        assert!(block_on(TEST_PROVIDER.download(&shared)).is_ok());
+        assert!(block_on(TEST_PROVIDER.download(&old_only)).is_ok());
 
         let current = Value::OutputList(vec![
             Value::GpuTensor(shared.clone()),
@@ -207,6 +222,34 @@ mod tests {
             !fusion_residency::is_resident(&old_only),
             "non-shared handle should clear residency across overwrite"
         );
+        assert!(
+            block_on(TEST_PROVIDER.download(&shared)).is_ok(),
+            "shared handle should remain available in provider storage"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&old_only)).is_err(),
+            "dropped handle should be released from provider storage"
+        );
         fusion_residency::clear(&shared);
+        let _ = TEST_PROVIDER.free(&shared);
+    }
+
+    #[test]
+    fn clear_value_releases_provider_storage_for_dropped_handle() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_handle(vec![3.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        clear_value(&Value::GpuTensor(handle.clone()));
+
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "cleared handle should no longer be marked resident"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "cleared handle should be released from provider storage"
+        );
     }
 }
