@@ -3,7 +3,7 @@ use runmat_config::RunMatConfig;
 use runmat_hir::LoweringContext;
 use runmat_parser::ParserOptions;
 use runmat_vm::Instr;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::io::Write;
@@ -11,14 +11,39 @@ use std::path::PathBuf;
 
 use crate::diagnostics::parser_compat;
 
-pub fn emit_bytecode(source: &str, config: &RunMatConfig) -> Result<String> {
+pub fn emit_bytecode(
+    source: &str,
+    config: &RunMatConfig,
+    source_name: Option<&str>,
+) -> Result<String> {
     let options = ParserOptions::new(parser_compat(config.language.compat));
     let ast = runmat_parser::parse_with_options(source, options)
         .map_err(|err| anyhow::anyhow!(format!("Parse error: {err:?}")))?;
-    let lowering = runmat_hir::lower(&ast, &LoweringContext::empty())
-        .map_err(|err| anyhow::anyhow!(format!("Lowering error: {err:?}")))?;
+    let known_project_symbols = discover_known_project_symbols(source_name);
+    let lowering = runmat_hir::lower(
+        &ast,
+        &LoweringContext::empty().with_known_project_symbols(&known_project_symbols),
+    )
+    .map_err(|err| anyhow::anyhow!(format!("Lowering error: {err:?}")))?;
     let bytecode = compile_bytecode(&lowering)?;
     Ok(disassemble_bytecode(&bytecode))
+}
+
+fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
+    use runmat_config::discover_project_symbols_from_source_name;
+
+    let Some(source_name) = source_name else {
+        return HashSet::new();
+    };
+    let Ok(cwd) = std::env::current_dir() else {
+        return HashSet::new();
+    };
+    let Ok(discovered) = discover_project_symbols_from_source_name(source_name, &cwd) else {
+        return HashSet::new();
+    };
+    discovered
+        .map(|discovered| discovered.symbols)
+        .unwrap_or_default()
 }
 
 fn compile_bytecode(lowering: &runmat_hir::LoweringResult) -> Result<runmat_vm::Bytecode> {

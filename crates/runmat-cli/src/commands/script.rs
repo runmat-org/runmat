@@ -69,7 +69,7 @@ pub(crate) async fn execute_script_contents(
     info!("Executing script source: {script:?}");
 
     if let Some(path) = &emit_bytecode_path {
-        let output = emit_bytecode(&content, config)
+        let output = emit_bytecode(&content, config, Some(script.to_string_lossy().as_ref()))
             .with_context(|| format!("Failed to emit bytecode for {script:?}"))?;
         write_bytecode_output(path, &output)?;
         return Ok(());
