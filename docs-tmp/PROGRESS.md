@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `7ed84fa4` `RM-378: drop accel graph when no executable groups`
+  - VM bytecode compile now drops accel-graph artifacts when semantic candidate groups exist but no executable semantic-mapped fusion groups survive filtering.
+  - This reduces residual bytecode-graph coupling in transitional semantic-candidate/no-executable-group cases by avoiding retention of unused graph artifacts.
+  - Validation: `cargo fmt --all --check`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `git diff --check`.
+
 - `9fd5f027` `RM-378: resolve wildcard imports via dependency aliases`
   - Project composition symbol discovery in `runmat-core` now includes dependency alias-qualified symbols from root `runmat.toml` dependency mapping (`alias -> package`), in addition to package-qualified and raw source-index symbols.
   - This enables wildcard imports like `import statsdep.*; y = summarize(1);` to resolve as package-function calls through manifest dependency aliases.
