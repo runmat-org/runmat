@@ -111,3 +111,93 @@ fn format_instr(instr: &Instr, var_names: &HashMap<usize, String>) -> String {
         other => format!("{other:?}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{discover_known_project_symbols, emit_bytecode};
+    use once_cell::sync::Lazy;
+    use runmat_config::RunMatConfig;
+    use std::fs;
+    use std::sync::Mutex;
+
+    static CWD_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    #[test]
+    fn discover_known_project_symbols_reads_manifest_source_context() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            tmp.path().join("+stats/summarize.m"),
+            "function y = summarize(x); y = x; end",
+        )
+        .expect("write package function");
+
+        let prev = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(tmp.path()).expect("set cwd");
+        let source_name = tmp.path().join("main.m");
+        let symbols = discover_known_project_symbols(Some(source_name.to_string_lossy().as_ref()));
+        std::env::set_current_dir(prev).expect("restore cwd");
+
+        assert!(
+            symbols.contains("stats.summarize"),
+            "expected project symbol discovery to include package-qualified names"
+        );
+    }
+
+    #[test]
+    fn emit_bytecode_uses_source_context_project_symbols() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            tmp.path().join("+stats/summarize.m"),
+            "function y = summarize(x); y = x; end",
+        )
+        .expect("write package function");
+
+        let prev = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(tmp.path()).expect("set cwd");
+        let source_name = tmp.path().join("main.m");
+        let output = emit_bytecode(
+            "import stats.*; y = summarize(1);",
+            &RunMatConfig::default(),
+            Some(source_name.to_string_lossy().as_ref()),
+        )
+        .expect("emit bytecode with project symbol context");
+        std::env::set_current_dir(prev).expect("restore cwd");
+
+        assert!(
+            output.contains("summarize"),
+            "expected disassembly to include imported callable identity"
+        );
+        assert!(
+            output.contains("CallFunctionMulti")
+                || output.contains("CallSemanticFunctionMulti")
+                || output.contains("CallBuiltinMulti"),
+            "expected disassembly to include a call instruction for imported symbol"
+        );
+    }
+}
