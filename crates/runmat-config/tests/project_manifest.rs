@@ -255,6 +255,53 @@ roots = ["."]
 }
 
 #[test]
+fn discover_project_symbols_from_source_name_rejects_nonexistent_path_like_name() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(PROJECT_MANIFEST_FILENAME),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .unwrap();
+
+    let discovered = discover_project_symbols_from_source_name("scripts/main.m", tmp.path())
+        .expect("discover symbols");
+    assert!(
+        discovered.is_none(),
+        "nonexistent path-like names should not trigger local project symbol discovery"
+    );
+}
+
+#[test]
+fn discover_project_symbols_from_source_name_rejects_colon_remote_name() {
+    let tmp = TempDir::new().unwrap();
+    fs::write(
+        tmp.path().join(PROJECT_MANIFEST_FILENAME),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .unwrap();
+    fs::write(tmp.path().join("main.m"), "x = 1;").unwrap();
+
+    let discovered = discover_project_symbols_from_source_name("remote:main.m", tmp.path())
+        .expect("discover symbols");
+    assert!(
+        discovered.is_none(),
+        "colon-style remote names should not trigger local project symbol discovery"
+    );
+}
+
+#[test]
 fn resolve_project_source_input_from_infers_m_extension() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join("src")).unwrap();

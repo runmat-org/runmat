@@ -690,6 +690,23 @@ pub fn discover_project_symbols_from_source_name(
     cwd: &Path,
 ) -> Result<Option<DiscoveredProjectSymbols>, DiscoverProjectSymbolsError> {
     let source_path = PathBuf::from(source_name);
+    let local_candidate = if source_path.is_absolute() {
+        source_path.clone()
+    } else {
+        cwd.join(&source_path)
+    };
+    // Remote/virtual source names (for example `remote:main.m`) should not trigger
+    // local composition symbol discovery unless they resolve to an actual local path.
+    if source_name.contains(':') && !local_candidate.exists() {
+        return Ok(None);
+    }
+    // Path-like source names should only drive symbol discovery when they map to an
+    // existing local path; plain names still discover from cwd.
+    if (source_path.is_absolute() || source_path.components().count() > 1)
+        && !local_candidate.exists()
+    {
+        return Ok(None);
+    }
     let start = if source_path.is_file() {
         source_path
             .parent()
@@ -701,8 +718,7 @@ pub fn discover_project_symbols_from_source_name(
             .map(Path::to_path_buf)
             .unwrap_or_else(|| cwd.to_path_buf())
     } else if source_path.components().count() > 1 {
-        let joined = cwd.join(&source_path);
-        joined
+        local_candidate
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| cwd.to_path_buf())

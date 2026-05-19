@@ -38,25 +38,6 @@ fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> 
     let Ok(cwd) = std::env::current_dir() else {
         return HashSet::new();
     };
-    let source_path = PathBuf::from(source_name);
-    if source_name.contains(':') {
-        let local_candidate = if source_path.is_absolute() {
-            source_path.clone()
-        } else {
-            cwd.join(&source_path)
-        };
-        if !local_candidate.exists() {
-            return HashSet::new();
-        }
-    }
-    let local_candidate = if source_path.is_absolute() {
-        source_path
-    } else {
-        cwd.join(&source_path)
-    };
-    if !local_candidate.exists() {
-        return HashSet::new();
-    }
     let Ok(discovered) = discover_project_symbols_from_source_name(source_name, &cwd) else {
         return HashSet::new();
     };
@@ -133,9 +114,8 @@ fn format_instr(instr: &Instr, var_names: &HashMap<usize, String>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{discover_known_project_symbols, emit_bytecode};
+    use super::{compile_bytecode, discover_known_project_symbols};
     use once_cell::sync::Lazy;
-    use runmat_config::RunMatConfig;
     use std::fs;
     use std::sync::Mutex;
 
@@ -197,27 +177,40 @@ roots = ["."]
             "function y = summarize(x); y = x; end",
         )
         .expect("write package function");
+        fs::write(tmp.path().join("main.m"), "x = 1;").expect("write source file");
 
         let prev = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(tmp.path()).expect("set cwd");
         let source_name = tmp.path().join("main.m");
-        let output = emit_bytecode(
-            "import stats.*; y = summarize(1);",
-            &RunMatConfig::default(),
-            Some(source_name.to_string_lossy().as_ref()),
+        let symbols = discover_known_project_symbols(Some(source_name.to_string_lossy().as_ref()));
+        let compat = runmat_config::RunMatConfig::default().language.compat;
+        let options = runmat_parser::ParserOptions::new(crate::diagnostics::parser_compat(compat));
+        let ast = runmat_parser::parse_with_options("import stats.*; y = summarize(1);", options)
+            .expect("parse source");
+        let lowering = runmat_hir::lower(
+            &ast,
+            &runmat_hir::LoweringContext::empty().with_known_project_symbols(&symbols),
         )
-        .expect("emit bytecode with project symbol context");
+        .expect("lower source");
+        let bytecode = compile_bytecode(&lowering).expect("compile bytecode");
         std::env::set_current_dir(prev).expect("restore cwd");
 
         assert!(
-            output.contains("summarize"),
-            "expected disassembly to include imported callable identity"
+            lowering
+                .semantic_index
+                .calls
+                .iter()
+                .any(|call| matches!(call.kind, runmat_hir::CallKind::PackageFunction(_))),
+            "expected wildcard call to resolve as package function with source-context symbols"
         );
         assert!(
-            output.contains("CallFunctionMulti")
-                || output.contains("CallSemanticFunctionMulti")
-                || output.contains("CallBuiltinMulti"),
-            "expected disassembly to include a call instruction for imported symbol"
+            bytecode.instructions.iter().any(|instr| match instr {
+                runmat_vm::Instr::CallFunctionMulti { identity, .. } => {
+                    identity.display_name().as_deref() == Some("stats.summarize")
+                }
+                _ => false,
+            }),
+            "expected call instruction identity to resolve to exact package-qualified symbol"
         );
     }
 
