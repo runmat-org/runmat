@@ -6,6 +6,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 ratchet await task-handle runtime contract through core integration
+  - Added `runmat-core` integration coverage `test_await_rejects_non_spawn_task_operand_at_runtime`, asserting `await(1)` returns runtime identifier `RunMat:AwaitOperandInvalid` in the session execution envelope.
+  - Validation: `cargo test -p runmat-core --test integration test_await_rejects_non_spawn_task_operand_at_runtime`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 introduce explicit spawned-task value lane at VM runtime boundary
   - VM dispatch `Instr::Spawn` now wraps payload values into an explicit spawned-task handle shape (struct-backed task record), and `Instr::Await` now validates/unwraps that handle instead of treating both opcodes as pure no-ops.
   - Added explicit await-operand contract diagnostics (`RunMat:AwaitOperandInvalid`) for non-task operands and malformed task records.
