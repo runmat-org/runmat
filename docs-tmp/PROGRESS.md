@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 core async handle-consumption identifier-contract ratchet
+  - Replaced a weak/incorrect async side-effect assumption in [integration.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/integration.rs) with a direct runtime contract for spawned-task handles:
+    - `test_spawn_handle_is_consumed_after_await`
+  - New coverage now asserts:
+    - first `await` on a spawned handle succeeds and preserves computed value (`42`)
+    - second `await` on the same handle fails with stable runtime identifier `RunMat:AwaitOperandInvalid`
+  - This keeps async integration behavior on semantic identifier/value assertions instead of display or incidental side-effect proxies.
+  - Validation: `cargo test -p runmat-core --test integration`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 explicit async runtime-model metadata contract
   - Added explicit semantic async runtime-model metadata in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs):
     - `SemanticAsyncRuntimeModel` (current value: `EagerValueLane`)

@@ -200,6 +200,34 @@ fn test_await_passes_through_non_spawn_operand_at_runtime() {
 }
 
 #[test]
+fn test_spawn_handle_is_consumed_after_await() {
+    gc_test_context(|| {
+        let mut engine = RunMatSession::new().unwrap();
+        let first_await = block_on(engine.execute("t = spawn(41 + 1); first = await(t);"))
+            .expect("first await execution should complete successfully");
+        assert!(
+            first_await.error.is_none(),
+            "first await should not report runtime errors"
+        );
+
+        let first = block_on(engine.execute("first")).expect("first readback should succeed");
+        assert_eq!(first.value, Some(runmat_builtins::Value::Num(42.0)));
+
+        let second_await = block_on(engine.execute("second = await(t);"));
+        match second_await {
+            Err(RunError::Runtime(err)) => {
+                assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+            }
+            Err(other) => panic!("expected runtime await-handle error, got: {other:?}"),
+            Ok(exec) => {
+                let err = exec.error.expect("expected execution-level runtime error");
+                assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+            }
+        }
+    });
+}
+
+#[test]
 fn test_control_flow_execution() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
