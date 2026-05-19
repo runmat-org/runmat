@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 core syntax-failure stage-contract ratchet
+  - Tightened broad parse/syntax failure checks in [engine.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/engine.rs):
+    - `test_parse_error_handling`
+    - `test_invalid_syntax_handling`
+  - Both tests now assert `Err(RunError::Syntax(_))` explicitly instead of generic `is_err()`, preserving parser-stage failure contracts through the core execution API.
+  - Validation: `cargo test -p runmat-core --test engine`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 core async handle-consumption identifier-contract ratchet
   - Replaced a weak/incorrect async side-effect assumption in [integration.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/integration.rs) with a direct runtime contract for spawned-task handles:
     - `test_spawn_handle_is_consumed_after_await`

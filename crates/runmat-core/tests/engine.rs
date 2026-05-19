@@ -4,7 +4,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use futures::executor::block_on;
-use runmat_core::RunMatSession;
+use runmat_core::{RunError, RunMatSession};
 use runmat_gc::{gc_test_context, GcConfig};
 
 #[test]
@@ -111,7 +111,10 @@ fn test_parse_error_handling() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
         let result = block_on(engine.execute("x = [1, 2,")); // Incomplete matrix
-        assert!(result.is_err()); // Should fail at parse stage
+        match result {
+            Err(RunError::Syntax(_)) => {}
+            other => panic!("expected syntax error for incomplete matrix literal, got {other:?}"),
+        }
     });
 }
 
@@ -120,7 +123,10 @@ fn test_invalid_syntax_handling() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
         let result = block_on(engine.execute("x = $invalid$"));
-        assert!(result.is_err()); // Should fail due to invalid tokens
+        match result {
+            Err(RunError::Syntax(_)) => {}
+            other => panic!("expected syntax error for invalid tokens, got {other:?}"),
+        }
     });
 }
 
