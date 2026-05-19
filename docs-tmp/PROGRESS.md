@@ -12,7 +12,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added provider-backed runner regressions:
     - `pop_releases_stack_only_provider_handle`
     - `pop_preserves_provider_handle_when_still_live_in_vars`
-  - Validation: `cargo test -p runmat-vm pop_releases_stack_only_provider_handle`, `cargo test -p runmat-vm pop_preserves_provider_handle_when_still_live_in_vars`, `cargo test -p runmat-vm spawn_policy_`.
+    - `spawn_await_completion_releases_stack_only_provider_handle`
+    - `spawn_await_completion_preserves_provider_handle_when_still_live_in_vars`
+  - Validation: `cargo test -p runmat-vm pop_releases_stack_only_provider_handle`, `cargo test -p runmat-vm pop_preserves_provider_handle_when_still_live_in_vars`, `cargo test -p runmat-vm spawn_await_completion_releases_stack_only_provider_handle`, `cargo test -p runmat-vm spawn_await_completion_preserves_provider_handle_when_still_live_in_vars`, `cargo test -p runmat-vm spawn_policy_`.
 
 - (pending commit) Plan 7 remove graph-derived shape inference from semantic fusion groups
   - VM semantic fusion-group construction now assigns `ShapeInfo::Unknown` directly instead of inferring shape from accel-graph node outputs, reducing semantic group-planning dependency on graph-derived shape artifacts.

@@ -907,4 +907,64 @@ mod tests {
         fusion_residency::clear(&handle);
         let _ = TEST_PROVIDER.free(&handle);
     }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn spawn_await_completion_releases_stack_only_provider_handle() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![21.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode = Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::GpuTensor(handle.clone()));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("spawn/await flow should complete");
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "spawn/await completion should clear residency for stack-only handle"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "spawn/await completion should release provider storage for stack-only handle"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn spawn_await_completion_preserves_provider_handle_when_still_live_in_vars() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![31.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode = Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
+        let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::GpuTensor(handle.clone()));
+        state.vars = vec![Value::GpuTensor(handle.clone())];
+
+        let mut result_vars = vec![Value::GpuTensor(handle.clone())];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("spawn/await flow should complete");
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "spawn/await completion should preserve residency for live-var handle"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "spawn/await completion should not release provider storage for live-var handle"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
 }
