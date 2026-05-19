@@ -480,26 +480,16 @@ fn accel_node_span_matches_instruction_window(
     window: &crate::bytecode::SemanticFusionInstructionWindow,
 ) -> bool {
     // Primary path: node span is contained by semantic window span.
-    // Compatibility fallback: allow node spans that fully cover the semantic window,
-    // but only with bounded widening (+/- one instruction) to avoid absorbing
-    // semantically unrelated broad node ranges.
+    // Secondary path: node span can fully cover the semantic window, but only
+    // with bounded widening (+/- one instruction) to avoid broad coupling.
     let contained_by_window =
         node.span.start >= window.span.start && node.span.end <= window.span.end;
     let covers_window = node.span.start <= window.span.start && node.span.end >= window.span.end;
-    let overlaps_window = node.span.start <= window.span.end && node.span.end >= window.span.start;
     if contained_by_window {
         return true;
     }
     if !covers_window {
-        // Compatibility fallback: accept only small partial-overlap boundary drift
-        // (<=1 instruction on both ends) so minor graph span jitter does not drop
-        // semantic windows, while still rejecting broad or weak overlap coupling.
-        if !overlaps_window {
-            return false;
-        }
-        let start_delta = node.span.start.abs_diff(window.span.start);
-        let end_delta = node.span.end.abs_diff(window.span.end);
-        return start_delta <= 1 && end_delta <= 1;
+        return false;
     }
     let left_extra = window.span.start.saturating_sub(node.span.start);
     let right_extra = node.span.end.saturating_sub(window.span.end);
@@ -1663,7 +1653,7 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_windows_map_accel_nodes_with_small_boundary_shift_overlap() {
+    fn semantic_windows_reject_partial_overlap_at_compile_mapping_stage() {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
@@ -1706,12 +1696,10 @@ mod tests {
             kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
         }];
         let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
-        assert_eq!(
-            groups.len(),
-            1,
-            "semantic windows should tolerate small boundary-shift overlap in accel node spans"
+        assert!(
+            groups.is_empty(),
+            "compile-time mapping should reject partial overlap and defer reconciliation to runtime sanitization"
         );
-        assert_eq!(groups[0].nodes, vec![0]);
     }
 
     #[cfg(feature = "native-accel")]
