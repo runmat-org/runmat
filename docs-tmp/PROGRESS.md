@@ -17,6 +17,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 semantic-gated fusion snapshot decisions for bytecode-group mismatch
+  - `runmat-core` fusion snapshot decisions for bytecode fusion groups are now gated by semantic candidate-group evidence from planner metadata.
+  - When bytecode fusion groups are present but `mir_fusion_candidate_group_count == 0`, snapshot decisions are now marked `fused: false` with explicit semantic-gating reason (`semantic-candidate-groups=0`) instead of reporting unconditional fused status.
+  - Added `runmat-core` regression coverage:
+    - `bytecode_groups_without_semantic_candidates_are_marked_non_fused`
+  - Validation: `cargo test -p runmat-core bytecode_groups_without_semantic_candidates_are_marked_non_fused`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic gating at fusion plan preparation boundary
   - `runmat-accelerate::prepare_fusion_plan` now requires semantic candidate-group evidence (`semantic_candidate_group_count > 0`) before constructing executable fusion plans from bytecode fusion groups.
   - This hardens the runtime fusion activation boundary against bytecode-only planning artifacts and keeps semantic candidate products as the gating source-of-truth for executable fusion-plan preparation.

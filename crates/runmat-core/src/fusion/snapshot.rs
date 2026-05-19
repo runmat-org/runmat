@@ -67,6 +67,7 @@ pub(crate) fn build_fusion_snapshot(
     let mut edges = Vec::new();
     let mut shaders = Vec::with_capacity(groups.len());
     let mut decisions = Vec::with_capacity(groups.len());
+    let semantic_gate_open = planner.mir_fusion_candidate_group_count > 0;
 
     for (index, group) in groups.iter().enumerate() {
         let node_id = format!("group-{}", group.id);
@@ -91,11 +92,18 @@ pub(crate) fn build_fusion_snapshot(
         });
         decisions.push(FusionPlanDecision {
             node_id: node_id.clone(),
-            fused: true,
-            reason: Some(format!(
-                "kernel={:?} span=[{}..{}]",
-                group.kind, group.span.start, group.span.end
-            )),
+            fused: semantic_gate_open,
+            reason: Some(if semantic_gate_open {
+                format!(
+                    "kernel={:?} span=[{}..{}]",
+                    group.kind, group.span.start, group.span.end
+                )
+            } else {
+                format!(
+                    "kernel={:?} span=[{}..{}] semantic-candidate-groups=0 (bytecode compatibility artifact)",
+                    group.kind, group.span.start, group.span.end
+                )
+            }),
             thresholds: None,
         });
         if let Some(next) = groups.get(index + 1) {
@@ -301,6 +309,49 @@ mod tests {
                 .iter()
                 .any(|node| node.id == "semantic-candidate-1"),
             "expected semantic candidate node"
+        );
+    }
+
+    #[test]
+    fn bytecode_groups_without_semantic_candidates_are_marked_non_fused() {
+        let snapshot = build_fusion_snapshot(
+            None,
+            &[FusionGroup {
+                id: 3,
+                kind: FusionKind::ElementwiseChain,
+                nodes: vec![0, 1],
+                shape: ShapeInfo::Scalar,
+                span: InstrSpan { start: 10, end: 12 },
+                pattern: None,
+                stack_layout: None,
+            }],
+            &[],
+            Some(FusionPlannerMetadata {
+                source: "semantic".to_string(),
+                mir_local_fact_count: 0,
+                mir_diagnostic_count: 0,
+                mir_fusion_signal_count: 2,
+                mir_fusion_candidate_group_count: 0,
+            }),
+        )
+        .expect("snapshot");
+
+        let decision = snapshot
+            .decisions
+            .iter()
+            .find(|decision| decision.node_id == "group-3")
+            .expect("bytecode group decision");
+        assert!(
+            !decision.fused,
+            "expected bytecode-only group to be marked non-fused when semantic candidates are absent"
+        );
+        assert!(
+            decision
+                .reason
+                .as_deref()
+                .unwrap_or("")
+                .contains("semantic-candidate-groups=0"),
+            "expected semantic gating reason in decision"
         );
     }
 }
