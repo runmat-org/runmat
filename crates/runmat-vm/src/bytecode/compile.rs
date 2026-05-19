@@ -69,17 +69,24 @@ pub fn compile(
 
 #[cfg(feature = "native-accel")]
 fn derive_semantic_fusion_metadata(mir: &MirAssembly) -> crate::bytecode::SemanticFusionMetadata {
+    let (mir_fusion_signal_count, mir_fusion_candidate_groups) =
+        derive_semantic_fusion_candidate_groups(mir);
     crate::bytecode::SemanticFusionMetadata {
-        mir_fusion_signal_count: semantic_fusion_signal_count(mir),
-        mir_fusion_candidate_group_count: semantic_fusion_candidate_group_count(mir),
+        mir_fusion_signal_count,
+        mir_fusion_candidate_group_count: mir_fusion_candidate_groups.len(),
+        mir_fusion_candidate_groups,
     }
 }
 
 #[cfg(feature = "native-accel")]
-fn semantic_fusion_signal_count(mir: &MirAssembly) -> usize {
-    let mut count = 0usize;
+fn derive_semantic_fusion_candidate_groups(
+    mir: &MirAssembly,
+) -> (usize, Vec<crate::bytecode::SemanticFusionCandidateGroup>) {
+    let mut signal_count = 0usize;
+    let mut groups = Vec::new();
     for body in mir.bodies.values() {
         for block in &body.blocks {
+            let mut run_len = 0usize;
             for stmt in &block.statements {
                 let value = match &stmt.kind {
                     MirStmtKind::Assign { value, .. }
@@ -87,47 +94,39 @@ fn semantic_fusion_signal_count(mir: &MirAssembly) -> usize {
                     | MirStmtKind::Expr(value) => value,
                     MirStmtKind::PlaceMutation(_)
                     | MirStmtKind::WorkspaceEffect { .. }
-                    | MirStmtKind::EnvironmentEffect(_) => continue,
+                    | MirStmtKind::EnvironmentEffect(_) => {
+                        if run_len >= 2 {
+                            groups.push(crate::bytecode::SemanticFusionCandidateGroup {
+                                id: groups.len(),
+                                signal_count: run_len,
+                            });
+                        }
+                        run_len = 0;
+                        continue;
+                    }
                 };
                 if rvalue_has_fusion_signal(value) {
-                    count += 1;
-                }
-            }
-        }
-    }
-    count
-}
-
-#[cfg(feature = "native-accel")]
-fn semantic_fusion_candidate_group_count(mir: &MirAssembly) -> usize {
-    let mut groups = 0usize;
-    for body in mir.bodies.values() {
-        for block in &body.blocks {
-            let mut run_len = 0usize;
-            for stmt in &block.statements {
-                let has_signal = match &stmt.kind {
-                    MirStmtKind::Assign { value, .. }
-                    | MirStmtKind::MultiAssign { value, .. }
-                    | MirStmtKind::Expr(value) => rvalue_has_fusion_signal(value),
-                    MirStmtKind::PlaceMutation(_)
-                    | MirStmtKind::WorkspaceEffect { .. }
-                    | MirStmtKind::EnvironmentEffect(_) => false,
-                };
-                if has_signal {
+                    signal_count += 1;
                     run_len += 1;
-                    continue;
+                } else {
+                    if run_len >= 2 {
+                        groups.push(crate::bytecode::SemanticFusionCandidateGroup {
+                            id: groups.len(),
+                            signal_count: run_len,
+                        });
+                    }
+                    run_len = 0;
                 }
-                if run_len >= 2 {
-                    groups += 1;
-                }
-                run_len = 0;
             }
             if run_len >= 2 {
-                groups += 1;
+                groups.push(crate::bytecode::SemanticFusionCandidateGroup {
+                    id: groups.len(),
+                    signal_count: run_len,
+                });
             }
         }
     }
-    groups
+    (signal_count, groups)
 }
 
 #[cfg(feature = "native-accel")]
@@ -284,6 +283,13 @@ mod tests {
                 .mir_fusion_candidate_group_count
                 > 0,
             "expected non-zero MIR fusion candidate group count"
+        );
+        assert!(
+            !bytecode
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_groups
+                .is_empty(),
+            "expected non-empty MIR fusion candidate groups"
         );
     }
 

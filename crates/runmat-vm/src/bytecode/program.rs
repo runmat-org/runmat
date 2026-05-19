@@ -175,6 +175,14 @@ pub struct Bytecode {
 pub struct SemanticFusionMetadata {
     pub mir_fusion_signal_count: usize,
     pub mir_fusion_candidate_group_count: usize,
+    pub mir_fusion_candidate_groups: Vec<SemanticFusionCandidateGroup>,
+}
+
+#[cfg(feature = "native-accel")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticFusionCandidateGroup {
+    pub id: usize,
+    pub signal_count: usize,
 }
 
 impl Bytecode {

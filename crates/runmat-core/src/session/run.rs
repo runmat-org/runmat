@@ -373,6 +373,9 @@ impl RunMatSession {
             build_fusion_snapshot(
                 bytecode.accel_graph.as_ref(),
                 &bytecode.fusion_groups,
+                &bytecode
+                    .semantic_fusion_metadata
+                    .mir_fusion_candidate_groups,
                 Some(crate::fusion::FusionPlannerMetadata {
                     source: "semantic-mir-analysis+bytecode-accel-graph-runtime".to_string(),
                     mir_local_fact_count: analysis.mir_locals.len(),

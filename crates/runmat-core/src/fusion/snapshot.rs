@@ -9,6 +9,7 @@ use super::{
 pub(crate) fn build_fusion_snapshot(
     graph: Option<&AccelGraph>,
     groups: &[FusionGroup],
+    semantic_candidate_groups: &[runmat_vm::SemanticFusionCandidateGroup],
     planner: Option<FusionPlannerMetadata>,
 ) -> Option<FusionPlanSnapshot> {
     let accel_graph_state = if graph.is_some() {
@@ -20,6 +21,53 @@ pub(crate) fn build_fusion_snapshot(
     if groups.is_empty() {
         if planner.mir_fusion_signal_count == 0 && planner.mir_fusion_candidate_group_count == 0 {
             return None;
+        }
+        if !semantic_candidate_groups.is_empty() {
+            let mut nodes = Vec::with_capacity(semantic_candidate_groups.len());
+            let mut edges = Vec::new();
+            let mut shaders = Vec::with_capacity(semantic_candidate_groups.len());
+            let mut decisions = Vec::with_capacity(semantic_candidate_groups.len());
+
+            for (index, group) in semantic_candidate_groups.iter().enumerate() {
+                let node_id = format!("semantic-candidate-{}", group.id);
+                nodes.push(FusionPlanNode {
+                    id: node_id.clone(),
+                    kind: "SemanticCandidate".to_string(),
+                    label: format!("semantic-run signals={}", group.signal_count),
+                    shape: Vec::new(),
+                    residency: None,
+                });
+                shaders.push(FusionPlanShader {
+                    name: node_id.clone(),
+                    stage: "semantic-candidate".to_string(),
+                    workgroup_size: None,
+                    source_hash: None,
+                });
+                decisions.push(FusionPlanDecision {
+                    node_id: node_id.clone(),
+                    fused: false,
+                    reason: Some(format!(
+                        "semantic-candidate signals={} bytecode-groups=0 accel-graph={}",
+                        group.signal_count, accel_graph_state
+                    )),
+                    thresholds: None,
+                });
+                if let Some(next) = semantic_candidate_groups.get(index + 1) {
+                    edges.push(FusionPlanEdge {
+                        from: node_id,
+                        to: format!("semantic-candidate-{}", next.id),
+                        reason: Some("semantic-program-order".to_string()),
+                    });
+                }
+            }
+
+            return Some(FusionPlanSnapshot {
+                nodes,
+                edges,
+                shaders,
+                decisions,
+                planner,
+            });
         }
         return Some(FusionPlanSnapshot {
             nodes: Vec::new(),
@@ -110,6 +158,7 @@ mod tests {
         let snapshot = build_fusion_snapshot(
             None,
             &[],
+            &[],
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
                 mir_local_fact_count: 0,
@@ -135,6 +184,41 @@ mod tests {
                 .unwrap_or("")
                 .contains("accel-graph=missing"),
             "expected missing accel graph marker in summary reason"
+        );
+    }
+
+    #[test]
+    fn semantic_candidate_groups_emit_nodes_without_bytecode_groups() {
+        let snapshot = build_fusion_snapshot(
+            None,
+            &[],
+            &[runmat_vm::SemanticFusionCandidateGroup {
+                id: 0,
+                signal_count: 3,
+            }],
+            Some(FusionPlannerMetadata {
+                source: "semantic".to_string(),
+                mir_local_fact_count: 0,
+                mir_diagnostic_count: 0,
+                mir_fusion_signal_count: 3,
+                mir_fusion_candidate_group_count: 1,
+            }),
+        )
+        .expect("semantic candidate snapshot");
+
+        assert_eq!(
+            snapshot.nodes.len(),
+            1,
+            "expected one semantic candidate node"
+        );
+        assert_eq!(snapshot.nodes[0].kind, "SemanticCandidate");
+        assert!(
+            snapshot.decisions[0]
+                .reason
+                .as_deref()
+                .unwrap_or("")
+                .contains("semantic-candidate signals=3"),
+            "expected semantic candidate signal annotation"
         );
     }
 }

@@ -170,6 +170,10 @@ impl RunMatSession {
         Ok(build_fusion_snapshot(
             prepared.bytecode.accel_graph.as_ref(),
             &prepared.bytecode.fusion_groups,
+            &prepared
+                .bytecode
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_groups,
             Some(FusionPlannerMetadata {
                 source: "semantic-mir-analysis+bytecode-accel-graph".to_string(),
                 mir_local_fact_count: analysis.mir_locals.len(),
