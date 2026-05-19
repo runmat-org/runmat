@@ -1286,6 +1286,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - New tests live in `crates/runmat-core/tests/fusion_regressions.rs` and assert semantic planner source tags plus non-zero MIR local fact counts.
   - Validation: `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
 
+- (pending commit) VM test identifier-contract ratchet (display-string debt reduction)
+  - Updated `crates/runmat-vm/tests/functions.rs` to assert stable runtime identifiers instead of message substrings in:
+    - `expansion_on_non_cell_errors` -> `RunMat:ExpandError`
+    - `mixed_range_end_assign_shape_mismatch_error` -> `RunMat:ShapeMismatch`
+  - Rationale: these tests validate runtime behavior contracts, so identifier checks are the stable assertion surface; display text remains non-contract UX.
+  - Validation: `cargo test -p runmat-vm expansion_on_non_cell_errors -- --nocapture`, `cargo test -p runmat-vm mixed_range_end_assign_shape_mismatch_error -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
+
 ## Next Resolution Items
 
 - Finish converting remaining legacy test/doc references that imply removed APIs where they block semantic-only confidence.

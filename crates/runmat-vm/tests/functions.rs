@@ -1270,12 +1270,7 @@ fn expansion_on_non_cell_errors() {
     let program = "r = max(5, 10{1});";
     let bytecode = compile_semantic_source(program).expect("compile expansion error source");
     let err = interpret(&bytecode).expect_err("expansion on non-cell should fail");
-    let msg = err.message().to_ascii_lowercase();
-    assert!(
-        msg.contains("cell") || msg.contains("expand"),
-        "unexpected error: {}",
-        err.message()
-    );
+    assert_eq!(err.identifier(), Some("RunMat:ExpandError"));
 }
 
 #[cfg(any(feature = "test-classes", test))]
@@ -1574,15 +1569,7 @@ fn mixed_range_end_assign_shape_mismatch_error() {
     let program = "A = [1 2 3 4; 5 6 7 8; 9 10 11 12]; B = [1;2;3]; A(2:end, 1:2:end-1) = B;";
     let err = execute_semantic_source_result(program)
         .expect_err("shape-mismatched range assignment should fail");
-    let msg = err.message().to_ascii_lowercase();
-    assert!(
-        msg.contains("shape")
-            || msg.contains("size")
-            || msg.contains("broadcast")
-            || msg.contains("dimension"),
-        "unexpected error: {}",
-        err.message()
-    );
+    assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
 }
 
 #[test]

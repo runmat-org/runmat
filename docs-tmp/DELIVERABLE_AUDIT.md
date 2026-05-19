@@ -353,8 +353,16 @@ This audit maps the active objective to concrete repository evidence and marks e
   - `cargo test -p runmat-vm primary_compile_scopes_await_site_metadata_to_entrypoint_target`
   - `cargo test -p runmat-core --test fusion_regressions`
   - `cargo test -p runmat-core --test semicolon_suppression`
+  - `cargo test -p runmat-vm expansion_on_non_cell_errors -- --nocapture`
+  - `cargo test -p runmat-vm mixed_range_end_assign_shape_mismatch_error -- --nocapture`
   - `cargo check --workspace`
   - `git diff --check`
+
+- Additional contract-hardening ratchet:
+  - Converted two VM tests in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) from message-substring assertions to identifier assertions:
+    - `expansion_on_non_cell_errors` now asserts `RunMat:ExpandError`.
+    - `mixed_range_end_assign_shape_mismatch_error` now asserts `RunMat:ShapeMismatch`.
+  - Purpose: reduce display-message coupling and keep runtime behavior tests pinned to stable identifier contracts.
 
 ## Current Conclusion
 
