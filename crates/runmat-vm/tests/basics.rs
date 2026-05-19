@@ -3,7 +3,7 @@ mod test_helpers;
 
 use runmat_accelerate::ShapeInfo;
 use runmat_builtins::Value;
-use runmat_vm::Instr;
+use runmat_vm::{EndExpr, Instr};
 use std::convert::TryInto;
 use test_helpers::compile_semantic_source;
 use test_helpers::interpret;
@@ -543,6 +543,28 @@ fn object_range_end_assignment_accepts_rich_end_expression_payload() {
         r = o(1);
         ok = (r == 99);
     "#;
+    let bytecode = compile_semantic_source(input).expect("compile object end-range assignment");
+    assert!(
+        bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                Instr::StoreSliceExpr {
+                    range_end_exprs,
+                    ..
+                } if matches!(
+                    range_end_exprs.as_slice(),
+                    [EndExpr::Sub(lhs, rhs)]
+                        if matches!(&**lhs, EndExpr::Mul(mul_lhs, mul_rhs)
+                            if matches!(&**mul_lhs, EndExpr::End)
+                                && matches!(&**mul_rhs, EndExpr::Const(v) if (*v - 1.0).abs() < 1e-12))
+                            && matches!(&**rhs, EndExpr::Div(div_lhs, div_rhs)
+                                if matches!(&**div_lhs, EndExpr::Const(v) if (*v - 1.0).abs() < 1e-12)
+                                    && matches!(&**div_rhs, EndExpr::Const(v) if (*v - 2.0).abs() < 1e-12))
+                )
+            )
+        }),
+        "expected StoreSliceExpr to preserve rich end arithmetic payload for object indexing"
+    );
     let vars = execute_semantic_source(input);
     assert!(
         vars.iter().any(|v| {
