@@ -3,8 +3,9 @@ use runmat_config::{
     discover_known_project_symbols_from_source_name, discover_project_manifest_from,
     discover_project_symbols_from, discover_project_symbols_from_source_name,
     load_project_manifest, parse_project_manifest_toml, resolve_named_entrypoint_from,
-    resolve_project_entrypoint, resolve_project_source_input_from, ResolveProjectSourceInputError,
-    ResolvedEntrypointTarget, PROJECT_MANIFEST_FILENAME,
+    resolve_project_entrypoint, resolve_project_source_input_from, ProjectCompositionError,
+    ProjectEntrypointResolveError, ProjectManifestLoadError, ProjectSourceIndexError,
+    ResolveProjectSourceInputError, ResolvedEntrypointTarget, PROJECT_MANIFEST_FILENAME,
 };
 use std::fs;
 use tempfile::TempDir;
@@ -62,8 +63,16 @@ roots = []
     let err = parsed
         .validate(std::path::Path::new("."))
         .expect_err("validation should reject empty package name and empty source roots");
-    assert!(err.to_string().contains("[package].name is required"));
-    assert!(err.to_string().contains("[sources].roots is required"));
+    assert!(
+        err.messages
+            .iter()
+            .any(|msg| msg == "[package].name is required and must be non-empty")
+    );
+    assert!(
+        err.messages
+            .iter()
+            .any(|msg| msg == "[sources].roots is required and must be non-empty")
+    );
 }
 
 #[test]
@@ -84,8 +93,15 @@ path = "src/main"
 "#,
     );
     let err = load_project_manifest(&manifest_path).expect_err("missing source root should fail");
-    let msg = err.to_string();
-    assert!(msg.contains("source root `src`"));
+    let ProjectManifestLoadError::Validation { source, .. } = err else {
+        panic!("expected validation error");
+    };
+    assert!(
+        source
+            .messages
+            .iter()
+            .any(|msg| msg.contains("source root `src`"))
+    );
 }
 
 #[test]
@@ -111,7 +127,7 @@ path = "src/main"
 "#,
     );
     let err = load_project_manifest(&manifest_path).expect_err("unsupported fields should fail");
-    assert!(err.to_string().contains("unsupported dependency fields"));
+    assert!(matches!(err, ProjectManifestLoadError::Parse { .. }));
 }
 
 #[test]
@@ -139,7 +155,15 @@ function = "run"
 "#,
     );
     let err = load_project_manifest(&manifest_path).expect_err("duplicate entrypoint should fail");
-    assert!(err.to_string().contains("duplicate entrypoint name `main`"));
+    let ProjectManifestLoadError::Validation { source, .. } = err else {
+        panic!("expected validation error");
+    };
+    assert!(
+        source
+            .messages
+            .iter()
+            .any(|msg| msg.contains("duplicate entrypoint name `main`"))
+    );
 }
 
 #[test]
@@ -510,7 +534,10 @@ roots = ["src"]
     fs::remove_dir_all(tmp.path().join("src")).unwrap();
     let err = build_project_source_index(tmp.path(), &manifest)
         .expect_err("missing source root should be reported");
-    assert!(err.to_string().contains("source root does not exist"));
+    let ProjectSourceIndexError::InvalidSourceRoot { root } = err else {
+        panic!("expected invalid source root error");
+    };
+    assert_eq!(root, std::path::PathBuf::from("src"));
 }
 
 #[test]
@@ -670,10 +697,13 @@ function = "main"
     fs::remove_dir_all(tmp.path().join("src")).unwrap();
     let err = resolve_project_entrypoint(tmp.path(), &manifest, "server")
         .expect_err("missing source root should bubble source index error");
-    assert!(
-        err.to_string().contains("failed to resolve entrypoint")
-            || err.to_string().contains("source root does not exist")
-    );
+    let ProjectEntrypointResolveError::SourceIndex { source, .. } = err else {
+        panic!("expected source index resolution error");
+    };
+    assert!(matches!(
+        source,
+        ProjectSourceIndexError::InvalidSourceRoot { .. }
+    ));
 }
 
 #[test]
@@ -753,7 +783,16 @@ dep_missing = { path = "dep_missing" }
 
     let err = build_project_composition_graph(&tmp.path().join("runmat.toml"))
         .expect_err("missing dependency manifest should fail");
-    assert!(err.to_string().contains("points to missing manifest"));
+    let ProjectCompositionError::MissingDependencyManifest {
+        dependency, path, ..
+    } = err
+    else {
+        panic!("expected missing dependency manifest error");
+    };
+    assert_eq!(dependency, "dep_missing");
+    assert!(path.ends_with(
+        std::path::Path::new("dep_missing").join(PROJECT_MANIFEST_FILENAME)
+    ));
 }
 
 #[test]
@@ -793,7 +832,10 @@ roots = ["src"]
 
     let err = build_project_composition_graph(&tmp.path().join("runmat.toml"))
         .expect_err("duplicate package names should fail");
-    assert!(err.to_string().contains("duplicate package name"));
+    let ProjectCompositionError::DuplicatePackageName { package, .. } = err else {
+        panic!("expected duplicate package name error");
+    };
+    assert_eq!(package, "dup_pkg");
 }
 
 #[test]

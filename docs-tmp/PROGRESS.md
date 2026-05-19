@@ -1340,6 +1340,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This keeps manifest-driven entrypoint failure coverage pinned to behavior contract surfaces rather than display text.
   - Validation: `cargo test -p runmat-core source_input_path_errors_for_invalid_named_entrypoint_target -- --nocapture`.
 
+- (pending commit) Plan 5 manifest/composition test typed-error ratchet
+  - Refactored display-string assertions in `crates/runmat-config/tests/project_manifest.rs` to typed error variant checks:
+    - `ProjectManifestLoadError::{Validation,Parse}`
+    - `ProjectSourceIndexError::InvalidSourceRoot`
+    - `ProjectEntrypointResolveError::SourceIndex`
+    - `ProjectCompositionError::{MissingDependencyManifest,DuplicatePackageName}`
+  - This keeps manifest/composition contracts pinned to semantic error surfaces and stable fields (`dependency`, `package`, structured variants) instead of rendered error text.
+  - Validation: `cargo test -p runmat-config --test project_manifest -- --nocapture`.
+
 ## Next Resolution Items
 
 - Finish converting remaining legacy test/doc references that imply removed APIs where they block semantic-only confidence.
