@@ -63,10 +63,10 @@ pub fn compile(
         (None, Vec::new())
     } else {
         let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
-        let mut fusion_groups = derive_semantic_fusion_groups_preserving_unmapped_windows(
-            &semantic_instruction_windows,
-            &accel_graph,
-        );
+        // Compile-time ownership is semantic-window scaffolding only; runtime fusion plan
+        // preparation performs node reconciliation against the accel graph.
+        let mut fusion_groups =
+            derive_semantic_fusion_groups_from_instruction_windows(&semantic_instruction_windows);
         if !fusion_groups.is_empty() {
             annotate_fusion_groups_with_stack_layout(
                 &c.instructions,
@@ -401,7 +401,7 @@ fn derive_semantic_fusion_groups_from_candidates(
     groups
 }
 
-#[cfg(feature = "native-accel")]
+#[cfg(all(feature = "native-accel", test))]
 fn derive_semantic_fusion_groups_preserving_unmapped_windows(
     semantic_instruction_windows: &[crate::bytecode::SemanticFusionInstructionWindow],
     accel_graph: &runmat_accelerate::graph::AccelGraph,

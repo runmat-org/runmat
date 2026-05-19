@@ -377,6 +377,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - Compile-time mapping now rejects disjoint, partial-overlap, and covering graph/window spans and leaves that reconciliation to runtime fusion sanitization (`prepare_fusion_plan` -> `sanitize_runtime_groups`) in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs).
   - Updated compile coverage to assert all compile-stage boundaries (`semantic_windows_reject_disjoint_gap_at_compile_mapping_stage`, `semantic_windows_reject_partial_overlap_at_compile_mapping_stage`, `semantic_windows_reject_covering_node_span_at_compile_mapping_stage`).
   - Tightened missing-tag compile mapping fallback to category-compatible matching only (instead of unconditional acceptance), with direct regression coverage: `semantic_windows_without_tags_reject_category_mismatch`.
+  - Compile now emits fusion-group scaffolding from semantic instruction windows without compile-time node assignment, delegating node reconciliation to runtime plan preparation.
 
 - Additional Plan 7 runtime sanitization ratchet:
   - Tightened runtime `sanitize_runtime_groups` span recovery in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs) from overlap-or-touch (`<=1` disjoint gap) to overlap-only, then to contained-span-only.
