@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 runtime fusion sanitization no-longer-trusts stale compile node IDs
+  - Strengthened runtime fusion-plan sanitization in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs):
+    - pre-mapped compile node IDs are now retained only when they are both kind-compatible and span-overlap/touch compatible with the semantic group span.
+    - stale mapped IDs now drop into existing runtime nearby-node recovery path instead of being trusted solely by node kind.
+  - Added regression coverage:
+    - `prepare_fusion_plan_replaces_stale_mapped_nodes_using_runtime_span_recovery`
+  - Validation: `cargo test -p runmat-accelerate prepare_fusion_plan_replaces_stale_mapped_nodes_using_runtime_span_recovery -- --nocapture`, `cargo test -p runmat-accelerate prepare_fusion_plan_recovers_empty_group_nodes_from_runtime_graph -- --nocapture`, `cargo test -p runmat-accelerate prepare_fusion_plan_rejects_empty_group_nodes_when_runtime_graph_is_too_far -- --nocapture`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 preserve semantic fusion windows under partial accel-node mapping drop
   - `runmat-vm` compile fusion-group derivation in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now preserves all semantic instruction windows as executable-group scaffolding, even when only a subset map to accel nodes.
   - Added compile helper path:

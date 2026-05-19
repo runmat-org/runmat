@@ -760,7 +760,10 @@ fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<Fu
             sanitized.nodes.retain(|id| {
                 graph
                     .node(*id)
-                    .map(|node| node_matches_runtime_group_kind(graph, node, &sanitized.kind))
+                    .map(|node| {
+                        node_matches_runtime_group_kind(graph, node, &sanitized.kind)
+                            && node_overlaps_or_touches_group_span(node, &sanitized.span)
+                    })
                     .unwrap_or(false)
             });
             if sanitized.nodes.is_empty() {
@@ -3575,6 +3578,29 @@ mod tests {
         assert!(
             plan.is_none(),
             "runtime sanitization should reject empty group mapping when no compatible nearby nodes exist"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_replaces_stale_mapped_nodes_using_runtime_span_recovery() {
+        let graph = simple_elementwise_graph();
+        let groups = vec![FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: vec![1],
+            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            span: InstrSpan { start: 9, end: 9 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1)
+            .expect("runtime sanitization should recover nearby node when mapped node is stale");
+        assert_eq!(plan.groups.len(), 1);
+        assert_eq!(
+            plan.groups[0].group.nodes,
+            vec![0],
+            "stale mapped node outside group span should be dropped and replaced by nearby compatible runtime node"
         );
     }
 
