@@ -10,8 +10,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added VM runner coverage for spawned payloads that carry provider handles through nested struct runtime value shapes:
     - `spawn_await_completion_releases_nested_struct_provider_handle`
     - `spawn_await_completion_releases_nested_object_property_provider_handle`
+    - `spawn_await_completion_preserves_nested_object_property_handle_when_alias_live`
   - This extends spawn/await lifecycle cleanup evidence beyond closure/output-list payloads to struct-nested and object-property-nested handle payloads.
-  - Validation: `cargo test -p runmat-vm spawn_await_completion_releases_nested_struct_provider_handle`, `cargo test -p runmat-vm spawn_await_completion_releases_nested_object_property_provider_handle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+  - Validation: `cargo test -p runmat-vm spawn_await_completion_releases_nested_struct_provider_handle`, `cargo test -p runmat-vm spawn_await_completion_releases_nested_object_property_provider_handle`, `cargo test -p runmat-vm spawn_await_completion_preserves_nested_object_property_handle_when_alias_live`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
 
 - (pending commit) Plan 6 deliverable audit closeout to `met`
   - Completed production consumer audit for nominal class/builtin metadata usage across runtime+VM callsites.

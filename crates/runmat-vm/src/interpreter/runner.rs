@@ -1297,6 +1297,42 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn spawn_await_completion_preserves_nested_object_property_handle_when_alias_live() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![101.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Await, Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        let mut payload = ObjectInstance::new("Payload".to_string());
+        payload
+            .properties
+            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
+        state.stack.push(Value::Object(payload.clone()));
+        state.vars = vec![Value::Object(payload.clone())];
+
+        let mut result_vars = vec![Value::Object(payload)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("spawn/await flow should complete for aliased nested object payload");
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "spawn/await completion should preserve residency for nested object handles still referenced by vars"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "spawn/await completion should not release provider storage for nested object handles still referenced by vars"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
+
     #[test]
     fn await_passes_through_non_spawn_value_operand() {
         let bytecode =
