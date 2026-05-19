@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `63539f02` `RM-378: block remote source symbol bleed in core compile`
+  - Hardened `runmat-core` compile-time project symbol discovery to reject path-like source names that do not map to existing local paths, preventing remote/virtual source-name contexts from inheriting local composition symbols.
+  - Added integration regression: `compile_input_does_not_leak_local_project_symbols_for_remote_source_names`.
+  - Validation: `cargo test -p runmat-core compile_input_does_not_leak_local_project_symbols_for_remote_source_names`, `cargo test -p runmat --lib commands::bytecode::tests::`, `cargo test -p runmat-core --test semicolon_suppression`.
+
 - `e2f9c345` `RM-378: guard bytecode symbol discovery on local source`
   - Tightened CLI bytecode source-context symbol discovery to require an existing local source path before manifest/source-index symbol lookup, avoiding accidental local-CWD symbol injection for virtual/nonexistent source names.
   - Added `discover_known_project_symbols_requires_existing_local_source_path` coverage and hardened existing source-context fixture expectations.
