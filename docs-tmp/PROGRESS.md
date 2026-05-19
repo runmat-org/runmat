@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Validation cadence keep workspace check green
+  - `cargo check --workspace` was failing on `runmat-lsp` due `-D warnings` dead-code rejection for `analyze_document_with_compat`.
+  - Added a narrow non-test dead-code allowance guard on that helper (`#[cfg_attr(not(test), allow(dead_code))]`) in `crates/runmat-lsp/src/core/analysis.rs`.
+  - Validation: `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 ratchet await task-handle runtime contract through core integration
   - Added `runmat-core` integration coverage `test_await_rejects_non_spawn_task_operand_at_runtime`, asserting `await(1)` returns runtime identifier `RunMat:AwaitOperandInvalid` in the session execution envelope.
   - Validation: `cargo test -p runmat-core --test integration test_await_rejects_non_spawn_task_operand_at_runtime`, `cargo fmt --all --check`.

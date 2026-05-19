@@ -69,6 +69,7 @@ impl TextRange {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentAnalysis {
     analyze_document_with_compat_and_source(text, compat, None)
 }
