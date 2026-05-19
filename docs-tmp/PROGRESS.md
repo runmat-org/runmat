@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 6 constructor fallback metadata normalization in runtime dispatcher
+  - Runtime builtin-dispatch constructor fallback now uses inheritance-aware class-method lookup for same-name constructor metadata and enforces static/public constructor dispatch policy.
+  - Constructor fallback now default-constructs object instances when same-name constructor metadata is private or non-static instead of invoking those methods.
+  - Added runtime dispatcher coverage:
+    - `constructor_fallback_uses_inherited_static_constructor_metadata`
+    - `constructor_fallback_skips_private_or_non_static_constructor_methods`
+  - Validation: `cargo test -p runmat-runtime constructor_fallback_uses_inherited_static_constructor_metadata`, `cargo test -p runmat-runtime constructor_fallback_skips_private_or_non_static_constructor_methods`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 end-to-end inherited object protocol dispatch ratchets
   - Added VM object resolution coverage asserting missing member read/write paths dispatch through inherited protocol methods, not only direct-class protocol metadata:
     - `load_member_uses_inherited_subsref_for_missing_property`

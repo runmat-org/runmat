@@ -126,6 +126,10 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `load_member_uses_inherited_subsref_for_missing_property`
     - `store_member_uses_inherited_subsasgn_for_missing_property`
   - this ratchets that child-class member fallback behavior executes inherited `subsref`/`subsasgn` handlers with concrete runtime outcomes, not just metadata-presence checks.
+  - runtime constructor fallback dispatch in [dispatcher.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/dispatcher.rs) now consumes inheritance-aware constructor metadata lookup (`lookup_method(class, class)`) and enforces static/public constructor invocation policy.
+  - explicit dispatcher coverage now ratchets both inherited-constructor dispatch and private/non-static constructor fallback behavior:
+    - `constructor_fallback_uses_inherited_static_constructor_metadata`
+    - `constructor_fallback_skips_private_or_non_static_constructor_methods`
   - runtime object construction hierarchy walk in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now guards parent traversal against class metadata cycles while applying inherited default-property initialization.
   - explicit runtime coverage (`new_object_builtin_handles_class_parent_cycles`) now ratchets deterministic constructor behavior for cyclic parent metadata graphs.
 - Gap:
