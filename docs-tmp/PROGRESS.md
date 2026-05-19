@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Validation ratchet replace VM indexing error display proxies with identifier assertions
+  - Tightened VM basics error coverage to assert stable semantic error identifiers instead of display-message substring proxies:
+    - `fft_end_arithmetic_out_of_bounds_raises_error` now asserts `RunMat:IndexOutOfBounds` / `RunMat:SubscriptOutOfBounds`.
+    - `scalar_slice_with_nonnumeric_selector_errors` now asserts `RunMat:UnsupportedIndexType` / `RunMat:SliceNonTensor`.
+  - Validation: `cargo test -p runmat-vm fft_end_arithmetic_out_of_bounds_raises_error`, `cargo test -p runmat-vm scalar_slice_with_nonnumeric_selector_errors`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 handle-object target recursion for residency/provider-release lifecycle
   - VM residency traversal now recurses through `Value::HandleObject` targets for both:
     - residency/provider clear on drop (`clear_value` path)

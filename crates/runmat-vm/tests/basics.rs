@@ -508,9 +508,12 @@ fn fft_end_arithmetic_out_of_bounds_raises_error() {
         compile_semantic_source(input).expect("compile semantic end arithmetic oob script");
     let err = interpret(&bytecode).expect_err("end+1 should be out-of-bounds");
     assert!(
-        err.to_string().contains("Index out of bounds")
-            || err.to_string().contains("Subscript out of bounds"),
-        "unexpected error: {err:?}"
+        matches!(
+            err.identifier(),
+            Some("RunMat:IndexOutOfBounds") | Some("RunMat:SubscriptOutOfBounds")
+        ),
+        "unexpected identifier: {:?} ({err:?})",
+        err.identifier()
     );
 }
 
@@ -524,11 +527,12 @@ fn scalar_slice_with_nonnumeric_selector_errors() {
     let bytecode = compile_semantic_source(input).expect("compile semantic scalar slice script");
     let err = interpret(&bytecode).expect_err("scalar slice with nonnumeric selector must error");
     assert!(
-        err.to_string().contains("Unsupported index type")
-            || err
-                .to_string()
-                .contains("Slicing only supported on tensors"),
-        "unexpected error: {err:?}"
+        matches!(
+            err.identifier(),
+            Some("RunMat:UnsupportedIndexType") | Some("RunMat:SliceNonTensor")
+        ),
+        "unexpected identifier: {:?} ({err:?})",
+        err.identifier()
     );
 }
 
