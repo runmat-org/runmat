@@ -294,12 +294,16 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `semantic_async_spawn_multi_output_helper_unrequested_handle_releases`
     - `semantic_async_spawn_varargout_helper_unrequested_handle_releases`
     - `semantic_async_spawn_varargout_nested_unrequested_handle_releases`
+  - semantic async lifecycle coverage now also includes multi-outstanding spawn-task flows in one semantic function frame (including out-of-order await):
+    - `semantic_async_spawn_parallel_await_keeps_retained_handle_and_releases_dropped_handle`
+    - `semantic_async_spawn_parallel_await_releases_both_unaliased_handles`
+  - these ratchets assert per-handle independence across two concurrent spawn handles (`t1`/`t2`), including retained-handle preservation and dropped-handle cleanup through residency/provider-release surfaces.
   - Fusion materialized-store write paths now also consume handle-aware exclusion clearing in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs), extending shared-handle preservation beyond interpreter dispatch overwrite hooks.
   - Fusion materialized-store shared-handle preservation is now directly covered by `fusion_writeback_preserves_shared_gpu_handles` in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs).
   - runtime gather/retry GPU recursion now includes `Value::Closure` captures and `Value::OutputList` entries in [dispatcher.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/dispatcher.rs), with explicit nested-provider-unavailable identifier coverage.
 - Blocking gap:
   - executable fusion groups now use semantic/bytecode instruction-window boundaries and semantic kind/shape classification first, and semantic-tag filtering has reduced category-coupled mapping behavior; however, fusion realization still depends on accel-graph node mapping after boundary derivation in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
-  - spawned-task provider-handle policy now has explicit provider declarations plus VM enforcement, and provider-backed release semantics are covered for residency-clear/drop paths (including `Pop`) plus spawn/await completion/cancellation and compiled semantic spawn-overwrite lifecycle flows; semantic async spawn/await lifecycle coverage now includes unaliased helper/callee release behavior via semantic invoker path for direct, struct-nested, cell-nested, multi-output, `varargout`, and nested-unrequested `varargout` payload/output shapes. Remaining evidence gap is parallel/true-async execution semantics (beyond immediate spawn-wrap/await-unpack value-lane behavior).
+  - spawned-task provider-handle policy now has explicit provider declarations plus VM enforcement, and provider-backed release semantics are covered for residency-clear/drop paths (including `Pop`) plus spawn/await completion/cancellation and compiled semantic spawn-overwrite lifecycle flows; semantic async spawn/await lifecycle coverage now includes unaliased helper/callee release behavior via semantic invoker path for direct, struct-nested, cell-nested, multi-output, `varargout`, nested-unrequested `varargout`, and multi-outstanding two-task await flows. Remaining evidence gap is scheduler-level true parallel execution behavior (not just multi-handle lifecycle correctness).
 
 ### 7) Validation cadence (`met` for current slices)
 

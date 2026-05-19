@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 semantic async multi-task await lifecycle ratchet
+  - Extended semantic invoker async lifecycle coverage in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs) with multi-outstanding spawn-task flows:
+    - `semantic_async_spawn_parallel_await_keeps_retained_handle_and_releases_dropped_handle`
+    - `semantic_async_spawn_parallel_await_releases_both_unaliased_handles`
+  - These ratchets validate independent await/cleanup behavior across two concurrent spawn handles in one semantic async function frame, including out-of-order await (`t2` then `t1`) and per-handle residency/provider-release outcomes.
+  - Validation: `cargo test -p runmat-vm --test spawn_semantic_lifecycle semantic_async_spawn_parallel_await_keeps_retained_handle_and_releases_dropped_handle`, `cargo test -p runmat-vm --test spawn_semantic_lifecycle semantic_async_spawn_parallel_await_releases_both_unaliased_handles`, `cargo test -p runmat-vm --test spawn_semantic_lifecycle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 tighten semicolon error-path assertions to identifier contracts
   - Replaced weak “any error” checks in [semicolon_suppression.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/semicolon_suppression.rs) (`test_errors_always_shown`) with stable undefined-variable identifier assertions (`RunMat:UndefinedVariable`) for both semicolon and non-semicolon paths.
   - This removes a remaining display/error-surface proxy in core semicolon behavior coverage and keeps the failure contract semantic.

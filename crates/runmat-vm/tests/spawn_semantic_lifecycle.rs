@@ -119,6 +119,16 @@ mod tests {
         })
     }
 
+    fn value_matches_handle(
+        value: &Value,
+        handle: &runmat_accelerate_api::GpuTensorHandle,
+    ) -> bool {
+        matches!(
+            value,
+            Value::GpuTensor(candidate) if candidate.buffer_id == handle.buffer_id
+        )
+    }
+
     #[test]
     fn semantic_spawn_overwrite_releases_unaliased_provider_handle() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
@@ -525,6 +535,139 @@ mod tests {
         assert!(
             block_on(TEST_PROVIDER.download(&handle)).is_err(),
             "async spawn/await nested varargout helper unaliased flow should release provider storage for dropped handle"
+        );
+    }
+
+    #[test]
+    fn semantic_async_spawn_parallel_await_keeps_retained_handle_and_releases_dropped_handle() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle_a = upload_provider_handle(vec![21.0, 22.0], vec![1, 2]);
+        let handle_b = upload_provider_handle(vec![23.0, 24.0], vec![1, 2]);
+        assert!(block_on(TEST_PROVIDER.download(&handle_a)).is_ok());
+        assert!(block_on(TEST_PROVIDER.download(&handle_b)).is_ok());
+        fusion_residency::mark(&handle_a);
+        fusion_residency::mark(&handle_b);
+
+        let source = r#"
+            async function y = pass(x)
+                y = x;
+            end
+
+            async function y = spawn_parallel_keep_first_drop_second(a, b)
+                t1 = spawn(pass(a));
+                t2 = spawn(pass(b));
+                v2 = await(t2);
+                t2 = 0;
+                b = 0;
+                v2 = 0;
+                v1 = await(t1);
+                t1 = 0;
+                a = 0;
+                y = v1;
+            end
+        "#;
+        let (function_id, registry, _input_slot) = compile_semantic_function_invocation_fixture(
+            source,
+            "spawn_parallel_keep_first_drop_second",
+        )
+        .expect("compile semantic parallel async function");
+        let result = block_on(runmat_vm::invoke_semantic_function_value(
+            function_id.0,
+            &[
+                Value::GpuTensor(handle_a.clone()),
+                Value::GpuTensor(handle_b.clone()),
+            ],
+            1,
+            &registry,
+        ))
+        .expect("semantic parallel async function should run via semantic invoker");
+        assert!(
+            value_matches_handle(&result, &handle_a),
+            "parallel async flow should preserve retained first awaited handle as output"
+        );
+        assert!(
+            fusion_residency::is_resident(&handle_a),
+            "parallel async flow should preserve residency for retained first handle"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle_a)).is_ok(),
+            "parallel async flow should preserve provider storage for retained first handle"
+        );
+        assert!(
+            !fusion_residency::is_resident(&handle_b),
+            "parallel async flow should clear residency for dropped second handle"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle_b)).is_err(),
+            "parallel async flow should release provider storage for dropped second handle"
+        );
+
+        fusion_residency::clear(&handle_a);
+        let _ = TEST_PROVIDER.free(&handle_a);
+    }
+
+    #[test]
+    fn semantic_async_spawn_parallel_await_releases_both_unaliased_handles() {
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle_a = upload_provider_handle(vec![25.0, 26.0], vec![1, 2]);
+        let handle_b = upload_provider_handle(vec![27.0, 28.0], vec![1, 2]);
+        assert!(block_on(TEST_PROVIDER.download(&handle_a)).is_ok());
+        assert!(block_on(TEST_PROVIDER.download(&handle_b)).is_ok());
+        fusion_residency::mark(&handle_a);
+        fusion_residency::mark(&handle_b);
+
+        let source = r#"
+            async function y = pass(x)
+                y = x;
+            end
+
+            async function y = spawn_parallel_drop_both(a, b)
+                t1 = spawn(pass(a));
+                t2 = spawn(pass(b));
+                v2 = await(t2);
+                v1 = await(t1);
+                t1 = 0;
+                t2 = 0;
+                a = 0;
+                b = 0;
+                v1 = 0;
+                v2 = 0;
+                y = 0;
+            end
+        "#;
+        let (function_id, registry, _input_slot) =
+            compile_semantic_function_invocation_fixture(source, "spawn_parallel_drop_both")
+                .expect("compile semantic parallel async drop-both function");
+        let result = block_on(runmat_vm::invoke_semantic_function_value(
+            function_id.0,
+            &[
+                Value::GpuTensor(handle_a.clone()),
+                Value::GpuTensor(handle_b.clone()),
+            ],
+            1,
+            &registry,
+        ))
+        .expect("semantic parallel async drop-both function should run via semantic invoker");
+        assert_eq!(
+            result,
+            Value::Num(0.0),
+            "parallel async drop-both flow should preserve scalar output semantics"
+        );
+        assert!(
+            !fusion_residency::is_resident(&handle_a),
+            "parallel async drop-both flow should clear residency for first dropped handle"
+        );
+        assert!(
+            !fusion_residency::is_resident(&handle_b),
+            "parallel async drop-both flow should clear residency for second dropped handle"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle_a)).is_err(),
+            "parallel async drop-both flow should release provider storage for first dropped handle"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle_b)).is_err(),
+            "parallel async drop-both flow should release provider storage for second dropped handle"
         );
     }
 }
