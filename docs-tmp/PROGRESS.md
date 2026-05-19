@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `7fe6791d` `RM-378: require candidate span containment in accel gate`
+  - Tightened VM compile semantic pre-gate matching from permissive span overlap to full instruction-span containment within semantic candidate source spans for accel-capable instruction qualification.
+  - Added coverage: `semantic_candidate_accel_capability_gate_rejects_partial_span_overlap`, asserting boundary-only/partial overlap no longer qualifies a candidate for accel-graph construction.
+  - Validation: `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_rejects_partial_span_overlap`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_rejects_non_accel_builtins`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_accepts_binary_ops`.
+
 - `0b65a6b4` `RM-378: tighten atan2 expansion bytecode contract`
   - Strengthened VM basics multi-output argument expansion ratchet for `atan2(g())` by asserting:
     - explicit `CallBuiltinExpandMultiOutput("atan2", specs, 1)` shape with `ArgSpec { is_expand: true, expand_all: true, num_indices: 0 }`
