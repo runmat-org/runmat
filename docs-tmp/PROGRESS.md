@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 completion-boundary residency keep-set ratchet for local aliases
+  - Updated VM interpreter completion cleanup in `run_interpreter_inner` to preserve live handles referenced by `context.locals` when clearing stack-dropped values.
+  - Added/ratcheted runner coverage for spawned payload alias liveness through locals at completion/pop boundaries:
+    - `spawn_pop_preserves_provider_handle_when_payload_still_live_in_locals`
+    - `spawn_await_completion_preserves_nested_handle_object_target_handle_when_alias_live_in_locals`
+    - `spawn_pop_preserves_nested_handle_object_target_handle_when_alias_live_in_locals`
+  - Validation: `cargo test -p runmat-vm --lib spawn_await_completion_preserves_nested_handle_object_target_handle_when_alias_live_in_locals`, `cargo test -p runmat-vm --lib spawn_pop_preserves`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 await-flow ratchet for local-slot spawn-handle aliases
   - Added runner-level await-flow coverage for spawn-handle alias liveness when aliases are carried through local slots:
     - `await_succeeds_after_overwriting_one_local_spawn_handle_alias`
