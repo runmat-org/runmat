@@ -267,6 +267,25 @@ fn unwrap_spawned_value(
         })
 }
 
+fn retire_spawn_task_id_if_dropped(
+    context: &mut crate::bytecode::program::ExecutionContext,
+    value: &Value,
+) {
+    let Value::Struct(task) = value else {
+        return;
+    };
+    let is_spawn_task = matches!(
+        task.fields.get(SPAWN_TASK_KIND_FIELD),
+        Some(Value::String(kind)) if kind == SPAWN_TASK_KIND_VALUE
+    );
+    if !is_spawn_task {
+        return;
+    }
+    if let Some(Value::Int(IntValue::U64(id))) = task.fields.get(SPAWN_TASK_ID_FIELD) {
+        context.spawned_task_ids.remove(id);
+    }
+}
+
 #[cfg(feature = "native-accel")]
 fn clear_popped_value_residency_excluding_live_values(
     popped: &Value,
@@ -434,6 +453,7 @@ pub async fn dispatch_instruction(
         }
         Instr::Pop => {
             if let Some(value) = stack.pop() {
+                retire_spawn_task_id_if_dropped(context, &value);
                 #[cfg(feature = "native-accel")]
                 clear_popped_value_residency_excluding_live_values(&value, stack, vars, context);
             }
@@ -1171,5 +1191,26 @@ mod tests {
         let err = unwrap_spawned_value(&mut await_context, wrapped)
             .expect_err("await should reject stale/unregistered task ids");
         assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+    }
+
+    #[test]
+    fn dropped_spawn_task_handle_retires_task_id() {
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+            spawned_task_ids: std::collections::HashSet::new(),
+            next_spawn_task_id: 0,
+        };
+        let wrapped = wrap_spawned_value(&mut context, Value::Num(7.0));
+        assert!(
+            context.spawned_task_ids.contains(&0),
+            "spawn should register task id before drop"
+        );
+        super::retire_spawn_task_id_if_dropped(&mut context, &wrapped);
+        assert!(
+            !context.spawned_task_ids.contains(&0),
+            "dropping a spawn task handle should retire its task id"
+        );
     }
 }

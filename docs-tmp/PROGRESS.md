@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 retire dropped spawn-task IDs on VM `Pop`
+  - VM dispatch now retires registered spawn-task IDs when spawned task-handle values are dropped via `Instr::Pop`, preventing stale growth in `ExecutionContext.spawned_task_ids` for un-awaited dropped handles.
+  - Added dispatch regression coverage: `dropped_spawn_task_handle_retires_task_id`.
+  - Validation: `cargo test -p runmat-vm dropped_spawn_task_handle_retires_task_id`, `cargo test -p runmat-vm spawn_`, `cargo test -p runmat-vm await_`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 enforce semantic window-kind compatibility in fusion-node mapping
   - VM semantic fusion-window -> accel-node mapping now filters by semantic window kind compatibility (not just generic accel-tag presence):
     - elementwise windows exclude reduction/matmul-tagged nodes
