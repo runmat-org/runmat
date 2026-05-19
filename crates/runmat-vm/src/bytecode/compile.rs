@@ -63,15 +63,10 @@ pub fn compile(
         (None, Vec::new())
     } else {
         let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
-        let mut fusion_groups = derive_semantic_fusion_groups_from_candidates(
+        let mut fusion_groups = derive_semantic_fusion_groups_preserving_unmapped_windows(
             &semantic_instruction_windows,
             &accel_graph,
         );
-        if fusion_groups.is_empty() && !semantic_instruction_windows.is_empty() {
-            fusion_groups = derive_semantic_fusion_groups_from_instruction_windows(
-                &semantic_instruction_windows,
-            );
-        }
         if !fusion_groups.is_empty() {
             annotate_fusion_groups_with_stack_layout(
                 &c.instructions,
@@ -375,6 +370,7 @@ fn fusion_group_within_semantic_candidate_spans(
 }
 
 #[cfg(feature = "native-accel")]
+#[allow(dead_code)]
 fn derive_semantic_fusion_groups_from_candidates(
     semantic_instruction_windows: &[crate::bytecode::SemanticFusionInstructionWindow],
     accel_graph: &runmat_accelerate::graph::AccelGraph,
@@ -406,6 +402,34 @@ fn derive_semantic_fusion_groups_from_candidates(
 }
 
 #[cfg(feature = "native-accel")]
+fn derive_semantic_fusion_groups_preserving_unmapped_windows(
+    semantic_instruction_windows: &[crate::bytecode::SemanticFusionInstructionWindow],
+    accel_graph: &runmat_accelerate::graph::AccelGraph,
+) -> Vec<runmat_accelerate::fusion::FusionGroup> {
+    let mut groups = Vec::new();
+    let mut assigned_nodes = HashSet::new();
+
+    for window in semantic_instruction_windows {
+        let nodes = accel_nodes_for_instruction_window(accel_graph, window, &assigned_nodes);
+        for node_id in &nodes {
+            assigned_nodes.insert(*node_id);
+        }
+        groups.push(runmat_accelerate::fusion::FusionGroup {
+            id: groups.len(),
+            kind: infer_semantic_fusion_kind(window.kind),
+            nodes,
+            shape: runmat_accelerate::graph::ShapeInfo::Unknown,
+            span: window.span.clone(),
+            pattern: None,
+            stack_layout: None,
+        });
+    }
+
+    groups
+}
+
+#[cfg(feature = "native-accel")]
+#[allow(dead_code)]
 fn derive_semantic_fusion_groups_from_instruction_windows(
     semantic_instruction_windows: &[crate::bytecode::SemanticFusionInstructionWindow],
 ) -> Vec<runmat_accelerate::fusion::FusionGroup> {
@@ -1439,6 +1463,70 @@ mod tests {
             groups[0].kind,
             runmat_accelerate::fusion::FusionKind::ElementwiseChain
         );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_windows_preserve_unmapped_windows_alongside_mapped_groups() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![runmat_accelerate::graph::AccelNode {
+                id: 0,
+                label: runmat_accelerate::graph::AccelNodeLabel::Primitive(
+                    runmat_accelerate::graph::PrimitiveOp::Add,
+                ),
+                category: runmat_accelerate::graph::AccelOpCategory::Elementwise,
+                inputs: vec![0, 0],
+                outputs: vec![1],
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+                tags: vec![],
+            }],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let windows = vec![
+            crate::bytecode::SemanticFusionInstructionWindow {
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+                kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+            },
+            crate::bytecode::SemanticFusionInstructionWindow {
+                span: runmat_accelerate::graph::InstrSpan { start: 5, end: 5 },
+                kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+            },
+        ];
+        let groups = super::derive_semantic_fusion_groups_preserving_unmapped_windows(
+            &windows,
+            &accel_graph,
+        );
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].nodes, vec![0]);
+        assert_eq!(
+            groups[1].nodes,
+            Vec::<runmat_accelerate::graph::NodeId>::new()
+        );
+        assert_eq!(groups[0].span.start, 0);
+        assert_eq!(groups[1].span.start, 5);
     }
 
     #[cfg(feature = "native-accel")]

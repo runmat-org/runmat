@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 preserve semantic fusion windows under partial accel-node mapping drop
+  - `runmat-vm` compile fusion-group derivation in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now preserves all semantic instruction windows as executable-group scaffolding, even when only a subset map to accel nodes.
+  - Added compile helper path:
+    - `derive_semantic_fusion_groups_preserving_unmapped_windows`
+  - Mapped windows still retain accel node lists; unmapped windows now remain as empty-node groups (instead of being dropped unless all windows failed).
+  - Added regression coverage:
+    - `semantic_windows_preserve_unmapped_windows_alongside_mapped_groups`
+  - Validation: `cargo test -p runmat-vm semantic_windows_preserve_unmapped_windows_alongside_mapped_groups -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops -- --nocapture`, `cargo test -p runmat-core --test async_stdin`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 lexer error-token boundary ratchet for formatter compatibility
   - Tightened token-format compatibility coverage in [repl.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/repl.rs):
     - `unterminated_string_is_error_token` now asserts the first emitted token is `Error` (`split_whitespace().next() == Some("Error")`) instead of broad substring matching.
