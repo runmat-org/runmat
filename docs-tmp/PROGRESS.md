@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Core engine empty/whitespace execution contract ratchet
+  - Tightened `runmat-core` engine coverage to require deterministic semantic behavior for empty and whitespace-only inputs.
+  - `test_empty_input_handling` and `test_whitespace_only_input` now assert successful execution and absence of runtime diagnostics, replacing proxy assertions that only required a non-empty error display string.
+  - Validation: `cargo test -p runmat-core test_empty_input_handling`, `cargo test -p runmat-core test_whitespace_only_input`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Command-form semantic preservation while tightening undefined-variable assertions
   - Parser command-form gating now treats `StringifyWords` verbs as zero-arg-capable and includes explicit `clc` command classification, restoring semantic command parsing for `clear;`, `close;`, and `clc;`.
   - Added parser coverage in `command_syntax.rs`:

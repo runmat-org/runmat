@@ -221,13 +221,11 @@ fn test_multiple_executions_performance_tracking() {
 fn test_empty_input_handling() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = block_on(engine.execute(""));
-        // Empty input behavior may vary - just ensure it doesn't crash
-        // Some parsers accept empty input, others don't
-        if let Err(e) = result {
-            // If it errors, that's also valid behavior
-            assert!(!e.to_string().is_empty(), "Error should have a message");
-        }
+        let result = block_on(engine.execute("")).expect("empty input should execute");
+        assert!(
+            result.error.is_none(),
+            "empty input should not produce runtime diagnostics"
+        );
     });
 }
 
@@ -235,12 +233,12 @@ fn test_empty_input_handling() {
 fn test_whitespace_only_input() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
-        let result = block_on(engine.execute("   \t\n  "));
-        // Whitespace-only input behavior may vary - just ensure it doesn't crash
-        if let Err(e) = result {
-            // If it errors, that's also valid behavior
-            assert!(!e.to_string().is_empty(), "Error should have a message");
-        }
+        let result =
+            block_on(engine.execute("   \t\n  ")).expect("whitespace-only input should execute");
+        assert!(
+            result.error.is_none(),
+            "whitespace-only input should not produce runtime diagnostics"
+        );
     });
 }
 
