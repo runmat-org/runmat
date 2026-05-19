@@ -1213,6 +1213,8 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use super::source_input_text;
     #[cfg(not(target_arch = "wasm32"))]
+    use crate::RunError;
+    #[cfg(not(target_arch = "wasm32"))]
     use crate::abi::SourceInput;
     #[cfg(not(target_arch = "wasm32"))]
     use std::fs;
@@ -1307,9 +1309,10 @@ function = "main"
         let err = source_input_text(SourceInput::Path("server".to_string()))
             .expect_err("invalid module/function entrypoint should report resolve error");
         std::env::set_current_dir(original).unwrap();
-        assert!(err
-            .to_string()
-            .contains("failed to resolve project entrypoint"));
+        let RunError::Runtime(runtime_err) = err else {
+            panic!("expected runtime error");
+        };
+        assert_eq!(runtime_err.identifier.as_deref(), Some("RunMat:EntrypointResolveFailed"));
     }
 
     #[test]

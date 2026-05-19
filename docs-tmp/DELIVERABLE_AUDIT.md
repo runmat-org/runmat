@@ -371,6 +371,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `expansion_on_non_cell_errors` now asserts `RunMat:ExpandError`.
     - `mixed_range_end_assign_shape_mismatch_error` now asserts `RunMat:ShapeMismatch`.
   - Purpose: reduce display-message coupling and keep runtime behavior tests pinned to stable identifier contracts.
+  - Core entrypoint-resolution error coverage in [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) now also asserts runtime identifier contract (`RunMat:EntrypointResolveFailed`) instead of matching rendered error text.
 
 - Additional Plan 7 heuristic-reduction ratchet:
   - Removed compile-time disjoint-gap, partial-overlap, and covering-span fallbacks in semantic-window node mapping in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).

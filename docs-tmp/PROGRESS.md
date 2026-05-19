@@ -1335,6 +1335,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This guards against regressions that re-introduce compile-time node reconciliation or bypass runtime plan preparation as the executable-node boundary.
   - Validation: `cargo test -p runmat-vm --features native-accel primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`.
 
+- (pending commit) Plan 5 core entrypoint-resolution identifier-contract ratchet
+  - Updated `crates/runmat-core/src/session/run.rs` test `source_input_path_errors_for_invalid_named_entrypoint_target` to assert the stable runtime identifier contract (`RunMat:EntrypointResolveFailed`) instead of message substring matching.
+  - This keeps manifest-driven entrypoint failure coverage pinned to behavior contract surfaces rather than display text.
+  - Validation: `cargo test -p runmat-core source_input_path_errors_for_invalid_named_entrypoint_target -- --nocapture`.
+
 ## Next Resolution Items
 
 - Finish converting remaining legacy test/doc references that imply removed APIs where they block semantic-only confidence.
