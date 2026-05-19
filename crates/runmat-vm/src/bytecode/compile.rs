@@ -270,11 +270,6 @@ fn merge_stmt_run_span(
 }
 
 #[cfg(feature = "native-accel")]
-fn source_spans_overlap(lhs: runmat_hir::Span, rhs: runmat_hir::Span) -> bool {
-    lhs.start < rhs.end && rhs.start < lhs.end
-}
-
-#[cfg(feature = "native-accel")]
 fn source_span_contains(outer: runmat_hir::Span, inner: runmat_hir::Span) -> bool {
     outer.start <= inner.start && inner.end <= outer.end
 }
@@ -364,7 +359,7 @@ fn fusion_group_within_semantic_candidate_spans(
     candidate_spans.iter().any(|candidate| {
         instr_spans[group.span.start..=end]
             .iter()
-            .all(|span| source_spans_overlap(*span, *candidate))
+            .all(|span| source_span_contains(*candidate, *span))
     })
 }
 
