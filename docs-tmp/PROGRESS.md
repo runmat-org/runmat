@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 make accel pre-gate assertions control-first, not display-proxy-first
+  - Split builtin pre-gate rejection coverage so primary negative contract is explicit control/assertion behavior:
+    - `semantic_candidate_accel_capability_gate_rejects_control_assert_builtin`
+  - Kept display/stream sink classification as secondary coverage:
+    - `semantic_candidate_accel_capability_gate_rejects_sink_builtins`
+  - Validation: `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_rejects_control_assert_builtin`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_rejects_sink_builtins`.
+
 - (pending commit) Plan 7 clear dropped GPU handles on `Instr::Pop` with live-handle exclusion
   - VM `Instr::Pop` now applies residency/provider-handle cleanup for dropped values, while excluding handles still referenced by live stack/var/local values to avoid premature release.
   - Removed now-dead `ops::stack::pop` helper after dispatch migration.
