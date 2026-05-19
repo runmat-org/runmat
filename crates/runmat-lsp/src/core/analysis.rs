@@ -14,6 +14,7 @@ pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
 use runmat_vm::CompileError;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Write;
 
 #[derive(Clone)]
@@ -69,11 +70,24 @@ impl TextRange {
 }
 
 pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentAnalysis {
+    analyze_document_with_compat_and_source(text, compat, None)
+}
+
+pub fn analyze_document_with_compat_and_source(
+    text: &str,
+    compat: CompatMode,
+    source_name: Option<&str>,
+) -> DocumentAnalysis {
     let tokens = tokenize_detailed(text);
+    let known_project_symbols = discover_known_project_symbols(source_name);
     match parse_with_options(text, ParserOptions::new(compat)) {
         Ok(ast) => {
-            let lowering_context = LoweringContext::empty()
+            let mut lowering_context = LoweringContext::empty()
                 .with_runmat_extensions_enabled(compat.allows_runmat_extensions());
+            if !known_project_symbols.is_empty() {
+                lowering_context =
+                    lowering_context.with_known_project_symbols(&known_project_symbols);
+            }
             let lowering = match runmat_hir::lower(&ast, &lowering_context) {
                 Ok(result) => result,
                 Err(err) => {
@@ -119,6 +133,23 @@ pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentA
             }
         }
     }
+}
+
+fn discover_known_project_symbols(source_name: Option<&str>) -> HashSet<String> {
+    use runmat_config::discover_project_symbols_from_source_name;
+
+    let Some(source_name) = source_name else {
+        return HashSet::new();
+    };
+    let Ok(cwd) = std::env::current_dir() else {
+        return HashSet::new();
+    };
+    let Ok(discovered) = discover_project_symbols_from_source_name(source_name, &cwd) else {
+        return HashSet::new();
+    };
+    discovered
+        .map(|discovered| discovered.symbols)
+        .unwrap_or_default()
 }
 
 fn compile_error_for_lowering(lowering: &LoweringResult) -> Option<CompileError> {
@@ -900,6 +931,8 @@ fn type_from_shape(shape: Vec<Option<usize>>) -> Type {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn hover_returns_builtin_docs() {
@@ -1096,5 +1129,41 @@ end
             "unexpected lint message: {}",
             diag.message
         );
+    }
+
+    #[test]
+    fn source_context_symbol_discovery_reads_manifest_project_symbols() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("runmat_lsp_symbol_discovery_{suffix}"));
+        fs::create_dir_all(root.join("+stats")).expect("create package dir");
+        fs::write(
+            root.join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+"#,
+        )
+        .expect("write manifest");
+        fs::write(
+            root.join("+stats/summarize.m"),
+            "function y = summarize(x); y = x; end",
+        )
+        .expect("write package function");
+        fs::write(root.join("main.m"), "x = 1;").expect("write source file");
+
+        let source_name = root.join("main.m");
+        let symbols = super::discover_known_project_symbols(source_name.to_str());
+        assert!(
+            symbols.contains("stats.summarize"),
+            "expected project symbol discovery to include package-qualified names"
+        );
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

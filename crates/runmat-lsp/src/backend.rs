@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::core::analysis::{
-    analyze_document_with_compat, completion_at, definition_at, diagnostics_for_document,
-    document_symbols, formatting_edits, hover_at, semantic_tokens_full, semantic_tokens_legend,
-    signature_help_at, CompatMode, DocumentAnalysis,
+    analyze_document_with_compat_and_source, completion_at, definition_at,
+    diagnostics_for_document, document_symbols, formatting_edits, hover_at, semantic_tokens_full,
+    semantic_tokens_legend, signature_help_at, CompatMode, DocumentAnalysis,
 };
 use crate::core::position::position_to_offset;
 use crate::core::workspace::workspace_symbols;
@@ -92,7 +92,15 @@ impl RunMatLanguageServer {
         let analysis = {
             let mut state = self.state.write().await;
             if let Some(doc) = state.documents.get_mut(uri) {
-                let analysis = analyze_document_with_compat(&doc.text, compat);
+                let source_name = uri
+                    .to_file_path()
+                    .ok()
+                    .and_then(|path| path.to_str().map(str::to_string));
+                let analysis = analyze_document_with_compat_and_source(
+                    &doc.text,
+                    compat,
+                    source_name.as_deref(),
+                );
                 doc.analysis = Some(analysis.clone());
                 analysis
             } else {

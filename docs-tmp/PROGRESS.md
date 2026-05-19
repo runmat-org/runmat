@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 5 wire manifest/source-index symbol discovery into LSP analysis
+  - `runmat-lsp` document analysis now threads source-path context into lowering (`analyze_document_with_compat_and_source`) and reuses shared config-layer discovery (`discover_project_symbols_from_source_name`) before semantic lowering.
+  - Native backend reanalysis and wasm document open/change paths now derive file source paths from document URIs and pass them through this shared symbol-discovery boundary.
+  - Added LSP regression `source_context_symbol_discovery_reads_manifest_project_symbols` to ratchet project-symbol discovery on source-context analysis paths.
+  - Validation: `cargo test -p runmat-lsp source_context_symbol_discovery_reads_manifest_project_symbols`, `cargo test -p runmat-lsp`.
+
 - (pending commit) Plan 7 derive fusion group boundaries from semantic instruction windows
   - `runmat-vm` fusion-group construction now derives executable fusion-group instruction windows directly from semantic candidate spans plus accel-capable bytecode instructions, instead of selecting group boundaries from accel-graph node overlap first.
   - VM compile still builds accel graph artifacts for node realization and stack-layout annotation, but executable group span boundaries are now semantic/bytecode-fact-driven first.

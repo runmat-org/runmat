@@ -11,9 +11,9 @@ use std::sync::Once;
 use wasm_bindgen::prelude::*;
 
 use crate::core::analysis::{
-    analyze_document_with_compat, completion_at, definition_at, diagnostics_for_document,
-    document_symbols as core_document_symbols, formatting_edits, hover_at, semantic_tokens_full,
-    signature_help_at, CompatMode, DocumentAnalysis,
+    analyze_document_with_compat_and_source, completion_at, definition_at,
+    diagnostics_for_document, document_symbols as core_document_symbols, formatting_edits,
+    hover_at, semantic_tokens_full, signature_help_at, CompatMode, DocumentAnalysis,
 };
 use crate::core::workspace::workspace_symbols;
 
@@ -51,6 +51,12 @@ fn ensure_builtins_registered() {
     });
 }
 
+fn source_name_from_uri(uri: &str) -> Option<String> {
+    let parsed = Url::parse(uri).ok()?;
+    let path = parsed.to_file_path().ok()?;
+    path.to_str().map(str::to_string)
+}
+
 #[wasm_bindgen]
 pub fn builtin_inventory_counts() -> JsValue {
     ensure_builtins_registered();
@@ -65,7 +71,8 @@ pub fn builtin_inventory_counts() -> JsValue {
 pub fn open_document(uri: String, text: String) {
     ensure_builtins_registered();
     let compat = COMPAT_MODE.with(|c| c.get());
-    let analysis = analyze_document_with_compat(&text, compat);
+    let source_name = source_name_from_uri(&uri);
+    let analysis = analyze_document_with_compat_and_source(&text, compat, source_name.as_deref());
     DOCS.with(|d| {
         d.borrow_mut().docs.insert(uri, DocEntry { text, analysis });
     });
@@ -75,7 +82,8 @@ pub fn open_document(uri: String, text: String) {
 pub fn change_document(uri: String, text: String) {
     ensure_builtins_registered();
     let compat = COMPAT_MODE.with(|c| c.get());
-    let analysis = analyze_document_with_compat(&text, compat);
+    let source_name = source_name_from_uri(&uri);
+    let analysis = analyze_document_with_compat_and_source(&text, compat, source_name.as_deref());
     DOCS.with(|d| {
         d.borrow_mut().docs.insert(uri, DocEntry { text, analysis });
     });
