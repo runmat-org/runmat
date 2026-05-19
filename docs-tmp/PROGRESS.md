@@ -17,6 +17,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 scope semantic fusion metadata to compiled entrypoint target
+  - `runmat-vm` bytecode compile now derives semantic fusion signal/candidate metadata from the selected entrypoint target MIR body instead of aggregating across every MIR body in the assembly.
+  - This prevents non-entrypoint helper functions from falsely opening fusion gating for the active executable bytecode path.
+  - Added `runmat-vm` regression coverage:
+    - `primary_compile_scopes_semantic_fusion_metadata_to_entrypoint_target`
+  - Validation: `cargo test -p runmat-vm primary_compile_scopes_semantic_fusion_metadata_to_entrypoint_target`, `cargo test -p runmat-vm primary_compile_semantically_gates_bytecode_fusion_groups`, `cargo test -p runmat-vm --test basics`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 candidate-group-gated accel graph construction in VM compile
   - `runmat-vm` bytecode compile now omits accel graph construction unless semantic fusion candidate groups are present (`mir_fusion_candidate_group_count > 0`).
   - This removes the remaining `signals>0 but no semantic candidate groups` path that still built accel graph artifacts, tightening compile-time fusion artifact creation to semantic candidate evidence.

@@ -37,8 +37,13 @@ pub fn compile(
                 .collect()
         })
         .unwrap_or_default();
+    let entrypoint_target = hir
+        .entrypoints
+        .iter()
+        .find(|candidate| candidate.id == entrypoint)
+        .map(|candidate| candidate.target);
     #[cfg(feature = "native-accel")]
-    let semantic_fusion_metadata = derive_semantic_fusion_metadata(mir);
+    let semantic_fusion_metadata = derive_semantic_fusion_metadata(mir, entrypoint_target);
     #[cfg(feature = "native-accel")]
     let (accel_graph, fusion_groups) =
         if semantic_fusion_metadata.mir_fusion_candidate_group_count == 0 {
@@ -113,9 +118,12 @@ fn derive_semantic_async_metadata(mir: &MirAssembly) -> crate::bytecode::Semanti
 }
 
 #[cfg(feature = "native-accel")]
-fn derive_semantic_fusion_metadata(mir: &MirAssembly) -> crate::bytecode::SemanticFusionMetadata {
+fn derive_semantic_fusion_metadata(
+    mir: &MirAssembly,
+    entrypoint_target: Option<FunctionId>,
+) -> crate::bytecode::SemanticFusionMetadata {
     let (mir_fusion_signal_count, mir_fusion_candidate_groups) =
-        derive_semantic_fusion_candidate_groups(mir);
+        derive_semantic_fusion_candidate_groups(mir, entrypoint_target);
     crate::bytecode::SemanticFusionMetadata {
         mir_fusion_signal_count,
         mir_fusion_candidate_group_count: mir_fusion_candidate_groups.len(),
@@ -126,10 +134,15 @@ fn derive_semantic_fusion_metadata(mir: &MirAssembly) -> crate::bytecode::Semant
 #[cfg(feature = "native-accel")]
 fn derive_semantic_fusion_candidate_groups(
     mir: &MirAssembly,
+    entrypoint_target: Option<FunctionId>,
 ) -> (usize, Vec<crate::bytecode::SemanticFusionCandidateGroup>) {
     let mut signal_count = 0usize;
     let mut groups = Vec::new();
-    let mut function_ids: Vec<_> = mir.bodies.keys().copied().collect();
+    let mut function_ids: Vec<_> = if let Some(function) = entrypoint_target {
+        vec![function]
+    } else {
+        mir.bodies.keys().copied().collect()
+    };
     function_ids.sort_by_key(|id| id.0);
     for function_id in function_ids {
         let Some(body) = mir.bodies.get(&function_id) else {
@@ -416,6 +429,37 @@ mod tests {
         assert!(
             bytecode.fusion_groups.is_empty(),
             "expected no executable bytecode fusion groups without semantic candidates"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn primary_compile_scopes_semantic_fusion_metadata_to_entrypoint_target() {
+        let source = "x = 1; function z = helper(a); t = a + 1; z = t * 2; end;";
+        let ast = runmat_parser::parse(source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+
+        assert_eq!(
+            bytecode.semantic_fusion_metadata.mir_fusion_signal_count, 0,
+            "non-entrypoint helper MIR bodies should not drive entrypoint fusion signal metadata"
+        );
+        assert_eq!(
+            bytecode
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_group_count,
+            0,
+            "non-entrypoint helper MIR bodies should not drive entrypoint fusion candidate metadata"
+        );
+        assert!(
+            bytecode.accel_graph.is_none(),
+            "entrypoint with no semantic candidates should omit accel graph even if helper bodies are fusible"
+        );
+        assert!(
+            bytecode.fusion_groups.is_empty(),
+            "entrypoint with no semantic candidates should not emit executable fusion groups"
         );
     }
 
