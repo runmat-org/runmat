@@ -6,6 +6,18 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `af19ee9d` `RM-378: use assert for sink-builtin accel gate test`
+  - Updated `runmat-vm` pre-gate rejection coverage to use control/assertion builtin semantics (`assert`) instead of display-side proxy semantics (`disp`) for the non-accelerable builtin overlap path.
+  - This keeps the Plan 7 accel-capability gate negative ratchet aligned to proper assertion/control behavior at the builtin boundary.
+  - Validation: `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_rejects_sink_builtin`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_accepts_reduction_builtin`.
+
+- `40610f2a` `RM-378: cover builtin accel-capability gating`
+  - Added `runmat-vm` builtin-path ratchets for semantic-candidate accel-capability pre-gate classification:
+    - `semantic_candidate_accel_capability_gate_accepts_reduction_builtin` (`sum`)
+    - `semantic_candidate_accel_capability_gate_rejects_sink_builtin` (`assert`)
+  - This hardens Plan 7 pre-gate behavior across builtin-call bytecode paths, not only primitive arithmetic/logical opcodes.
+  - Validation: `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_accepts_reduction_builtin`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_rejects_sink_builtin`, `cargo test -p runmat-vm semantic_candidate_accel_capability_gate_accepts_binary_ops`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `git diff --check`.
+
 - `f08b9e0d` `RM-378: cover logical-only candidate pre-gate`
   - Added compile-level `runmat-vm` regression:
     - `primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops`
