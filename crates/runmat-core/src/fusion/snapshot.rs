@@ -148,7 +148,10 @@ fn append_semantic_candidate_artifacts(
         nodes.push(FusionPlanNode {
             id: node_id.clone(),
             kind: "SemanticCandidate".to_string(),
-            label: format!("semantic-run signals={}", group.signal_count),
+            label: format!(
+                "semantic-run f={:?} b={:?} stmts=[{}..{}] signals={}",
+                group.function, group.block, group.stmt_start, group.stmt_end, group.signal_count
+            ),
             shape: Vec::new(),
             residency: None,
         });
@@ -226,6 +229,10 @@ mod tests {
             &[runmat_vm::SemanticFusionCandidateGroup {
                 id: 0,
                 signal_count: 3,
+                function: runmat_hir::FunctionId(0),
+                block: runmat_mir::BasicBlockId(0),
+                stmt_start: 1,
+                stmt_end: 4,
             }],
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
@@ -269,6 +276,10 @@ mod tests {
             &[runmat_vm::SemanticFusionCandidateGroup {
                 id: 1,
                 signal_count: 2,
+                function: runmat_hir::FunctionId(1),
+                block: runmat_mir::BasicBlockId(2),
+                stmt_start: 0,
+                stmt_end: 2,
             }],
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),

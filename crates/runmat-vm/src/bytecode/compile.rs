@@ -84,10 +84,15 @@ fn derive_semantic_fusion_candidate_groups(
 ) -> (usize, Vec<crate::bytecode::SemanticFusionCandidateGroup>) {
     let mut signal_count = 0usize;
     let mut groups = Vec::new();
-    for body in mir.bodies.values() {
+    let mut function_ids: Vec<_> = mir.bodies.keys().copied().collect();
+    function_ids.sort_by_key(|id| id.0);
+    for function_id in function_ids {
+        let Some(body) = mir.bodies.get(&function_id) else {
+            continue;
+        };
         for block in &body.blocks {
             let mut run_len = 0usize;
-            for stmt in &block.statements {
+            for (stmt_index, stmt) in block.statements.iter().enumerate() {
                 let value = match &stmt.kind {
                     MirStmtKind::Assign { value, .. }
                     | MirStmtKind::MultiAssign { value, .. }
@@ -99,6 +104,10 @@ fn derive_semantic_fusion_candidate_groups(
                             groups.push(crate::bytecode::SemanticFusionCandidateGroup {
                                 id: groups.len(),
                                 signal_count: run_len,
+                                function: body.function,
+                                block: block.id,
+                                stmt_start: stmt_index - run_len,
+                                stmt_end: stmt_index,
                             });
                         }
                         run_len = 0;
@@ -113,6 +122,10 @@ fn derive_semantic_fusion_candidate_groups(
                         groups.push(crate::bytecode::SemanticFusionCandidateGroup {
                             id: groups.len(),
                             signal_count: run_len,
+                            function: body.function,
+                            block: block.id,
+                            stmt_start: stmt_index - run_len,
+                            stmt_end: stmt_index,
                         });
                     }
                     run_len = 0;
@@ -122,6 +135,10 @@ fn derive_semantic_fusion_candidate_groups(
                 groups.push(crate::bytecode::SemanticFusionCandidateGroup {
                     id: groups.len(),
                     signal_count: run_len,
+                    function: body.function,
+                    block: block.id,
+                    stmt_start: block.statements.len() - run_len,
+                    stmt_end: block.statements.len(),
                 });
             }
         }
@@ -290,6 +307,14 @@ mod tests {
                 .mir_fusion_candidate_groups
                 .is_empty(),
             "expected non-empty MIR fusion candidate groups"
+        );
+        assert!(
+            bytecode
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_groups
+                .iter()
+                .all(|group| group.stmt_end > group.stmt_start),
+            "expected candidate groups to carry non-empty statement spans"
         );
     }
 

@@ -17,6 +17,16 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 add MIR-localized semantic fusion candidate metadata
+  - `runmat-vm` semantic fusion candidate artifacts now carry MIR location metadata per candidate run:
+    - `function` (`FunctionId`)
+    - `block` (`BasicBlockId`)
+    - `stmt_start` / `stmt_end` run bounds
+  - Candidate derivation now iterates MIR bodies in deterministic function-id order and records concrete statement-run spans for each semantic fusion candidate group.
+  - `runmat-core` fusion snapshot semantic-candidate node labels now include MIR location metadata, making semantic candidate evidence traceable to specific MIR regions for follow-on planner migration.
+  - Added regression checks that candidate groups carry non-empty statement spans and updated snapshot tests to assert mixed bytecode + semantic candidate artifact emission with MIR-localized metadata.
+  - Validation: `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core semantic_candidate_groups_emit_nodes_with_bytecode_groups`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 thread semantic candidate evidence into fusion plan preparation boundary
   - Extended `runmat-accelerate::prepare_fusion_plan` to accept semantic candidate-group count from VM bytecode semantic metadata.
   - Interpreter state setup now passes `bytecode.semantic_fusion_metadata.mir_fusion_candidate_group_count` into fusion-plan preparation, so the execution setup boundary has explicit semantic-candidate awareness even when executable bytecode groups are empty.

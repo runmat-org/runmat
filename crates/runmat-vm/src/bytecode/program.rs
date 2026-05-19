@@ -183,6 +183,10 @@ pub struct SemanticFusionMetadata {
 pub struct SemanticFusionCandidateGroup {
     pub id: usize,
     pub signal_count: usize,
+    pub function: runmat_hir::FunctionId,
+    pub block: runmat_mir::BasicBlockId,
+    pub stmt_start: usize,
+    pub stmt_end: usize,
 }
 
 impl Bytecode {
