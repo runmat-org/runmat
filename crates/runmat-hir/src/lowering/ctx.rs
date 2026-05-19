@@ -22,6 +22,7 @@ const IDENT_AWAIT_EXTENSION_DISABLED: &str = "RunMat:AwaitExtensionDisabled";
 const IDENT_AWAIT_CONTEXT_INVALID: &str = "RunMat:AwaitContextInvalid";
 const IDENT_SPAWN_EXTENSION_DISABLED: &str = "RunMat:SpawnExtensionDisabled";
 const IDENT_SPAWN_LEXICAL_CAPTURE_UNSUPPORTED: &str = "RunMat:SpawnLexicalCaptureUnsupported";
+const IDENT_UNDEFINED_VARIABLE: &str = "RunMat:UndefinedVariable";
 
 #[derive(Clone)]
 struct SemanticScope {
@@ -1108,9 +1109,9 @@ impl SemanticCtx {
                 {
                     HirExprKind::Constant(SymbolName(name.clone()))
                 } else {
-                    return Err(
-                        SemanticError::new(format!("undefined variable '{name}'")).with_span(span)
-                    );
+                    return Err(SemanticError::new(format!("undefined variable '{name}'"))
+                        .with_span(span)
+                        .with_identifier(IDENT_UNDEFINED_VARIABLE));
                 }
             }
             AstExpr::FuncCall(name, args, _) => {

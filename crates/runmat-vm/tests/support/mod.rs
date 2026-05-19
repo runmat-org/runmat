@@ -25,7 +25,7 @@ where
 pub fn compile_semantic_source(source: &str) -> Result<runmat_vm::Bytecode, RuntimeError> {
     let ast = runmat_parser::parse(source).map_err(|err| RuntimeError::new(err.to_string()))?;
     let hir = runmat_hir::lower(&ast, &LoweringContext::empty())
-        .map_err(|err| RuntimeError::new(format!("{err:?}")))?;
+        .map_err(|err| RuntimeError::from(runmat_vm::CompileError::from(err)))?;
     let mir = runmat_mir::lowering::lower_assembly(&hir.assembly)
         .map_err(|err| RuntimeError::new(format!("{err:?}")))?;
     let entrypoint = hir.assembly.entrypoints[0].id;

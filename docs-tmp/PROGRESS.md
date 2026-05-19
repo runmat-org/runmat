@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Semantic identifier contract for undefined-variable lowering
+  - Added explicit HIR lowering identifier `RunMat:UndefinedVariable` for unresolved identifier reads in `lower_expr_semantic_requested`.
+  - Updated VM semantic test helper to preserve lowering identifiers by converting `SemanticError` through `runmat_vm::CompileError` instead of debug-string wrapping.
+  - Tightened VM control-flow coverage `undefined_variable_raises_mex` to assert `err.identifier() == Some("RunMat:UndefinedVariable")`.
+  - Added HIR ratchet coverage `undefined_variable_errors_have_stable_identifier`.
+  - Validation: `cargo test -p runmat-hir undefined_variable_errors_have_stable_identifier`, `cargo test -p runmat-vm undefined_variable_raises_mex`.
+
 - (pending commit) Validation ratchet replace display-proxy control-flow checks with semantic assertions
   - Tightened control-flow coverage in `runmat-core` tests to assert deterministic execution/value contracts instead of accepting any non-empty error display string.
   - Updated integration coverage in `test_control_flow_execution` to require successful execution for `if`/`if-else`/`for`/`while-break` and explicit readback values (`x = 10`, `y = 30`, `z = 6`).

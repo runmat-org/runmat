@@ -169,13 +169,7 @@ fn for_loop_over_matrix_iterates_columns() {
 #[test]
 fn undefined_variable_raises_mex() {
     let err = compile_semantic_source("y = x + 1;").err().unwrap();
-    let message = err.message();
-    assert!(
-        message.contains("RunMat:UndefinedVariable")
-            || message.contains("UndefinedVariable")
-            || message.to_ascii_lowercase().contains("undefined variable"),
-        "unexpected undefined-variable diagnostic: {message}"
-    );
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedVariable"));
 }
 
 #[test]

@@ -701,6 +701,13 @@ fn strict_mode_disables_runmat_extension_calls() {
 }
 
 #[test]
+fn undefined_variable_errors_have_stable_identifier() {
+    let ast = runmat_parser::parse("y = x + 1;").unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
+}
+
+#[test]
 fn spawn_rejects_anonymous_function_with_lexical_capture() {
     let ast = runmat_parser::parse("function y = f(x); y = spawn(@() x); end").unwrap();
     let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
