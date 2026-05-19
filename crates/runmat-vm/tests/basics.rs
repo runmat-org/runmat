@@ -240,6 +240,13 @@ fn elementwise_division_accepts_leading_dot_rhs() {
 #[test]
 fn chol_multiassign_reports_failure() {
     let input = "A = [1 2; 2 1]; [R, p] = chol(A);";
+    let bytecode = compile_semantic_source(input).expect("compile chol multi-assign");
+    assert!(
+        bytecode.instructions.iter().any(
+            |instr| matches!(instr, Instr::CallBuiltinMulti(name, 1, 2) if name == "chol")
+        ),
+        "expected semantic multi-output chol call shape in bytecode"
+    );
     let vars = execute_semantic_source(input);
     let p: f64 = (&vars[2]).try_into().unwrap();
     assert_eq!(p, 2.0);
