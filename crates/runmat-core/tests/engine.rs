@@ -129,23 +129,24 @@ fn test_execution_with_control_flow() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
 
-        // Test if statement - control flow may not be fully implemented yet
-        let result = block_on(engine.execute("if 1 > 0; x = 5; end"));
-        if result.is_ok() {
-            assert!(result.unwrap().error.is_none());
-        } else {
-            // Control flow might not be implemented yet - that's OK
-            assert!(!result.unwrap_err().to_string().is_empty());
-        }
+        let result = block_on(engine.execute("if 1 > 0; x = 5; end"))
+            .expect("if-statement execution should succeed");
+        assert!(
+            result.error.is_none(),
+            "if-statement should not report runtime errors"
+        );
 
-        // Test for loop - may not be implemented yet
-        let result = block_on(engine.execute("for i = 1:3; y = i; end"));
-        if result.is_ok() {
-            assert!(result.unwrap().error.is_none());
-        } else {
-            // Control flow might not be implemented yet - that's OK
-            assert!(!result.unwrap_err().to_string().is_empty());
-        }
+        let result = block_on(engine.execute("for i = 1:3; y = i; end"))
+            .expect("for-loop execution should succeed");
+        assert!(
+            result.error.is_none(),
+            "for-loop should not report runtime errors"
+        );
+
+        let x = block_on(engine.execute("x")).expect("x readback should succeed");
+        assert_eq!(x.value, Some(runmat_builtins::Value::Num(5.0)));
+        let y = block_on(engine.execute("y")).expect("y readback should succeed");
+        assert_eq!(y.value, Some(runmat_builtins::Value::Num(3.0)));
     });
 }
 

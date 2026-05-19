@@ -1052,4 +1052,30 @@ mod tests {
             .expect("await should pass through non-task operand");
         assert_eq!(result_vars[0], Value::Num(7.0));
     }
+
+    #[test]
+    fn await_succeeds_after_spawn_handle_self_reassignment() {
+        let bytecode = Bytecode::with_instructions(
+            vec![
+                Instr::Spawn,
+                Instr::StoreVar(0),
+                Instr::LoadVar(0),
+                Instr::StoreVar(0),
+                Instr::LoadVar(0),
+                Instr::Await,
+                Instr::StoreVar(0),
+                Instr::Return,
+            ],
+            1,
+        );
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::Num(9.0));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("await should still succeed after self-reassignment of spawn handle");
+        assert_eq!(result_vars[0], Value::Num(9.0));
+    }
 }

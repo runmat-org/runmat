@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Validation ratchet replace display-proxy control-flow checks with semantic assertions
+  - Tightened control-flow coverage in `runmat-core` tests to assert deterministic execution/value contracts instead of accepting any non-empty error display string.
+  - Updated integration coverage in `test_control_flow_execution` to require successful execution for `if`/`if-else`/`for`/`while-break` and explicit readback values (`x = 10`, `y = 30`, `z = 6`).
+  - Updated engine coverage in `test_execution_with_control_flow` to require successful execution plus explicit readback values (`x = 5`, `y = 3`).
+  - Validation: `cargo test -p runmat-core test_control_flow_execution`, `cargo test -p runmat-core test_execution_with_control_flow`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 retire dropped spawn-task IDs on VM value-drop boundaries
   - VM dispatch now retires registered spawn-task IDs when spawned task-handle values are dropped or replaced across value-drop boundaries:
     - `Instr::Pop`
@@ -17,6 +23,8 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `spawn_task_id_extraction_ignores_non_task_structs`
     - `replaced_spawn_task_id_is_retired_when_incoming_differs`
     - `replacing_with_same_spawn_task_keeps_id_registered`
+  - Added runner regression coverage:
+    - `await_succeeds_after_spawn_handle_self_reassignment`
   - Validation: `cargo test -p runmat-vm dropped_spawn_task_handle_retires_task_id`, `cargo test -p runmat-vm spawn_task_id_extraction_ignores_non_task_structs`, `cargo test -p runmat-vm replaced_spawn_task_id_is_retired_when_incoming_differs`, `cargo test -p runmat-vm replacing_with_same_spawn_task_keeps_id_registered`, `cargo test -p runmat-vm spawn_`, `cargo test -p runmat-vm await_`, `cargo fmt --all --check`.
 
 - (pending commit) Plan 7 enforce semantic window-kind compatibility in fusion-node mapping

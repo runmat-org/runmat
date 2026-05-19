@@ -204,23 +204,40 @@ fn test_control_flow_execution() {
     gc_test_context(|| {
         let mut engine = RunMatSession::new().unwrap();
 
-        let control_flow_tests = [
-            "if 1 > 0; x = 10; end",
-            "if 0 > 1; y = 20; else; y = 30; end",
-            "for i = 1:3; z = i * 2; end",
-            "while 0 < 1; break; end",
-        ];
+        let result = block_on(engine.execute("if 1 > 0; x = 10; end"))
+            .expect("if-statement execution should succeed");
+        assert!(
+            result.error.is_none(),
+            "if-statement should not report runtime errors"
+        );
 
-        for test in &control_flow_tests {
-            let result = block_on(engine.execute(test));
-            // Control flow may not be fully implemented yet
-            if result.is_ok() {
-                assert!(result.unwrap().error.is_none());
-            } else {
-                // If control flow isn't implemented, that's acceptable for now
-                assert!(!result.unwrap_err().to_string().is_empty());
-            }
-        }
+        let result = block_on(engine.execute("if 0 > 1; y = 20; else; y = 30; end"))
+            .expect("if-else execution should succeed");
+        assert!(
+            result.error.is_none(),
+            "if-else should not report runtime errors"
+        );
+
+        let result = block_on(engine.execute("for i = 1:3; z = i * 2; end"))
+            .expect("for-loop execution should succeed");
+        assert!(
+            result.error.is_none(),
+            "for-loop should not report runtime errors"
+        );
+
+        let result = block_on(engine.execute("while 0 < 1; break; end"))
+            .expect("while-loop execution should succeed");
+        assert!(
+            result.error.is_none(),
+            "while-loop should not report runtime errors"
+        );
+
+        let x = block_on(engine.execute("x")).expect("x readback should succeed");
+        assert_eq!(x.value, Some(runmat_builtins::Value::Num(10.0)));
+        let y = block_on(engine.execute("y")).expect("y readback should succeed");
+        assert_eq!(y.value, Some(runmat_builtins::Value::Num(30.0)));
+        let z = block_on(engine.execute("z")).expect("z readback should succeed");
+        assert_eq!(z.value, Some(runmat_builtins::Value::Num(6.0)));
     });
 }
 
