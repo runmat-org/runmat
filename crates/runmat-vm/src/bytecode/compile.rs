@@ -730,6 +730,33 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
+    fn primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops() {
+        let ast =
+            runmat_parser::parse("a = true; b = false; c = a & b; d = c | a;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+
+        assert!(
+            bytecode
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_group_count
+                > 0,
+            "logical chain should still produce semantic candidate groups"
+        );
+        assert!(
+            bytecode.accel_graph.is_none(),
+            "expected accel graph omission when candidate overlap is non-accelerable logical ops"
+        );
+        assert!(
+            bytecode.fusion_groups.is_empty(),
+            "expected no executable fusion groups for logical-only candidate overlap"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
     fn semantic_candidate_accel_capability_gate_rejects_logical_ops() {
         let instructions = vec![Instr::LogicalAnd, Instr::LogicalOr];
         let instr_spans = vec![
