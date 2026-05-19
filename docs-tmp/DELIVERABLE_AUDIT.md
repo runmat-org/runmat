@@ -378,10 +378,11 @@ This audit maps the active objective to concrete repository evidence and marks e
   - Updated compile coverage to assert all compile-stage boundaries (`semantic_windows_reject_disjoint_gap_at_compile_mapping_stage`, `semantic_windows_reject_partial_overlap_at_compile_mapping_stage`, `semantic_windows_reject_covering_node_span_at_compile_mapping_stage`).
 
 - Additional Plan 7 runtime sanitization ratchet:
-  - Tightened runtime `sanitize_runtime_groups` span recovery in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs) from overlap-or-touch (`<=1` disjoint gap) to overlap-only.
-  - Updated runtime sanitization coverage to assert overlap-based recovery and stale-node replacement only under overlapping spans:
-    - `prepare_fusion_plan_recovers_empty_group_nodes_from_overlapping_runtime_span`
-    - `prepare_fusion_plan_replaces_stale_mapped_nodes_using_overlapping_runtime_span_recovery`
+  - Tightened runtime `sanitize_runtime_groups` span recovery in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs) from overlap-or-touch (`<=1` disjoint gap) to overlap-only, then to contained-span-only.
+  - Updated runtime sanitization coverage to assert contained-span recovery and explicit rejection of covering spans:
+    - `prepare_fusion_plan_recovers_empty_group_nodes_from_contained_runtime_span`
+    - `prepare_fusion_plan_replaces_stale_mapped_nodes_using_contained_runtime_span_recovery`
+    - `prepare_fusion_plan_rejects_empty_group_nodes_when_runtime_node_covers_group_span`
 
 ## Current Conclusion
 

@@ -762,7 +762,7 @@ fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<Fu
                     .node(*id)
                     .map(|node| {
                         node_matches_runtime_group_kind(graph, node, &sanitized.kind)
-                            && node_overlaps_group_span(node, &sanitized.span)
+                            && node_within_group_span(node, &sanitized.span)
                     })
                     .unwrap_or(false)
             });
@@ -772,7 +772,7 @@ fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<Fu
                     .iter()
                     .filter(|node| {
                         node_matches_runtime_group_kind(graph, node, &sanitized.kind)
-                            && node_overlaps_group_span(node, &sanitized.span)
+                            && node_within_group_span(node, &sanitized.span)
                     })
                     .map(|node| node.id)
                     .collect();
@@ -817,8 +817,8 @@ fn node_matches_runtime_group_kind(
     }
 }
 
-fn node_overlaps_group_span(node: &AccelNode, span: &InstrSpan) -> bool {
-    node.span.start <= span.end && node.span.end >= span.start
+fn node_within_group_span(node: &AccelNode, span: &InstrSpan) -> bool {
+    node.span.start >= span.start && node.span.end <= span.end
 }
 
 pub fn activate_fusion_plan(plan: Option<Arc<FusionPlan>>) {
@@ -3533,7 +3533,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_fusion_plan_recovers_empty_group_nodes_from_overlapping_runtime_span() {
+    fn prepare_fusion_plan_recovers_empty_group_nodes_from_contained_runtime_span() {
         let graph = simple_elementwise_graph();
         let groups = vec![FusionGroup {
             id: 0,
@@ -3546,12 +3546,12 @@ mod tests {
         }];
 
         let plan = prepare_fusion_plan(Some(&graph), &groups, 1)
-            .expect("runtime group sanitization should recover overlapping elementwise nodes");
+            .expect("runtime group sanitization should recover contained elementwise nodes");
         assert_eq!(plan.groups.len(), 1);
         assert_eq!(
             plan.groups[0].group.nodes,
             vec![0],
-            "runtime sanitization should recover a compatible overlapping node for empty group mapping"
+            "runtime sanitization should recover a compatible contained node for empty group mapping"
         );
     }
 
@@ -3576,7 +3576,59 @@ mod tests {
     }
 
     #[test]
-    fn prepare_fusion_plan_replaces_stale_mapped_nodes_using_overlapping_runtime_span_recovery() {
+    fn prepare_fusion_plan_rejects_empty_group_nodes_when_runtime_node_covers_group_span() {
+        let values = vec![
+            ValueInfo {
+                id: 0,
+                origin: ValueOrigin::Variable {
+                    kind: VarKind::Global,
+                    index: 0,
+                },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+                constant: None,
+            },
+            ValueInfo {
+                id: 1,
+                origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+                ty: Type::tensor(),
+                shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+                constant: None,
+            },
+        ];
+        let graph = AccelGraph {
+            nodes: vec![AccelNode {
+                id: 0,
+                label: AccelNodeLabel::Primitive(PrimitiveOp::ElemMul),
+                category: AccelOpCategory::Elementwise,
+                inputs: vec![0, 0],
+                outputs: vec![1],
+                span: InstrSpan { start: 10, end: 12 },
+                tags: vec![AccelGraphTag::Elementwise],
+            }],
+            values,
+            var_bindings: StdHashMap::new(),
+            node_bindings: StdHashMap::new(),
+        };
+        let groups = vec![FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: Vec::new(),
+            shape: ShapeInfo::Tensor(vec![Some(4), Some(4)]),
+            span: InstrSpan { start: 11, end: 11 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1);
+        assert!(
+            plan.is_none(),
+            "runtime sanitization should reject covering runtime-node spans when semantic group spans are narrower"
+        );
+    }
+
+    #[test]
+    fn prepare_fusion_plan_replaces_stale_mapped_nodes_using_contained_runtime_span_recovery() {
         let graph = simple_elementwise_graph();
         let groups = vec![FusionGroup {
             id: 0,
@@ -3588,14 +3640,13 @@ mod tests {
             stack_layout: None,
         }];
 
-        let plan = prepare_fusion_plan(Some(&graph), &groups, 1).expect(
-            "runtime sanitization should recover overlapping node when mapped node is stale",
-        );
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1)
+            .expect("runtime sanitization should recover contained node when mapped node is stale");
         assert_eq!(plan.groups.len(), 1);
         assert_eq!(
             plan.groups[0].group.nodes,
             vec![0],
-            "stale mapped node outside group span should be dropped and replaced by overlapping compatible runtime node"
+            "stale mapped node outside group span should be dropped and replaced by contained compatible runtime node"
         );
     }
 

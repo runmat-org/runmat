@@ -1310,11 +1310,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Validation: `cargo test -p runmat-vm semantic_windows_reject_disjoint_gap_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_partial_overlap_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_covering_node_span_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_overly_wide_covering_node_spans -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 runtime fusion sanitization heuristic reduction
-  - Tightened runtime group sanitization in `crates/runmat-accelerate/src/fusion.rs` from overlap-or-touch (`<=1` disjoint gap) to strict overlap-only span recovery.
-  - This keeps compile-time semantic window assignment and runtime plan recovery aligned around explicit span overlap instead of near-span jitter tolerance.
+  - Tightened runtime group sanitization in `crates/runmat-accelerate/src/fusion.rs` in two steps:
+    - removed overlap-or-touch (`<=1` disjoint gap) recovery
+    - then required contained node spans (not merely overlap)
+  - Runtime recovery now aligns with compile-time contained-span mapping, reducing residual span-jitter reconciliation heuristics.
   - Updated runtime sanitization tests:
-    - `prepare_fusion_plan_recovers_empty_group_nodes_from_overlapping_runtime_span`
-    - `prepare_fusion_plan_replaces_stale_mapped_nodes_using_overlapping_runtime_span_recovery`
+    - `prepare_fusion_plan_recovers_empty_group_nodes_from_contained_runtime_span`
+    - `prepare_fusion_plan_replaces_stale_mapped_nodes_using_contained_runtime_span_recovery`
+    - `prepare_fusion_plan_rejects_empty_group_nodes_when_runtime_node_covers_group_span`
     - plus existing negative far-span coverage remains.
   - Validation: `cargo test -p runmat-accelerate prepare_fusion_plan_ -- --nocapture`, `cargo test -p runmat-accelerate sanitize_runtime_groups -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
