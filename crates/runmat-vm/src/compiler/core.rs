@@ -605,6 +605,7 @@ impl Compiler {
                         self.emit(Instr::PopTry);
                     }
                     self.compile_mir_operand(future)?;
+                    self.emit(Instr::Await);
                     if let Some(place) = result {
                         let tmp = self.alloc_temp();
                         self.emit(Instr::StoreVar(tmp));

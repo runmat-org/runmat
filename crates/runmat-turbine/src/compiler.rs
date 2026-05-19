@@ -814,7 +814,8 @@ impl BytecodeCompiler {
                     | Instr::DeclareGlobal(_)
                     | Instr::DeclarePersistent(_)
                     | Instr::CallFevalMulti(_, _)
-                    | Instr::Spawn => {
+                    | Instr::Spawn
+                    | Instr::Await => {
                         return Err(execution_error(
                             "Unsupported instruction in JIT; use interpreter".to_string(),
                         ));

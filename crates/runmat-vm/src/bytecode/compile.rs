@@ -1667,6 +1667,13 @@ mod tests {
                 .any(|instr| matches!(instr, Instr::Spawn)),
             "expected MIR spawn lowering to emit an explicit spawn instruction"
         );
+        assert!(
+            bytecode
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, Instr::Await)),
+            "expected MIR await lowering to emit an explicit await instruction"
+        );
 
         let layout = bytecode.layout.as_ref().expect("layout");
         let z_export = layout.entrypoints[&entrypoint]

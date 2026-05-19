@@ -581,6 +581,7 @@ async fn run_interpreter_inner(
             | Instr::CallFevalMulti(_, _)
             | Instr::CallFevalExpandMultiOutput(_, _)
             | Instr::Spawn
+            | Instr::Await
             | Instr::CallBuiltinMulti(_, _, _)
             | Instr::CallSemanticFunctionMulti(_, _, _)
             | Instr::CallFunctionMulti { .. }
