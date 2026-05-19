@@ -20,6 +20,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This ratchets runtime object introspection behavior to shared nominal class metadata inheritance semantics.
   - Validation: `cargo test -p runmat-runtime fieldnames_object_includes_inherited_class_properties`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
 
+- (pending commit) Plan 6 runtime handle-object fieldnames inheritance consumer ratchet
+  - Added runtime coverage ensuring handle-object introspection includes inherited class metadata properties:
+    - `fieldnames_handle_object_includes_inherited_class_properties`
+  - The test registers parent/child class metadata and asserts `fieldnames(handle)` emits child class properties, inherited parent properties, and target payload fields in sorted output order.
+  - Validation: `cargo test -p runmat-runtime fieldnames_handle_object_includes_inherited_class_properties`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 runtime consumer ratchet for class-metadata inheritance lookup
   - Added runtime `exist` builtin coverage that asserts method existence queries consume registered class metadata through inheritance lookup:
     - `exist_method_uses_registered_class_metadata_including_inheritance`

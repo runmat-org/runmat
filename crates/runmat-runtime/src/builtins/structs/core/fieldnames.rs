@@ -429,6 +429,80 @@ pub(crate) mod tests {
         assert_eq!(collected, vec!["Enabled".to_string(), "Status".to_string()]);
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fieldnames_handle_object_includes_inherited_class_properties() {
+        let parent_name = "runmat.unittest.FieldnamesHandleParent";
+        let child_name = "runmat.unittest.FieldnamesHandleChild";
+
+        let mut parent = ClassDef {
+            name: parent_name.to_string(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        };
+        parent.properties.insert(
+            "ParentEnabled".to_string(),
+            PropertyDef {
+                name: "ParentEnabled".to_string(),
+                is_static: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        runmat_builtins::register_class(parent);
+
+        let mut child = ClassDef {
+            name: child_name.to_string(),
+            parent: Some(parent_name.to_string()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        };
+        child.properties.insert(
+            "ChildEnabled".to_string(),
+            PropertyDef {
+                name: "ChildEnabled".to_string(),
+                is_static: false,
+                is_dependent: false,
+                get_access: Access::Public,
+                set_access: Access::Public,
+                default_value: None,
+            },
+        );
+        runmat_builtins::register_class(child);
+
+        let mut payload = StructValue::new();
+        payload
+            .fields
+            .insert("Status".to_string(), Value::from("ready"));
+        let target = unsafe {
+            runmat_gc_api::GcPtr::from_raw(Box::into_raw(Box::new(Value::Struct(payload))))
+        };
+
+        let handle = HandleRef {
+            class_name: child_name.to_string(),
+            target,
+            valid: true,
+        };
+
+        let Value::Cell(cell) =
+            run_fieldnames(Value::HandleObject(handle)).expect("fieldnames handle")
+        else {
+            panic!("expected cell array");
+        };
+        let collected = cell_strings(&cell);
+        assert_eq!(
+            collected,
+            vec![
+                "ChildEnabled".to_string(),
+                "ParentEnabled".to_string(),
+                "Status".to_string()
+            ]
+        );
+    }
+
     fn cell_strings(cell: &CellArray) -> Vec<String> {
         cell.data
             .iter()
