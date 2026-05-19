@@ -835,26 +835,28 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
-    fn semantic_candidate_accel_capability_gate_rejects_sink_builtin() {
-        let instructions = vec![Instr::CallBuiltinMulti("assert".to_string(), 1, 0)];
-        let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
-        let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
-            id: 0,
-            signal_count: 2,
-            function: runmat_hir::FunctionId(0),
-            block: runmat_mir::BasicBlockId(0),
-            stmt_start: 0,
-            stmt_end: 2,
-            source_span: runmat_hir::Span { start: 10, end: 20 },
-        }];
-        assert!(
-            !super::semantic_candidates_touch_accel_capable_instruction(
-                &instructions,
-                &instr_spans,
-                &candidates,
-            ),
-            "control/sink builtin call should not trigger accel-graph construction gate"
-        );
+    fn semantic_candidate_accel_capability_gate_rejects_non_accel_builtins() {
+        for builtin in ["assert", "disp", "fprintf"] {
+            let instructions = vec![Instr::CallBuiltinMulti(builtin.to_string(), 1, 0)];
+            let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
+            let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+                id: 0,
+                signal_count: 2,
+                function: runmat_hir::FunctionId(0),
+                block: runmat_mir::BasicBlockId(0),
+                stmt_start: 0,
+                stmt_end: 2,
+                source_span: runmat_hir::Span { start: 10, end: 20 },
+            }];
+            assert!(
+                !super::semantic_candidates_touch_accel_capable_instruction(
+                    &instructions,
+                    &instr_spans,
+                    &candidates,
+                ),
+                "non-accelerable builtin `{builtin}` should not trigger accel-graph construction gate"
+            );
+        }
     }
 
     #[cfg(feature = "native-accel")]
