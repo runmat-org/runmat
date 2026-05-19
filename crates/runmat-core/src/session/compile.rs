@@ -27,12 +27,11 @@ fn mir_local_fact_count_for_entrypoint(
 }
 
 fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
-    use runmat_config::{build_project_composition_graph, discover_project_manifest_from};
+    use runmat_config::discover_project_symbols_from;
 
-    let mut symbols = HashSet::new();
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
-        Err(_) => return symbols,
+        Err(_) => return HashSet::new(),
     };
     let source_path = PathBuf::from(source_name);
     let start = if source_path.is_file() {
@@ -54,32 +53,12 @@ fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
     } else {
         cwd.clone()
     };
-    let Some(manifest_path) = discover_project_manifest_from(&start) else {
-        return symbols;
+    let Ok(discovered) = discover_project_symbols_from(&start) else {
+        return HashSet::new();
     };
-    let Ok(composition) = build_project_composition_graph(&manifest_path) else {
-        return symbols;
-    };
-    let root_dependencies = composition
-        .packages
-        .get(&composition.root_package)
-        .map(|package| package.dependencies.clone())
-        .unwrap_or_default();
-    for package in composition.packages.values() {
-        for source in &package.source_index.files {
-            symbols.insert(source.qualified_name.clone());
-            symbols.insert(format!(
-                "{}.{}",
-                package.package_name, source.qualified_name
-            ));
-            for (alias, dependency_package) in &root_dependencies {
-                if dependency_package == &package.package_name {
-                    symbols.insert(format!("{alias}.{}", source.qualified_name));
-                }
-            }
-        }
-    }
-    symbols
+    discovered
+        .map(|discovered| discovered.symbols)
+        .unwrap_or_default()
 }
 
 impl RunMatSession {

@@ -269,6 +269,31 @@ pub enum DiscoverProjectEntrypointError {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveredProjectSymbols {
+    pub manifest_path: PathBuf,
+    pub root_package: String,
+    pub project_root: PathBuf,
+    pub symbols: HashSet<String>,
+}
+
+#[derive(Debug, Error)]
+pub enum DiscoverProjectSymbolsError {
+    #[error(
+        "failed to build project composition from discovered manifest {manifest_path}: {source}"
+    )]
+    Composition {
+        manifest_path: PathBuf,
+        #[source]
+        source: ProjectCompositionError,
+    },
+    #[error("project composition for {manifest_path} is missing root package `{package}`")]
+    MissingRootPackage {
+        manifest_path: PathBuf,
+        package: String,
+    },
+}
+
 impl ProjectManifest {
     pub fn validate(&self, project_root: &Path) -> Result<(), ProjectManifestValidationError> {
         let mut messages = Vec::new();
@@ -557,6 +582,49 @@ pub fn resolve_named_entrypoint_from(
         root_package,
         project_root: root.project_root.clone(),
         entrypoint,
+    }))
+}
+
+pub fn discover_project_symbols_from(
+    start: &Path,
+) -> Result<Option<DiscoveredProjectSymbols>, DiscoverProjectSymbolsError> {
+    let Some(manifest_path) = discover_project_manifest_from(start) else {
+        return Ok(None);
+    };
+    let composition = build_project_composition_graph(&manifest_path).map_err(|source| {
+        DiscoverProjectSymbolsError::Composition {
+            manifest_path: manifest_path.clone(),
+            source,
+        }
+    })?;
+    let root_package = composition.root_package.clone();
+    let root = composition.packages.get(&root_package).ok_or_else(|| {
+        DiscoverProjectSymbolsError::MissingRootPackage {
+            manifest_path: manifest_path.clone(),
+            package: root_package.clone(),
+        }
+    })?;
+    let root_dependencies = root.dependencies.clone();
+    let mut symbols = HashSet::new();
+    for package in composition.packages.values() {
+        for source in &package.source_index.files {
+            symbols.insert(source.qualified_name.clone());
+            symbols.insert(format!(
+                "{}.{}",
+                package.package_name, source.qualified_name
+            ));
+            for (alias, dependency_package) in &root_dependencies {
+                if dependency_package == &package.package_name {
+                    symbols.insert(format!("{alias}.{}", source.qualified_name));
+                }
+            }
+        }
+    }
+    Ok(Some(DiscoveredProjectSymbols {
+        manifest_path,
+        root_package,
+        project_root: root.project_root.clone(),
+        symbols,
     }))
 }
 
