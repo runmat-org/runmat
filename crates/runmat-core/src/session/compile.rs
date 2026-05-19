@@ -60,9 +60,23 @@ fn discover_known_project_symbols(source_name: &str) -> HashSet<String> {
     let Ok(composition) = build_project_composition_graph(&manifest_path) else {
         return symbols;
     };
+    let root_dependencies = composition
+        .packages
+        .get(&composition.root_package)
+        .map(|package| package.dependencies.clone())
+        .unwrap_or_default();
     for package in composition.packages.values() {
         for source in &package.source_index.files {
             symbols.insert(source.qualified_name.clone());
+            symbols.insert(format!(
+                "{}.{}",
+                package.package_name, source.qualified_name
+            ));
+            for (alias, dependency_package) in &root_dependencies {
+                if dependency_package == &package.package_name {
+                    symbols.insert(format!("{alias}.{}", source.qualified_name));
+                }
+            }
         }
     }
     symbols

@@ -187,6 +187,62 @@ roots = ["."]
 }
 
 #[test]
+fn compile_input_resolves_wildcard_import_from_dependency_alias() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let dep_root = tmp.path().join("deps/statslib");
+    std::fs::create_dir_all(&dep_root).expect("create dependency dir");
+    std::fs::write(
+        tmp.path().join("runmat.toml"),
+        r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+
+[dependencies]
+statsdep = { path = "deps/statslib" }
+"#,
+    )
+    .expect("write root manifest");
+    std::fs::write(
+        dep_root.join("runmat.toml"),
+        r#"
+[package]
+name = "statslib"
+
+[sources]
+roots = ["."]
+"#,
+    )
+    .expect("write dependency manifest");
+    std::fs::write(
+        dep_root.join("summarize.m"),
+        "function y = summarize(x); y = x; end",
+    )
+    .expect("write dependency function");
+
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    session.set_source_name_override(Some(
+        tmp.path().join("main.m").to_string_lossy().to_string(),
+    ));
+    let prepared = session
+        .compile_input("import statsdep.*; y = summarize(1);")
+        .expect("compile");
+    session.set_source_name_override(None);
+
+    assert!(
+        prepared
+            .lowering()
+            .semantic_index
+            .calls
+            .iter()
+            .any(|call| matches!(call.kind, runmat_hir::CallKind::PackageFunction(_))),
+        "wildcard import call should resolve through dependency alias symbols from project composition"
+    );
+}
+
+#[test]
 fn end_offset_indexing_uses_semantic_vm() {
     let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
     let source = "A = [1, 2, 3]; y = A(end-1);";
