@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 semantic-window mapping fallback for untagged accel nodes
+  - VM semantic fusion-group mapping now keeps span-matched accel nodes eligible when accel-graph semantic tags are absent, instead of dropping semantic windows solely due missing node tags.
+  - Kind mismatch filtering for explicitly-tagged reduction/matmul nodes remains enforced.
+  - Added compile-level ratchet coverage:
+    - `semantic_windows_map_accel_nodes_without_semantic_tags`
+  - Validation: `cargo test -p runmat-vm semantic_windows_map_accel_nodes_without_semantic_tags`, `cargo test -p runmat-vm semantic_elementwise_window_excludes_reduction_nodes`, `cargo test -p runmat-vm semantic_reduction_window_accepts_reduction_nodes`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_transpose_nodes`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Core engine empty/whitespace execution contract ratchet
   - Tightened `runmat-core` engine coverage to require deterministic semantic behavior for empty and whitespace-only inputs.
   - `test_empty_input_handling` and `test_whitespace_only_input` now assert successful execution and absence of runtime diagnostics, replacing proxy assertions that only required a non-empty error display string.
