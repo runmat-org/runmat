@@ -1307,6 +1307,8 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - now `semantic_windows_reject_partial_overlap_at_compile_mapping_stage` asserting no compile-time mapping for partial-overlap spans.
     - renamed `semantic_windows_map_accel_nodes_that_cover_window_span`
     - now `semantic_windows_reject_covering_node_span_at_compile_mapping_stage` asserting no compile-time mapping for covering spans.
+    - added `semantic_windows_without_tags_reject_category_mismatch` to ensure missing accel tags do not bypass semantic kind/category compatibility.
+  - Tightened missing-tag fallback in semantic window mapping: absent graph tags now require accel-category compatibility (`Elementwise|Transpose` for elementwise windows, `Reduction` for reduction windows, `MatMul` for matmul windows) instead of unconditional admission.
   - Validation: `cargo test -p runmat-vm semantic_windows_reject_disjoint_gap_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_partial_overlap_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_covering_node_span_at_compile_mapping_stage -- --nocapture`, `cargo test -p runmat-vm semantic_windows_reject_overly_wide_covering_node_spans -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
 - (pending commit) Plan 7 runtime fusion sanitization heuristic reduction

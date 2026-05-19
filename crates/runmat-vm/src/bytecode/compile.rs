@@ -505,9 +505,27 @@ fn accel_node_matches_semantic_window_kind(
 ) -> bool {
     let has_semantic_signal = accel_node_has_semantic_signal(node);
     if !has_semantic_signal {
-        // If graph tags are missing, trust semantic window classification and keep span-matched
-        // nodes eligible instead of dropping semantic fusion groups on graph metadata absence.
-        return true;
+        // If graph tags are absent, fall back to accel category compatibility
+        // instead of admitting any span-matched node.
+        return match kind {
+            crate::bytecode::SemanticFusionInstructionKind::Elementwise => matches!(
+                node.category,
+                runmat_accelerate::graph::AccelOpCategory::Elementwise
+                    | runmat_accelerate::graph::AccelOpCategory::Transpose
+            ),
+            crate::bytecode::SemanticFusionInstructionKind::Reduction => {
+                matches!(
+                    node.category,
+                    runmat_accelerate::graph::AccelOpCategory::Reduction
+                )
+            }
+            crate::bytecode::SemanticFusionInstructionKind::Matmul => {
+                matches!(
+                    node.category,
+                    runmat_accelerate::graph::AccelOpCategory::MatMul
+                )
+            }
+        };
     }
     let has_reduction = node
         .tags
@@ -1532,6 +1550,57 @@ mod tests {
         assert_eq!(
             groups[0].kind,
             runmat_accelerate::fusion::FusionKind::ElementwiseChain
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_windows_without_tags_reject_category_mismatch() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![runmat_accelerate::graph::AccelNode {
+                id: 0,
+                label: runmat_accelerate::graph::AccelNodeLabel::Builtin {
+                    name: "sum".to_string(),
+                },
+                category: runmat_accelerate::graph::AccelOpCategory::Reduction,
+                inputs: vec![0],
+                outputs: vec![1],
+                span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+                tags: vec![],
+            }],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+            span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+        }];
+        let groups = super::derive_semantic_fusion_groups_from_candidates(&windows, &accel_graph);
+        assert!(
+            groups.is_empty(),
+            "missing tags should not bypass category mismatch for semantic window mapping"
         );
     }
 
