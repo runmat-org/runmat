@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 introduce explicit spawned-task value lane at VM runtime boundary
+  - VM dispatch `Instr::Spawn` now wraps payload values into an explicit spawned-task handle shape (struct-backed task record), and `Instr::Await` now validates/unwraps that handle instead of treating both opcodes as pure no-ops.
+  - Added explicit await-operand contract diagnostics (`RunMat:AwaitOperandInvalid`) for non-task operands and malformed task records.
+  - Added provider-backed lifecycle coverage for spawned-task payload handles without await:
+    - `spawn_pop_releases_stack_only_provider_handle`
+    - `spawn_pop_preserves_provider_handle_when_payload_still_live_in_vars`
+  - Added dispatch/unit coverage for task-handle wrap/unwrap shape and await rejection paths.
+  - Validation: `cargo test -p runmat-vm spawn_`, `cargo test -p runmat-vm await_rejects_non_spawn_task_operand`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 surface semantic instruction-window artifacts in fusion snapshots
   - Core fusion snapshot construction now accepts VM semantic instruction-window artifacts and emits explicit `SemanticWindow` nodes/decisions alongside semantic candidate artifacts.
   - Compile-time fusion-plan preview and runtime fusion-plan emission now pass semantic instruction windows through from bytecode semantic fusion metadata.

@@ -975,4 +975,80 @@ mod tests {
         fusion_residency::clear(&handle);
         let _ = TEST_PROVIDER.free(&handle);
     }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn spawn_pop_releases_stack_only_provider_handle() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![41.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Pop, Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::GpuTensor(handle.clone()));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("spawn/pop should complete");
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "spawn/pop should clear residency for dropped spawned task payload"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "spawn/pop should release provider storage for dropped spawned task payload"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn spawn_pop_preserves_provider_handle_when_payload_still_live_in_vars() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![51.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode =
+            Bytecode::with_instructions(vec![Instr::Spawn, Instr::Pop, Instr::Return], 1);
+        let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::GpuTensor(handle.clone()));
+        state.vars = vec![Value::GpuTensor(handle.clone())];
+
+        let mut result_vars = vec![Value::GpuTensor(handle.clone())];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("spawn/pop should complete");
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "spawn/pop should preserve residency for spawned payload handles still referenced by vars"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "spawn/pop should not release provider storage for spawned payload handles still referenced by vars"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
+
+    #[test]
+    fn await_rejects_non_spawn_task_operand() {
+        let bytecode = Bytecode::with_instructions(vec![Instr::Await, Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.stack.push(Value::Num(7.0));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let err = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect_err("await should reject non-task operand");
+        assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+    }
 }

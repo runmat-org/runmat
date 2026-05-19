@@ -11,7 +11,7 @@ use crate::bytecode::Instr;
 use crate::interpreter::debug;
 use crate::runtime::workspace::refresh_workspace_state;
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::Value;
+use runmat_builtins::{StructValue, Value};
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
@@ -189,6 +189,49 @@ fn enforce_spawn_value_concurrency_policy(value: &Value) -> Result<(), RuntimeEr
         }
         Ok(())
     })
+}
+
+const SPAWN_TASK_KIND_FIELD: &str = "__runmat_spawn_kind";
+const SPAWN_TASK_PAYLOAD_FIELD: &str = "__runmat_spawn_payload";
+const SPAWN_TASK_KIND_VALUE: &str = "task";
+
+fn wrap_spawned_value(value: Value) -> Value {
+    let mut task = StructValue::new();
+    task.fields.insert(
+        SPAWN_TASK_KIND_FIELD.to_string(),
+        Value::String(SPAWN_TASK_KIND_VALUE.to_string()),
+    );
+    task.fields
+        .insert(SPAWN_TASK_PAYLOAD_FIELD.to_string(), value);
+    Value::Struct(task)
+}
+
+fn unwrap_spawned_value(value: Value) -> Result<Value, RuntimeError> {
+    let Value::Struct(task) = value else {
+        return Err(crate::interpreter::errors::mex(
+            "AwaitOperandInvalid",
+            "await expected a spawned task handle value",
+        ));
+    };
+    let is_spawn_task = matches!(
+        task.fields.get(SPAWN_TASK_KIND_FIELD),
+        Some(Value::String(kind)) if kind == SPAWN_TASK_KIND_VALUE
+    );
+    if !is_spawn_task {
+        return Err(crate::interpreter::errors::mex(
+            "AwaitOperandInvalid",
+            "await expected a spawned task handle value",
+        ));
+    }
+    task.fields
+        .get(SPAWN_TASK_PAYLOAD_FIELD)
+        .cloned()
+        .ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "AwaitOperandInvalid",
+                "await task handle is missing payload value",
+            )
+        })
 }
 
 #[cfg(feature = "native-accel")]
@@ -584,26 +627,26 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::Spawn => {
-            if stack.is_empty() {
-                return Err(crate::interpreter::errors::mex(
+            let value = stack.pop().ok_or_else(|| {
+                crate::interpreter::errors::mex(
                     "StackUnderflow",
                     "spawn instruction expected a value on the stack",
-                ));
-            }
-            if let Some(top) = stack.last() {
-                enforce_spawn_value_concurrency_policy(top)?;
-            }
+                )
+            })?;
+            enforce_spawn_value_concurrency_policy(&value)?;
+            stack.push(wrap_spawned_value(value));
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::Await => {
-            if stack.is_empty() {
-                return Err(crate::interpreter::errors::mex(
+            let value = stack.pop().ok_or_else(|| {
+                crate::interpreter::errors::mex(
                     "StackUnderflow",
                     "await instruction expected a value on the stack",
-                ));
-            }
+                )
+            })?;
+            stack.push(unwrap_spawned_value(value)?);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -857,7 +900,10 @@ pub async fn dispatch_instruction(
 
 #[cfg(test)]
 mod tests {
-    use super::enforce_spawn_value_concurrency_policy;
+    use super::{
+        enforce_spawn_value_concurrency_policy, unwrap_spawned_value, wrap_spawned_value,
+        SPAWN_TASK_KIND_FIELD, SPAWN_TASK_KIND_VALUE, SPAWN_TASK_PAYLOAD_FIELD,
+    };
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView,
         SpawnHandleConcurrency, ThreadProviderGuard,
@@ -1011,6 +1057,36 @@ mod tests {
             err.identifier(),
             Some("RunMat:SpawnGpuHandleUnsupported"),
             "expected closure-capture spawn policy identifier"
+        );
+    }
+
+    #[test]
+    fn spawn_value_wrap_roundtrips_through_await_unwrap() {
+        let wrapped = wrap_spawned_value(Value::Num(3.0));
+        let unwrapped = unwrap_spawned_value(wrapped).expect("await should unwrap spawn task");
+        assert_eq!(unwrapped, Value::Num(3.0));
+    }
+
+    #[test]
+    fn await_unwrap_rejects_non_spawn_value() {
+        let err =
+            unwrap_spawned_value(Value::Num(3.0)).expect_err("await should reject non-task value");
+        assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+    }
+
+    #[test]
+    fn spawn_wrapper_uses_explicit_task_fields() {
+        let wrapped = wrap_spawned_value(Value::Num(5.0));
+        let Value::Struct(task) = wrapped else {
+            panic!("spawn should produce a struct-backed task handle");
+        };
+        assert_eq!(
+            task.fields.get(SPAWN_TASK_KIND_FIELD),
+            Some(&Value::String(SPAWN_TASK_KIND_VALUE.to_string()))
+        );
+        assert_eq!(
+            task.fields.get(SPAWN_TASK_PAYLOAD_FIELD),
+            Some(&Value::Num(5.0))
         );
     }
 }
