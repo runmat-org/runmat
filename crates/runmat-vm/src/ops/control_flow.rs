@@ -63,17 +63,6 @@ pub fn enter_scope(locals: &mut Vec<Value>, local_count: usize) {
     }
 }
 
-pub fn exit_scope<OnPop>(locals: &mut Vec<Value>, local_count: usize, mut on_pop: OnPop)
-where
-    OnPop: FnMut(&Value),
-{
-    for _ in 0..local_count {
-        if let Some(value) = locals.pop() {
-            on_pop(&value);
-        }
-    }
-}
-
 #[inline]
 pub fn return_value(stack: &mut Vec<Value>) -> Result<ControlFlowAction, RuntimeError> {
     let value = pop_value(stack)?;

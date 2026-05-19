@@ -322,6 +322,20 @@ fn clear_popped_value_residency_excluding_live_values(
     crate::accel::residency::clear_value_excluding(popped, &Value::OutputList(live));
 }
 
+#[cfg(feature = "native-accel")]
+fn clear_scope_value_residency_excluding_live_values(
+    dropped_local: &Value,
+    stack: &[Value],
+    vars: &[Value],
+    context: &crate::bytecode::program::ExecutionContext,
+) {
+    let mut live = Vec::with_capacity(stack.len() + vars.len() + context.locals.len());
+    live.extend(stack.iter().cloned());
+    live.extend(vars.iter().cloned());
+    live.extend(context.locals.iter().cloned());
+    crate::accel::residency::clear_value_excluding(dropped_local, &Value::OutputList(live));
+}
+
 pub async fn dispatch_instruction(
     meta: DispatchMeta<'_>,
     state: DispatchState<'_>,
@@ -543,13 +557,17 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::ExitScope(local_count) => {
-            let spawned_task_ids = &mut context.spawned_task_ids;
-            crate::ops::control_flow::exit_scope(&mut context.locals, *local_count, |val| {
-                if let Some(id) = spawn_task_id_from_value(val) {
-                    spawned_task_ids.remove(&id);
+            for _ in 0..*local_count {
+                if let Some(value) = context.locals.pop() {
+                    if let Some(id) = spawn_task_id_from_value(&value) {
+                        context.spawned_task_ids.remove(&id);
+                    }
+                    #[cfg(feature = "native-accel")]
+                    clear_scope_value_residency_excluding_live_values(&value, stack, vars, context);
+                    #[cfg(not(feature = "native-accel"))]
+                    clear_value_residency(&value);
                 }
-                clear_value_residency(val);
-            });
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

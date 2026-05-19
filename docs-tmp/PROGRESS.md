@@ -52,6 +52,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This ratchets that spawn lifecycle cleanup (`Pop` and `Await` completion) releases provider-backed handles for nested `Closure` captures and `OutputList` payloads, not only direct scalar `GpuTensor` payloads.
   - Validation: `cargo test -p runmat-vm spawn_pop_releases_nested_closure_captured_provider_handle`, `cargo test -p runmat-vm spawn_await_completion_releases_nested_output_list_provider_handle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
 
+- (pending commit) Plan 7 `ExitScope` provider-handle lifecycle correctness for shared liveness
+  - VM dispatch `Instr::ExitScope` now clears dropped local values with live-value exclusion (`stack` + `vars` + remaining `locals`) instead of unconditional residency clear.
+  - This prevents premature provider release when a GPU handle remains live outside the exiting local scope.
+  - Added VM runner coverage:
+    - `exit_scope_releases_local_only_provider_handle`
+    - `exit_scope_preserves_provider_handle_when_still_live_in_vars`
+  - Validation: `cargo test -p runmat-vm exit_scope_releases_local_only_provider_handle`, `cargo test -p runmat-vm exit_scope_preserves_provider_handle_when_still_live_in_vars`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 runtime consumer ratchet for class-metadata inheritance lookup
   - Added runtime `exist` builtin coverage that asserts method existence queries consume registered class metadata through inheritance lookup:
     - `exist_method_uses_registered_class_metadata_including_inheritance`

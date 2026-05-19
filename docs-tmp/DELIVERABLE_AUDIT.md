@@ -166,6 +166,11 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `spawn_pop_releases_nested_closure_captured_provider_handle`
     - `spawn_await_completion_releases_nested_output_list_provider_handle`
   - this extends release-semantics evidence beyond direct `GpuTensor` payloads to nested closure-capture and output-list task payloads.
+  - VM `Instr::ExitScope` local-drop cleanup in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs) now applies handle-aware live-value exclusion (stack + vars + remaining locals) before residency/provider release.
+  - provider-backed runner coverage in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) now asserts both sides of this contract:
+    - `exit_scope_releases_local_only_provider_handle`
+    - `exit_scope_preserves_provider_handle_when_still_live_in_vars`
+  - this closes a concrete shared-liveness bug class where exiting a local scope could previously free provider storage for handles still live in variable slots.
   - VM interpreter cancellation path now clears residency marks for live stack/variable GPU-handle values before returning `ExecutionCancelled`, and completion now clears stack-only handle residency while preserving live-var handles in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs), with direct coverage in `cancellation_clears_gpu_residency_for_live_values` and `completion_clears_stack_only_gpu_residency`.
   - Fusion materialized-store write paths now also consume handle-aware exclusion clearing in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs), extending shared-handle preservation beyond interpreter dispatch overwrite hooks.
   - Fusion materialized-store shared-handle preservation is now directly covered by `fusion_writeback_preserves_shared_gpu_handles` in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs).

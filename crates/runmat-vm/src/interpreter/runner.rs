@@ -916,6 +916,66 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
+    fn exit_scope_releases_local_only_provider_handle() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![15.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode = Bytecode::with_instructions(vec![Instr::ExitScope(1), Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.context.locals.push(Value::GpuTensor(handle.clone()));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("exit scope should complete");
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "exit scope should clear residency for local-only handles"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "exit scope should release provider storage for local-only handles"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn exit_scope_preserves_provider_handle_when_still_live_in_vars() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![17.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode = Bytecode::with_instructions(vec![Instr::ExitScope(1), Instr::Return], 1);
+        let mut seed_vars = vec![Value::GpuTensor(handle.clone())];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.context.locals.push(Value::GpuTensor(handle.clone()));
+        state.vars = vec![Value::GpuTensor(handle.clone())];
+
+        let mut result_vars = vec![Value::GpuTensor(handle.clone())];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("exit scope should complete");
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "exit scope should preserve residency for handles still referenced by vars"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "exit scope should not release provider storage for handles still referenced by vars"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
     fn spawn_await_completion_releases_stack_only_provider_handle() {
         use runmat_accelerate::fusion_residency;
 
