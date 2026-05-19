@@ -15,6 +15,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "step";
 const EPS: f64 = 1.0e-12;
 const DEFAULT_SAMPLES: usize = 101;
+const MAX_DISCRETE_SAMPLES: usize = 1_000_000;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::step")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -66,6 +67,7 @@ async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
 
+    let sys = crate::gather_if_needed_async(&sys).await?;
     let model = TransferFunction::from_value(sys)?;
     let time = TimeSpec::parse(rest.first(), model.sample_time)?;
     let eval = evaluate_step(&model, time)?;
@@ -407,14 +409,30 @@ fn add_scaled(state: &[f64], delta: &[f64], scale: f64) -> Vec<f64> {
 
 fn evaluate_discrete_step(model: &TransferFunction, time: TimeSpec) -> BuiltinResult<StepEval> {
     let t = discrete_time_vector(model.sample_time, time)?;
+    if t.len() > MAX_DISCRETE_SAMPLES {
+        return Err(step_error(format!(
+            "step: discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"
+        )));
+    }
     let sample_indices = t
         .iter()
-        .map(|&value| (value / model.sample_time).round() as usize)
-        .collect::<Vec<_>>();
+        .map(|&value| checked_discrete_sample_index(model.sample_time, value))
+        .collect::<BuiltinResult<Vec<_>>>()?;
     let max_k = sample_indices.iter().copied().max().unwrap_or(0);
+    let count = max_k
+        .checked_add(1)
+        .ok_or_else(|| step_error("step: discrete sample index exceeds platform limits"))?;
     let (num, den) = model.normalized();
-    let all_y = discrete_response(&num, &den, max_k + 1)?;
-    let y = sample_indices.into_iter().map(|idx| all_y[idx]).collect();
+    let all_y = discrete_response(&num, &den, count)?;
+    let y = sample_indices
+        .into_iter()
+        .map(|idx| {
+            all_y
+                .get(idx)
+                .copied()
+                .ok_or_else(|| step_error("step: discrete sample index exceeds response length"))
+        })
+        .collect::<BuiltinResult<Vec<_>>>()?;
     Ok(StepEval { y, t })
 }
 
@@ -424,11 +442,41 @@ fn discrete_time_vector(sample_time: f64, time: TimeSpec) -> BuiltinResult<Vec<f
             .map(|idx| idx as f64 * sample_time)
             .collect()),
         TimeSpec::FinalTime(final_time) => {
-            let steps = (final_time / sample_time).floor() as usize;
+            let steps = checked_discrete_sample_steps(sample_time, final_time)?;
             Ok((0..=steps).map(|idx| idx as f64 * sample_time).collect())
         }
         TimeSpec::Vector(values) => Ok(values),
     }
+}
+
+fn checked_discrete_sample_steps(sample_time: f64, final_time: f64) -> BuiltinResult<usize> {
+    let steps = (final_time / sample_time).floor();
+    if !steps.is_finite() || steps < 0.0 || steps > usize::MAX as f64 {
+        return Err(step_error(
+            "step: discrete sample count exceeds platform limits",
+        ));
+    }
+    if steps >= MAX_DISCRETE_SAMPLES as f64 {
+        return Err(step_error(format!(
+            "step: discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"
+        )));
+    }
+    Ok(steps as usize)
+}
+
+fn checked_discrete_sample_index(sample_time: f64, time: f64) -> BuiltinResult<usize> {
+    let index = (time / sample_time).round();
+    if !index.is_finite() || index < 0.0 || index > usize::MAX as f64 {
+        return Err(step_error(
+            "step: discrete sample index exceeds platform limits",
+        ));
+    }
+    if index >= MAX_DISCRETE_SAMPLES as f64 {
+        return Err(step_error(format!(
+            "step: discrete response would require more than {MAX_DISCRETE_SAMPLES} samples"
+        )));
+    }
+    Ok(index as usize)
 }
 
 fn discrete_response(num: &[f64], den: &[f64], count: usize) -> BuiltinResult<Vec<f64>> {
@@ -617,6 +665,22 @@ mod tests {
         let time = Value::Tensor(Tensor::new(vec![0.0, 0.1, 0.2], vec![1, 3]).unwrap());
         let y = tensor_data(run_step(sys, vec![time]).expect("step"));
         assert_eq!(y, vec![0.0, 1.0, 1.5]);
+    }
+
+    #[test]
+    fn discrete_final_time_rejects_excessive_sample_count() {
+        let sys = tf_object(vec![1.0], vec![1.0, -0.5], 1.0e-6);
+        let err = run_step(sys, vec![Value::Num(2.0)]).expect_err("should fail");
+        assert!(err.message().contains("more than 1000000 samples"));
+    }
+
+    #[test]
+    fn discrete_time_vector_rejects_excessive_sample_index() {
+        let sys = tf_object(vec![1.0], vec![1.0, -0.5], 1.0);
+        let time =
+            Value::Tensor(Tensor::new(vec![0.0, MAX_DISCRETE_SAMPLES as f64], vec![1, 2]).unwrap());
+        let err = run_step(sys, vec![time]).expect_err("should fail");
+        assert!(err.message().contains("more than 1000000 samples"));
     }
 
     #[test]
