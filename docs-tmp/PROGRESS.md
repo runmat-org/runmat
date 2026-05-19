@@ -15,7 +15,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - duplicate-import classstar test now asserts `RunMat:ImportDuplicate`
   - Added direct HIR-layer identifier-contract coverage in [lowering_extras.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/lowering_extras.rs):
     - `import_normalization_and_ambiguity` now asserts `err.identifier == Some("RunMat:ImportAmbiguous")`
-  - Validation: `cargo test -p runmat-vm --test functions import_ambiguity_`, `cargo test -p runmat-vm --test functions import_wildcard_vs_classstar_ambiguity_for_static_method`, `cargo test -p runmat-hir --test lowering_extras import_normalization_and_ambiguity -- --nocapture`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+  - Added core compile-path identifier-contract coverage in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs):
+    - `compile_input_reports_import_ambiguity_identifier`
+    - `compile_input_reports_duplicate_import_identifier`
+  - Validation: `cargo test -p runmat-vm --test functions import_ambiguity_`, `cargo test -p runmat-vm --test functions import_wildcard_vs_classstar_ambiguity_for_static_method`, `cargo test -p runmat-hir --test lowering_extras import_normalization_and_ambiguity -- --nocapture`, `cargo test -p runmat-core compile_input_reports_import_`, `cargo test -p runmat-core compile_input_reports_duplicate_import_identifier`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
 
 - (pending commit) Plan 7 core execution-attempt stats contract ratchet
   - Tightened execution-attempt accounting in [integration.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/integration.rs):

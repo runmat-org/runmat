@@ -190,6 +190,32 @@ roots = ["."]
 }
 
 #[test]
+fn compile_input_reports_import_ambiguity_identifier() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let err = match session.compile_input("import PkgF.foo; import PkgG.foo; y = foo();") {
+        Ok(_) => panic!("ambiguous specific imports should fail compilation"),
+        Err(err) => err,
+    };
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic import ambiguity error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:ImportAmbiguous"));
+}
+
+#[test]
+fn compile_input_reports_duplicate_import_identifier() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let err = match session.compile_input("import Point.*; import Point.*; y = 1;") {
+        Ok(_) => panic!("duplicate imports should fail compilation"),
+        Err(err) => err,
+    };
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic duplicate import error");
+    };
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:ImportDuplicate"));
+}
+
+#[test]
 fn compile_input_resolves_wildcard_import_from_dependency_alias() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let dep_root = tmp.path().join("deps/statslib");
