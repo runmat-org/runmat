@@ -266,3 +266,43 @@ fn parallel_spawn_inputs_follow_spawn_order_not_await_order() -> Result<()> {
     assert_eq!(value_as_f64(&out2_value), Some(2.0));
     Ok(())
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn spawn_error_stops_later_spawn_from_running() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
+    let _guard = InteractiveGuard::new();
+    let mut session = RunMatSession::with_options(false, false)?;
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let prompts_clone = Arc::clone(&prompts);
+    session.install_async_input_handler(move |request: InputRequest| {
+        let prompts_clone = Arc::clone(&prompts_clone);
+        async move {
+            prompts_clone.lock().unwrap().push(request.prompt.clone());
+            Err("handler failed".to_string())
+        }
+    });
+
+    let result = block_on(session.execute(
+        "async function y = first(); input('first: '); y = 1; end; \
+         async function y = second(); input('second: '); y = 2; end; \
+         t1 = spawn(first()); t2 = spawn(second()); marker = 7;",
+    ));
+
+    match result {
+        Err(RunError::Runtime(err)) => {
+            assert_eq!(err.identifier(), Some("RunMat:input:InteractionFailed"));
+        }
+        Err(other) => panic!("expected runtime interaction error, got: {other:?}"),
+        Ok(exec) => {
+            let err = exec.error.expect("expected execution-level runtime error");
+            assert_eq!(err.identifier(), Some("RunMat:input:InteractionFailed"));
+        }
+    }
+    assert_eq!(
+        prompts.lock().unwrap().as_slice(),
+        &["first: "],
+        "second spawn should not run after first spawn interaction failure"
+    );
+    Ok(())
+}
