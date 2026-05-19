@@ -267,22 +267,29 @@ fn unwrap_spawned_value(
         })
 }
 
-fn retire_spawn_task_id_if_dropped(
-    context: &mut crate::bytecode::program::ExecutionContext,
-    value: &Value,
-) {
+fn spawn_task_id_from_value(value: &Value) -> Option<u64> {
     let Value::Struct(task) = value else {
-        return;
+        return None;
     };
     let is_spawn_task = matches!(
         task.fields.get(SPAWN_TASK_KIND_FIELD),
         Some(Value::String(kind)) if kind == SPAWN_TASK_KIND_VALUE
     );
     if !is_spawn_task {
-        return;
+        return None;
     }
-    if let Some(Value::Int(IntValue::U64(id))) = task.fields.get(SPAWN_TASK_ID_FIELD) {
-        context.spawned_task_ids.remove(id);
+    match task.fields.get(SPAWN_TASK_ID_FIELD) {
+        Some(Value::Int(IntValue::U64(id))) => Some(*id),
+        _ => None,
+    }
+}
+
+fn retire_spawn_task_id_if_dropped(
+    context: &mut crate::bytecode::program::ExecutionContext,
+    value: &Value,
+) {
+    if let Some(id) = spawn_task_id_from_value(value) {
+        context.spawned_task_ids.remove(&id);
     }
 }
 
@@ -507,7 +514,11 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::ExitScope(local_count) => {
+            let spawned_task_ids = &mut context.spawned_task_ids;
             crate::ops::control_flow::exit_scope(&mut context.locals, *local_count, |val| {
+                if let Some(id) = spawn_task_id_from_value(val) {
+                    spawned_task_ids.remove(&id);
+                }
                 clear_value_residency(val);
             });
             Ok(Some(DispatchHandled::Generic(
@@ -963,7 +974,7 @@ mod tests {
         AccelDownloadFuture, AccelProvider, GpuTensorHandle, HostTensorView,
         SpawnHandleConcurrency, ThreadProviderGuard,
     };
-    use runmat_builtins::{CellArray, IntValue, Value};
+    use runmat_builtins::{CellArray, IntValue, StructValue, Value};
 
     struct RejectSpawnProvider;
     static REJECT_PROVIDER: RejectSpawnProvider = RejectSpawnProvider;
@@ -1211,6 +1222,18 @@ mod tests {
         assert!(
             !context.spawned_task_ids.contains(&0),
             "dropping a spawn task handle should retire its task id"
+        );
+    }
+
+    #[test]
+    fn spawn_task_id_extraction_ignores_non_task_structs() {
+        let mut non_task = StructValue::new();
+        non_task
+            .fields
+            .insert("x".to_string(), Value::Int(IntValue::U64(9)));
+        assert!(
+            super::spawn_task_id_from_value(&Value::Struct(non_task)).is_none(),
+            "only spawn task structs should expose task ids"
         );
     }
 }
