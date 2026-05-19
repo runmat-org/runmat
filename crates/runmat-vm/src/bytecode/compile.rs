@@ -2,12 +2,14 @@
 use crate::accel::graph::build_accel_graph;
 #[cfg(feature = "native-accel")]
 use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
+#[cfg(feature = "native-accel")]
+use crate::bytecode::instr::Instr;
 use crate::bytecode::program::SemanticFunctionBytecode;
 use crate::bytecode::{Bytecode, SemanticFunctionRegistry};
 use crate::compiler::{CompileError, Compiler};
 use crate::layout::derive_layout;
 #[cfg(feature = "native-accel")]
-use runmat_builtins::BuiltinSemanticKind;
+use runmat_builtins::{builtin_functions, AccelTag, BuiltinSemanticKind};
 use runmat_hir::{EntrypointId, FunctionId, HirAssembly};
 use runmat_mir::MirAssembly;
 use runmat_mir::{MirRvalue, MirStmtKind, MirTerminatorKind};
@@ -47,36 +49,41 @@ pub fn compile(
     #[cfg(feature = "native-accel")]
     let semantic_fusion_metadata = derive_semantic_fusion_metadata(mir, entrypoint_target);
     #[cfg(feature = "native-accel")]
-    let (accel_graph, fusion_groups) =
-        if semantic_fusion_metadata.mir_fusion_candidate_group_count == 0 {
+    let (accel_graph, fusion_groups) = if semantic_fusion_metadata.mir_fusion_candidate_group_count
+        == 0
+        || !semantic_candidates_touch_accel_capable_instruction(
+            &c.instructions,
+            &c.instr_spans,
+            &semantic_fusion_metadata.mir_fusion_candidate_groups,
+        ) {
+        (None, Vec::new())
+    } else {
+        let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
+        let mut fusion_groups = derive_semantic_fusion_groups_from_candidates(
+            &accel_graph,
+            &c.instr_spans,
+            &semantic_fusion_metadata.mir_fusion_candidate_groups,
+        );
+        if !fusion_groups.is_empty() {
+            annotate_fusion_groups_with_stack_layout(
+                &c.instructions,
+                &accel_graph,
+                &mut fusion_groups,
+            );
+            fusion_groups.retain(|group| {
+                fusion_group_within_semantic_candidate_spans(
+                    group,
+                    &c.instr_spans,
+                    &semantic_fusion_metadata.mir_fusion_candidate_groups,
+                )
+            });
+        }
+        if fusion_groups.is_empty() {
             (None, Vec::new())
         } else {
-            let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
-            let mut fusion_groups = derive_semantic_fusion_groups_from_candidates(
-                &accel_graph,
-                &c.instr_spans,
-                &semantic_fusion_metadata.mir_fusion_candidate_groups,
-            );
-            if !fusion_groups.is_empty() {
-                annotate_fusion_groups_with_stack_layout(
-                    &c.instructions,
-                    &accel_graph,
-                    &mut fusion_groups,
-                );
-                fusion_groups.retain(|group| {
-                    fusion_group_within_semantic_candidate_spans(
-                        group,
-                        &c.instr_spans,
-                        &semantic_fusion_metadata.mir_fusion_candidate_groups,
-                    )
-                });
-            }
-            if fusion_groups.is_empty() {
-                (None, Vec::new())
-            } else {
-                (Some(accel_graph), fusion_groups)
-            }
-        };
+            (Some(accel_graph), fusion_groups)
+        }
+    };
     let semantic_async_metadata = derive_semantic_async_metadata(mir, entrypoint_target);
 
     Ok(Bytecode {
@@ -265,6 +272,71 @@ fn merge_stmt_run_span(
 #[cfg(feature = "native-accel")]
 fn source_spans_overlap(lhs: runmat_hir::Span, rhs: runmat_hir::Span) -> bool {
     lhs.start < rhs.end && rhs.start < lhs.end
+}
+
+#[cfg(feature = "native-accel")]
+fn semantic_candidates_touch_accel_capable_instruction(
+    instructions: &[Instr],
+    instr_spans: &[runmat_hir::Span],
+    semantic_candidate_groups: &[crate::bytecode::SemanticFusionCandidateGroup],
+) -> bool {
+    if instructions.is_empty() || instr_spans.is_empty() || semantic_candidate_groups.is_empty() {
+        return false;
+    }
+    instructions
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index < instr_spans.len())
+        .any(|(index, instr)| {
+            let span = instr_spans[index];
+            semantic_candidate_groups
+                .iter()
+                .any(|candidate| source_spans_overlap(span, candidate.source_span))
+                && instr_is_accel_capable(instr)
+        })
+}
+
+#[cfg(feature = "native-accel")]
+fn instr_is_accel_capable(instr: &Instr) -> bool {
+    match instr {
+        Instr::Add
+        | Instr::Sub
+        | Instr::Mul
+        | Instr::RightDiv
+        | Instr::LeftDiv
+        | Instr::Pow
+        | Instr::Neg
+        | Instr::UPlus
+        | Instr::Transpose
+        | Instr::ConjugateTranspose
+        | Instr::ElemMul
+        | Instr::ElemDiv
+        | Instr::ElemPow
+        | Instr::ElemLeftDiv
+        | Instr::LessEqual
+        | Instr::Less
+        | Instr::Greater
+        | Instr::GreaterEqual
+        | Instr::Equal
+        | Instr::NotEqual => true,
+        Instr::CallBuiltinMulti(name, _, _) => builtin_functions()
+            .iter()
+            .find(|func| func.name == name.as_str())
+            .map(|func| {
+                func.accel_tags.iter().any(|tag| {
+                    matches!(
+                        tag,
+                        AccelTag::Unary
+                            | AccelTag::Elementwise
+                            | AccelTag::Reduction
+                            | AccelTag::MatMul
+                            | AccelTag::Transpose
+                    )
+                })
+            })
+            .unwrap_or(false),
+        _ => false,
+    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -653,6 +725,60 @@ mod tests {
         assert!(
             bytecode.fusion_groups.is_empty(),
             "expected no executable bytecode fusion groups without semantic candidates"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_candidate_accel_capability_gate_rejects_logical_ops() {
+        let instructions = vec![Instr::LogicalAnd, Instr::LogicalOr];
+        let instr_spans = vec![
+            runmat_hir::Span { start: 10, end: 20 },
+            runmat_hir::Span { start: 21, end: 30 },
+        ];
+        let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 2,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 2,
+            source_span: runmat_hir::Span { start: 10, end: 30 },
+        }];
+        assert!(
+            !super::semantic_candidates_touch_accel_capable_instruction(
+                &instructions,
+                &instr_spans,
+                &candidates,
+            ),
+            "logical ops should not trigger accel-graph construction gate"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_candidate_accel_capability_gate_accepts_binary_ops() {
+        let instructions = vec![Instr::Add, Instr::ElemMul];
+        let instr_spans = vec![
+            runmat_hir::Span { start: 10, end: 20 },
+            runmat_hir::Span { start: 21, end: 30 },
+        ];
+        let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 2,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 2,
+            source_span: runmat_hir::Span { start: 10, end: 30 },
+        }];
+        assert!(
+            super::semantic_candidates_touch_accel_capable_instruction(
+                &instructions,
+                &instr_spans,
+                &candidates,
+            ),
+            "elementwise arithmetic ops should trigger accel-graph construction gate"
         );
     }
 
