@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 1 callback ABI unresolved external identity normalization for cellfun/arrayfun
+  - Runtime `cellfun` and `arrayfun` external-callback unresolved paths now emit `RunMat:UndefinedFunction` instead of a tool-specific fallback identifier or identifier-less flow error.
+  - Added runtime regressions:
+    - `cellfun_external_handle_errors_as_undefined_when_unresolved`
+    - `arrayfun_external_handle_errors_as_undefined_when_unresolved`
+  - Validation: `cargo test -p runmat-runtime cellfun_external_handle_errors_as_undefined_when_unresolved`, `cargo test -p runmat-runtime arrayfun_external_handle_errors_as_undefined_when_unresolved`, `cargo test -p runmat-runtime arrayfun_error_without_handler_propagates_identifier`, `cargo test -p runmat-runtime cellfun_external_handle_uses_semantic_resolver`.
+
 - (pending commit) Plan 7 classify fusion-group kind from semantic windows, not accel-node category overrides
   - VM compile semantic-fusion grouping now derives `FusionKind` directly from semantic instruction-window signal kind hints (`Elementwise`/`Reduction`/`Matmul`) instead of allowing accel-graph node-category scans to override classification.
   - This keeps group-kind planning on semantic instruction facts while retaining accel-graph use for node realization and shape extraction.

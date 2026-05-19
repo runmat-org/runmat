@@ -79,6 +79,13 @@ fn arrayfun_error(message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
+fn arrayfun_error_with_identifier(message: impl Into<String>, identifier: &str) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("arrayfun")
+        .with_identifier(identifier)
+        .build()
+}
+
 fn arrayfun_error_with_source(message: impl Into<String>, source: RuntimeError) -> RuntimeError {
     let identifier = source.identifier().map(str::to_string);
     let mut builder = build_runtime_error(message)
@@ -679,7 +686,10 @@ impl Callable {
                 if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
                     return result;
                 }
-                Err(arrayfun_flow(format!("Undefined function '{name}'")))
+                Err(arrayfun_error_with_identifier(
+                    format!("Undefined function '{name}'"),
+                    "RunMat:UndefinedFunction",
+                ))
             }
             Callable::Closure(c) => {
                 let mut merged = c.captures.clone();
@@ -1209,6 +1219,25 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn arrayfun_external_handle_errors_as_undefined_when_unresolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_| None)));
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
+
+        let err = call(
+            Value::ExternalFunctionHandle("pkg.callback".to_string()),
+            vec![Value::Tensor(tensor)],
+        )
+        .expect_err("unresolved external callback should error");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:UndefinedFunction"),
+            "unexpected error: {}",
+            err.message()
+        );
     }
 
     #[test]

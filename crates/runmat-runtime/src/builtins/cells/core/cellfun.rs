@@ -548,7 +548,7 @@ impl Callable {
                 }
                 Err(cellfun_error_with_identifier(
                     format!("Undefined function '{name}'"),
-                    IDENT_FUNCTION_ERROR,
+                    "RunMat:UndefinedFunction",
                 ))
             }
             Callable::Closure(c) => {
@@ -919,6 +919,25 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cellfun_external_handle_errors_as_undefined_when_unresolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_| None)));
+        let cell = crate::make_cell(vec![Value::Num(2.0)], 1, 1).expect("cell");
+
+        let err = cellfun_builtin(
+            Value::ExternalFunctionHandle("pkg.callback".to_string()),
+            vec![cell],
+        )
+        .expect_err("unresolved external callback should error");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:UndefinedFunction"),
+            "unexpected error: {}",
+            err.message()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
