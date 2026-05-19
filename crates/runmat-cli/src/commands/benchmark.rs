@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use log::{error, info};
-use runmat_config::RunMatConfig;
+use runmat_config::{
+    resolve_project_source_input_from, ResolveProjectSourceInputError, RunMatConfig,
+};
 use runmat_core::{abi::DiagnosticSeverity, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish};
 use std::fs;
 use std::path::PathBuf;
@@ -19,6 +21,7 @@ pub async fn execute_benchmark(
     cli: &Cli,
     config: &RunMatConfig,
 ) -> Result<()> {
+    let file = resolve_benchmark_input(file)?;
     info!("Benchmarking script: {file:?} ({iterations} iterations, JIT: {jit})");
 
     let content = fs::read_to_string(&file)
@@ -209,4 +212,118 @@ pub async fn execute_benchmark(
     engine.set_source_name_override(None);
 
     Ok(())
+}
+
+fn resolve_benchmark_input(file: PathBuf) -> Result<PathBuf> {
+    let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
+    resolve_project_source_input_from(&cwd, &file).map_err(|err| match err {
+        ResolveProjectSourceInputError::EntrypointResolve { .. } => {
+            anyhow::anyhow!(
+                "failed to resolve benchmark target '{}': {}",
+                file.display(),
+                err
+            )
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_benchmark_input;
+    use once_cell::sync::Lazy;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    static CWD_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    #[test]
+    fn resolves_named_entrypoint_to_manifest_path_target() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "main"
+path = "src/main"
+"#,
+        )
+        .unwrap();
+
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let resolved = resolve_benchmark_input(PathBuf::from("main")).expect("resolve entrypoint");
+        std::env::set_current_dir(original).unwrap();
+
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            tmp.path().join("src/main.m").canonicalize().unwrap()
+        );
+    }
+
+    #[test]
+    fn resolve_benchmark_input_infers_m_extension_for_relative_path() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/main.m"), "x = 1;").unwrap();
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let resolved =
+            resolve_benchmark_input(PathBuf::from("src/main")).expect("should infer .m extension");
+
+        std::env::set_current_dir(prev).unwrap();
+
+        assert_eq!(resolved, PathBuf::from("src/main.m"));
+    }
+
+    #[test]
+    fn resolves_module_function_entrypoint_to_source_root_file() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("src/app")).unwrap();
+        fs::write(
+            tmp.path().join("src/app/server.m"),
+            "function y = main(); y = 1; end",
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["src"]
+
+[[entrypoints]]
+name = "server"
+module = "app.server"
+function = "main"
+"#,
+        )
+        .unwrap();
+
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let resolved = resolve_benchmark_input(PathBuf::from("server"))
+            .expect("module/function entrypoint should resolve to module file");
+        std::env::set_current_dir(original).unwrap();
+
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            tmp.path().join("src/app/server.m").canonicalize().unwrap()
+        );
+    }
 }
