@@ -433,7 +433,7 @@ fn split_method_name(name: &str) -> Option<(String, String)> {
 pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
-    use runmat_builtins::Value;
+    use runmat_builtins::{Access, ClassDef, MethodDef, Value};
     use runmat_filesystem as vfs;
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
@@ -442,7 +442,15 @@ pub(crate) mod tests {
     use std::fs::File;
     use std::io::Write;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use tempfile::tempdir;
+
+    static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn unique_class_name(prefix: &str) -> String {
+        let id = TEST_CLASS_COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", prefix, id)
+    }
 
     fn exist_builtin(name: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::exist_builtin(name, rest))
@@ -631,5 +639,58 @@ pub(crate) mod tests {
         let value =
             exist_builtin(Value::Num(17.0), vec![Value::from("handle")]).expect("exist handle");
         assert_eq!(value, Value::Num(0.0));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn exist_method_uses_registered_class_metadata_including_inheritance() {
+        let (_guard, _lock) = test_guard();
+
+        let parent_name = unique_class_name("existParent");
+        let child_name = unique_class_name("existChild");
+        let mut parent_methods = HashMap::new();
+        parent_methods.insert(
+            "parentOnly".to_string(),
+            MethodDef {
+                name: "parentOnly".to_string(),
+                is_static: false,
+                access: Access::Public,
+                function_name: "parent_only_impl".to_string(),
+                implicit_class_argument: None,
+            },
+        );
+        runmat_builtins::register_class(ClassDef {
+            name: parent_name.clone(),
+            parent: None,
+            properties: HashMap::new(),
+            methods: parent_methods,
+        });
+        runmat_builtins::register_class(ClassDef {
+            name: child_name.clone(),
+            parent: Some(parent_name.clone()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+
+        let direct = exist_builtin(
+            Value::from(format!("{parent_name}.parentOnly")),
+            vec![Value::from("method")],
+        )
+        .expect("direct class method lookup should succeed");
+        assert_eq!(direct, Value::Num(5.0));
+
+        let inherited = exist_builtin(
+            Value::from(format!("{child_name}.parentOnly")),
+            vec![Value::from("method")],
+        )
+        .expect("inherited class method lookup should succeed");
+        assert_eq!(inherited, Value::Num(5.0));
+
+        let missing = exist_builtin(
+            Value::from(format!("{child_name}.missingMethod")),
+            vec![Value::from("method")],
+        )
+        .expect("missing method lookup should return not found");
+        assert_eq!(missing, Value::Num(0.0));
     }
 }

@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 6 runtime consumer ratchet for class-metadata inheritance lookup
+  - Added runtime `exist` builtin coverage that asserts method existence queries consume registered class metadata through inheritance lookup:
+    - `exist_method_uses_registered_class_metadata_including_inheritance`
+  - The test registers synthetic parent/child classes via `runmat_builtins::register_class` and verifies:
+    - direct method lookup resolves (`Parent.parentOnly`)
+    - inherited lookup resolves (`Child.parentOnly`)
+    - missing method reports not found
+  - Validation: `cargo test -p runmat-runtime exist_method_uses_registered_class_metadata_including_inheritance`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 6 class-registry metadata ratchets for nominal static/inheritance lookup
   - Added `runmat-builtins` class-registry tests that ratchet language-facing metadata behavior for runtime/primitive nominal classes:
     - `primitive_classes_expose_static_zeros_method_metadata`
