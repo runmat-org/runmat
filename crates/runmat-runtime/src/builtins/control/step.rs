@@ -68,8 +68,12 @@ async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 
     let sys = crate::gather_if_needed_async(&sys).await?;
+    let mut rest_host = Vec::with_capacity(rest.len());
+    for arg in &rest {
+        rest_host.push(crate::gather_if_needed_async(arg).await?);
+    }
     let model = TransferFunction::from_value(sys)?;
-    let time = TimeSpec::parse(rest.first(), model.sample_time)?;
+    let time = TimeSpec::parse(rest_host.first(), model.sample_time)?;
     let eval = evaluate_step(&model, time)?;
 
     if crate::output_context::requested_output_count() == Some(0)
@@ -83,6 +87,9 @@ async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         if out_count == 0 {
             plot_response(&eval).await?;
             return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.y_value()?]));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
@@ -642,6 +649,21 @@ mod tests {
         assert_eq!(outputs.len(), 2);
         assert_eq!(tensor_data(outputs[1].clone()), vec![0.0, 1.0]);
         let y = tensor_data(outputs[0].clone());
+        assert!((y[1] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn single_requested_output_returns_only_response() {
+        let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
+        let _guard = crate::output_count::push_output_count(Some(1));
+        let time = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
+        let result = run_step(sys, vec![time]).expect("step");
+        let Value::OutputList(outputs) = result else {
+            panic!("expected output list");
+        };
+        assert_eq!(outputs.len(), 1);
+        let y = tensor_data(outputs[0].clone());
+        assert_eq!(y.len(), 2);
         assert!((y[1] - (1.0 - (-1.0_f64).exp())).abs() < 1.0e-5);
     }
 
