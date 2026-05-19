@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- `e2f9c345` `RM-378: guard bytecode symbol discovery on local source`
+  - Tightened CLI bytecode source-context symbol discovery to require an existing local source path before manifest/source-index symbol lookup, avoiding accidental local-CWD symbol injection for virtual/nonexistent source names.
+  - Added `discover_known_project_symbols_requires_existing_local_source_path` coverage and hardened existing source-context fixture expectations.
+  - Validation: `cargo test -p runmat --lib commands::bytecode::tests::`, `cargo test -p runmat --lib commands::script::tests::`, `cargo test -p runmat --lib commands::benchmark::tests::`, `cargo test -p runmat-core --test semicolon_suppression`.
+
 - `f54e8e79` `RM-378: add bytecode source-context symbol tests`
   - Added CLI bytecode-command tests that ratchet manifest/source-context symbol discovery and wildcard-import lowering visibility for emitted-bytecode mode:
     - `discover_known_project_symbols_reads_manifest_source_context`
