@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 `ExitScope` lifecycle ratchet for nested handle-object locals
+  - Added provider-backed VM runner coverage for local-scope drop cleanup where GPU handles are nested under `Value::HandleObject` local values:
+    - `exit_scope_releases_nested_handle_object_local_provider_handle`
+    - `exit_scope_preserves_nested_handle_object_provider_handle_when_still_live_in_vars`
+  - This extends `Instr::ExitScope` shared-liveness evidence beyond direct local tensor handles to handle-object target traversal.
+  - Validation: `cargo test -p runmat-vm exit_scope_releases_nested_handle_object_local_provider_handle`, `cargo test -p runmat-vm exit_scope_preserves_nested_handle_object_provider_handle_when_still_live_in_vars`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 provider-release lifecycle ratchet for handle-object spawned payloads
   - Added provider-backed VM runner coverage for spawned payloads where GPU handles are nested under `Value::HandleObject` targets:
     - `spawn_await_completion_releases_nested_handle_object_target_provider_handle`

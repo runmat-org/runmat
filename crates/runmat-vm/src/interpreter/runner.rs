@@ -962,6 +962,85 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
+    fn exit_scope_releases_nested_handle_object_local_provider_handle() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![18.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode = Bytecode::with_instructions(vec![Instr::ExitScope(1), Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        let mut payload = StructValue::new();
+        payload
+            .fields
+            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        state.context.locals.push(Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        }));
+        state.vars = vec![Value::Num(0.0)];
+
+        let mut result_vars = vec![Value::Num(0.0)];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("exit scope should complete for nested handle-object local");
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "exit scope should clear residency for nested handle-object local-only handles"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "exit scope should release provider storage for nested handle-object local-only handles"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn exit_scope_preserves_nested_handle_object_provider_handle_when_still_live_in_vars() {
+        use runmat_accelerate::fusion_residency;
+
+        let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
+        let handle = upload_provider_handle(vec![20.0], vec![1]);
+        assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
+        fusion_residency::mark(&handle);
+
+        let bytecode = Bytecode::with_instructions(vec![Instr::ExitScope(1), Instr::Return], 1);
+        let mut seed_vars = vec![Value::Num(0.0)];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        let mut payload = StructValue::new();
+        payload
+            .fields
+            .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
+        let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
+        let local_value = Value::HandleObject(HandleRef {
+            class_name: "Payload".to_string(),
+            target,
+            valid: true,
+        });
+        state.context.locals.push(local_value.clone());
+        state.vars = vec![local_value.clone()];
+
+        let mut result_vars = vec![local_value];
+        let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect("exit scope should complete for aliased nested handle-object local");
+        assert!(
+            fusion_residency::is_resident(&handle),
+            "exit scope should preserve residency for nested handle-object handles still referenced by vars"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_ok(),
+            "exit scope should not release provider storage for nested handle-object handles still referenced by vars"
+        );
+        fusion_residency::clear(&handle);
+        let _ = TEST_PROVIDER.free(&handle);
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
     fn store_var_overwrite_preserves_provider_handle_when_shared_in_other_var() {
         use runmat_accelerate::fusion_residency;
 

@@ -211,6 +211,8 @@ This audit maps the active objective to concrete repository evidence and marks e
   - provider-backed runner coverage in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) now asserts both sides of this contract:
     - `exit_scope_releases_local_only_provider_handle`
     - `exit_scope_preserves_provider_handle_when_still_live_in_vars`
+    - `exit_scope_releases_nested_handle_object_local_provider_handle`
+    - `exit_scope_preserves_nested_handle_object_provider_handle_when_still_live_in_vars`
     - `await_rejects_spawn_task_handle_after_scope_exit_retires_id`
   - this closes a concrete shared-liveness bug class where exiting a local scope could previously free provider storage for handles still live in variable slots.
   - VM overwrite cleanup for `Instr::StoreVar` / `Instr::StoreLocal` in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs) now applies handle-aware live-value exclusion across stack/vars/locals before residency/provider release.
