@@ -15,6 +15,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `OutputList`
   - VM overwrite residency clearing now preserves shared nested handles by clearing only handles that are absent from the incoming value (`clear_value_excluding`), avoiding premature de-residency when values share GPU-handle storage during replacement.
   - Fusion materialized-store writeback now also uses handle-aware exclusion clearing for globals/locals in `runmat-vm/src/accel/fusion.rs`, removing remaining top-level-only residency-clear behavior on fusion write paths.
+  - Added direct fusion writeback regression `fusion_writeback_preserves_shared_gpu_handles` to ratchet shared-handle preservation at the fusion store-materialization boundary.
   - This closes a lifecycle gap where nested GPU handles could remain residency-marked after value replacement/clear paths.
   - Added `runmat-vm` unit coverage:
     - `clear_value_releases_nested_gpu_handles_in_cells`

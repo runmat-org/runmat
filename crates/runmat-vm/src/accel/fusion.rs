@@ -938,3 +938,61 @@ pub async fn try_execute_fusion_group(
             .await
     }
 }
+
+#[cfg(all(test, feature = "native-accel"))]
+mod tests {
+    use super::write_elementwise_materialized_stores;
+    use crate::bytecode::program::ExecutionContext;
+    use runmat_accelerate::fusion::FusionStoreMaterialization;
+    use runmat_accelerate::fusion_residency;
+    use runmat_accelerate::graph::VarBinding;
+    use runmat_accelerate::VarKind;
+    use runmat_accelerate_api::GpuTensorHandle;
+    use runmat_builtins::Value;
+
+    #[test]
+    fn fusion_writeback_preserves_shared_gpu_handles() {
+        let shared = GpuTensorHandle {
+            shape: vec![1],
+            device_id: 17,
+            buffer_id: 17001,
+        };
+        let old_only = GpuTensorHandle {
+            shape: vec![1],
+            device_id: 17,
+            buffer_id: 17002,
+        };
+        fusion_residency::mark(&shared);
+        fusion_residency::mark(&old_only);
+        assert!(fusion_residency::is_resident(&shared));
+        assert!(fusion_residency::is_resident(&old_only));
+
+        let mut vars = vec![Value::OutputList(vec![
+            Value::GpuTensor(shared.clone()),
+            Value::GpuTensor(old_only.clone()),
+        ])];
+        let mut context = ExecutionContext {
+            call_stack: Vec::new(),
+            locals: Vec::new(),
+            instruction_pointer: 0,
+        };
+        write_elementwise_materialized_stores(
+            vec![(
+                FusionStoreMaterialization {
+                    value_id: 1,
+                    binding: VarBinding {
+                        kind: VarKind::Global,
+                        index: 0,
+                    },
+                },
+                Value::GpuTensor(shared.clone()),
+            )],
+            &mut vars,
+            &mut context,
+        );
+
+        assert!(fusion_residency::is_resident(&shared));
+        assert!(!fusion_residency::is_resident(&old_only));
+        fusion_residency::clear(&shared);
+    }
+}
