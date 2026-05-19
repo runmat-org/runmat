@@ -3131,10 +3131,13 @@ fn workspace_state_roundtrip_replace_only() {
         WorkspaceMaterializeTarget::Name("z".to_string()),
         WorkspaceMaterializeOptions::default(),
     ));
-    assert!(
-        z.is_err(),
-        "replace-only import should drop stale z variable"
-    );
+    match z {
+        Ok(value) => panic!(
+            "replace-only import should drop stale z variable, but materialized: {:?}",
+            value.name
+        ),
+        Err(err) => assert_eq!(err.to_string(), "Variable 'z' not found in workspace"),
+    }
 }
 
 #[test]

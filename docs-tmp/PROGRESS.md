@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 workspace replace-import stale-binding contract ratchet
+  - Tightened stale-variable verification in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs):
+    - `workspace_state_roundtrip_replace_only` now asserts the explicit materialization error contract (`"Variable 'z' not found in workspace"`) instead of broad `is_err()` acceptance after replace-only import.
+  - Validation: `cargo test -p runmat-core workspace_state_roundtrip_replace_only`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 core async spawn eager-interaction contract ratchet
   - Added interaction-backed runtime-model coverage in [async_stdin.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/async_stdin.rs):
     - `spawn_of_async_function_triggers_pause_handler_before_await`
