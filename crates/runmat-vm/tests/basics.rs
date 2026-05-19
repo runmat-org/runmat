@@ -321,11 +321,22 @@ fn atan2_multi_output_argument_path_unpacks_before_call() {
     let bytecode = compile_semantic_source(input).expect("compile atan2 multi-output script");
     let has_output_list_expansion = bytecode.instructions.iter().any(|instr| {
         matches!(instr, Instr::CallBuiltinExpandMultiOutput(name, specs, out_count)
-            if name == "atan2" && *out_count == 1 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all)
+            if name == "atan2"
+                && *out_count == 1
+                && specs.len() == 1
+                && specs[0].is_expand
+                && specs[0].expand_all
+                && specs[0].num_indices == 0)
     });
     assert!(
         has_output_list_expansion,
         "expected semantic CallBuiltinExpandMultiOutput(atan2) expansion in bytecode"
+    );
+    assert!(
+        !bytecode.instructions.iter().any(
+            |instr| matches!(instr, Instr::CallBuiltinMulti(name, 2, 1) if name == "atan2")
+        ),
+        "atan2(g()) should lower through expand-multi-output call shape, not fixed-arity builtin call"
     );
 }
 
