@@ -58,6 +58,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added VM runner coverage:
     - `exit_scope_releases_local_only_provider_handle`
     - `exit_scope_preserves_provider_handle_when_still_live_in_vars`
+    - `await_rejects_spawn_task_handle_after_scope_exit_retires_id`
   - Validation: `cargo test -p runmat-vm exit_scope_releases_local_only_provider_handle`, `cargo test -p runmat-vm exit_scope_preserves_provider_handle_when_still_live_in_vars`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`.
 
 - (pending commit) Plan 6 runtime consumer ratchet for class-metadata inheritance lookup

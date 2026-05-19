@@ -1204,4 +1204,40 @@ mod tests {
             .expect("await should still succeed after self-reassignment of spawn handle");
         assert_eq!(result_vars[0], Value::Num(9.0));
     }
+
+    #[test]
+    fn await_rejects_spawn_task_handle_after_scope_exit_retires_id() {
+        let mut task = runmat_builtins::StructValue::new();
+        task.fields.insert(
+            "__runmat_spawn_kind".to_string(),
+            Value::String("task".to_string()),
+        );
+        task.fields.insert(
+            "__runmat_spawn_id".to_string(),
+            Value::Int(runmat_builtins::IntValue::U64(23)),
+        );
+        task.fields
+            .insert("__runmat_spawn_payload".to_string(), Value::Num(4.0));
+        let task_value = Value::Struct(task);
+
+        let bytecode = Bytecode::with_instructions(
+            vec![
+                Instr::ExitScope(1),
+                Instr::LoadVar(0),
+                Instr::Await,
+                Instr::Return,
+            ],
+            1,
+        );
+        let mut seed_vars = vec![task_value.clone()];
+        let mut state = InterpreterState::new(bytecode, &mut seed_vars, Some("<main>"), Vec::new());
+        state.context.locals.push(task_value);
+        state.context.spawned_task_ids.insert(23);
+        state.vars = seed_vars.clone();
+
+        let mut result_vars = seed_vars.clone();
+        let err = block_on(run_interpreter_inner(state, &mut result_vars))
+            .expect_err("await should reject stale task handle after scope-retired id");
+        assert_eq!(err.identifier(), Some("RunMat:AwaitOperandInvalid"));
+    }
 }

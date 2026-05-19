@@ -170,6 +170,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - provider-backed runner coverage in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) now asserts both sides of this contract:
     - `exit_scope_releases_local_only_provider_handle`
     - `exit_scope_preserves_provider_handle_when_still_live_in_vars`
+    - `await_rejects_spawn_task_handle_after_scope_exit_retires_id`
   - this closes a concrete shared-liveness bug class where exiting a local scope could previously free provider storage for handles still live in variable slots.
   - VM interpreter cancellation path now clears residency marks for live stack/variable GPU-handle values before returning `ExecutionCancelled`, and completion now clears stack-only handle residency while preserving live-var handles in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs), with direct coverage in `cancellation_clears_gpu_residency_for_live_values` and `completion_clears_stack_only_gpu_residency`.
   - Fusion materialized-store write paths now also consume handle-aware exclusion clearing in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs), extending shared-handle preservation beyond interpreter dispatch overwrite hooks.
