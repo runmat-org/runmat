@@ -126,13 +126,6 @@ fn collect_gpu_buffer_ids(value: &Value, output: &mut HashSet<u64>) {
     }
 }
 
-pub fn same_gpu_handle(lhs: &Value, rhs: &Value) -> bool {
-    matches!(
-        (lhs, rhs),
-        (Value::GpuTensor(left), Value::GpuTensor(right)) if left.buffer_id == right.buffer_id
-    )
-}
-
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
     use super::{clear_value, clear_value_excluding};

@@ -400,8 +400,8 @@ pub fn write_elementwise_materialized_stores(
         match store.binding.kind {
             VarKind::Global => {
                 let i = store.binding.index;
-                if i < vars.len() && !accel_residency::same_gpu_handle(&vars[i], &value) {
-                    accel_residency::clear_value(&vars[i]);
+                if i < vars.len() {
+                    accel_residency::clear_value_excluding(&vars[i], &value);
                 }
                 if i >= vars.len() {
                     vars.resize(i + 1, Value::Num(0.0));
@@ -415,14 +415,12 @@ pub fn write_elementwise_materialized_stores(
                     while context.locals.len() <= absolute {
                         context.locals.push(Value::Num(0.0));
                     }
-                    if !accel_residency::same_gpu_handle(&context.locals[absolute], &value) {
-                        accel_residency::clear_value(&context.locals[absolute]);
-                    }
+                    accel_residency::clear_value_excluding(&context.locals[absolute], &value);
                     context.locals[absolute] = value;
                 } else {
                     let i = store.binding.index;
-                    if i < vars.len() && !accel_residency::same_gpu_handle(&vars[i], &value) {
-                        accel_residency::clear_value(&vars[i]);
+                    if i < vars.len() {
+                        accel_residency::clear_value_excluding(&vars[i], &value);
                     }
                     if i >= vars.len() {
                         vars.resize(i + 1, Value::Num(0.0));
