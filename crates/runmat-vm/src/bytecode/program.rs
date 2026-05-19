@@ -159,6 +159,8 @@ pub struct Bytecode {
     pub var_names: HashMap<usize, String>,
     #[serde(default)]
     pub layout: Option<VmAssemblyLayout>,
+    #[serde(default)]
+    pub semantic_async_metadata: SemanticAsyncMetadata,
     #[cfg(feature = "native-accel")]
     #[serde(default)]
     pub accel_graph: Option<AccelGraph>,
@@ -168,6 +170,19 @@ pub struct Bytecode {
     #[cfg(feature = "native-accel")]
     #[serde(default)]
     pub semantic_fusion_metadata: SemanticFusionMetadata,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SemanticAsyncMetadata {
+    pub mir_spawn_site_count: usize,
+    pub mir_spawn_sites: Vec<SemanticSpawnSite>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticSpawnSite {
+    pub function: runmat_hir::FunctionId,
+    pub block: runmat_mir::BasicBlockId,
+    pub stmt_index: usize,
 }
 
 #[cfg(feature = "native-accel")]
@@ -202,6 +217,7 @@ impl Bytecode {
             var_types: Vec::new(),
             var_names: HashMap::new(),
             layout: None,
+            semantic_async_metadata: SemanticAsyncMetadata::default(),
             #[cfg(feature = "native-accel")]
             accel_graph: None,
             #[cfg(feature = "native-accel")]

@@ -10,7 +10,6 @@ use crate::layout::derive_layout;
 use runmat_builtins::BuiltinSemanticKind;
 use runmat_hir::{EntrypointId, FunctionId, HirAssembly};
 use runmat_mir::MirAssembly;
-#[cfg(feature = "native-accel")]
 use runmat_mir::{MirRvalue, MirStmtKind};
 use std::collections::HashMap;
 
@@ -46,6 +45,7 @@ pub fn compile(
     annotate_fusion_groups_with_stack_layout(&c.instructions, &accel_graph, &mut fusion_groups);
     #[cfg(feature = "native-accel")]
     let semantic_fusion_metadata = derive_semantic_fusion_metadata(mir);
+    let semantic_async_metadata = derive_semantic_async_metadata(mir);
 
     Ok(Bytecode {
         instructions: c.instructions,
@@ -58,6 +58,7 @@ pub fn compile(
         var_types: c.var_types,
         var_names,
         layout: c.layout,
+        semantic_async_metadata,
         #[cfg(feature = "native-accel")]
         accel_graph: Some(accel_graph),
         #[cfg(feature = "native-accel")]
@@ -65,6 +66,40 @@ pub fn compile(
         #[cfg(feature = "native-accel")]
         semantic_fusion_metadata,
     })
+}
+
+fn derive_semantic_async_metadata(mir: &MirAssembly) -> crate::bytecode::SemanticAsyncMetadata {
+    let mut sites = Vec::new();
+    let mut function_ids: Vec<_> = mir.bodies.keys().copied().collect();
+    function_ids.sort_by_key(|id| id.0);
+    for function_id in function_ids {
+        let Some(body) = mir.bodies.get(&function_id) else {
+            continue;
+        };
+        for block in &body.blocks {
+            for (stmt_index, stmt) in block.statements.iter().enumerate() {
+                let value = match &stmt.kind {
+                    MirStmtKind::Assign { value, .. }
+                    | MirStmtKind::MultiAssign { value, .. }
+                    | MirStmtKind::Expr(value) => value,
+                    MirStmtKind::PlaceMutation(_)
+                    | MirStmtKind::WorkspaceEffect { .. }
+                    | MirStmtKind::EnvironmentEffect(_) => continue,
+                };
+                if matches!(value, MirRvalue::Spawn(_)) {
+                    sites.push(crate::bytecode::SemanticSpawnSite {
+                        function: body.function,
+                        block: block.id,
+                        stmt_index,
+                    });
+                }
+            }
+        }
+    }
+    crate::bytecode::SemanticAsyncMetadata {
+        mir_spawn_site_count: sites.len(),
+        mir_spawn_sites: sites,
+    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -315,6 +350,40 @@ mod tests {
                 .iter()
                 .all(|group| group.stmt_end > group.stmt_start),
             "expected candidate groups to carry non-empty statement spans"
+        );
+    }
+
+    #[test]
+    fn primary_compile_records_semantic_spawn_site_metadata() {
+        let ast = runmat_parser::parse("fut = make(); task = spawn(fut);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+
+        assert!(
+            bytecode.semantic_async_metadata.mir_spawn_site_count > 0,
+            "expected non-zero spawn site count"
+        );
+        assert!(
+            !bytecode.semantic_async_metadata.mir_spawn_sites.is_empty(),
+            "expected spawn site metadata entries"
+        );
+        assert_eq!(
+            bytecode.semantic_async_metadata.mir_spawn_site_count,
+            bytecode.semantic_async_metadata.mir_spawn_sites.len(),
+            "spawn site count should match listed sites"
+        );
+        let unique_sites = bytecode
+            .semantic_async_metadata
+            .mir_spawn_sites
+            .iter()
+            .map(|site| (site.function, site.block, site.stmt_index))
+            .collect::<std::collections::HashSet<_>>();
+        assert!(
+            unique_sites.len() == bytecode.semantic_async_metadata.mir_spawn_sites.len(),
+            "spawn site metadata entries should be distinct"
         );
     }
 

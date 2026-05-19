@@ -17,6 +17,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Recent Landed Slices
 
+- (pending commit) Plan 7 explicit semantic spawn-site metadata boundary
+  - `runmat-vm::Bytecode` now carries `semantic_async_metadata` with MIR-derived spawn-site inventory:
+    - `mir_spawn_site_count`
+    - `mir_spawn_sites` containing `function`, `block`, and `stmt_index`
+  - VM bytecode compile now derives spawn-site metadata directly from MIR statement forms (`MirRvalue::Spawn`) using deterministic function-id traversal.
+  - Interpreter state setup now emits explicit runtime debug signal when compiled bytecode carries spawn sites, replacing silent transitional behavior with explicit semantic boundary telemetry.
+  - Added `runmat-vm` compile regression coverage asserting spawn-site metadata presence and consistency.
+  - Validation: `cargo test -p runmat-vm primary_compile_records_semantic_spawn_site_metadata`, `cargo test -p runmat-vm primary_compile_records_semantic_fusion_metadata`, `cargo test -p runmat-core --test fusion_regressions`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo check --workspace`, `cargo fmt --all --check`, `git diff --check`.
+
 - (pending commit) Plan 7 add MIR-localized semantic fusion candidate metadata
   - `runmat-vm` semantic fusion candidate artifacts now carry MIR location metadata per candidate run:
     - `function` (`FunctionId`)

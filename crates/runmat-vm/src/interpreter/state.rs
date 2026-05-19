@@ -1,5 +1,6 @@
 use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::Bytecode;
+use log::debug;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{prepare_fusion_plan, FusionPlan};
 use runmat_builtins::Value;
@@ -40,6 +41,12 @@ impl InterpreterState {
         let mut vars = initial_vars.to_vec();
         if vars.len() < bytecode.var_count {
             vars.resize(bytecode.var_count, Value::Num(0.0));
+        }
+        if bytecode.semantic_async_metadata.mir_spawn_site_count > 0 {
+            debug!(
+                "spawn semantics: compiled bytecode carries {} MIR spawn site(s); runtime task-handle materialization remains transitional",
+                bytecode.semantic_async_metadata.mir_spawn_site_count
+            );
         }
         Self {
             stack: Vec::new(),
