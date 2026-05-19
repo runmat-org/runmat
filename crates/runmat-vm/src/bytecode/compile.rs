@@ -811,6 +811,54 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
+    fn semantic_candidate_accel_capability_gate_accepts_reduction_builtin() {
+        let instructions = vec![Instr::CallBuiltinMulti("sum".to_string(), 1, 1)];
+        let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
+        let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 2,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 2,
+            source_span: runmat_hir::Span { start: 10, end: 20 },
+        }];
+        assert!(
+            super::semantic_candidates_touch_accel_capable_instruction(
+                &instructions,
+                &instr_spans,
+                &candidates,
+            ),
+            "reduction builtin call should trigger accel-graph construction gate"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_candidate_accel_capability_gate_rejects_sink_builtin() {
+        let instructions = vec![Instr::CallBuiltinMulti("disp".to_string(), 1, 0)];
+        let instr_spans = vec![runmat_hir::Span { start: 10, end: 20 }];
+        let candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 2,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 2,
+            source_span: runmat_hir::Span { start: 10, end: 20 },
+        }];
+        assert!(
+            !super::semantic_candidates_touch_accel_capable_instruction(
+                &instructions,
+                &instr_spans,
+                &candidates,
+            ),
+            "sink builtin call should not trigger accel-graph construction gate"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
     fn primary_compile_scopes_semantic_fusion_metadata_to_entrypoint_target() {
         let source = "x = 1; function z = helper(a); t = a + 1; z = t * 2; end;";
         let ast = runmat_parser::parse(source).expect("parse");
