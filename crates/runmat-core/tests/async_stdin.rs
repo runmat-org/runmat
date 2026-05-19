@@ -173,3 +173,46 @@ fn pending_handler_returns_error() -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn spawn_of_async_function_triggers_pause_handler_before_await() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
+    let _guard = InteractiveGuard::new();
+    let mut session = RunMatSession::with_options(false, false)?;
+    let kinds = Arc::new(Mutex::new(Vec::new()));
+    let kinds_clone = Arc::clone(&kinds);
+    session.install_async_input_handler(move |request: InputRequest| {
+        let kinds_clone = Arc::clone(&kinds_clone);
+        async move {
+            kinds_clone.lock().unwrap().push(request.kind.clone());
+            Ok(InputResponse::KeyPress)
+        }
+    });
+
+    let result = block_on(session.execute(
+        "async function y = wait_for_key(); pause; y = 1; end; \
+         t = spawn(wait_for_key()); marker = 7;",
+    ))
+    .map_err(anyhow::Error::new)?;
+    assert!(
+        result.error.is_none(),
+        "spawn of async function with pause handler should not raise runtime errors"
+    );
+    assert_eq!(
+        result.stdin_events.len(),
+        1,
+        "spawn should trigger pause interaction before await in current runtime model"
+    );
+    assert!(matches!(
+        kinds.lock().unwrap().as_slice(),
+        [InputRequestKind::KeyPress]
+    ));
+
+    let marker = block_on(session.execute("marker")).map_err(anyhow::Error::new)?;
+    let marker_value = marker
+        .value
+        .expect("marker readback should produce a value");
+    assert_eq!(value_as_f64(&marker_value), Some(7.0));
+    Ok(())
+}

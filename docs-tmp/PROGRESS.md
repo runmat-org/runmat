@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 core async spawn eager-interaction contract ratchet
+  - Added interaction-backed runtime-model coverage in [async_stdin.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/async_stdin.rs):
+    - `spawn_of_async_function_triggers_pause_handler_before_await`
+  - This test executes:
+    - `async function y = wait_for_key(); pause; y = 1; end;`
+    - `t = spawn(wait_for_key()); marker = 7;`
+  - and asserts the keypress handler is invoked during `spawn` (before any explicit `await`) with one stdin event and stable state readback (`marker == 7`), providing direct runtime evidence for the current eager async value-lane execution model.
+  - Validation: `cargo test -p runmat-core --test async_stdin spawn_of_async_function_triggers_pause_handler_before_await -- --nocapture`, `cargo test -p runmat-core --test async_stdin`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 3/7 import ambiguity/duplicate identifier-contract ratchet
   - Added stable semantic lowering identifiers for import conflict paths in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs):
     - `RunMat:ImportAmbiguous` for ambiguous call/handle/import resolution
