@@ -1313,10 +1313,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Tightened runtime group sanitization in `crates/runmat-accelerate/src/fusion.rs` in two steps:
     - removed overlap-or-touch (`<=1` disjoint gap) recovery
     - then required contained node spans (not merely overlap)
+    - and restricted runtime graph scan backfill to compile-unmapped groups only (no stale mapped-node remap)
   - Runtime recovery now aligns with compile-time contained-span mapping, reducing residual span-jitter reconciliation heuristics.
   - Updated runtime sanitization tests:
     - `prepare_fusion_plan_recovers_empty_group_nodes_from_contained_runtime_span`
-    - `prepare_fusion_plan_replaces_stale_mapped_nodes_using_contained_runtime_span_recovery`
+    - `prepare_fusion_plan_rejects_stale_mapped_nodes_without_runtime_remap`
     - `prepare_fusion_plan_rejects_empty_group_nodes_when_runtime_node_covers_group_span`
     - plus existing negative far-span coverage remains.
   - Validation: `cargo test -p runmat-accelerate prepare_fusion_plan_ -- --nocapture`, `cargo test -p runmat-accelerate sanitize_runtime_groups -- --nocapture`, `cargo test -p runmat-vm semantic_windows_ -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.

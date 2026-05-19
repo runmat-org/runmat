@@ -756,6 +756,7 @@ fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<Fu
     groups
         .iter()
         .filter_map(|group| {
+            let had_explicit_mapped_nodes = !group.nodes.is_empty();
             let mut sanitized = group.clone();
             sanitized.nodes.retain(|id| {
                 graph
@@ -766,7 +767,7 @@ fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<Fu
                     })
                     .unwrap_or(false)
             });
-            if sanitized.nodes.is_empty() {
+            if sanitized.nodes.is_empty() && !had_explicit_mapped_nodes {
                 sanitized.nodes = graph
                     .nodes
                     .iter()
@@ -3628,7 +3629,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_fusion_plan_replaces_stale_mapped_nodes_using_contained_runtime_span_recovery() {
+    fn prepare_fusion_plan_rejects_stale_mapped_nodes_without_runtime_remap() {
         let graph = simple_elementwise_graph();
         let groups = vec![FusionGroup {
             id: 0,
@@ -3640,13 +3641,10 @@ mod tests {
             stack_layout: None,
         }];
 
-        let plan = prepare_fusion_plan(Some(&graph), &groups, 1)
-            .expect("runtime sanitization should recover contained node when mapped node is stale");
-        assert_eq!(plan.groups.len(), 1);
-        assert_eq!(
-            plan.groups[0].group.nodes,
-            vec![0],
-            "stale mapped node outside group span should be dropped and replaced by contained compatible runtime node"
+        let plan = prepare_fusion_plan(Some(&graph), &groups, 1);
+        assert!(
+            plan.is_none(),
+            "runtime sanitization should reject stale mapped nodes instead of remapping from runtime graph scan"
         );
     }
 
