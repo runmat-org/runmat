@@ -12,6 +12,8 @@ use runmat_hir::{EntrypointId, FunctionId, HirAssembly};
 use runmat_mir::MirAssembly;
 use runmat_mir::{MirRvalue, MirStmtKind};
 use std::collections::HashMap;
+#[cfg(feature = "native-accel")]
+use std::collections::HashSet;
 
 pub fn compile(
     hir: &HirAssembly,
@@ -50,7 +52,14 @@ pub fn compile(
             (None, Vec::new())
         } else {
             let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
-            let mut fusion_groups = accel_graph.detect_fusion_groups();
+            let mut fusion_groups = derive_semantic_fusion_groups_from_candidates(
+                &accel_graph,
+                &c.instr_spans,
+                &semantic_fusion_metadata.mir_fusion_candidate_groups,
+            );
+            if fusion_groups.is_empty() {
+                fusion_groups = accel_graph.detect_fusion_groups();
+            }
             if !fusion_groups.is_empty() {
                 annotate_fusion_groups_with_stack_layout(
                     &c.instructions,
@@ -269,6 +278,135 @@ fn fusion_group_within_semantic_candidate_spans(
             .iter()
             .all(|span| source_spans_overlap(*span, *candidate))
     })
+}
+
+#[cfg(feature = "native-accel")]
+fn derive_semantic_fusion_groups_from_candidates(
+    accel_graph: &runmat_accelerate::graph::AccelGraph,
+    instr_spans: &[runmat_hir::Span],
+    semantic_candidate_groups: &[crate::bytecode::SemanticFusionCandidateGroup],
+) -> Vec<runmat_accelerate::fusion::FusionGroup> {
+    let mut groups = Vec::new();
+    let mut assigned_nodes = HashSet::new();
+
+    for semantic_candidate in semantic_candidate_groups {
+        let mut nodes: Vec<_> = accel_graph
+            .nodes
+            .iter()
+            .filter(|node| {
+                !assigned_nodes.contains(&node.id)
+                    && matches!(
+                        node.category,
+                        runmat_accelerate::graph::AccelOpCategory::Elementwise
+                            | runmat_accelerate::graph::AccelOpCategory::Reduction
+                            | runmat_accelerate::graph::AccelOpCategory::MatMul
+                    )
+                    && node_within_semantic_candidate_span(
+                        node,
+                        instr_spans,
+                        semantic_candidate.source_span,
+                    )
+            })
+            .map(|node| node.id)
+            .collect();
+        if nodes.is_empty() {
+            continue;
+        }
+        nodes.sort_unstable_by_key(|node_id| {
+            accel_graph
+                .node(*node_id)
+                .map(|node| (node.span.start, node.span.end, node.id))
+                .unwrap_or((usize::MAX, usize::MAX, *node_id))
+        });
+        nodes.dedup();
+        for node_id in &nodes {
+            assigned_nodes.insert(*node_id);
+        }
+        let span_start = accel_graph
+            .node(*nodes.first().expect("non-empty nodes"))
+            .map(|node| node.span.start)
+            .unwrap_or(0);
+        let span_end = accel_graph
+            .node(*nodes.last().expect("non-empty nodes"))
+            .map(|node| node.span.end)
+            .unwrap_or(span_start);
+        let kind = infer_semantic_fusion_kind(accel_graph, &nodes);
+        let shape = infer_semantic_fusion_shape(accel_graph, &nodes);
+        groups.push(runmat_accelerate::fusion::FusionGroup {
+            id: groups.len(),
+            kind,
+            nodes,
+            shape,
+            span: runmat_accelerate::graph::InstrSpan {
+                start: span_start,
+                end: span_end,
+            },
+            pattern: None,
+            stack_layout: None,
+        });
+    }
+
+    groups
+}
+
+#[cfg(feature = "native-accel")]
+fn node_within_semantic_candidate_span(
+    node: &runmat_accelerate::graph::AccelNode,
+    instr_spans: &[runmat_hir::Span],
+    semantic_candidate_span: runmat_hir::Span,
+) -> bool {
+    if instr_spans.is_empty()
+        || node.span.start > node.span.end
+        || node.span.start >= instr_spans.len()
+    {
+        return false;
+    }
+    let end = node.span.end.min(instr_spans.len().saturating_sub(1));
+    instr_spans[node.span.start..=end]
+        .iter()
+        .all(|span| source_spans_overlap(*span, semantic_candidate_span))
+}
+
+#[cfg(feature = "native-accel")]
+fn infer_semantic_fusion_kind(
+    accel_graph: &runmat_accelerate::graph::AccelGraph,
+    nodes: &[runmat_accelerate::graph::NodeId],
+) -> runmat_accelerate::fusion::FusionKind {
+    let mut saw_matmul = false;
+    let mut saw_reduction = false;
+    for node_id in nodes {
+        if let Some(node) = accel_graph.node(*node_id) {
+            match node.category {
+                runmat_accelerate::graph::AccelOpCategory::MatMul => saw_matmul = true,
+                runmat_accelerate::graph::AccelOpCategory::Reduction => saw_reduction = true,
+                _ => {}
+            }
+        }
+    }
+    if saw_matmul {
+        runmat_accelerate::fusion::FusionKind::MatmulEpilogue
+    } else if saw_reduction {
+        runmat_accelerate::fusion::FusionKind::Reduction
+    } else {
+        runmat_accelerate::fusion::FusionKind::ElementwiseChain
+    }
+}
+
+#[cfg(feature = "native-accel")]
+fn infer_semantic_fusion_shape(
+    accel_graph: &runmat_accelerate::graph::AccelGraph,
+    nodes: &[runmat_accelerate::graph::NodeId],
+) -> runmat_accelerate::graph::ShapeInfo {
+    for node_id in nodes.iter().rev() {
+        if let Some(node) = accel_graph.node(*node_id) {
+            if let Some(value_id) = node.outputs.first() {
+                if let Some(value) = accel_graph.value(*value_id) {
+                    return value.shape.clone();
+                }
+            }
+        }
+    }
+    runmat_accelerate::graph::ShapeInfo::Unknown
 }
 
 #[cfg(feature = "native-accel")]
@@ -649,6 +787,96 @@ mod tests {
         assert!(
             !super::fusion_group_within_semantic_candidate_spans(&group, &instr_spans, &split_candidates),
             "expected rejection when bytecode group coverage requires unioning multiple semantic candidate spans"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_candidates_build_fusion_groups_from_accel_graph_nodes() {
+        let accel_graph = runmat_accelerate::graph::AccelGraph {
+            nodes: vec![
+                runmat_accelerate::graph::AccelNode {
+                    id: 0,
+                    label: runmat_accelerate::graph::AccelNodeLabel::Primitive(
+                        runmat_accelerate::graph::PrimitiveOp::Add,
+                    ),
+                    category: runmat_accelerate::graph::AccelOpCategory::Elementwise,
+                    inputs: vec![0, 0],
+                    outputs: vec![1],
+                    span: runmat_accelerate::graph::InstrSpan { start: 0, end: 0 },
+                    tags: vec![runmat_accelerate::graph::AccelGraphTag::Elementwise],
+                },
+                runmat_accelerate::graph::AccelNode {
+                    id: 1,
+                    label: runmat_accelerate::graph::AccelNodeLabel::Primitive(
+                        runmat_accelerate::graph::PrimitiveOp::ElemMul,
+                    ),
+                    category: runmat_accelerate::graph::AccelOpCategory::Elementwise,
+                    inputs: vec![1, 0],
+                    outputs: vec![2],
+                    span: runmat_accelerate::graph::InstrSpan { start: 1, end: 1 },
+                    tags: vec![runmat_accelerate::graph::AccelGraphTag::Elementwise],
+                },
+            ],
+            values: vec![
+                runmat_accelerate::graph::ValueInfo {
+                    id: 0,
+                    origin: runmat_accelerate::graph::ValueOrigin::Variable {
+                        kind: runmat_accelerate::graph::VarKind::Global,
+                        index: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 1,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 0,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+                runmat_accelerate::graph::ValueInfo {
+                    id: 2,
+                    origin: runmat_accelerate::graph::ValueOrigin::NodeOutput {
+                        node: 1,
+                        output: 0,
+                    },
+                    ty: runmat_builtins::Type::Num,
+                    shape: runmat_accelerate::graph::ShapeInfo::Scalar,
+                    constant: None,
+                },
+            ],
+            var_bindings: std::collections::HashMap::new(),
+            node_bindings: std::collections::HashMap::new(),
+        };
+        let instr_spans = vec![
+            runmat_hir::Span { start: 10, end: 11 },
+            runmat_hir::Span { start: 11, end: 12 },
+        ];
+        let semantic_candidates = vec![crate::bytecode::SemanticFusionCandidateGroup {
+            id: 0,
+            signal_count: 2,
+            function: runmat_hir::FunctionId(0),
+            block: runmat_mir::BasicBlockId(0),
+            stmt_start: 0,
+            stmt_end: 2,
+            source_span: runmat_hir::Span { start: 10, end: 12 },
+        }];
+
+        let groups = super::derive_semantic_fusion_groups_from_candidates(
+            &accel_graph,
+            &instr_spans,
+            &semantic_candidates,
+        );
+        assert_eq!(groups.len(), 1, "expected one semantic-driven fusion group");
+        assert_eq!(groups[0].nodes, vec![0, 1]);
+        assert_eq!(
+            groups[0].kind,
+            runmat_accelerate::fusion::FusionKind::ElementwiseChain
         );
     }
 
