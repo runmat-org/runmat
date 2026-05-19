@@ -171,6 +171,8 @@ pub async fn invoke_semantic_function_value(
     )
     .await?;
     let output_values = collect_semantic_outputs(func, &result_vars, requested_outputs)?;
+    #[cfg(feature = "native-accel")]
+    clear_semantic_function_temp_residency(&result_vars, &output_values);
     Ok(semantic_output_value(output_values, requested_outputs))
 }
 
@@ -220,6 +222,16 @@ fn semantic_output_value(output_values: Vec<Value>, requested_outputs: usize) ->
         0 => Value::OutputList(Vec::new()),
         1 => output_values.into_iter().next().unwrap_or(Value::Num(0.0)),
         _ => Value::OutputList(output_values.into_iter().take(requested_outputs).collect()),
+    }
+}
+
+#[cfg(feature = "native-accel")]
+fn clear_semantic_function_temp_residency(result_vars: &[Value], output_values: &[Value]) {
+    let mut keep_values = output_values.to_vec();
+    keep_values.extend(runtime_globals::collect_thread_roots());
+    let keep = Value::OutputList(keep_values);
+    for value in result_vars {
+        accel_residency::clear_value_excluding(value, &keep);
     }
 }
 

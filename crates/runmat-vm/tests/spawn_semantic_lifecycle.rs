@@ -69,6 +69,44 @@ mod tests {
         Ok((bytecode, input_slot, output_slot))
     }
 
+    fn compile_semantic_function_invocation_fixture(
+        source: &str,
+        function_name: &str,
+    ) -> Result<
+        (
+            runmat_hir::FunctionId,
+            runmat_vm::SemanticFunctionRegistry,
+            usize,
+        ),
+        RuntimeError,
+    > {
+        let ast = runmat_parser::parse(source).map_err(|err| RuntimeError::new(err.to_string()))?;
+        let hir = lower(&ast, &LoweringContext::empty())
+            .map_err(|err| RuntimeError::new(err.to_string()))?;
+        let mir =
+            lower_assembly(&hir.assembly).map_err(|err| RuntimeError::new(format!("{err:?}")))?;
+
+        let function_id = hir
+            .assembly
+            .functions
+            .iter()
+            .find(|function| function.name.0 == function_name)
+            .map(|function| function.id)
+            .ok_or_else(|| RuntimeError::new(format!("missing function `{function_name}`")))?;
+
+        let semantic_functions =
+            compile_semantic_function_registry(&hir.assembly, &mir).map_err(RuntimeError::from)?;
+        let function_bytecode = semantic_functions
+            .get(&function_id)
+            .ok_or_else(|| RuntimeError::new("missing semantic function bytecode"))?;
+        let input_slot = *function_bytecode
+            .input_slots
+            .first()
+            .ok_or_else(|| RuntimeError::new("semantic function missing input slot"))?;
+        let registry = runmat_vm::SemanticFunctionRegistry::new(semantic_functions);
+        Ok((function_id, registry, input_slot))
+    }
+
     fn result_contains_handle(
         vars: &[Value],
         handle: &runmat_accelerate_api::GpuTensorHandle,
@@ -162,15 +200,19 @@ mod tests {
     }
 
     #[test]
-    fn semantic_async_spawn_await_overwrite_unaliased_executes_with_scalar_output() {
+    fn semantic_async_spawn_await_helper_overwrite_releases_unaliased_provider_handle() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let handle = upload_provider_handle(vec![5.0, 6.0], vec![1, 2]);
         assert!(block_on(TEST_PROVIDER.download(&handle)).is_ok());
         fusion_residency::mark(&handle);
 
         let source = r#"
+            async function y = pass(x)
+                y = x;
+            end
+
             async function y = spawn_await_drop_unaliased(x)
-                task = spawn(x);
+                task = spawn(pass(x));
                 tmp = await(task);
                 task = 0;
                 x = 0;
@@ -178,22 +220,29 @@ mod tests {
                 y = 0;
             end
         "#;
-        let (bytecode, input_slot, output_slot) =
-            compile_semantic_function_bytecode(source, "spawn_await_drop_unaliased")
+        let (function_id, registry, _input_slot) =
+            compile_semantic_function_invocation_fixture(source, "spawn_await_drop_unaliased")
                 .expect("compile semantic async function");
-
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
-        vars[input_slot] = Value::GpuTensor(handle.clone());
-
-        let result = block_on(runmat_vm::interpret_function(&bytecode, vars))
-            .expect("semantic async spawn/await function should run");
+        let result = block_on(runmat_vm::invoke_semantic_function_value(
+            function_id.0,
+            &[Value::GpuTensor(handle.clone())],
+            1,
+            &registry,
+        ))
+        .expect("semantic async spawn/await function should run via semantic invoker");
         assert_eq!(
-            result.get(output_slot),
-            Some(&Value::Num(0.0)),
-            "async spawn/await unaliased drop flow should preserve scalar output semantics"
+            result,
+            Value::Num(0.0),
+            "async spawn/await helper unaliased flow should preserve scalar output semantics"
         );
-        fusion_residency::clear(&handle);
-        let _ = TEST_PROVIDER.free(&handle);
+        assert!(
+            !fusion_residency::is_resident(&handle),
+            "async spawn/await helper unaliased flow should clear residency for dropped handle"
+        );
+        assert!(
+            block_on(TEST_PROVIDER.download(&handle)).is_err(),
+            "async spawn/await helper unaliased flow should release provider storage for dropped handle"
+        );
     }
 
     #[test]

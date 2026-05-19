@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 semantic-invoker async helper/callee release cleanup ratchet
+  - `runmat-vm` semantic function invocation now clears non-output GPU-handle residency/storage from semantic function result slots after output extraction in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs), while preserving live handles reachable through returned outputs and runtime global/persistent roots.
+  - Extended semantic lifecycle coverage in [spawn_semantic_lifecycle.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/spawn_semantic_lifecycle.rs) with an async helper/callee unaliased release ratchet executed through the semantic invoker path:
+    - `semantic_async_spawn_await_helper_overwrite_releases_unaliased_provider_handle`
+  - Validation: `cargo test -p runmat-vm --test spawn_semantic_lifecycle`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 7 semantic-window overlap-tolerance ratchet for accel-node mapping
   - `runmat-vm` semantic window -> accel-node mapping in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now accepts small partial-overlap boundary drift (<=1 instruction on both boundaries) when strict contained/covering span checks do not match.
   - This reduces fragility to minor accel-graph span jitter while preserving strict rejection of broad overlap coupling.
