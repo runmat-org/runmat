@@ -67,6 +67,11 @@ pub fn compile(
             &semantic_instruction_windows,
             &accel_graph,
         );
+        if fusion_groups.is_empty() && !semantic_instruction_windows.is_empty() {
+            fusion_groups = derive_semantic_fusion_groups_from_instruction_windows(
+                &semantic_instruction_windows,
+            );
+        }
         if !fusion_groups.is_empty() {
             annotate_fusion_groups_with_stack_layout(
                 &c.instructions,
@@ -397,6 +402,25 @@ fn derive_semantic_fusion_groups_from_candidates(
     }
 
     groups
+}
+
+#[cfg(feature = "native-accel")]
+fn derive_semantic_fusion_groups_from_instruction_windows(
+    semantic_instruction_windows: &[crate::bytecode::SemanticFusionInstructionWindow],
+) -> Vec<runmat_accelerate::fusion::FusionGroup> {
+    semantic_instruction_windows
+        .iter()
+        .enumerate()
+        .map(|(id, window)| runmat_accelerate::fusion::FusionGroup {
+            id,
+            kind: infer_semantic_fusion_kind(window.kind),
+            nodes: Vec::new(),
+            shape: runmat_accelerate::graph::ShapeInfo::Unknown,
+            span: window.span.clone(),
+            pattern: None,
+            stack_layout: None,
+        })
+        .collect()
 }
 
 #[cfg(feature = "native-accel")]
@@ -1388,6 +1412,31 @@ mod tests {
         assert_eq!(
             groups[0].shape,
             runmat_accelerate::graph::ShapeInfo::Unknown
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn semantic_windows_fallback_to_empty_node_groups_when_mapping_drops_all_nodes() {
+        let windows = vec![crate::bytecode::SemanticFusionInstructionWindow {
+            span: runmat_accelerate::graph::InstrSpan { start: 7, end: 9 },
+            kind: crate::bytecode::SemanticFusionInstructionKind::Elementwise,
+        }];
+        let groups = super::derive_semantic_fusion_groups_from_instruction_windows(&windows);
+        assert_eq!(
+            groups.len(),
+            1,
+            "semantic windows fallback should preserve executable-group scaffolding even when graph mapping is unavailable"
+        );
+        assert_eq!(
+            groups[0].nodes,
+            Vec::<runmat_accelerate::graph::NodeId>::new()
+        );
+        assert_eq!(groups[0].span.start, 7);
+        assert_eq!(groups[0].span.end, 9);
+        assert_eq!(
+            groups[0].kind,
+            runmat_accelerate::fusion::FusionKind::ElementwiseChain
         );
     }
 

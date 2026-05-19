@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 keep semantic fusion groups when accel-node mapping drops out
+  - `runmat-vm` compile path in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now falls back to semantic-window-derived fusion groups (empty node lists + semantic span/kind metadata) when semantic instruction windows exist but accel-node mapping produces zero groups.
+  - This preserves semantic executable-group scaffolding through bytecode products so runtime fusion-plan preparation can recover/drop groups against the live accel graph, instead of dropping semantic fusion-group artifacts early at compile time.
+  - Added unit ratchet:
+    - `semantic_windows_fallback_to_empty_node_groups_when_mapping_drops_all_nodes`
+  - Validation: `cargo test -p runmat-vm semantic_windows_fallback_to_empty_node_groups_when_mapping_drops_all_nodes`, `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`, `cargo test -p runmat-vm semantic_windows_reject_overly_wide_covering_node_spans`, `cargo test -p runmat-core --test semicolon_suppression`, `cargo fmt --all --check`, `cargo check --workspace`, `git diff --check`.
+
 - (pending commit) Plan 3/7 command-form `pause` semantic parsing + interaction contract ratchet
   - Added command-form verb support for bare `pause` in [command.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-parser/src/parser/command.rs), aligning no-arg `pause` parsing with existing command-form controls (`clear`, `clc`, `close`, etc.).
   - Added parser coverage in [command_syntax.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-parser/tests/command_syntax.rs):
