@@ -14,9 +14,21 @@ use crate::builtins::stats::type_resolvers::cov_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "cov";
+const COV_ERR_ROWS_MISMATCH: &str = "RunMat:cov:RowsMismatch";
+const COV_ERR_NORMALIZATION_INVALID: &str = "RunMat:cov:NormalizationInvalid";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
+}
+
+fn builtin_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_identifier(identifier)
+        .build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::summary::cov")]
@@ -298,24 +310,32 @@ fn parse_normalization(value: Value) -> BuiltinResult<CovNormalization> {
         Value::Int(i) => match i.to_i64() {
             0 => Ok(CovNormalization::Unbiased),
             1 => Ok(CovNormalization::Biased),
-            other => Err(builtin_error(format!(
-                "cov: normalization flag must be 0 or 1, received {other}"
-            ))),
+            other => Err(builtin_error_with_identifier(
+                format!("cov: normalization flag must be 0 or 1, received {other}"),
+                COV_ERR_NORMALIZATION_INVALID,
+            )),
         },
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(builtin_error("cov: normalization flag must be finite"));
+                return Err(builtin_error_with_identifier(
+                    "cov: normalization flag must be finite",
+                    COV_ERR_NORMALIZATION_INVALID,
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > 1.0e-12 {
-                return Err(builtin_error("cov: normalization flag must be an integer"));
+                return Err(builtin_error_with_identifier(
+                    "cov: normalization flag must be an integer",
+                    COV_ERR_NORMALIZATION_INVALID,
+                ));
             }
             match rounded as i64 {
                 0 => Ok(CovNormalization::Unbiased),
                 1 => Ok(CovNormalization::Biased),
-                other => Err(builtin_error(format!(
-                    "cov: normalization flag must be 0 or 1, received {other}"
-                ))),
+                other => Err(builtin_error_with_identifier(
+                    format!("cov: normalization flag must be 0 or 1, received {other}"),
+                    COV_ERR_NORMALIZATION_INVALID,
+                )),
             }
         }
         Value::Bool(flag) => Ok(if flag {
@@ -323,10 +343,13 @@ fn parse_normalization(value: Value) -> BuiltinResult<CovNormalization> {
         } else {
             CovNormalization::Unbiased
         }),
-        other => Err(builtin_error(format!(
-            "cov: normalization flag must be numeric, received {:?}",
-            other
-        ))),
+        other => Err(builtin_error_with_identifier(
+            format!(
+                "cov: normalization flag must be numeric, received {:?}",
+                other
+            ),
+            COV_ERR_NORMALIZATION_INVALID,
+        )),
     }
 }
 
@@ -443,8 +466,9 @@ fn combine_tensors(left: Tensor, right: Option<Tensor>) -> BuiltinResult<Matrix>
     if let Some(second) = right {
         let right_matrix = Matrix::from_tensor("cov", second)?;
         if matrix.rows != right_matrix.rows {
-            return Err(builtin_error(
+            return Err(builtin_error_with_identifier(
                 "cov: inputs must have the same number of rows",
+                COV_ERR_ROWS_MISMATCH,
             ));
         }
         matrix.cols += right_matrix.cols;
@@ -988,6 +1012,25 @@ pub(crate) mod tests {
             4.5,
         ];
         assert_tensor_close(&tensor, &expected, 1.0e-6);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cov_mismatched_rows_errors() {
+        let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap();
+        let right = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let err = block_on(cov_builtin(Value::Tensor(left), vec![Value::Tensor(right)]))
+            .expect_err("expected mismatch error");
+        assert_eq!(err.identifier(), Some(COV_ERR_ROWS_MISMATCH));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cov_invalid_flag_errors() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let err = block_on(cov_builtin(Value::Tensor(tensor), vec![Value::Num(2.5)]))
+            .expect_err("expected invalid flag error");
+        assert_eq!(err.identifier(), Some(COV_ERR_NORMALIZATION_INVALID));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

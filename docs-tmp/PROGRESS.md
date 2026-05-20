@@ -55,6 +55,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- (pending commit) Plan 4 cov identifier-contract ratchet for rows/normalization validation
+  - Added stable `cov` identifiers in [cov.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/stats/summary/cov.rs):
+    - `RunMat:cov:RowsMismatch`
+    - `RunMat:cov:NormalizationInvalid`
+  - Runtime now emits these identifiers for:
+    - paired-input row-count mismatch during matrix combination
+    - invalid normalization-flag values/types (`0|1` contract violations, non-finite/non-integer numerics, and non-numeric inputs)
+  - Added/tightened tests:
+    - `cov_mismatched_rows_errors`
+    - `cov_invalid_flag_errors`
+    now assert `RuntimeError.identifier()` on these paths.
+  - Validation:
+    - `cargo test -p runmat-runtime cov_mismatched_rows_errors -- --nocapture`
+    - `cargo test -p runmat-runtime cov_invalid_flag_errors -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - (pending commit) Set builtins option-parse identifier ratchet
   - Added stable option-parse identifiers for set builtins:
     - `RunMat:unique:ConflictingOrderOptions`
