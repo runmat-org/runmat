@@ -2565,6 +2565,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 unresolved dynamic-call multi-output instruction-shape ratchet
+  - Added VM functions coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `unresolved_function_multi_output_uses_typed_instruction_and_errors`
+    - `unresolved_function_expand_multi_output_uses_typed_instruction_and_errors`
+  - This extends unresolved dynamic-call contracts from single-output-only to explicit multi-output and expanded-argument variants:
+    - fixed-arg unresolved call lowers to `Instr::CallFunctionMulti` with `out_count == 2`
+    - expanded unresolved call lowers to `Instr::CallFunctionExpandMultiOutput` with `out_count == 2`
+  - Both runtime paths are asserted to fail with stable identifier `RunMat:UndefinedFunction` (no legacy fallback masking).
+  - Validation:
+    - `cargo test -p runmat-vm --test functions unresolved_function_multi_output_uses_typed_instruction_and_errors -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_function_expand_multi_output_uses_typed_instruction_and_errors -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
