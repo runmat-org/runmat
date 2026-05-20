@@ -203,9 +203,7 @@ fn apply_positional_data(opts: &mut PatchOptions, args: &mut Vec<Value>) -> Buil
         apply_color_argument(opts, &args.remove(0));
     } else {
         let value = args.remove(0);
-        if value_matches_coordinate_shape(opts, &value) {
-            opts.z_data = Some(tensor_from_value(value)?);
-        } else if !apply_color_argument(opts, &value) {
+        if value_matches_coordinate_shape(opts, &value) || !apply_color_argument(opts, &value) {
             opts.z_data = Some(tensor_from_value(value)?);
         }
     }
