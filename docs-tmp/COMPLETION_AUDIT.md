@@ -27,7 +27,7 @@ Date: 2026-05-20
 3. MATLAB semantics as products
 - Artifact: `docs-tmp/DELIVERABLE_AUDIT.md` section `### 3` (`partial`).
 - Evidence files: `docs-tmp/TARGET_MODEL.md`, `docs-tmp/NEXT_STEPS.md`, `docs-tmp/DELIVERABLE_AUDIT.md`.
-- Latest result: still partial; non-builtin semantic gap inventory remains open.
+- Latest result: still partial; non-builtin semantic gap inventory remains open (recent progress includes compile-stage selector-plan invariant identifier ratchets, but aggregate-edge design gaps remain).
 
 4. Manifest-driven composition and entrypoints
 - Artifact: `docs-tmp/DELIVERABLE_AUDIT.md` section `### 4` (`met`).

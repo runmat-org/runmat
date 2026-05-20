@@ -825,7 +825,7 @@ mod tests {
     use runmat_builtins::Value;
     use runmat_hir::{lower, CallableFallbackPolicy, FunctionId, LoweringContext};
     use runmat_mir::lowering::lower_assembly;
-    use runmat_mir::MirTerminatorKind;
+    use runmat_mir::{MirIndexComponent, MirIndexPlan, MirRvalue, MirStmtKind, MirTerminatorKind};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -2744,6 +2744,81 @@ mod tests {
         };
         assert_eq!(tensor.shape, vec![1, 4]);
         assert_eq!(tensor.data, vec![10.0, 9.0, 30.0, 8.0]);
+    }
+
+    #[test]
+    fn primary_compile_rejects_invalid_scalar_index_plan_with_identifier() {
+        let ast = runmat_parser::parse("x = [1 2 3]; y = x(2);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign {
+                    value: MirRvalue::Index { indexing, .. },
+                    ..
+                } = &mut stmt.kind
+                {
+                    indexing.plan = MirIndexPlan::Scalar;
+                    indexing.components = vec![MirIndexComponent::Colon];
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected indexed assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirScalarIndexPlanInvalid")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_invalid_slice_index_plan_with_identifier() {
+        let ast = runmat_parser::parse("x = [1 2 3]; y = x(end);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign {
+                    value: MirRvalue::Index { indexing, .. },
+                    ..
+                } = &mut stmt.kind
+                {
+                    indexing.plan = MirIndexPlan::Slice;
+                    indexing.components = vec![MirIndexComponent::End {
+                        dim: Some(0),
+                        offset: 1,
+                    }];
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected indexed assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirSliceIndexPlanInvalid")
+        );
     }
 
     #[test]

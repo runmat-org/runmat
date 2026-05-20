@@ -49,6 +49,26 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- MIR selector-plan invariant identifier ratchet
+  - `scope: in-scope`
+  - Added stable compile-time identifier contracts for invalid MIR selector-plan shapes in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `RunMat:MirCellExpandPlanInvalid`
+    - `RunMat:MirParenCellPlanInvalid`
+    - `RunMat:MirScalarIndexPlanInvalid`
+    - `RunMat:MirSliceIndexPlanInvalid`
+  - Compiler now emits these identifiers when MIR selector-plan invariants are violated (for example scalar plan carrying non-expression selector components, or slice plan carrying nonzero `end` offsets that should lower through slice-expr paths).
+  - Added compile-level ratchet coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_invalid_scalar_index_plan_with_identifier`
+    - `primary_compile_rejects_invalid_slice_index_plan_with_identifier`
+    using controlled MIR mutation to verify explicit invariant rejection identifiers.
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_scalar_index_plan_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_slice_index_plan_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - (pending commit) Plan 4 histcounts identifier-contract ratchet for option validation
   - Added stable `histcounts` identifiers for two option-parse validation surfaces in [histcounts.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/stats/hist/histcounts.rs):
     - `RunMat:histcounts:BinMethodConflict`

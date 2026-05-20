@@ -84,6 +84,10 @@ struct MirStochasticEvolutionPlan {
 
 const CELL_END_PLUS_TAG_VALUE: u64 = 0x7ff8_c311_0000_0000;
 const CELL_END_PLUS_OFFSET_MASK: u64 = 0x0000_0000_ffff_ffff;
+const IDENT_MIR_CELL_EXPAND_PLAN_INVALID: &str = "RunMat:MirCellExpandPlanInvalid";
+const IDENT_MIR_PAREN_CELL_PLAN_INVALID: &str = "RunMat:MirParenCellPlanInvalid";
+const IDENT_MIR_SCALAR_INDEX_PLAN_INVALID: &str = "RunMat:MirScalarIndexPlanInvalid";
+const IDENT_MIR_SLICE_INDEX_PLAN_INVALID: &str = "RunMat:MirSliceIndexPlanInvalid";
 
 fn encode_cell_end_offset(offset: isize) -> f64 {
     if offset <= 0 {
@@ -1124,9 +1128,12 @@ impl Compiler {
                 .iter()
                 .any(|component| !matches!(component, MirIndexComponent::Colon))
         {
-            return Err(self.compile_error(
-                "MIR cell expansion invariant violated: expand_all requires all-colon selectors",
-            ));
+            return Err(
+                self.compile_error(
+                    "MIR cell expansion invariant violated: expand_all requires all-colon selectors",
+                )
+                .with_identifier(IDENT_MIR_CELL_EXPAND_PLAN_INVALID),
+            );
         }
         Ok((index_count, expand_all, end_offsets))
     }
@@ -1376,7 +1383,8 @@ impl Compiler {
                 }
                 MirIndexPlan::Cell => {
                     return Err(self
-                        .compile_error("MIR paren assignment lowering received cell index plan"));
+                        .compile_error("MIR paren assignment lowering received cell index plan")
+                        .with_identifier(IDENT_MIR_PAREN_CELL_PLAN_INVALID));
                 }
             },
             IndexKind::Brace => {
@@ -1545,9 +1553,9 @@ impl Compiler {
                         });
                     }
                     MirIndexPlan::Cell => {
-                        return Err(self.compile_error(
-                            "MIR paren assignment lowering received cell index plan",
-                        ));
+                        return Err(self
+                            .compile_error("MIR paren assignment lowering received cell index plan")
+                            .with_identifier(IDENT_MIR_PAREN_CELL_PLAN_INVALID));
                     }
                 }
                 Ok(())
@@ -2204,9 +2212,9 @@ impl Compiler {
                 ));
                 Ok(())
             }
-            MirIndexPlan::Cell => {
-                Err(self.compile_error("MIR paren index lowering received cell index plan"))
-            }
+            MirIndexPlan::Cell => Err(self
+                .compile_error("MIR paren index lowering received cell index plan")
+                .with_identifier(IDENT_MIR_PAREN_CELL_PLAN_INVALID)),
         }
     }
 
@@ -2216,9 +2224,9 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         for component in &indexing.components {
             let MirIndexComponent::Expr(operand) = component else {
-                return Err(
-                    self.compile_error("scalar index lowering expects expression selectors only")
-                );
+                return Err(self
+                    .compile_error("scalar index lowering expects expression selectors only")
+                    .with_identifier(IDENT_MIR_SCALAR_INDEX_PLAN_INVALID));
             };
             self.compile_mir_operand(operand)?;
         }
@@ -2242,9 +2250,11 @@ impl Compiler {
                     numeric_count += 1;
                 }
                 MirIndexComponent::End { .. } => {
-                    return Err(self.compile_error(
-                        "MIR slice lowering invariant violated: nonzero end offset must lower through IndexSliceExpr",
-                    ))
+                    return Err(self
+                        .compile_error(
+                            "MIR slice lowering invariant violated: nonzero end offset must lower through IndexSliceExpr",
+                        )
+                        .with_identifier(IDENT_MIR_SLICE_INDEX_PLAN_INVALID))
                 }
             }
         }
