@@ -19,6 +19,7 @@ const COV_ERR_NORMALIZATION_INVALID: &str = "RunMat:cov:NormalizationInvalid";
 const COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH: &str = "RunMat:cov:WeightVectorLengthMismatch";
 const COV_ERR_ROWS_OPTION_UNKNOWN: &str = "RunMat:cov:RowsOptionUnknown";
 const COV_ERR_NORMALIZATION_DUPLICATE: &str = "RunMat:cov:NormalizationDuplicate";
+const COV_ERR_TOO_MANY_ARRAY_ARGUMENTS: &str = "RunMat:cov:TooManyArrayArguments";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
@@ -136,7 +137,10 @@ impl CovArgs {
                     } else if weight_candidate.is_none() {
                         weight_candidate = Some(arg);
                     } else {
-                        return Err(builtin_error("cov: too many array arguments"));
+                        return Err(builtin_error_with_identifier(
+                            "cov: too many array arguments",
+                            COV_ERR_TOO_MANY_ARRAY_ARGUMENTS,
+                        ));
                     }
                 }
                 Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
@@ -1079,6 +1083,21 @@ pub(crate) mod tests {
         ))
         .expect_err("expected duplicate normalization flag error");
         assert_eq!(err.identifier(), Some(COV_ERR_NORMALIZATION_DUPLICATE));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cov_too_many_array_arguments_errors() {
+        let x = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let y = Tensor::new(vec![4.0, 5.0, 6.0], vec![3, 1]).unwrap();
+        let w = Tensor::new(vec![1.0, 1.0, 1.0], vec![3, 1]).unwrap();
+        let z = Tensor::new(vec![7.0, 8.0, 9.0], vec![3, 1]).unwrap();
+        let err = block_on(cov_builtin(
+            Value::Tensor(x),
+            vec![Value::Tensor(y), Value::Tensor(w), Value::Tensor(z)],
+        ))
+        .expect_err("expected too many array arguments error");
+        assert_eq!(err.identifier(), Some(COV_ERR_TOO_MANY_ARRAY_ARGUMENTS));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

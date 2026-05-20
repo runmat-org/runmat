@@ -22,6 +22,7 @@ const CORRCOEF_ERR_ROWS_OPTION_UNKNOWN: &str = "RunMat:corrcoef:RowsOptionUnknow
 const CORRCOEF_ERR_NORMALIZATION_DUPLICATE: &str = "RunMat:corrcoef:NormalizationDuplicate";
 const CORRCOEF_ERR_ROWS_OPTION_MALFORMED: &str = "RunMat:corrcoef:RowsOptionMalformed";
 const CORRCOEF_ERR_OPTION_UNKNOWN: &str = "RunMat:corrcoef:OptionUnknown";
+const CORRCOEF_ERR_TOO_MANY_INPUT_ARRAYS: &str = "RunMat:corrcoef:TooManyInputArrays";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
@@ -157,7 +158,10 @@ impl CorrcoefArgs {
                 }
                 Value::Tensor(_) | Value::LogicalArray(_) | Value::GpuTensor(_) => {
                     if second.is_some() {
-                        return Err(builtin_error("corrcoef: too many input arrays"));
+                        return Err(builtin_error_with_identifier(
+                            "corrcoef: too many input arrays",
+                            CORRCOEF_ERR_TOO_MANY_INPUT_ARRAYS,
+                        ));
                     }
                     second = Some(arg);
                 }
@@ -986,6 +990,20 @@ pub(crate) mod tests {
         ))
         .expect_err("expected malformed rows option error");
         assert_eq!(err.identifier(), Some(CORRCOEF_ERR_ROWS_OPTION_MALFORMED));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn corrcoef_too_many_input_arrays_errors() {
+        let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let b = Tensor::new(vec![4.0, 5.0, 6.0], vec![3, 1]).unwrap();
+        let c = Tensor::new(vec![7.0, 8.0, 9.0], vec![3, 1]).unwrap();
+        let err = block_on(corrcoef_builtin(
+            Value::Tensor(a),
+            vec![Value::Tensor(b), Value::Tensor(c)],
+        ))
+        .expect_err("expected too many input arrays error");
+        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_TOO_MANY_INPUT_ARRAYS));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

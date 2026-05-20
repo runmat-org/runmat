@@ -46,12 +46,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `RunMat:corrcoef:NormalizationDuplicate`
     - `RunMat:corrcoef:RowsOptionMalformed`
     - `RunMat:corrcoef:OptionUnknown`
+    - `RunMat:corrcoef:TooManyInputArrays`
   - Runtime now emits these identifiers for:
     - paired-input row-count mismatch during matrix combination
     - invalid normalization-flag values/types (`0|1` contract violations, non-finite/non-integer numerics, non-numeric/non-logical inputs)
     - duplicate normalization-flag specification
     - malformed `rows` option argument shape/type
     - unsupported top-level option keys
+    - excessive array-input argument count
     - unsupported `rows` option values
   - Tightened tests:
     - `corrcoef_mismatched_rows_errors`
@@ -59,6 +61,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `corrcoef_duplicate_normalization_flag_errors`
     - `corrcoef_rows_option_malformed_errors`
     - `corrcoef_unknown_option_errors`
+    - `corrcoef_too_many_input_arrays_errors`
     - `corrcoef_unknown_rows_option_errors`
     now assert `RuntimeError.identifier()` rather than message-fragment checks.
   - Validation:
@@ -67,6 +70,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-runtime corrcoef_duplicate_normalization_flag_errors -- --nocapture`
     - `cargo test -p runmat-runtime corrcoef_rows_option_malformed_errors -- --nocapture`
     - `cargo test -p runmat-runtime corrcoef_unknown_option_errors -- --nocapture`
+    - `cargo test -p runmat-runtime corrcoef_too_many_input_arrays_errors -- --nocapture`
     - `cargo test -p runmat-runtime corrcoef_unknown_rows_option_errors -- --nocapture`
     - `cargo fmt --all --check`
     - `git diff --check`
@@ -78,16 +82,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `RunMat:cov:WeightVectorLengthMismatch`
     - `RunMat:cov:RowsOptionUnknown`
     - `RunMat:cov:NormalizationDuplicate`
+    - `RunMat:cov:TooManyArrayArguments`
   - Runtime now emits these identifiers for:
     - paired-input row-count mismatch during matrix combination
     - invalid normalization-flag values/types (`0|1` contract violations, non-finite/non-integer numerics, and non-numeric inputs)
     - duplicate normalization-flag specification
     - weight-vector length mismatch against input row count
+    - excessive array-argument count
     - unsupported `rows` option values
   - Added/tightened tests:
     - `cov_mismatched_rows_errors`
     - `cov_invalid_flag_errors`
     - `cov_duplicate_normalization_flag_errors`
+    - `cov_too_many_array_arguments_errors`
     - `cov_weight_vector_length_mismatch_errors`
     - `cov_unknown_rows_option_errors`
     now assert `RuntimeError.identifier()` on these paths.
@@ -95,6 +102,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-runtime cov_mismatched_rows_errors -- --nocapture`
     - `cargo test -p runmat-runtime cov_invalid_flag_errors -- --nocapture`
     - `cargo test -p runmat-runtime cov_duplicate_normalization_flag_errors -- --nocapture`
+    - `cargo test -p runmat-runtime cov_too_many_array_arguments_errors -- --nocapture`
     - `cargo test -p runmat-runtime cov_weight_vector_length_mismatch_errors -- --nocapture`
     - `cargo test -p runmat-runtime cov_unknown_rows_option_errors -- --nocapture`
     - `cargo fmt --all --check`
