@@ -59,16 +59,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added stable `cov` identifiers in [cov.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/stats/summary/cov.rs):
     - `RunMat:cov:RowsMismatch`
     - `RunMat:cov:NormalizationInvalid`
+    - `RunMat:cov:WeightVectorLengthMismatch`
   - Runtime now emits these identifiers for:
     - paired-input row-count mismatch during matrix combination
     - invalid normalization-flag values/types (`0|1` contract violations, non-finite/non-integer numerics, and non-numeric inputs)
+    - weight-vector length mismatch against input row count
   - Added/tightened tests:
     - `cov_mismatched_rows_errors`
     - `cov_invalid_flag_errors`
+    - `cov_weight_vector_length_mismatch_errors`
     now assert `RuntimeError.identifier()` on these paths.
   - Validation:
     - `cargo test -p runmat-runtime cov_mismatched_rows_errors -- --nocapture`
     - `cargo test -p runmat-runtime cov_invalid_flag_errors -- --nocapture`
+    - `cargo test -p runmat-runtime cov_weight_vector_length_mismatch_errors -- --nocapture`
     - `cargo fmt --all --check`
     - `git diff --check`
 

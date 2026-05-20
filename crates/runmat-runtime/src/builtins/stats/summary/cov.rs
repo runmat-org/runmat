@@ -16,6 +16,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const NAME: &str = "cov";
 const COV_ERR_ROWS_MISMATCH: &str = "RunMat:cov:RowsMismatch";
 const COV_ERR_NORMALIZATION_INVALID: &str = "RunMat:cov:NormalizationInvalid";
+const COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH: &str = "RunMat:cov:WeightVectorLengthMismatch";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
@@ -85,10 +86,10 @@ pub fn cov_from_tensors(
     let matrix = combine_tensors(left, right)?;
     if let CovWeightSpec::Vector(ref vec) = weight {
         if matrix.rows != vec.len() {
-            return Err(builtin_error(format!(
-                "cov: weight vector must contain {} elements",
-                matrix.rows
-            )));
+            return Err(builtin_error_with_identifier(
+                format!("cov: weight vector must contain {} elements", matrix.rows),
+                COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH,
+            ));
         }
     }
     match rows {
@@ -278,10 +279,10 @@ async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinRe
         return Err(builtin_error("cov: weight vector must be one-dimensional"));
     }
     if tensor.rows() != expected_rows && tensor.cols() != expected_rows {
-        return Err(builtin_error(format!(
-            "cov: weight vector must contain {} elements",
-            expected_rows
-        )));
+        return Err(builtin_error_with_identifier(
+            format!("cov: weight vector must contain {} elements", expected_rows),
+            COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH,
+        ));
     }
     for (idx, weight) in tensor.data.iter().enumerate() {
         if !weight.is_finite() || *weight < 0.0 {
@@ -524,10 +525,10 @@ fn covariance_dense(matrix: &Matrix, weight: &CovWeightSpec) -> BuiltinResult<Te
         }
         CovWeightSpec::Vector(weights) => {
             if weights.len() != rows {
-                return Err(builtin_error(format!(
-                    "cov: weight vector must contain {} elements",
-                    rows
-                )));
+                return Err(builtin_error_with_identifier(
+                    format!("cov: weight vector must contain {} elements", rows),
+                    COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH,
+                ));
             }
             let sum_w: f64 = weights.iter().sum();
             if sum_w <= 0.0 {
@@ -1031,6 +1032,23 @@ pub(crate) mod tests {
         let err = block_on(cov_builtin(Value::Tensor(tensor), vec![Value::Num(2.5)]))
             .expect_err("expected invalid flag error");
         assert_eq!(err.identifier(), Some(COV_ERR_NORMALIZATION_INVALID));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cov_weight_vector_length_mismatch_errors() {
+        let x = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![3, 2]).unwrap();
+        let y = Tensor::new(vec![10.0, 11.0, 12.0], vec![3, 1]).unwrap();
+        let w = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let err = block_on(cov_builtin(
+            Value::Tensor(x),
+            vec![Value::Tensor(y), Value::Tensor(w)],
+        ))
+        .expect_err("expected weight length mismatch");
+        assert_eq!(
+            err.identifier(),
+            Some(COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
