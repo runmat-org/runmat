@@ -47,6 +47,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-runtime sorting_sets:: -- --nocapture`
     - `cargo fmt --all --check`
 
+- (pending commit) Setdiff unsupported-type/rows identifier ratchet
+  - Added stable `setdiff` identifier contracts for:
+    - `RunMat:setdiff:UnsupportedInputType`
+    - `RunMat:setdiff:RowsColumnMismatch`
+  - Runtime implementation now emits those identifiers on:
+    - setdiff host fallback type coercion failures (non-tensor/non-numeric incompatible operands)
+    - `'rows'` column-count mismatch across numeric/complex/char/string row paths
+  - Tightened tests in [setdiff.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/array/sorting_sets/setdiff.rs):
+    - `setdiff_type_mismatch_errors` now asserts `RunMat:setdiff:UnsupportedInputType`
+    - new `setdiff_rows_dimension_mismatch_reports_identifier` asserts `RunMat:setdiff:RowsColumnMismatch`
+  - Validation:
+    - `cargo test -p runmat-runtime setdiff_type_mismatch_errors -- --nocapture`
+    - `cargo test -p runmat-runtime setdiff_rows_dimension_mismatch_reports_identifier -- --nocapture`
+    - `cargo fmt --all`
+
 - (pending commit) Set builtins legacy-option identifier ratchet
   - Replaced message-only legacy-option rejections in set builtins with stable identifiers:
     - `RunMat:unique:LegacyOptionUnsupported`

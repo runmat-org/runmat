@@ -61,6 +61,15 @@ fn setdiff_error(message: impl Into<String>) -> crate::RuntimeError {
 const SETDIFF_ERR_LEGACY_OPTION_UNSUPPORTED: &str = "RunMat:setdiff:LegacyOptionUnsupported";
 const SETDIFF_ERR_CONFLICTING_ORDER_OPTIONS: &str = "RunMat:setdiff:ConflictingOrderOptions";
 const SETDIFF_ERR_UNKNOWN_OPTION: &str = "RunMat:setdiff:UnknownOption";
+const SETDIFF_ERR_ROWS_COLUMN_MISMATCH: &str = "RunMat:setdiff:RowsColumnMismatch";
+const SETDIFF_ERR_UNSUPPORTED_INPUT_TYPE: &str = "RunMat:setdiff:UnsupportedInputType";
+
+fn setdiff_rows_column_mismatch_error() -> crate::RuntimeError {
+    build_runtime_error("setdiff: inputs must have the same number of columns when using 'rows'")
+        .with_builtin("setdiff")
+        .with_identifier(SETDIFF_ERR_ROWS_COLUMN_MISMATCH)
+        .build()
+}
 
 #[runtime_builtin(
     name = "setdiff",
@@ -260,10 +269,18 @@ fn setdiff_host(
         }
 
         (left, right) => {
-            let tensor_a =
-                tensor::value_into_tensor_for("setdiff", left).map_err(|e| setdiff_error(e))?;
-            let tensor_b =
-                tensor::value_into_tensor_for("setdiff", right).map_err(|e| setdiff_error(e))?;
+            let tensor_a = tensor::value_into_tensor_for("setdiff", left).map_err(|e| {
+                build_runtime_error(e)
+                    .with_builtin("setdiff")
+                    .with_identifier(SETDIFF_ERR_UNSUPPORTED_INPUT_TYPE)
+                    .build()
+            })?;
+            let tensor_b = tensor::value_into_tensor_for("setdiff", right).map_err(|e| {
+                build_runtime_error(e)
+                    .with_builtin("setdiff")
+                    .with_identifier(SETDIFF_ERR_UNSUPPORTED_INPUT_TYPE)
+                    .build()
+            })?;
             setdiff_numeric(tensor_a, tensor_b, opts)
         }
     }
@@ -336,9 +353,7 @@ fn setdiff_numeric_rows(
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(setdiff_error(
-            "setdiff: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(setdiff_rows_column_mismatch_error());
     }
 
     let rows_a = a.shape[0];
@@ -439,9 +454,7 @@ fn setdiff_complex_rows(
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(setdiff_error(
-            "setdiff: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(setdiff_rows_column_mismatch_error());
     }
 
     let rows_a = a.shape[0];
@@ -544,9 +557,7 @@ fn setdiff_char_rows(
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     if a.cols != b.cols {
-        return Err(setdiff_error(
-            "setdiff: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(setdiff_rows_column_mismatch_error());
     }
 
     let rows_a = a.rows;
@@ -646,9 +657,7 @@ fn setdiff_string_rows(
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(setdiff_error(
-            "setdiff: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(setdiff_rows_column_mismatch_error());
     }
 
     let rows_a = a.shape[0];
@@ -1392,8 +1401,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_type_mismatch_errors() {
-        let result = evaluate_sync(Value::from(1.0), Value::String("a".into()), &[]);
-        assert!(result.is_err());
+        let err = evaluate_sync(Value::from(1.0), Value::String("a".into()), &[]).unwrap_err();
+        assert_eq!(err.identifier(), Some(SETDIFF_ERR_UNSUPPORTED_INPUT_TYPE));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn setdiff_rows_dimension_mismatch_reports_identifier() {
+        let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("tensor a");
+        let b = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor b");
+        let err =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")]).unwrap_err();
+        assert_eq!(err.identifier(), Some(SETDIFF_ERR_ROWS_COLUMN_MISMATCH));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
