@@ -3246,4 +3246,34 @@ mod tests {
         let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
         assert_eq!(vars[z_export.slot.0], Value::Num(3.0));
     }
+
+    #[test]
+    fn primary_compile_lowers_async_expansion_call_to_future_expand_instruction() {
+        let source =
+            "async function y = inc(x); y = x + 1; end; args = {2}; t = inc(args{:}); z = await(t);";
+        let ast = runmat_parser::parse(source).expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        assert!(
+            bytecode
+                .instructions
+                .iter()
+                .any(|instr| matches!(
+                    instr,
+                    Instr::CreateSemanticFutureExpandMultiOutput(FunctionId(_), _, 1)
+                )),
+            "expected async expansion call lowering to create a semantic future expansion descriptor"
+        );
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let z_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "z")
+            .expect("z export");
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[z_export.slot.0], Value::Num(3.0));
+    }
 }

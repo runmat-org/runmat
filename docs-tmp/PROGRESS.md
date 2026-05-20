@@ -31,6 +31,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3/4 async expansion-call future-descriptor lowering ratchet
+  - Added VM compile/interpret coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_lowers_async_expansion_call_to_future_expand_instruction`
+  - Contract: async direct calls with comma-list expansion (`args{:}`) lower to lazy future-descriptor instruction form (`CreateSemanticFutureExpandMultiOutput`) rather than eager semantic call execution.
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_lowers_async_expansion_call_to_future_expand_instruction -- --nocapture`
+
 - (pending commit) Plan 6/7 slice-assignment unsupported-base identifier ratchet
   - VM interpreter slice-assignment dispatch in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now emits stable `RunMat:SliceNonTensor` identifiers for unsupported base types in both `StoreSlice` and `StoreSliceExpr` paths instead of message-only runtime errors.
   - Added VM semantic regression coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):
