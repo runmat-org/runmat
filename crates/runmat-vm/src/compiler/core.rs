@@ -94,6 +94,8 @@ const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
 const IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED: &str = "RunMat:MirCallFallbackPolicyUnsupported";
 const IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED: &str =
     "RunMat:MirMethodFallbackPolicyUnsupported";
+const IDENT_MIR_METHOD_CALL_CALLEE_INVALID: &str = "RunMat:MirMethodCallCalleeInvalid";
+const IDENT_MIR_METHOD_CALL_RECEIVER_MISSING: &str = "RunMat:MirMethodCallReceiverMissing";
 
 fn encode_cell_end_offset(offset: isize) -> f64 {
     if offset <= 0 {
@@ -1928,9 +1930,9 @@ impl Compiler {
         has_expansion: bool,
     ) -> Result<(), CompileError> {
         let MirCallee::Static(identity) = &call.callee else {
-            return Err(
-                self.compile_error("internal error: method-call lowering expected a static callee")
-            );
+            return Err(self
+                .compile_error("internal error: method-call lowering expected a static callee")
+                .with_identifier(IDENT_MIR_METHOD_CALL_CALLEE_INVALID));
         };
         let identity = identity.clone();
         let fallback_policy = call.fallback_policy;
@@ -1943,7 +1945,9 @@ impl Compiler {
                 .with_identifier(IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED));
         }
         if call.args.is_empty() {
-            return Err(self.compile_error("MIR method calls require a base receiver"));
+            return Err(self
+                .compile_error("MIR method calls require a base receiver")
+                .with_identifier(IDENT_MIR_METHOD_CALL_RECEIVER_MISSING));
         }
         for arg in &call.args {
             self.compile_mir_call_arg(arg)?;

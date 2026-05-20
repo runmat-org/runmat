@@ -2072,6 +2072,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 method-call compile invariant identifier ratchet
+  - Added method-call compile invariant identifiers in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `RunMat:MirMethodCallReceiverMissing` for method calls with no base receiver arg.
+    - `RunMat:MirMethodCallCalleeInvalid` for internal non-static-callee method-lowering mismatch guard.
+  - Added compile-level invariant test in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_missing_mir_method_call_receiver_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_missing_mir_method_call_receiver_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

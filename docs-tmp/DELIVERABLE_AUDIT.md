@@ -90,6 +90,8 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `RunMat:MirAggregateShapeInvalid` for MIR aggregate shape/count mismatch (`rows * cols != elements.len()`).
     - `RunMat:MirCallFallbackPolicyUnsupported` for unsupported static-call fallback policies.
     - `RunMat:MirMethodFallbackPolicyUnsupported` for unsupported method-call fallback policies.
+    - `RunMat:MirMethodCallReceiverMissing` for method-call receiver arg invariants.
+    - `RunMat:MirMethodCallCalleeInvalid` for internal method-call static-callee invariants.
   - compile-level ratchets now assert these contracts in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_rejects_unsupported_mir_unary_operator_with_identifier`
     - `primary_compile_rejects_unsupported_mir_binary_operator_with_identifier`
@@ -97,6 +99,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `primary_compile_rejects_invalid_mir_aggregate_shape_with_identifier`
     - `primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier`
     - `primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier`
+    - `primary_compile_rejects_missing_mir_method_call_receiver_with_identifier`
 - Gap:
   - designed gaps still open (aggregate edge behavior and selector-plan normalization have both narrowed with early aggregate-shape semantic invariant checks plus compile-stage selector-plan invariant identifiers/ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 

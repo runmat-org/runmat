@@ -3119,6 +3119,50 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_missing_mir_method_call_receiver_with_identifier() {
+        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                let maybe_call = match &mut stmt.kind {
+                    MirStmtKind::Assign {
+                        value: MirRvalue::Call(call),
+                        ..
+                    }
+                    | MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call),
+                    _ => None,
+                };
+                if let Some(call) = maybe_call {
+                    if matches!(
+                        call.syntax,
+                        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
+                    ) {
+                        call.args.clear();
+                        patched = true;
+                        break;
+                    }
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected method call in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirMethodCallReceiverMissing")
+        );
+    }
+
+    #[test]
     fn primary_compile_lowers_statement_semantic_call_to_zero_outputs() {
         let ast =
             runmat_parser::parse("function y = f(x); y = nargout(); end; f(10);").expect("parse");
