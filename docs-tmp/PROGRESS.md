@@ -2061,6 +2061,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 compile-level unary-operator identifier contract ratchet
+  - Added compile-level invariant test in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_unsupported_mir_unary_operator_with_identifier`
+  - This extends `RunMat:MirOperatorUnsupported` coverage to both unsupported unary and binary MIR operator rejection paths.
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_unsupported_mir_unary_operator_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

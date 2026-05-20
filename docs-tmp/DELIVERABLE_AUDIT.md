@@ -91,6 +91,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `RunMat:MirCallFallbackPolicyUnsupported` for unsupported static-call fallback policies.
     - `RunMat:MirMethodFallbackPolicyUnsupported` for unsupported method-call fallback policies.
   - compile-level ratchets now assert these contracts in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_unsupported_mir_unary_operator_with_identifier`
     - `primary_compile_rejects_unsupported_mir_binary_operator_with_identifier`
     - `primary_compile_rejects_unknown_mir_builtin_id_with_identifier`
     - `primary_compile_rejects_invalid_mir_aggregate_shape_with_identifier`
