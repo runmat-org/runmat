@@ -16,9 +16,21 @@ use crate::builtins::stats::type_resolvers::corrcoef_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "corrcoef";
+const CORRCOEF_ERR_ROWS_MISMATCH: &str = "RunMat:corrcoef:RowsMismatch";
+const CORRCOEF_ERR_NORMALIZATION_INVALID: &str = "RunMat:corrcoef:NormalizationInvalid";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
+}
+
+fn builtin_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_identifier(identifier)
+        .build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::summary::corrcoef")]
@@ -253,26 +265,32 @@ fn parse_normalization(value: Value) -> BuiltinResult<CorrcoefNormalization> {
         Value::Int(i) => match i.to_i64() {
             0 => Ok(CorrcoefNormalization::Unbiased),
             1 => Ok(CorrcoefNormalization::Biased),
-            other => Err(builtin_error(format!(
-                "corrcoef: normalization flag must be 0 or 1, received {other}"
-            ))),
+            other => Err(builtin_error_with_identifier(
+                format!("corrcoef: normalization flag must be 0 or 1, received {other}"),
+                CORRCOEF_ERR_NORMALIZATION_INVALID,
+            )),
         },
         Value::Num(n) => {
             if !n.is_finite() {
-                return Err(builtin_error("corrcoef: normalization flag must be finite"));
+                return Err(builtin_error_with_identifier(
+                    "corrcoef: normalization flag must be finite",
+                    CORRCOEF_ERR_NORMALIZATION_INVALID,
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > 1.0e-12 {
-                return Err(builtin_error(
+                return Err(builtin_error_with_identifier(
                     "corrcoef: normalization flag must be an integer",
+                    CORRCOEF_ERR_NORMALIZATION_INVALID,
                 ));
             }
             match rounded as i64 {
                 0 => Ok(CorrcoefNormalization::Unbiased),
                 1 => Ok(CorrcoefNormalization::Biased),
-                other => Err(builtin_error(format!(
-                    "corrcoef: normalization flag must be 0 or 1, received {other}"
-                ))),
+                other => Err(builtin_error_with_identifier(
+                    format!("corrcoef: normalization flag must be 0 or 1, received {other}"),
+                    CORRCOEF_ERR_NORMALIZATION_INVALID,
+                )),
             }
         }
         Value::Bool(b) => Ok(if b {
@@ -280,9 +298,10 @@ fn parse_normalization(value: Value) -> BuiltinResult<CorrcoefNormalization> {
         } else {
             CorrcoefNormalization::Unbiased
         }),
-        other => Err(builtin_error(format!(
-            "corrcoef: normalization flag must be numeric or logical, received {other:?}"
-        ))),
+        other => Err(builtin_error_with_identifier(
+            format!("corrcoef: normalization flag must be numeric or logical, received {other:?}"),
+            CORRCOEF_ERR_NORMALIZATION_INVALID,
+        )),
     }
 }
 
@@ -332,8 +351,9 @@ fn combine_tensors(left: Tensor, right: Option<Tensor>) -> BuiltinResult<Matrix>
     if let Some(second) = right {
         let right_matrix = Matrix::from_tensor(second)?;
         if matrix.rows != right_matrix.rows {
-            return Err(builtin_error(
+            return Err(builtin_error_with_identifier(
                 "corrcoef: inputs must have the same number of rows",
+                CORRCOEF_ERR_ROWS_MISMATCH,
             ));
         }
         matrix.cols += right_matrix.cols;
@@ -666,14 +686,6 @@ pub(crate) mod tests {
         assert_eq!(out, Type::Num);
     }
 
-    fn assert_flow_message(err: RuntimeError, needle: &str) {
-        assert!(
-            err.message().contains(needle),
-            "unexpected error message: {}",
-            err.message()
-        );
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn corrcoef_matrix_basic() {
@@ -897,7 +909,7 @@ pub(crate) mod tests {
             vec![Value::Tensor(right)],
         ))
         .expect_err("expected mismatch error");
-        assert_flow_message(err, "same number of rows");
+        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_ROWS_MISMATCH));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -909,7 +921,7 @@ pub(crate) mod tests {
             vec![Value::Num(2.5)],
         ))
         .expect_err("expected invalid flag error");
-        assert_flow_message(err, "normalization flag");
+        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_NORMALIZATION_INVALID));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -38,6 +38,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- (pending commit) Plan 4 corrcoef identifier-contract ratchet for rows/normalization validation
+  - Added stable `corrcoef` identifiers in [corrcoef.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/stats/summary/corrcoef.rs):
+    - `RunMat:corrcoef:RowsMismatch`
+    - `RunMat:corrcoef:NormalizationInvalid`
+  - Runtime now emits these identifiers for:
+    - paired-input row-count mismatch during matrix combination
+    - invalid normalization-flag values/types (`0|1` contract violations, non-finite/non-integer numerics, non-numeric/non-logical inputs)
+  - Tightened tests:
+    - `corrcoef_mismatched_rows_errors`
+    - `corrcoef_invalid_flag_errors`
+    now assert `RuntimeError.identifier()` rather than message-fragment checks.
+  - Validation:
+    - `cargo test -p runmat-runtime corrcoef_mismatched_rows_errors -- --nocapture`
+    - `cargo test -p runmat-runtime corrcoef_invalid_flag_errors -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - (pending commit) Set builtins option-parse identifier ratchet
   - Added stable option-parse identifiers for set builtins:
     - `RunMat:unique:ConflictingOrderOptions`
