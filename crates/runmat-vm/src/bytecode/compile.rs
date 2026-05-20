@@ -2822,6 +2822,79 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_invalid_paren_cell_plan_with_identifier() {
+        let ast = runmat_parser::parse("x = [1 2 3]; y = x(2);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign {
+                    value: MirRvalue::Index { indexing, .. },
+                    ..
+                } = &mut stmt.kind
+                {
+                    indexing.plan = MirIndexPlan::Cell;
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected indexed assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirParenCellPlanInvalid")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_invalid_cell_expand_all_shape_with_identifier() {
+        let ast = runmat_parser::parse("c = {1,2;3,4}; [a,b] = c{:,2};").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::MultiAssign {
+                    value: MirRvalue::Index { indexing, .. },
+                    ..
+                } = &mut stmt.kind
+                {
+                    indexing.cell_expand_all = true;
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(
+            patched,
+            "expected multi-assign cell expansion in lowered MIR"
+        );
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirCellExpandPlanInvalid")
+        );
+    }
+
+    #[test]
     fn primary_compile_lowers_statement_semantic_call_to_zero_outputs() {
         let ast =
             runmat_parser::parse("function y = f(x); y = nargout(); end; f(10);").expect("parse");

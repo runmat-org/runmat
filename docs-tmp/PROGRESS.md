@@ -85,6 +85,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- MIR cell-selector invariant coverage completion ratchet
+  - `scope: in-scope`
+  - Added compile-level invariant coverage for the remaining MIR cell selector-plan identifier contracts in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_invalid_paren_cell_plan_with_identifier` -> `RunMat:MirParenCellPlanInvalid`
+    - `primary_compile_rejects_invalid_cell_expand_all_shape_with_identifier` -> `RunMat:MirCellExpandPlanInvalid`
+  - These tests intentionally mutate lowered MIR to invalid cell selector-plan states to verify compiler-side invariant rejection with stable identifiers.
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_paren_cell_plan_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_cell_expand_all_shape_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - (pending commit) Plan 4 histcounts identifier-contract ratchet for option validation
   - Added stable `histcounts` identifiers for two option-parse validation surfaces in [histcounts.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/stats/hist/histcounts.rs):
     - `RunMat:histcounts:BinMethodConflict`
