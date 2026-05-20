@@ -48,6 +48,15 @@ fn compile_semantic(source: &str) -> runmat_vm::Bytecode {
     test_helpers::compile_semantic_source(source).expect("compile semantic source")
 }
 
+fn graph_for_fusion_test(
+    bytecode: &runmat_vm::Bytecode,
+) -> Option<runmat_accelerate::graph::AccelGraph> {
+    let runtime_groups = bytecode.runtime_fusion_groups();
+    bytecode
+        .runtime_accel_graph_for_fusion(&runtime_groups)
+        .or_else(|| bytecode.accel_graph.clone())
+}
+
 struct TestProvider {
     next_id: AtomicU64,
     buffers: Mutex<BufferStore>,
@@ -1409,7 +1418,7 @@ fn reduction_sum_omitnan_vs_include_dim2_gpu_cpu() {
         );
 
         let bytecode = compile_semantic(&source);
-        if let Some(graph) = &bytecode.accel_graph {
+        if let Some(graph) = graph_for_fusion_test(&bytecode) {
             let groups = graph.detect_fusion_groups();
             let reduction_count = groups
                 .iter()
@@ -2359,7 +2368,7 @@ fn fused_safe_followup_builtins_remain_resident() {
         "#;
 
         let bytecode = compile_semantic(source);
-        if let Some(graph) = &bytecode.accel_graph {
+        if let Some(graph) = graph_for_fusion_test(&bytecode) {
             let groups = graph.detect_fusion_groups();
             assert!(
                 groups
@@ -2368,7 +2377,7 @@ fn fused_safe_followup_builtins_remain_resident() {
                 "expected elementwise fusion group, got {:?}",
                 groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
             );
-            let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+            let plan = runmat_accelerate::FusionPlan::from_graph(&graph, &groups);
             assert!(
                 plan.groups.iter().any(|g| g.kernel.supported),
                 "expected supported fusion plan, groups={:?} supported={:?}",
@@ -2423,7 +2432,7 @@ fn fused_inverse_hyperbolic_builtins_are_plannable() {
         "#;
 
         let bytecode = compile_semantic(source);
-        if let Some(graph) = &bytecode.accel_graph {
+        if let Some(graph) = graph_for_fusion_test(&bytecode) {
             let groups = graph.detect_fusion_groups();
             assert!(
                 groups
@@ -2432,7 +2441,7 @@ fn fused_inverse_hyperbolic_builtins_are_plannable() {
                 "expected elementwise fusion group, got {:?}",
                 groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
             );
-            let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+            let plan = runmat_accelerate::FusionPlan::from_graph(&graph, &groups);
             assert!(
                 plan.groups.iter().any(|g| g.kernel.supported),
                 "expected supported fusion plan, groups={:?} supported={:?}",
@@ -2493,9 +2502,9 @@ fn direct_execution_of_safe_followup_group_returns_gpu_tensor() {
         "#;
 
         let bytecode = compile_semantic(source);
-        let graph = bytecode.accel_graph.as_ref().expect("accel graph");
+        let graph = graph_for_fusion_test(&bytecode).expect("accel graph");
         let groups = graph.detect_fusion_groups();
-        let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+        let plan = runmat_accelerate::FusionPlan::from_graph(&graph, &groups);
         let group_plan = plan
             .groups
             .iter()
@@ -2535,9 +2544,9 @@ fn direct_execution_of_inverse_hyperbolic_group_returns_gpu_tensor() {
         "#;
 
         let bytecode = compile_semantic(source);
-        let graph = bytecode.accel_graph.as_ref().expect("accel graph");
+        let graph = graph_for_fusion_test(&bytecode).expect("accel graph");
         let groups = graph.detect_fusion_groups();
-        let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+        let plan = runmat_accelerate::FusionPlan::from_graph(&graph, &groups);
         let group_plan = plan
             .groups
             .iter()
@@ -2571,9 +2580,9 @@ fn direct_execution_of_mod_and_rem_group_returns_gpu_tensor() {
         "#;
 
         let bytecode = compile_semantic(source);
-        let graph = bytecode.accel_graph.as_ref().expect("accel graph");
+        let graph = graph_for_fusion_test(&bytecode).expect("accel graph");
         let groups = graph.detect_fusion_groups();
-        let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+        let plan = runmat_accelerate::FusionPlan::from_graph(&graph, &groups);
         let group_plan = plan
             .groups
             .iter()
@@ -2607,7 +2616,7 @@ fn fused_mod_and_rem_remain_resident() {
         "#;
 
         let bytecode = compile_semantic(source);
-        if let Some(graph) = &bytecode.accel_graph {
+        if let Some(graph) = graph_for_fusion_test(&bytecode) {
             let groups = graph.detect_fusion_groups();
             assert!(
                 groups
@@ -2616,7 +2625,7 @@ fn fused_mod_and_rem_remain_resident() {
                 "expected elementwise fusion group, got {:?}",
                 groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
             );
-            let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+            let plan = runmat_accelerate::FusionPlan::from_graph(&graph, &groups);
             assert!(
                 plan.groups.iter().any(|g| g.kernel.supported),
                 "expected supported fusion plan, groups={:?} supported={:?}",
@@ -2678,7 +2687,7 @@ fn fused_mod_and_rem_broadcast_variants_remain_resident() {
         "#;
 
         let bytecode = compile_semantic(source);
-        if let Some(graph) = &bytecode.accel_graph {
+        if let Some(graph) = graph_for_fusion_test(&bytecode) {
             let groups = graph.detect_fusion_groups();
             assert!(
                 groups
@@ -2687,7 +2696,7 @@ fn fused_mod_and_rem_broadcast_variants_remain_resident() {
                 "expected elementwise fusion group, got {:?}",
                 groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
             );
-            let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+            let plan = runmat_accelerate::FusionPlan::from_graph(&graph, &groups);
             assert!(
                 plan.groups.iter().any(|g| g.kernel.supported),
                 "expected supported fusion plan, groups={:?} supported={:?}",
@@ -3309,7 +3318,7 @@ fn power_step_normalization_matches_cpu() {
 
         let bytecode = compile_semantic(source);
 
-        if let Some(graph) = &bytecode.accel_graph {
+        if let Some(graph) = graph_for_fusion_test(&bytecode) {
             let groups = graph.detect_fusion_groups();
             assert!(
                 groups
@@ -3386,7 +3395,7 @@ fn image_normalize_matches_cpu() {
 
         let bytecode = compile_semantic(source);
 
-        if let Some(graph) = &bytecode.accel_graph {
+        if let Some(graph) = graph_for_fusion_test(&bytecode) {
             let groups = graph.detect_fusion_groups();
             assert!(groups
                 .iter()
@@ -3460,7 +3469,7 @@ fn explained_variance_matches_cpu() {
             }
         }
 
-        let (q_var_idx, g_var_idx) = if let Some(graph) = &bytecode.accel_graph {
+        let (q_var_idx, g_var_idx) = if let Some(graph) = graph_for_fusion_test(&bytecode) {
             let groups = graph.detect_fusion_groups();
             assert!(
                 groups
@@ -3469,7 +3478,7 @@ fn explained_variance_matches_cpu() {
                 "expected explained variance group, got {:?}",
                 groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
             );
-            let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+            let plan = runmat_accelerate::FusionPlan::from_graph(&graph, &groups);
             let explained = plan
                 .groups
                 .iter()

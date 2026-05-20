@@ -6,6 +6,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 runtime-first fusion graph access migration in `fusion_gpu` coverage
+  - Added shared runtime-first graph helper in [fusion_gpu.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/fusion_gpu.rs): `graph_for_fusion_test`.
+  - Updated touched fusion tests to consume runtime-owned graph selection first (with compile-graph fallback only inside the helper), replacing direct `bytecode.accel_graph` call-site reads.
+  - Tightened runtime graph API behavior in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs): when semantic runtime groups exist, `runtime_accel_graph_for_fusion` now returns compile graph metadata if present, otherwise materializes from active bytecode.
+  - Validation:
+    - `cargo test -p runmat-vm --test fusion_gpu direct_execution_of_safe_followup_group_returns_gpu_tensor -- --nocapture`
+    - `cargo test -p runmat-vm --test fusion_gpu explained_variance_matches_cpu -- --nocapture`
+    - `cargo test -p runmat-vm --test matrix_division -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`
+    - `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
+  - Known follow-up:
+    - `cargo test -p runmat-vm --test fusion_gpu fused_safe_followup_builtins_remain_resident -- --nocapture` fails on current branch with `cannot convert GpuTensor ... to f64` during `interpret`; keep as open runtime fusion behavior investigation.
+
 - (pending commit) Plan 7 test-surface decoupling from compile accel-graph artifacts
   - VM compile-unit fusion tests in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now assert runtime graph materialization/reconciliation (`runtime_accel_graph_for_fusion`, `prepare_fusion_plan`) instead of asserting compile-populated `bytecode.accel_graph` presence.
   - Matrix-division semantic coverage in [matrix_division.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/matrix_division.rs) now asserts observable division behavior contracts (operator parity vs `mrdivide`/`mldivide` and scalar `/` vs `./`) rather than accel-graph node-shape internals.

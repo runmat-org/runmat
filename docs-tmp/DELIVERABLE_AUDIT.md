@@ -328,6 +328,7 @@ This audit maps the active objective to concrete repository evidence and marks e
 - Blocking gap:
   - executable fusion groups now preserve semantic-window scaffolding across both zero-mapping and partial-mapping compile outcomes, and runtime sanitization now revalidates both kind and span for pre-mapped nodes before recovery/drop; remaining gap is further minimizing compile-time node assignment heuristics in favor of runtime-only assignment.
   - spawned-task provider-handle policy now has explicit provider declarations plus VM enforcement, and provider-backed release semantics are covered for residency-clear/drop paths (including `Pop`) plus spawn/await completion/cancellation and compiled semantic spawn-overwrite lifecycle flows; semantic async spawn/await lifecycle coverage now includes unaliased helper/callee release behavior via semantic invoker path for direct, struct-nested, cell-nested, multi-output, `varargout`, nested-unrequested `varargout`, and multi-outstanding two-task await flows, with core interaction tests now ratcheting explicit serial eager spawn execution/order/failure boundaries.
+  - targeted runtime fusion behavior remains open in current coverage: `fused_safe_followup_builtins_remain_resident` fails on branch with `cannot convert GpuTensor ... to f64` during `interpret`, requiring focused runtime fusion boundary debugging before closeout.
 
 ### 7) Validation cadence (`met` for current slices)
 
@@ -385,6 +386,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - VM interpreter now retains and executes against the same runtime-selected accel graph used during fusion-plan preparation: [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs) persists `fusion_accel_graph`, and fused execution in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) now uses that retained graph instead of requiring `bytecode.accel_graph`.
   - Core/session fusion snapshot paths no longer fall back to compile-provided graph metadata: [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs) and [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) now consume runtime graph materialization only, matching VM runtime planning behavior.
   - VM compile and matrix-division tests were updated to assert runtime-graph behavior and semantic observable outcomes rather than compile-graph internals, reducing test-level coupling to transitional compile accel-graph artifacts.
+  - `fusion_gpu` call-sites now use a shared runtime-first graph helper for fusion introspection, reducing direct compile-graph reads in execution coverage while preserving compatibility fallback inside that helper.
 
 - Additional Plan 7 heuristic-reduction ratchet:
   - Removed compile-time disjoint-gap, partial-overlap, and covering-span fallbacks in semantic-window node mapping in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).

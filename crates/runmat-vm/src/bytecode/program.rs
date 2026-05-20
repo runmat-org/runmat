@@ -371,6 +371,9 @@ impl Bytecode {
         {
             return None;
         }
+        if let Some(graph) = self.accel_graph.clone() {
+            return Some(graph);
+        }
         Some(build_accel_graph(&self.instructions, &self.var_types))
     }
 }
