@@ -2096,6 +2096,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 core compile-path identifier ratchet for isolated lexical capture
+  - Added core compile-path regression in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs):
+    - `compile_input_reports_isolated_capture_identifier`
+  - The test asserts `RunMatSession::compile_input(...)` returns semantic identifier `RunMat:IsolatedLexicalCaptureUnsupported` for isolated nested-function capture rejection, extending contract coverage beyond HIR-only tests.
+  - Validation:
+    - `cargo test -p runmat-core compile_input_reports_isolated_capture_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

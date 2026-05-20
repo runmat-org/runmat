@@ -232,6 +232,24 @@ fn compile_input_reports_duplicate_import_identifier() {
 }
 
 #[test]
+fn compile_input_reports_isolated_capture_identifier() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let err = match session.compile_input(
+        "function y = outer(x); isolated function z = inner(); z = x; end; y = 1; end",
+    ) {
+        Ok(_) => panic!("isolated nested functions should reject lexical capture"),
+        Err(err) => err,
+    };
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic isolated-capture error");
+    };
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:IsolatedLexicalCaptureUnsupported")
+    );
+}
+
+#[test]
 fn compile_input_resolves_wildcard_import_from_dependency_alias() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let dep_root = tmp.path().join("deps/statslib");
