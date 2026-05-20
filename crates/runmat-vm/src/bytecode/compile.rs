@@ -940,9 +940,11 @@ mod tests {
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let runtime_groups = bytecode.runtime_fusion_groups();
+        let runtime_graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
         assert!(
-            bytecode.accel_graph.is_some(),
-            "expected accel graph when semantic fusion candidates/windows exist"
+            runtime_graph.is_some(),
+            "expected runtime accel graph when semantic fusion candidates/windows exist"
         );
         assert!(
             !bytecode.fusion_groups.is_empty(),
@@ -956,9 +958,14 @@ mod tests {
             "compile should not assign accel node IDs to semantic-window groups"
         );
 
+        let runtime_groups = if let Some(graph) = runtime_graph.as_ref() {
+            bytecode.runtime_fusion_groups_for_graph(graph)
+        } else {
+            bytecode.fusion_groups.clone()
+        };
         let runtime_plan = prepare_fusion_plan(
-            bytecode.accel_graph.as_ref(),
-            &bytecode.fusion_groups,
+            runtime_graph.as_ref(),
+            &runtime_groups,
             bytecode
                 .semantic_fusion_metadata
                 .mir_fusion_candidate_group_count,
@@ -981,6 +988,8 @@ mod tests {
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let runtime_graph =
+            bytecode.runtime_accel_graph_for_fusion(&bytecode.runtime_fusion_groups());
 
         assert_eq!(
             bytecode
@@ -990,8 +999,8 @@ mod tests {
             "expected no semantic fusion candidate groups"
         );
         assert!(
-            bytecode.accel_graph.is_none(),
-            "expected accel graph to be omitted when semantic candidate groups are absent"
+            runtime_graph.is_none(),
+            "expected runtime accel graph to be omitted when semantic candidate groups are absent"
         );
         assert!(
             bytecode.fusion_groups.is_empty(),
@@ -1007,6 +1016,8 @@ mod tests {
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let runtime_graph =
+            bytecode.runtime_accel_graph_for_fusion(&bytecode.runtime_fusion_groups());
 
         assert!(
             bytecode.semantic_fusion_metadata.mir_fusion_signal_count > 0,
@@ -1020,8 +1031,8 @@ mod tests {
             "expected no semantic candidate groups for a single-operation run"
         );
         assert!(
-            bytecode.accel_graph.is_none(),
-            "expected accel graph omission to follow semantic candidate-group gating"
+            runtime_graph.is_none(),
+            "expected runtime accel graph omission to follow semantic candidate-group gating"
         );
         assert!(
             bytecode.fusion_groups.is_empty(),
@@ -1038,6 +1049,8 @@ mod tests {
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let runtime_graph =
+            bytecode.runtime_accel_graph_for_fusion(&bytecode.runtime_fusion_groups());
 
         assert!(
             bytecode
@@ -1047,8 +1060,8 @@ mod tests {
             "logical chain should still produce semantic candidate groups"
         );
         assert!(
-            bytecode.accel_graph.is_none(),
-            "expected accel graph omission when candidate overlap is non-accelerable logical ops"
+            runtime_graph.is_none(),
+            "expected runtime accel graph omission when candidate overlap is non-accelerable logical ops"
         );
         assert!(
             bytecode.fusion_groups.is_empty(),
@@ -1217,6 +1230,8 @@ mod tests {
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let runtime_graph =
+            bytecode.runtime_accel_graph_for_fusion(&bytecode.runtime_fusion_groups());
 
         assert_eq!(
             bytecode.semantic_fusion_metadata.mir_fusion_signal_count, 0,
@@ -1230,8 +1245,8 @@ mod tests {
             "non-entrypoint helper MIR bodies should not drive entrypoint fusion candidate metadata"
         );
         assert!(
-            bytecode.accel_graph.is_none(),
-            "entrypoint with no semantic candidates should omit accel graph even if helper bodies are fusible"
+            runtime_graph.is_none(),
+            "entrypoint with no semantic candidates should omit runtime accel graph even if helper bodies are fusible"
         );
         assert!(
             bytecode.fusion_groups.is_empty(),

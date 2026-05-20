@@ -6,6 +6,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 test-surface decoupling from compile accel-graph artifacts
+  - VM compile-unit fusion tests in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now assert runtime graph materialization/reconciliation (`runtime_accel_graph_for_fusion`, `prepare_fusion_plan`) instead of asserting compile-populated `bytecode.accel_graph` presence.
+  - Matrix-division semantic coverage in [matrix_division.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/matrix_division.rs) now asserts observable division behavior contracts (operator parity vs `mrdivide`/`mldivide` and scalar `/` vs `./`) rather than accel-graph node-shape internals.
+  - Validation: `cargo test -p runmat-vm --test matrix_division -- --nocapture`, `cargo test -p runmat-vm primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`, `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group -- --nocapture`.
+
 - (pending commit) Plan 7 removed compile-graph fallback from runtime fusion planning/snapshots
   - Core fusion snapshot paths now use only runtime-owned graph materialization (`runtime_accel_graph_for_fusion`) in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs) and [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs), instead of falling back to `bytecode.accel_graph`.
   - VM interpreter fusion-plan setup in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs) now similarly uses only runtime-owned graph selection for plan preparation/annotation.

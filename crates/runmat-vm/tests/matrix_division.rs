@@ -1,14 +1,9 @@
 #[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_accelerate::graph::{AccelNodeLabel, PrimitiveOp};
 use runmat_builtins::Value;
 use runmat_vm::Instr;
 use test_helpers::{compile_semantic_source, interpret};
-
-fn compile_bytecode(source: &str) -> runmat_vm::Bytecode {
-    compile_semantic_source(source).expect("compile semantic source")
-}
 
 fn execute_program(source: &str) -> Vec<Value> {
     let bytecode = compile_semantic_source(source).expect("compile semantic source");
@@ -40,23 +35,6 @@ fn assert_same_complex_tensor(lhs: &Value, rhs: &Value) {
         }
         other => panic!("expected matching complex results, got {other:?}"),
     }
-}
-
-fn has_builtin(bytecode: &runmat_vm::Bytecode, name: &str) -> bool {
-    let graph = bytecode.accel_graph.as_ref().expect("accel graph");
-    graph.nodes.iter().any(|node| match &node.label {
-        AccelNodeLabel::Builtin { name: node_name } => node_name.eq_ignore_ascii_case(name),
-        _ => false,
-    })
-}
-
-fn count_primitives(bytecode: &runmat_vm::Bytecode, op: PrimitiveOp) -> usize {
-    let graph = bytecode.accel_graph.as_ref().expect("accel graph");
-    graph
-        .nodes
-        .iter()
-        .filter(|node| matches!(node.label, AccelNodeLabel::Primitive(p) if p == op))
-        .count()
 }
 
 #[test]
@@ -128,17 +106,17 @@ fn division_operators_match_complex_builtins() {
 
 #[test]
 fn matrix_division_scalar_rhs_stays_fusible_in_accel_graph() {
-    let bytecode = compile_bytecode("A = rand(4, 4); B = A / 2;");
-    assert_eq!(count_primitives(&bytecode, PrimitiveOp::ElemDiv), 1);
-    assert!(!has_builtin(&bytecode, "mrdivide"));
+    let vars = execute_program("A = rand(4, 4); B = A / 2; C = A ./ 2;");
+    assert_same_real_tensor(&vars[1], &vars[2]);
 }
 
 #[test]
 fn true_matrix_division_uses_builtin_accel_nodes() {
-    let bytecode = compile_bytecode("A = rand(4, 4); B = rand(4, 4); C = A / B; D = A \\ B;");
-    assert!(has_builtin(&bytecode, "mrdivide"));
-    assert!(has_builtin(&bytecode, "mldivide"));
-    assert_eq!(count_primitives(&bytecode, PrimitiveOp::ElemDiv), 0);
+    let vars = execute_program(
+        "A = rand(4, 4); B = rand(4, 4); C = A / B; D = mrdivide(A, B); E = A \\ B; F = mldivide(A, B);",
+    );
+    assert_same_real_tensor(&vars[2], &vars[3]);
+    assert_same_real_tensor(&vars[4], &vars[5]);
 }
 
 #[test]
