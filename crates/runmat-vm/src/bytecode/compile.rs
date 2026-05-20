@@ -823,9 +823,14 @@ mod tests {
     #[cfg(feature = "native-accel")]
     use runmat_accelerate::fusion::prepare_fusion_plan;
     use runmat_builtins::Value;
-    use runmat_hir::{lower, CallableFallbackPolicy, FunctionId, LoweringContext};
+    use runmat_hir::{
+        lower, BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId, LoweringContext,
+        OperatorKind,
+    };
     use runmat_mir::lowering::lower_assembly;
-    use runmat_mir::{MirIndexComponent, MirIndexPlan, MirRvalue, MirStmtKind, MirTerminatorKind};
+    use runmat_mir::{
+        MirCallee, MirIndexComponent, MirIndexPlan, MirRvalue, MirStmtKind, MirTerminatorKind,
+    };
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -2892,6 +2897,75 @@ mod tests {
             err.identifier.as_deref(),
             Some("RunMat:MirCellExpandPlanInvalid")
         );
+    }
+
+    #[test]
+    fn primary_compile_rejects_unsupported_mir_binary_operator_with_identifier() {
+        let ast = runmat_parser::parse("x = 1 + 2;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign {
+                    value: MirRvalue::Binary(_, op, _),
+                    ..
+                } = &mut stmt.kind
+                {
+                    *op = OperatorKind::Transpose;
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected binary assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirOperatorUnsupported")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_unknown_mir_builtin_id_with_identifier() {
+        let ast = runmat_parser::parse("x = sin(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign {
+                    value: MirRvalue::Call(call),
+                    ..
+                } = &mut stmt.kind
+                {
+                    call.callee = MirCallee::Static(CallableIdentity::Builtin(BuiltinId(
+                        "__not_a_builtin".into(),
+                    )));
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected call assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(err.identifier.as_deref(), Some("RunMat:MirBuiltinUnknown"));
     }
 
     #[test]

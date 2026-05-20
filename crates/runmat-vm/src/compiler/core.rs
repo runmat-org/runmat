@@ -88,6 +88,8 @@ const IDENT_MIR_CELL_EXPAND_PLAN_INVALID: &str = "RunMat:MirCellExpandPlanInvali
 const IDENT_MIR_PAREN_CELL_PLAN_INVALID: &str = "RunMat:MirParenCellPlanInvalid";
 const IDENT_MIR_SCALAR_INDEX_PLAN_INVALID: &str = "RunMat:MirScalarIndexPlanInvalid";
 const IDENT_MIR_SLICE_INDEX_PLAN_INVALID: &str = "RunMat:MirSliceIndexPlanInvalid";
+const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
+const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
 
 fn encode_cell_end_offset(offset: isize) -> f64 {
     if offset <= 0 {
@@ -1607,7 +1609,8 @@ impl Compiler {
                     OperatorKind::ConjugateTranspose => self.emit(Instr::ConjugateTranspose),
                     _ => {
                         return Err(self
-                            .compile_error(format!("operator {op:?} is not a MIR unary operator")))
+                            .compile_error(format!("operator {op:?} is not a MIR unary operator"))
+                            .with_identifier(IDENT_MIR_OPERATOR_UNSUPPORTED))
                     }
                 };
                 Ok(())
@@ -1644,9 +1647,11 @@ impl Compiler {
                     OperatorKind::ElementwiseAnd => self.emit(Instr::LogicalAnd),
                     OperatorKind::ElementwiseOr => self.emit(Instr::LogicalOr),
                     _ => {
-                        return Err(self.compile_error(format!(
-                            "operator {op:?} is not supported in primary MIR lowering yet"
-                        )))
+                        return Err(self
+                            .compile_error(format!(
+                                "operator {op:?} is not supported in primary MIR lowering yet"
+                            ))
+                            .with_identifier(IDENT_MIR_OPERATOR_UNSUPPORTED))
                     }
                 };
                 Ok(())
@@ -2010,7 +2015,8 @@ impl Compiler {
         if let Some(builtin) = runmat_builtins::builtin_function_by_name(&candidate) {
             return Ok(builtin.name.to_string());
         }
-        Err(CompileError::new(format!("unknown builtin id {candidate}")))
+        Err(CompileError::new(format!("unknown builtin id {candidate}"))
+            .with_identifier(IDENT_MIR_BUILTIN_UNKNOWN))
     }
 
     fn compile_mir_aggregate(
