@@ -1374,6 +1374,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This hardens semantic-fact-driven fusion planner metadata checks against accidental source-tag drift hidden by partial matches.
   - Validation: `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`.
 
+- (pending commit) Plan 7 core fusion snapshot input decoupling ratchet
+  - Removed direct `accel_graph` parameter dependency from `build_fusion_snapshot` in `crates/runmat-core/src/fusion/snapshot.rs`; snapshot construction now consumes semantic fusion artifacts plus planner metadata (`accel_graph_state`) without needing an accel-graph object at this boundary.
+  - Updated core compile/runtime snapshot call-sites and snapshot unit tests to the new signature.
+  - This further reduces bytecode accel-graph coupling in core/session fusion diagnostics while preserving explicit accel-graph presence reporting through planner metadata.
+  - Validation: `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core semantic_candidate_summary_emits_without_accel_graph -- --nocapture`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

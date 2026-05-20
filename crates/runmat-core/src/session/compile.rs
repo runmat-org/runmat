@@ -204,7 +204,6 @@ impl RunMatSession {
         let prepared = self.compile_input(input)?;
         let analysis = runmat_mir::analysis::analyze_assembly(&prepared.mir);
         Ok(build_fusion_snapshot(
-            prepared.bytecode.accel_graph.as_ref(),
             &prepared.bytecode.fusion_groups,
             &prepared
                 .bytecode

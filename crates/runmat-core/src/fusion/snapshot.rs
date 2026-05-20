@@ -1,5 +1,5 @@
 use runmat_accelerate::fusion::FusionGroup;
-use runmat_accelerate::graph::{AccelGraph, ShapeInfo};
+use runmat_accelerate::graph::ShapeInfo;
 
 use super::{
     FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader, FusionPlanSnapshot,
@@ -7,7 +7,6 @@ use super::{
 };
 
 pub(crate) fn build_fusion_snapshot(
-    graph: Option<&AccelGraph>,
     groups: &[FusionGroup],
     semantic_candidate_groups: &[runmat_vm::SemanticFusionCandidateGroup],
     semantic_instruction_windows: &[runmat_vm::SemanticFusionInstructionWindow],
@@ -15,7 +14,7 @@ pub(crate) fn build_fusion_snapshot(
 ) -> Option<FusionPlanSnapshot> {
     let planner = planner.unwrap_or_default();
     let accel_graph_state = if planner.accel_graph_state.is_empty() {
-        if graph.is_some() { "present" } else { "missing" }
+        "unknown"
     } else {
         planner.accel_graph_state.as_str()
     };
@@ -278,7 +277,6 @@ mod tests {
     #[test]
     fn semantic_candidate_summary_emits_without_accel_graph() {
         let snapshot = build_fusion_snapshot(
-            None,
             &[],
             &[],
             &[],
@@ -315,7 +313,6 @@ mod tests {
     #[test]
     fn semantic_candidate_groups_emit_nodes_without_bytecode_groups() {
         let snapshot = build_fusion_snapshot(
-            None,
             &[],
             &[runmat_vm::SemanticFusionCandidateGroup {
                 id: 0,
@@ -368,7 +365,6 @@ mod tests {
     #[test]
     fn semantic_candidate_groups_emit_nodes_with_bytecode_groups() {
         let snapshot = build_fusion_snapshot(
-            None,
             &[FusionGroup {
                 id: 7,
                 kind: FusionKind::ElementwiseChain,
@@ -433,7 +429,6 @@ mod tests {
     #[test]
     fn bytecode_groups_without_semantic_candidates_are_marked_non_fused() {
         let snapshot = build_fusion_snapshot(
-            None,
             &[FusionGroup {
                 id: 3,
                 kind: FusionKind::ElementwiseChain,

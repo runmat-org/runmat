@@ -417,7 +417,6 @@ impl RunMatSession {
         let fusion_snapshot = if self.emit_fusion_plan {
             let analysis = runmat_mir::analysis::analyze_assembly(&mir);
             build_fusion_snapshot(
-                bytecode.accel_graph.as_ref(),
                 &bytecode.fusion_groups,
                 &bytecode
                     .semantic_fusion_metadata
