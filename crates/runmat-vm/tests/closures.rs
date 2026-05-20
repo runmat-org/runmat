@@ -69,6 +69,26 @@ fn fzero_accepts_optimset_options() {
 }
 
 #[test]
+fn integral_accepts_anonymous_function() {
+    let ast = parse("q = integral(@(x) x.^2, 0, 1);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - (1.0 / 3.0)).abs() < 1e-8)));
+}
+
+#[test]
+fn integral_accepts_named_function_handle() {
+    let ast = parse("q = integral(@sin, 0, pi);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-7)));
+}
+
+#[test]
 fn fsolve_accepts_anonymous_vector_function() {
     let ast =
         parse("F = @(x) [x(1)^2 + x(2)^2 - 4; x(1)*x(2) - 1]; x = fsolve(F, [1; 1]);").unwrap();

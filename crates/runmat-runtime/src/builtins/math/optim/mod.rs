@@ -3,5 +3,6 @@
 pub(crate) mod common;
 pub mod fsolve;
 pub mod fzero;
+pub mod integral;
 pub mod optimset;
 pub(crate) mod type_resolvers;
