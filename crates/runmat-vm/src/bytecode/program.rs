@@ -260,6 +260,23 @@ pub struct SemanticFusionInstructionWindow {
     pub kind: SemanticFusionInstructionKind,
 }
 
+#[cfg(feature = "native-accel")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeAccelGraphSource {
+    NotMaterialized,
+    RuntimeMaterializedFromInstructions,
+}
+
+#[cfg(feature = "native-accel")]
+impl RuntimeAccelGraphSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotMaterialized => "not_materialized",
+            Self::RuntimeMaterializedFromInstructions => "runtime_materialized_from_instructions",
+        }
+    }
+}
+
 impl Bytecode {
     pub fn empty() -> Self {
         Self {
@@ -363,15 +380,27 @@ impl Bytecode {
         &self,
         runtime_groups: &[FusionGroup],
     ) -> Option<AccelGraph> {
+        self.runtime_accel_graph_for_fusion_with_source(runtime_groups)
+            .0
+    }
+
+    #[cfg(feature = "native-accel")]
+    pub fn runtime_accel_graph_for_fusion_with_source(
+        &self,
+        runtime_groups: &[FusionGroup],
+    ) -> (Option<AccelGraph>, RuntimeAccelGraphSource) {
         if runtime_groups.is_empty()
             || self
                 .semantic_fusion_metadata
                 .mir_fusion_candidate_group_count
                 == 0
         {
-            return None;
+            return (None, RuntimeAccelGraphSource::NotMaterialized);
         }
-        Some(build_accel_graph(&self.instructions, &self.var_types))
+        (
+            Some(build_accel_graph(&self.instructions, &self.var_types)),
+            RuntimeAccelGraphSource::RuntimeMaterializedFromInstructions,
+        )
     }
 }
 
@@ -455,10 +484,14 @@ mod tests {
         }];
 
         let runtime_groups = bytecode.runtime_fusion_groups();
-        let graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
+        let (graph, source) = bytecode.runtime_accel_graph_for_fusion_with_source(&runtime_groups);
         assert!(
             graph.is_some(),
             "runtime graph should be materialized when semantic runtime groups exist and compile graph is missing"
+        );
+        assert_eq!(
+            source,
+            super::RuntimeAccelGraphSource::RuntimeMaterializedFromInstructions
         );
     }
 
@@ -490,10 +523,14 @@ mod tests {
         }];
 
         let runtime_groups = bytecode.runtime_fusion_groups();
-        let graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
+        let (graph, source) = bytecode.runtime_accel_graph_for_fusion_with_source(&runtime_groups);
         assert!(
             graph.is_some(),
             "runtime graph should still be materialized when compile graph metadata is present"
+        );
+        assert_eq!(
+            source,
+            super::RuntimeAccelGraphSource::RuntimeMaterializedFromInstructions
         );
     }
 
@@ -531,9 +568,9 @@ mod tests {
         }];
 
         let runtime_groups = bytecode.runtime_fusion_groups();
-        let graph = bytecode
-            .runtime_accel_graph_for_fusion(&runtime_groups)
-            .expect("runtime graph should be materialized from active bytecode instructions");
+        let (graph, source) = bytecode.runtime_accel_graph_for_fusion_with_source(&runtime_groups);
+        let graph =
+            graph.expect("runtime graph should be materialized from active bytecode instructions");
         assert!(
             graph
                 .nodes
@@ -548,15 +585,20 @@ mod tests {
                 .any(|node| matches!(node.label, AccelNodeLabel::Primitive(PrimitiveOp::Mul))),
             "stale compile graph metadata should not be reused at runtime"
         );
+        assert_eq!(
+            source,
+            super::RuntimeAccelGraphSource::RuntimeMaterializedFromInstructions
+        );
     }
 
     #[test]
     fn runtime_accel_graph_is_not_materialized_when_runtime_groups_are_empty() {
         let bytecode = Bytecode::empty();
-        let graph = bytecode.runtime_accel_graph_for_fusion(&[]);
+        let (graph, source) = bytecode.runtime_accel_graph_for_fusion_with_source(&[]);
         assert!(
             graph.is_none(),
             "runtime graph materialization should remain gated when semantic runtime groups are absent"
         );
+        assert_eq!(source, super::RuntimeAccelGraphSource::NotMaterialized);
     }
 }

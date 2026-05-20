@@ -283,6 +283,7 @@ mod tests {
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
                 accel_graph_state: "missing".to_string(),
+                accel_graph_source: "not_materialized".to_string(),
                 mir_local_fact_count: 0,
                 mir_diagnostic_count: 0,
                 mir_fusion_signal_count: 2,
@@ -326,6 +327,7 @@ mod tests {
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
                 accel_graph_state: "missing".to_string(),
+                accel_graph_source: "not_materialized".to_string(),
                 mir_local_fact_count: 0,
                 mir_diagnostic_count: 0,
                 mir_fusion_signal_count: 3,
@@ -385,6 +387,7 @@ mod tests {
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
                 accel_graph_state: "missing".to_string(),
+                accel_graph_source: "not_materialized".to_string(),
                 mir_local_fact_count: 0,
                 mir_diagnostic_count: 0,
                 mir_fusion_signal_count: 2,
@@ -438,6 +441,7 @@ mod tests {
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
                 accel_graph_state: "missing".to_string(),
+                accel_graph_source: "not_materialized".to_string(),
                 mir_local_fact_count: 0,
                 mir_diagnostic_count: 0,
                 mir_fusion_signal_count: 2,

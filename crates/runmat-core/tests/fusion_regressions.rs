@@ -176,6 +176,10 @@ fn compile_fusion_plan_exposes_semantic_planner_metadata() {
         snapshot.planner.accel_graph_state, "present",
         "unexpected accel graph state for compile fusion snapshot"
     );
+    assert_eq!(
+        snapshot.planner.accel_graph_source, "runtime_materialized_from_instructions",
+        "compile fusion snapshot should be sourced from runtime materialization"
+    );
     assert!(
         snapshot.planner.mir_local_fact_count > 0,
         "expected non-zero MIR local fact count"
@@ -225,6 +229,10 @@ fn runtime_fusion_snapshot_exposes_semantic_planner_metadata() {
     assert_eq!(
         snapshot.planner.accel_graph_state, "present",
         "unexpected accel graph state for runtime fusion snapshot"
+    );
+    assert_eq!(
+        snapshot.planner.accel_graph_source, "runtime_materialized_from_instructions",
+        "runtime fusion snapshot should be sourced from runtime materialization"
     );
     assert!(
         snapshot.planner.mir_local_fact_count > 0,

@@ -11,6 +11,7 @@ pub struct FusionPlanSnapshot {
 pub struct FusionPlannerMetadata {
     pub source: String,
     pub accel_graph_state: String,
+    pub accel_graph_source: String,
     pub mir_local_fact_count: usize,
     pub mir_diagnostic_count: usize,
     pub mir_fusion_signal_count: usize,
@@ -23,6 +24,7 @@ impl Default for FusionPlannerMetadata {
         Self {
             source: "semantic-mir-analysis".to_string(),
             accel_graph_state: "unknown".to_string(),
+            accel_graph_source: "unknown".to_string(),
             mir_local_fact_count: 0,
             mir_diagnostic_count: 0,
             mir_fusion_signal_count: 0,

@@ -416,7 +416,8 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         let fusion_snapshot = if self.emit_fusion_plan {
             let runtime_groups = bytecode.runtime_fusion_groups();
-            let runtime_graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
+            let (runtime_graph, runtime_graph_source) =
+                bytecode.runtime_accel_graph_for_fusion_with_source(&runtime_groups);
             let runtime_groups = if let Some(graph) = runtime_graph.as_ref() {
                 bytecode.runtime_fusion_groups_for_graph(graph)
             } else {
@@ -438,6 +439,7 @@ impl RunMatSession {
                     } else {
                         "missing".to_string()
                     },
+                    accel_graph_source: runtime_graph_source.as_str().to_string(),
                     mir_local_fact_count: mir_local_fact_count_for_entrypoint(
                         &analysis,
                         &lowering.assembly,

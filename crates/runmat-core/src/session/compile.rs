@@ -203,9 +203,9 @@ impl RunMatSession {
     ) -> std::result::Result<Option<FusionPlanSnapshot>, RunError> {
         let prepared = self.compile_input(input)?;
         let runtime_groups = prepared.bytecode.runtime_fusion_groups();
-        let runtime_graph = prepared
+        let (runtime_graph, runtime_graph_source) = prepared
             .bytecode
-            .runtime_accel_graph_for_fusion(&runtime_groups);
+            .runtime_accel_graph_for_fusion_with_source(&runtime_groups);
         let runtime_groups = if let Some(graph) = runtime_graph.as_ref() {
             prepared.bytecode.runtime_fusion_groups_for_graph(graph)
         } else {
@@ -229,6 +229,7 @@ impl RunMatSession {
                 } else {
                     "missing".to_string()
                 },
+                accel_graph_source: runtime_graph_source.as_str().to_string(),
                 mir_local_fact_count: mir_local_fact_count_for_entrypoint(
                     &analysis,
                     &prepared.lowering.assembly,

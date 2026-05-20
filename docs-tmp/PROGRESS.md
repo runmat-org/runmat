@@ -38,6 +38,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Validation:
     - `cargo test -p runmat-vm primary_compile_lowers_async_expansion_call_to_future_expand_instruction -- --nocapture`
 
+- (pending commit) Plan 7 fusion planner metadata now records runtime graph source
+  - Fusion planner metadata in [types.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/fusion/types.rs) now carries `accel_graph_source` alongside `accel_graph_state`.
+  - Core fusion snapshot producers in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs) and [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) now populate that field from VM runtime graph selection.
+  - VM bytecode runtime graph API in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs) now exposes explicit graph source classification via `runtime_accel_graph_for_fusion_with_source`.
+  - Core fusion regressions in [fusion_regressions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/fusion_regressions.rs) now assert `accel_graph_source == "runtime_materialized_from_instructions"` for compile/runtime snapshots, tightening evidence that active fusion entrypoints are runtime-graph-driven.
+  - Validation:
+    - `cargo test -p runmat-vm runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing -- --nocapture`
+    - `cargo test -p runmat-vm runtime_accel_graph_ignores_stale_compile_graph_metadata -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - (pending commit) Plan 6/7 slice-assignment unsupported-base identifier ratchet
   - VM interpreter slice-assignment dispatch in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now emits stable `RunMat:SliceNonTensor` identifiers for unsupported base types in both `StoreSlice` and `StoreSliceExpr` paths instead of message-only runtime errors.
   - Added VM semantic regression coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):
