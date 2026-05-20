@@ -2585,12 +2585,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added VM callable-descriptor coverage in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
     - `method_identity_runtime_name_resolution_can_use_semantic_resolver`
     - `method_identity_runtime_name_resolution_without_resolver_errors`
+    - `feval_closure_without_embedded_semantic_uses_registry_name_resolution`
   - This pins `CallableIdentity::Method` runtime-name-resolution behavior at VM descriptor boundaries:
     - semantic resolver/invoker is used when available
     - unresolved method identities remain `RunMat:UndefinedFunction`
+  - It also ratchets closure-based `feval` descriptor construction: when `Closure.semantic_function` is absent, the descriptor must resolve closure names through `SemanticFunctionRegistry` before runtime fallback.
   - Validation:
     - `cargo test -p runmat-vm --lib call::descriptor::tests::method_identity_runtime_name_resolution_can_use_semantic_resolver -- --nocapture`
     - `cargo test -p runmat-vm --lib call::descriptor::tests::method_identity_runtime_name_resolution_without_resolver_errors -- --nocapture`
+    - `cargo test -p runmat-vm --lib call::descriptor::tests::feval_closure_without_embedded_semantic_uses_registry_name_resolution -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
