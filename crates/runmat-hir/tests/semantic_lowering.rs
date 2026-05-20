@@ -708,6 +708,26 @@ fn undefined_variable_errors_have_stable_identifier() {
 }
 
 #[test]
+fn ragged_tensor_literal_rejected_with_identifier() {
+    let ast = runmat_parser::parse("x = [1 2; 3];").unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:AggregateShapeMismatch")
+    );
+}
+
+#[test]
+fn ragged_cell_literal_rejected_with_identifier() {
+    let ast = runmat_parser::parse("x = {1, 2; 3};").unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:AggregateShapeMismatch")
+    );
+}
+
+#[test]
 fn spawn_rejects_anonymous_function_with_lexical_capture() {
     let ast = runmat_parser::parse("function y = f(x); y = spawn(@() x); end").unwrap();
     let err = lower(&ast, &LoweringContext::empty()).unwrap_err();

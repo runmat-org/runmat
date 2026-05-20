@@ -26,6 +26,7 @@ const IDENT_UNDEFINED_VARIABLE: &str = "RunMat:UndefinedVariable";
 const IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassPropertyAttributeConflict";
 const IDENT_CLASS_METHOD_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassMethodAttributeConflict";
 const IDENT_CLASS_ACCESS_VALUE_INVALID: &str = "RunMat:ClassAccessValueInvalid";
+const IDENT_AGGREGATE_SHAPE_MISMATCH: &str = "RunMat:AggregateShapeMismatch";
 const IDENT_IMPORT_AMBIGUOUS: &str = "RunMat:ImportAmbiguous";
 const IDENT_IMPORT_DUPLICATE: &str = "RunMat:ImportDuplicate";
 
@@ -93,6 +94,24 @@ impl SemanticCtx {
     fn is_well_formed_qualified_name(name: &str) -> bool {
         let segments = name.split('.').collect::<Vec<_>>();
         segments.len() > 1 && segments.iter().all(|segment| !segment.is_empty())
+    }
+
+    fn validate_rectangular_aggregate(
+        &self,
+        kind: &str,
+        rows: &[Vec<AstExpr>],
+    ) -> Result<(), SemanticError> {
+        let Some(expected_cols) = rows.first().map(Vec::len) else {
+            return Ok(());
+        };
+        if rows.iter().all(|row| row.len() == expected_cols) {
+            return Ok(());
+        }
+
+        Err(SemanticError::new(format!(
+            "{kind} literal rows must have consistent column counts",
+        ))
+        .with_identifier(IDENT_AGGREGATE_SHAPE_MISMATCH))
     }
 
     fn lower_program(
@@ -1275,24 +1294,30 @@ impl SemanticCtx {
                 binary_op(*op),
                 Box::new(self.lower_expr_semantic(right)?),
             ),
-            AstExpr::Tensor(rows, _) => HirExprKind::Tensor(
-                rows.iter()
-                    .map(|row| {
-                        row.iter()
-                            .map(|expr| self.lower_expr_semantic(expr))
-                            .collect()
-                    })
-                    .collect::<Result<_, _>>()?,
-            ),
-            AstExpr::Cell(rows, _) => HirExprKind::Cell(
-                rows.iter()
-                    .map(|row| {
-                        row.iter()
-                            .map(|expr| self.lower_expr_semantic(expr))
-                            .collect()
-                    })
-                    .collect::<Result<_, _>>()?,
-            ),
+            AstExpr::Tensor(rows, _) => {
+                self.validate_rectangular_aggregate("tensor", rows)?;
+                HirExprKind::Tensor(
+                    rows.iter()
+                        .map(|row| {
+                            row.iter()
+                                .map(|expr| self.lower_expr_semantic(expr))
+                                .collect()
+                        })
+                        .collect::<Result<_, _>>()?,
+                )
+            }
+            AstExpr::Cell(rows, _) => {
+                self.validate_rectangular_aggregate("cell", rows)?;
+                HirExprKind::Cell(
+                    rows.iter()
+                        .map(|row| {
+                            row.iter()
+                                .map(|expr| self.lower_expr_semantic(expr))
+                                .collect()
+                        })
+                        .collect::<Result<_, _>>()?,
+                )
+            }
             AstExpr::Index(base, indices, _) => HirExprKind::Index(
                 Box::new(self.lower_expr_semantic(base)?),
                 self.lower_indexing(indices, IndexKind::Paren)?,

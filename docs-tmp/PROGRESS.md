@@ -69,6 +69,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Aggregate rectangular-shape semantic invariant ratchet
+  - `scope: in-scope`
+  - Added semantic-lowering rectangular-shape validation for tensor/cell literals in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs):
+    - new stable identifier: `RunMat:AggregateShapeMismatch`
+  - Ragged aggregate literals now fail during HIR lowering (instead of drifting to later compile-time aggregate shape mismatches), tightening aggregate-edge behavior toward compiler-product contracts.
+  - Added HIR identifier-contract tests in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
+    - `ragged_tensor_literal_rejected_with_identifier`
+    - `ragged_cell_literal_rejected_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-hir ragged_tensor_literal_rejected_with_identifier -- --nocapture`
+    - `cargo test -p runmat-hir ragged_cell_literal_rejected_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - (pending commit) Plan 4 histcounts identifier-contract ratchet for option validation
   - Added stable `histcounts` identifiers for two option-parse validation surfaces in [histcounts.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/stats/hist/histcounts.rs):
     - `RunMat:histcounts:BinMethodConflict`
