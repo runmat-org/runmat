@@ -70,6 +70,8 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `primary_compile_rejects_invalid_slice_index_plan_with_identifier`
     - `primary_compile_rejects_invalid_paren_cell_plan_with_identifier`
     - `primary_compile_rejects_invalid_cell_expand_all_shape_with_identifier`
+    - `primary_compile_rejects_cell_assignment_colon_selector_from_source_with_identifier`
+  - core compile-path coverage now also surfaces this selector contract in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs) (`compile_input_reports_cell_assignment_colon_selector_identifier`), asserting `RunMat:MirCellIndexPlanInvalid` at `compile_input(...)` boundary.
   - VM function-handle selector rejection now also has explicit identifier-contract coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) (`function_handle_selector_colon_errors_with_identifier_contract`), asserting `RunMat:UnsupportedFunctionHandleSelector` for colon-selector misuse on function handles.
   - VM cell aggregate member-assignment now carries stable identifier coverage for RHS shape mismatch in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs): `RunMat:CellMemberRhsShapeMismatch` (`assign_cell_member_rejects_shape_mismatch_cell_rhs`).
   - VM static-property missing-name semantic coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) now asserts stable `RunMat:UndefinedVariable` identifier (`unqualified_static_property_without_imports_errors`) instead of message-text proxy checks.

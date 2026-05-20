@@ -318,6 +318,22 @@ end
 }
 
 #[test]
+fn compile_input_reports_cell_assignment_colon_selector_identifier() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let err = match session.compile_input("c = {1,2;3,4}; c{:,2} = 9;") {
+        Ok(_) => panic!("brace assignment with colon selector should fail compilation"),
+        Err(err) => err,
+    };
+    let RunError::Compile(err) = err else {
+        panic!("expected compile-time cell selector plan error");
+    };
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:MirCellIndexPlanInvalid")
+    );
+}
+
+#[test]
 fn compile_input_resolves_wildcard_import_from_dependency_alias() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let dep_root = tmp.path().join("deps/statslib");

@@ -3045,6 +3045,20 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_cell_assignment_colon_selector_from_source_with_identifier() {
+        let ast = runmat_parser::parse("c = {1,2;3,4}; c{:,2} = 9;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirCellIndexPlanInvalid")
+        );
+    }
+
+    #[test]
     fn primary_compile_rejects_mismatched_cell_index_context_with_identifier() {
         let ast = runmat_parser::parse("c = {1}; c{1} = 2;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

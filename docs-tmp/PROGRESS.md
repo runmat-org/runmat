@@ -2474,6 +2474,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 source-level cell selector compile contract ratchet
+  - Added VM compile contract test in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_cell_assignment_colon_selector_from_source_with_identifier`
+  - Added core compile-path identifier surface test in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs):
+    - `compile_input_reports_cell_assignment_colon_selector_identifier`
+  - This pins brace assignment with colon selectors (`c{:,2} = ...`) to stable compile identifier `RunMat:MirCellIndexPlanInvalid` on semantic compiler paths.
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_cell_assignment_colon_selector_from_source_with_identifier -- --nocapture`
+    - `cargo test -p runmat-core compile_input_reports_cell_assignment_colon_selector_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
