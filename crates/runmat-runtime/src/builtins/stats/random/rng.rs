@@ -18,9 +18,22 @@ use crate::builtins::stats::type_resolvers::rng_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rng";
+const RNG_ERR_SEED_NONNEGATIVE: &str = "RunMat:rng:SeedMustBeNonnegative";
+const RNG_ERR_GENERATOR_UNSUPPORTED: &str = "RunMat:rng:GeneratorUnsupported";
+const RNG_ERR_STATE_TYPE_FIELD_MISSING: &str = "RunMat:rng:StateTypeFieldMissing";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
+}
+
+fn builtin_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_identifier(identifier)
+        .build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::random::rng")]
@@ -112,10 +125,13 @@ fn parse_double_args(first: &Value, second: &Value) -> BuiltinResult<ParsedComma
 fn parse_keyword(keyword: &str, generator: Option<RngAlgorithm>) -> BuiltinResult<ParsedCommand> {
     let algo = generator.unwrap_or(RngAlgorithm::RunMatLcg);
     if algo != RngAlgorithm::RunMatLcg {
-        return Err(builtin_error(format!(
-            "rng: generator '{}' is not supported in RunMat",
-            algo.as_str()
-        )));
+        return Err(builtin_error_with_identifier(
+            format!(
+                "rng: generator '{}' is not supported in RunMat",
+                algo.as_str()
+            ),
+            RNG_ERR_GENERATOR_UNSUPPORTED,
+        ));
     }
     match keyword {
         "default" | "twister" | "runmat-lcg" => Ok(ParsedCommand::Default),
@@ -176,7 +192,12 @@ fn snapshot_from_value(value: &Value) -> BuiltinResult<RngSnapshot> {
         .fields
         .get("Type")
         .or_else(|| struct_value.fields.get("type"))
-        .ok_or_else(|| builtin_error("rng: state struct is missing the 'Type' field"))?;
+        .ok_or_else(|| {
+            builtin_error_with_identifier(
+                "rng: state struct is missing the 'Type' field",
+                RNG_ERR_STATE_TYPE_FIELD_MISSING,
+            )
+        })?;
     let generator = match keyword_of(type_value) {
         Some(ref kw) => parse_generator_keyword(kw)?,
         None => return Err(builtin_error("rng: Type field must be a string")),
@@ -211,9 +232,10 @@ fn parse_generator(value: &Value) -> BuiltinResult<RngAlgorithm> {
 fn parse_generator_keyword(keyword: &str) -> BuiltinResult<RngAlgorithm> {
     match keyword {
         "twister" | "default" | "runmat-lcg" => Ok(RngAlgorithm::RunMatLcg),
-        other => Err(builtin_error(format!(
-            "rng: generator '{other}' is not supported"
-        ))),
+        other => Err(builtin_error_with_identifier(
+            format!("rng: generator '{other}' is not supported"),
+            RNG_ERR_GENERATOR_UNSUPPORTED,
+        )),
     }
 }
 
@@ -222,7 +244,10 @@ fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
         Value::Int(i) => {
             let v = i.to_i64();
             if v < 0 {
-                return Err(builtin_error(format!("{label}: seed must be non-negative")));
+                return Err(builtin_error_with_identifier(
+                    format!("{label}: seed must be non-negative"),
+                    RNG_ERR_SEED_NONNEGATIVE,
+                ));
             }
             Ok(v as u64)
         }
@@ -231,7 +256,10 @@ fn parse_seed_scalar(value: &Value, label: &str) -> BuiltinResult<u64> {
                 return Err(builtin_error(format!("{label}: seed must be finite")));
             }
             if *n < 0.0 {
-                return Err(builtin_error(format!("{label}: seed must be non-negative")));
+                return Err(builtin_error_with_identifier(
+                    format!("{label}: seed must be non-negative"),
+                    RNG_ERR_SEED_NONNEGATIVE,
+                ));
             }
             let rounded = n.round();
             if (rounded - n).abs() > f64::EPSILON {
@@ -446,11 +474,7 @@ pub(crate) mod tests {
             .unwrap_or_else(|e| e.into_inner());
         random::reset_rng();
         let err = block_on(rng_builtin(vec![Value::Int(IntValue::I32(-5))])).unwrap_err();
-        let message = err.to_string();
-        assert!(
-            message.contains("seed must be non-negative"),
-            "unexpected error: {message}"
-        );
+        assert_eq!(err.identifier(), Some(RNG_ERR_SEED_NONNEGATIVE));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -465,12 +489,7 @@ pub(crate) mod tests {
             Value::from("philox"),
         ]))
         .unwrap_err();
-        let message = err.to_string();
-        assert!(
-            message.contains("generator 'philox' is not supported")
-                || message.contains("generator 'philox'"),
-            "unexpected error: {message}"
-        );
+        assert_eq!(err.identifier(), Some(RNG_ERR_GENERATOR_UNSUPPORTED));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -485,11 +504,7 @@ pub(crate) mod tests {
         st.fields.insert("Seed".to_string(), Value::Num(0.0));
         st.fields.insert("State".to_string(), Value::Tensor(tensor));
         let err = block_on(rng_builtin(vec![Value::Struct(st)])).unwrap_err();
-        let message = err.to_string();
-        assert!(
-            message.contains("Type"),
-            "unexpected error message: {message}"
-        );
+        assert_eq!(err.identifier(), Some(RNG_ERR_STATE_TYPE_FIELD_MISSING));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

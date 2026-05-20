@@ -1787,6 +1787,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This closes another production compile entrypoint on the explicit semantic HIR->MIR->analysis->VM lane (snapshot bytecode caching / prebuilt snapshot generation path).
   - Validation: `cargo test -p runmat-snapshot --test integration test_snapshot_creation_and_loading -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
+- (pending commit) Plan 4 rng identifier-contract ratchet for seed/generator/state-struct guards
+  - Added stable runtime identifiers in `crates/runmat-runtime/src/builtins/stats/random/rng.rs`:
+    - `RunMat:rng:SeedMustBeNonnegative`
+    - `RunMat:rng:GeneratorUnsupported`
+    - `RunMat:rng:StateTypeFieldMissing`
+  - Wired identifier-bearing errors for:
+    - negative seed validation in `parse_seed_scalar`
+    - unsupported generator validation in `parse_keyword` / `parse_generator_keyword`
+    - missing `Type` field in `snapshot_from_value` state-struct parse
+  - Converted targeted tests from message-fragment checks to `RuntimeError.identifier()` assertions:
+    - `rng_rejects_negative_seed`
+    - `rng_rejects_unknown_generator`
+    - `rng_state_struct_requires_type`
+  - Validation: `cargo test -p runmat-runtime rng_rejects_negative_seed -- --nocapture`, `cargo test -p runmat-runtime rng_rejects_unknown_generator -- --nocapture`, `cargo test -p runmat-runtime rng_state_struct_requires_type -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
