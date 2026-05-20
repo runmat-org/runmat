@@ -125,6 +125,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-runtime argsort_dimension_zero_errors -- --nocapture`
     - `cargo fmt --all --check`
 
+- (pending commit) Sortrows column/missingplacement identifier ratchet
+  - Added stable `sortrows` identifiers for two remaining option/index failure surfaces:
+    - `RunMat:sortrows:InvalidColumnIndex`
+    - `RunMat:sortrows:MissingPlacementUnknown`
+  - Runtime parse/index validation now emits these identifiers for:
+    - out-of-range/invalid column spec values (including zero, too-large indices, and post-parse validation overflow)
+    - unsupported `MissingPlacement` argument values
+  - Tightened tests in [sortrows.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/array/sorting_sets/sortrows.rs):
+    - `sortrows_invalid_column_index_errors`
+    - `sortrows_missingplacement_invalid_value_errors`
+    now assert `RuntimeError.identifier()` instead of message-fragment checks.
+  - Validation:
+    - `cargo test -p runmat-runtime sortrows_invalid_column_index_errors -- --nocapture`
+    - `cargo test -p runmat-runtime sortrows_missingplacement_invalid_value_errors -- --nocapture`
+    - `cargo fmt --all --check`
+
 - (pending commit) Set builtins legacy-option identifier ratchet
   - Replaced message-only legacy-option rejections in set builtins with stable identifiers:
     - `RunMat:unique:LegacyOptionUnsupported`

@@ -54,6 +54,19 @@ fn sortrows_error(message: impl Into<String>) -> crate::RuntimeError {
         .build()
 }
 
+const SORTROWS_ERR_COLUMN_INDEX_INVALID: &str = "RunMat:sortrows:InvalidColumnIndex";
+const SORTROWS_ERR_MISSINGPLACEMENT_UNKNOWN: &str = "RunMat:sortrows:MissingPlacementUnknown";
+
+fn sortrows_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> crate::RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("sortrows")
+        .with_identifier(identifier)
+        .build()
+}
+
 #[runtime_builtin(
     name = "sortrows",
     category = "array/sorting_sets",
@@ -673,9 +686,10 @@ impl SortRowsArgs {
                         "first" => MissingPlacement::First,
                         "last" => MissingPlacement::Last,
                         other => {
-                            return Err(sortrows_error(format!(
-                                "sortrows: unsupported MissingPlacement '{other}'"
-                            ))
+                            return Err(sortrows_error_with_identifier(
+                                format!("sortrows: unsupported MissingPlacement '{other}'"),
+                                SORTROWS_ERR_MISSINGPLACEMENT_UNKNOWN,
+                            )
                             .into())
                         }
                     };
@@ -780,22 +794,32 @@ fn parse_single_column(value: i64, num_cols: usize) -> crate::BuiltinResult<Vec<
 
 fn parse_single_column_i64(value: i64, num_cols: usize) -> crate::BuiltinResult<ColumnSpec> {
     if value == 0 {
-        return Err(sortrows_error("sortrows: column indices must be non-zero"));
+        return Err(sortrows_error_with_identifier(
+            "sortrows: column indices must be non-zero",
+            SORTROWS_ERR_COLUMN_INDEX_INVALID,
+        ));
     }
     let abs = value.unsigned_abs() as usize;
     if abs == 0 {
-        return Err(sortrows_error("sortrows: column indices must be >= 1"));
+        return Err(sortrows_error_with_identifier(
+            "sortrows: column indices must be >= 1",
+            SORTROWS_ERR_COLUMN_INDEX_INVALID,
+        ));
     }
     if num_cols == 0 {
-        return Err(sortrows_error(
+        return Err(sortrows_error_with_identifier(
             "sortrows: column index exceeds matrix with 0 columns",
+            SORTROWS_ERR_COLUMN_INDEX_INVALID,
         ));
     }
     if abs > num_cols {
-        return Err(sortrows_error(format!(
-            "sortrows: column index {} exceeds matrix with {} columns",
-            abs, num_cols
-        ))
+        return Err(sortrows_error_with_identifier(
+            format!(
+                "sortrows: column index {} exceeds matrix with {} columns",
+                abs, num_cols
+            ),
+            SORTROWS_ERR_COLUMN_INDEX_INVALID,
+        )
         .into());
     }
     let direction = if value > 0 {
@@ -826,17 +850,21 @@ fn default_columns(num_cols: usize) -> Vec<ColumnSpec> {
 
 fn validate_columns(columns: &[ColumnSpec], num_cols: usize) -> crate::BuiltinResult<()> {
     if num_cols == 0 && columns.iter().any(|spec| spec.index > 0) {
-        return Err(sortrows_error(
+        return Err(sortrows_error_with_identifier(
             "sortrows: column index exceeds matrix with 0 columns",
+            SORTROWS_ERR_COLUMN_INDEX_INVALID,
         ));
     }
     for spec in columns {
         if num_cols > 0 && spec.index >= num_cols {
-            return Err(sortrows_error(format!(
-                "sortrows: column index {} exceeds matrix with {} columns",
-                spec.index + 1,
-                num_cols
-            ))
+            return Err(sortrows_error_with_identifier(
+                format!(
+                    "sortrows: column index {} exceeds matrix with {} columns",
+                    spec.index + 1,
+                    num_cols
+                ),
+                SORTROWS_ERR_COLUMN_INDEX_INVALID,
+            )
             .into());
         }
     }
@@ -878,10 +906,6 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use runmat_builtins::{IntValue, ResolveContext, Type, Value};
-
-    fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
-    }
 
     fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortRowsEvaluation> {
         futures::executor::block_on(super::evaluate(value, rest))
@@ -1029,13 +1053,8 @@ pub(crate) mod tests {
     #[test]
     fn sortrows_invalid_column_index_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = error_message(
-            evaluate(Value::Tensor(tensor), &[Value::Int(IntValue::I32(3))]).unwrap_err(),
-        );
-        assert!(
-            err.contains("column index"),
-            "unexpected error message: {err}"
-        );
+        let err = evaluate(Value::Tensor(tensor), &[Value::Int(IntValue::I32(3))]).unwrap_err();
+        assert_eq!(err.identifier(), Some(SORTROWS_ERR_COLUMN_INDEX_INVALID));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1098,16 +1117,14 @@ pub(crate) mod tests {
     #[test]
     fn sortrows_missingplacement_invalid_value_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = error_message(
-            evaluate(
-                Value::Tensor(tensor),
-                &[Value::from("MissingPlacement"), Value::from("middle")],
-            )
-            .unwrap_err(),
-        );
-        assert!(
-            err.contains("MissingPlacement"),
-            "unexpected error message: {err}"
+        let err = evaluate(
+            Value::Tensor(tensor),
+            &[Value::from("MissingPlacement"), Value::from("middle")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some(SORTROWS_ERR_MISSINGPLACEMENT_UNKNOWN)
         );
     }
 
