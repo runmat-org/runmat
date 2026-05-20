@@ -6,9 +6,9 @@
 use crate::core::{BoundingBox, GpuPackContext, RenderData};
 use crate::plots::surface::ColorMap;
 use crate::plots::{
-    AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Line3Plot, LinePlot, PieChart,
-    QuiverPlot, ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot, StairsPlot,
-    StemPlot, SurfacePlot,
+    AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Line3Plot, LinePlot, PatchPlot,
+    PieChart, QuiverPlot, ReferenceLine, ReferenceLineOrientation, Scatter3Plot, ScatterPlot,
+    StairsPlot, StemPlot, SurfacePlot,
 };
 use glam::Vec4;
 use log::trace;
@@ -170,6 +170,7 @@ pub enum PlotElement {
     Quiver(QuiverPlot),
     Pie(PieChart),
     Surface(SurfacePlot),
+    Patch(PatchPlot),
     Line3(Line3Plot),
     Scatter3(Scatter3Plot),
     Contour(ContourPlot),
@@ -204,6 +205,7 @@ pub enum PlotType {
     Quiver,
     Pie,
     Surface,
+    Patch,
     Line3,
     Scatter3,
     Contour,
@@ -934,6 +936,14 @@ impl Figure {
         self.push_plot(PlotElement::Surface(plot), axes_index)
     }
 
+    pub fn add_patch_plot(&mut self, plot: PatchPlot) -> usize {
+        self.add_patch_plot_on_axes(plot, 0)
+    }
+
+    pub fn add_patch_plot_on_axes(&mut self, plot: PatchPlot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Patch(plot), axes_index)
+    }
+
     pub fn add_line3_plot(&mut self, plot: Line3Plot) -> usize {
         self.add_line3_plot_on_axes(plot, self.active_axes_index)
     }
@@ -1240,6 +1250,12 @@ impl Figure {
                         ),
                     ));
                 }
+                PlotElement::Patch(plot) => {
+                    out.push((axes_index, plot.render_data()));
+                    if let Some(edge_data) = plot.edge_render_data() {
+                        out.push((axes_index, edge_data));
+                    }
+                }
                 _ => out.push((axes_index, p.render_data())),
             }
         }
@@ -1528,6 +1544,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.visible,
             PlotElement::Pie(plot) => plot.visible,
             PlotElement::Surface(plot) => plot.visible,
+            PlotElement::Patch(plot) => plot.is_visible(),
             PlotElement::Line3(plot) => plot.visible,
             PlotElement::Scatter3(plot) => plot.visible,
             PlotElement::Contour(plot) => plot.visible,
@@ -1549,6 +1566,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.label.clone(),
             PlotElement::Pie(plot) => plot.label.clone(),
             PlotElement::Surface(plot) => plot.label.clone(),
+            PlotElement::Patch(plot) => plot.label().map(str::to_string),
             PlotElement::Line3(plot) => plot.label.clone(),
             PlotElement::Scatter3(plot) => plot.label.clone(),
             PlotElement::Contour(plot) => plot.label.clone(),
@@ -1570,6 +1588,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.label = label,
             PlotElement::Pie(plot) => plot.label = label,
             PlotElement::Surface(plot) => plot.label = label,
+            PlotElement::Patch(plot) => plot.set_label(label),
             PlotElement::Line3(plot) => plot.label = label,
             PlotElement::Scatter3(plot) => plot.label = label,
             PlotElement::Contour(plot) => plot.label = label,
@@ -1591,6 +1610,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.color,
             PlotElement::Pie(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
             PlotElement::Surface(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
+            PlotElement::Patch(plot) => plot.effective_face_color(),
             PlotElement::Line3(plot) => plot.color,
             PlotElement::Scatter3(plot) => plot.colors.first().copied().unwrap_or(Vec4::ONE),
             PlotElement::Contour(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
@@ -1612,6 +1632,7 @@ impl PlotElement {
             PlotElement::Quiver(_) => PlotType::Quiver,
             PlotElement::Pie(_) => PlotType::Pie,
             PlotElement::Surface(_) => PlotType::Surface,
+            PlotElement::Patch(_) => PlotType::Patch,
             PlotElement::Line3(_) => PlotType::Line3,
             PlotElement::Scatter3(_) => PlotType::Scatter3,
             PlotElement::Contour(_) => PlotType::Contour,
@@ -1633,6 +1654,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.bounds(),
             PlotElement::Pie(plot) => plot.bounds(),
             PlotElement::Surface(plot) => plot.bounds(),
+            PlotElement::Patch(plot) => plot.bounds(),
             PlotElement::Line3(plot) => plot.bounds(),
             PlotElement::Scatter3(plot) => plot.bounds(),
             PlotElement::Contour(plot) => plot.bounds(),
@@ -1654,6 +1676,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.render_data(),
             PlotElement::Pie(plot) => plot.render_data(),
             PlotElement::Surface(plot) => plot.render_data(),
+            PlotElement::Patch(plot) => plot.render_data(),
             PlotElement::Line3(plot) => plot.render_data(),
             PlotElement::Scatter3(plot) => plot.render_data(),
             PlotElement::Contour(plot) => plot.render_data(),
@@ -1677,6 +1700,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.estimated_memory_usage(),
             PlotElement::Pie(plot) => plot.estimated_memory_usage(),
             PlotElement::Surface(_plot) => 0,
+            PlotElement::Patch(plot) => plot.estimated_memory_usage(),
             PlotElement::Line3(plot) => plot.estimated_memory_usage(),
             PlotElement::Scatter3(plot) => plot.estimated_memory_usage(),
             PlotElement::Contour(plot) => plot.estimated_memory_usage(),

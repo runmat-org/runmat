@@ -82,6 +82,8 @@ pub(crate) mod mesh;
 pub(crate) mod meshc;
 #[path = "ops/common/mod.rs"]
 pub(crate) mod op_common;
+#[path = "ops/patch.rs"]
+pub(crate) mod patch;
 #[path = "ops/pie.rs"]
 pub(crate) mod pie;
 #[path = "ops/plot.rs"]
