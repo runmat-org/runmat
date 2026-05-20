@@ -66,10 +66,6 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use runmat_builtins::{ComplexTensor, IntValue, ResolveContext, Tensor, Type, Value};
 
-    fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
-    }
-
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn argsort_vector_default() {
@@ -177,29 +173,23 @@ pub(crate) mod tests {
     #[test]
     fn argsort_dimension_zero_errors() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let err = error_message(
-            argsort_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))]).unwrap_err(),
-        );
-        assert!(
-            err.contains("dimension must be >= 1"),
-            "unexpected error: {err}"
-        );
+        let err =
+            argsort_builtin(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(0))]).unwrap_err();
+        assert_eq!(err.identifier(), Some("RunMat:sort:InvalidDimension"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn argsort_invalid_argument_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = error_message(
-            argsort_builtin(
-                Value::Tensor(tensor),
-                vec![Value::from("MissingPlacement"), Value::from("auto")],
-            )
-            .unwrap_err(),
-        );
-        assert!(
-            err.contains("sort: the 'MissingPlacement' option is not supported"),
-            "{err}"
+        let err = argsort_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("MissingPlacement"), Value::from("auto")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:sort:MissingPlacementUnsupported")
         );
     }
 
@@ -207,16 +197,14 @@ pub(crate) mod tests {
     #[test]
     fn argsort_invalid_comparison_method_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = error_message(
-            argsort_builtin(
-                Value::Tensor(tensor),
-                vec![Value::from("ComparisonMethod"), Value::from("unknown")],
-            )
-            .unwrap_err(),
-        );
-        assert!(
-            err.contains("unsupported ComparisonMethod"),
-            "unexpected error: {err}"
+        let err = argsort_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("ComparisonMethod"), Value::from("unknown")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:sort:ComparisonMethodUnknown")
         );
     }
 
@@ -224,19 +212,17 @@ pub(crate) mod tests {
     #[test]
     fn argsort_invalid_comparison_method_value_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = error_message(
-            argsort_builtin(
-                Value::Tensor(tensor),
-                vec![
-                    Value::from("ComparisonMethod"),
-                    Value::Int(IntValue::I32(1)),
-                ],
-            )
-            .unwrap_err(),
-        );
-        assert!(
-            err.contains("requires a string value"),
-            "unexpected error: {err}"
+        let err = argsort_builtin(
+            Value::Tensor(tensor),
+            vec![
+                Value::from("ComparisonMethod"),
+                Value::Int(IntValue::I32(1)),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:sort:ComparisonMethodRequiresString")
         );
     }
 

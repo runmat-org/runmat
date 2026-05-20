@@ -106,6 +106,25 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-runtime issorted_duplicate_direction_error -- --nocapture`
     - `cargo fmt --all --check`
 
+- (pending commit) Argsort identifier-assertion ratchet via sort contract surface
+  - Tightened `argsort` negative coverage to assert stable runtime identifiers emitted by shared `sort` argument parsing/execution contracts:
+    - `RunMat:sort:InvalidDimension`
+    - `RunMat:sort:MissingPlacementUnsupported`
+    - `RunMat:sort:ComparisonMethodUnknown`
+    - `RunMat:sort:ComparisonMethodRequiresString`
+  - Updated tests in [argsort.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/array/sorting_sets/argsort.rs):
+    - `argsort_dimension_zero_errors`
+    - `argsort_invalid_argument_errors`
+    - `argsort_invalid_comparison_method_errors`
+    - `argsort_invalid_comparison_method_value_errors`
+    now assert `RuntimeError.identifier()` instead of message-fragment checks.
+  - Validation:
+    - `cargo test -p runmat-runtime argsort_invalid_argument_errors -- --nocapture`
+    - `cargo test -p runmat-runtime argsort_invalid_comparison_method_errors -- --nocapture`
+    - `cargo test -p runmat-runtime argsort_invalid_comparison_method_value_errors -- --nocapture`
+    - `cargo test -p runmat-runtime argsort_dimension_zero_errors -- --nocapture`
+    - `cargo fmt --all --check`
+
 - (pending commit) Set builtins legacy-option identifier ratchet
   - Replaced message-only legacy-option rejections in set builtins with stable identifiers:
     - `RunMat:unique:LegacyOptionUnsupported`
