@@ -93,6 +93,7 @@ const IDENT_MIR_CELL_INDEX_CONTEXT_INVALID: &str = "RunMat:MirCellIndexContextIn
 const IDENT_MIR_INDEX_CONTEXT_INVALID: &str = "RunMat:MirIndexContextInvalid";
 const IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH: &str =
     "RunMat:MirMultiAssignOutputCountMismatch";
+const IDENT_MIR_DELETE_ASSIGNMENT_RHS_INVALID: &str = "RunMat:MirDeleteAssignmentRhsInvalid";
 const IDENT_MIR_AGGREGATE_SHAPE_INVALID: &str = "RunMat:MirAggregateShapeInvalid";
 const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
 const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
@@ -1270,6 +1271,13 @@ impl Compiler {
         value: &MirRvalue,
         delete: bool,
     ) -> Result<(), CompileError> {
+        if delete && !self.mir_delete_rhs_is_empty_tensor_literal(value) {
+            return Err(self
+                .compile_error(
+                    "MIR delete assignment requires an empty tensor literal RHS at compile boundary",
+                )
+                .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_RHS_INVALID));
+        }
         match place {
             MirPlace::Local(_) | MirPlace::Binding(_) => {
                 self.compile_mir_rvalue(value)?;
@@ -2092,6 +2100,18 @@ impl Compiler {
         elements
             .iter()
             .any(|element| self.mir_operand_needs_dynamic_concat(element))
+    }
+
+    fn mir_delete_rhs_is_empty_tensor_literal(&self, value: &MirRvalue) -> bool {
+        matches!(
+            value,
+            MirRvalue::Aggregate {
+                kind: MirAggregateKind::Tensor,
+                rows: 0,
+                cols: 0,
+                elements,
+            } if elements.is_empty()
+        )
     }
 
     fn mir_operand_needs_dynamic_concat(&self, operand: &MirOperand) -> bool {

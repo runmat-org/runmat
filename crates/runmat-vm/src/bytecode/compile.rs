@@ -829,8 +829,8 @@ mod tests {
     };
     use runmat_mir::lowering::lower_assembly;
     use runmat_mir::{
-        MirCallee, MirConstant, MirIndexComponent, MirIndexPlan, MirOperand, MirPlace, MirRvalue,
-        MirStmtKind, MirTerminatorKind,
+        MirAggregateKind, MirCallee, MirConstant, MirIndexComponent, MirIndexPlan, MirOperand,
+        MirPlace, MirRvalue, MirStmtKind, MirTerminatorKind,
     };
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -3113,6 +3113,46 @@ mod tests {
         assert_eq!(
             err.identifier.as_deref(),
             Some("RunMat:MirMultiAssignOutputCountMismatch")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_nonempty_delete_rhs_with_identifier() {
+        let ast = runmat_parser::parse("x = [1 2 3]; x(2) = [];").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { place, value } = &mut stmt.kind {
+                    if matches!(place, MirPlace::Index(_, _)) {
+                        *value = MirRvalue::Aggregate {
+                            kind: MirAggregateKind::Tensor,
+                            rows: 1,
+                            cols: 1,
+                            elements: vec![MirOperand::Constant(MirConstant::Number(
+                                "1".to_string(),
+                            ))],
+                        };
+                        patched = true;
+                        break;
+                    }
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected indexed delete assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirDeleteAssignmentRhsInvalid")
         );
     }
 

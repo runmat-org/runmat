@@ -2414,6 +2414,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- (pending commit) Plan 3 delete-assignment compile-boundary invariant identifier ratchet
+  - Added compile-time identifier `RunMat:MirDeleteAssignmentRhsInvalid` in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) for MIR delete assignments whose RHS is not an explicit empty tensor literal.
+  - This tightens deletion semantics to an explicit compiler-product contract (delete-marker + empty-literal RHS), instead of relying on runtime empty-RHS checks as the semantic source of truth.
+  - Added compile-level invariant test in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_nonempty_delete_rhs_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_nonempty_delete_rhs_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_multi_assign_call_output_count_mismatch_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
