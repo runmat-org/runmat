@@ -27,6 +27,10 @@ fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
+fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
+    crate::interpreter::errors::mex("ShapeMismatch", &format!("{context}: {err}"))
+}
+
 fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Option<RuntimeError> {
     let class_name = match base {
         Value::Object(obj) => obj.class_name.as_str(),
@@ -798,7 +802,7 @@ pub async fn dispatch_indexing(
                         .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                         .collect();
                     let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
-                        .map_err(|e| format!("slice: {e}"))?;
+                        .map_err(|e| map_slice_shape_error("slice", e))?;
                     Value::Tensor(tensor)
                 }
                 other => other,
@@ -1281,12 +1285,14 @@ pub async fn dispatch_indexing(
                         "No acceleration provider registered",
                     )
                 })?;
-                let host = provider
-                    .download(handle)
-                    .await
-                    .map_err(|e| format!("slice: {e}"))?;
+                let host = provider.download(handle).await.map_err(|e| {
+                    crate::interpreter::errors::mex(
+                        "AccelerationOperationFailed",
+                        &format!("slice: {e}"),
+                    )
+                })?;
                 let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
-                    .map_err(|e| format!("slice: {e}"))?;
+                    .map_err(|e| map_slice_shape_error("slice", e))?;
                 base = Value::Tensor(tensor);
             }
             match base {
@@ -1670,5 +1676,26 @@ pub async fn dispatch_indexing(
             Ok(true)
         }
         _ => Ok(false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_slice_plan_error;
+
+    #[test]
+    fn map_slice_plan_error_preserves_identifier_and_adds_context() {
+        let err = crate::interpreter::errors::mex("ShapeMismatch", "shape mismatch");
+        let mapped = map_slice_plan_error("slice assign", err);
+        assert_eq!(mapped.identifier(), Some("RunMat:ShapeMismatch"));
+        assert_eq!(mapped.message(), "slice assign: shape mismatch");
+    }
+
+    #[test]
+    fn map_slice_plan_error_keeps_identifier_absent_when_missing() {
+        let err = runmat_runtime::build_runtime_error("plain error").build();
+        let mapped = map_slice_plan_error("slice assign", err);
+        assert_eq!(mapped.identifier(), None);
+        assert_eq!(mapped.message(), "slice assign: plain error");
     }
 }

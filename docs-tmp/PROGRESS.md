@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM slice dispatch fallback/error identifier ratchet
+  - `scope: in-scope`
+  - Removed remaining string-wrapped slice-error wrappers in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) for:
+    - logical-array -> tensor slice-base materialization shape errors
+    - GPU slice fallback download failures in `IndexSliceExpr`
+    - GPU fallback tensor materialization shape errors
+  - Added `map_slice_shape_error` and converted those paths to stable identifiers (`RunMat:ShapeMismatch` for shape construction failures, `RunMat:AccelerationOperationFailed` for provider operation failures) instead of message-only runtime errors.
+  - Added direct unit coverage in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - `map_slice_plan_error_preserves_identifier_and_adds_context`
+    - `map_slice_plan_error_keeps_identifier_absent_when_missing`
+  - Validation:
+    - `cargo test -p runmat-vm --lib map_slice_plan_error_preserves_identifier_and_adds_context -- --nocapture`
+    - `cargo test -p runmat-vm --lib map_slice_plan_error_keeps_identifier_absent_when_missing -- --nocapture`
+    - `cargo test -p runmat-vm mixed_range_end_assign_shape_mismatch_error -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM slice dispatch context-wrapping identifier-preservation ratchet
   - `scope: in-scope`
   - Updated runtime error context wrapping in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) so `map_slice_plan_error` preserves incoming `RuntimeError.identifier()` while adding dispatch context text.
