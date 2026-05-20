@@ -983,10 +983,9 @@ mod tests {
     #[cfg(feature = "native-accel")]
     #[test]
     fn primary_compile_keeps_multi_window_groups_node_empty_before_runtime_reconciliation() {
-        let ast = runmat_parser::parse(
-            "a = 1 + 2; b = a * 3; marker = 'x'; c = b - 4; d = c ./ 2;",
-        )
-        .expect("parse");
+        let ast =
+            runmat_parser::parse("a = 1 + 2; b = a * 3; marker = 'x'; c = b - 4; d = c ./ 2;")
+                .expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
         let mir = lower_assembly(&hir.assembly).expect("lower MIR");
         let entrypoint = hir.assembly.entrypoints[0].id;

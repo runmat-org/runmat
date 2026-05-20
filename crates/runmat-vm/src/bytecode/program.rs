@@ -378,8 +378,8 @@ impl Bytecode {
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
     use super::{Bytecode, SemanticFusionInstructionKind, SemanticFusionInstructionWindow};
-    use runmat_accelerate::graph::{AccelNodeLabel, PrimitiveOp};
     use runmat_accelerate::graph::InstrSpan;
+    use runmat_accelerate::graph::{AccelNodeLabel, PrimitiveOp};
 
     #[test]
     fn runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty() {
@@ -512,7 +512,11 @@ mod tests {
         ];
 
         let stale_graph = crate::accel::graph::build_accel_graph(
-            &[crate::Instr::LoadVar(0), crate::Instr::LoadVar(1), crate::Instr::Mul],
+            &[
+                crate::Instr::LoadVar(0),
+                crate::Instr::LoadVar(1),
+                crate::Instr::Mul,
+            ],
             &bytecode.var_types,
         );
         bytecode.accel_graph = Some(stale_graph);
@@ -531,17 +535,17 @@ mod tests {
             .runtime_accel_graph_for_fusion(&runtime_groups)
             .expect("runtime graph should be materialized from active bytecode instructions");
         assert!(
-            graph.nodes.iter().any(|node| matches!(
-                node.label,
-                AccelNodeLabel::Primitive(PrimitiveOp::Add)
-            )),
+            graph
+                .nodes
+                .iter()
+                .any(|node| matches!(node.label, AccelNodeLabel::Primitive(PrimitiveOp::Add))),
             "runtime graph should reflect active bytecode instructions"
         );
         assert!(
-            !graph.nodes.iter().any(|node| matches!(
-                node.label,
-                AccelNodeLabel::Primitive(PrimitiveOp::Mul)
-            )),
+            !graph
+                .nodes
+                .iter()
+                .any(|node| matches!(node.label, AccelNodeLabel::Primitive(PrimitiveOp::Mul))),
             "stale compile graph metadata should not be reused at runtime"
         );
     }
