@@ -1767,6 +1767,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Converted negative tests from broad `is_err()` checks to direct `RuntimeError.identifier()` assertions for those contracts.
   - Validation: `cargo test -p runmat-runtime exprnd_rejects_negative_mu -- --nocapture`, `cargo test -p runmat-runtime exprnd_rejects_zero_mu -- --nocapture`, `cargo test -p runmat-runtime normrnd_rejects_negative_sigma -- --nocapture`, `cargo test -p runmat-runtime unifrnd_rejects_a_ge_b -- --nocapture`, `cargo test -p runmat-runtime unifrnd_rejects_a_eq_b -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
+- (pending commit) Remaining-partials consolidated validation gate refresh
+  - Re-ran a consolidated gate spanning current open-partial surfaces (semantic pipeline + MATLAB semantics contract slices + semantic fusion metadata surfaces):
+    - `cargo test -p runmat-core compile_input_records_mir_analysis_facts -- --nocapture`
+    - `cargo test -p runmat --lib emit_bytecode_uses_source_context_project_symbols -- --nocapture`
+    - `cargo test -p runmat-lsp diagnostics_include_shape_lints -- --nocapture`
+    - `cargo test -p runmat-runtime exprnd_rejects_negative_mu -- --nocapture`
+    - `cargo test -p runmat-runtime normrnd_rejects_negative_sigma -- --nocapture`
+    - `cargo test -p runmat-runtime unifrnd_rejects_a_ge_b -- --nocapture`
+    - `cargo test -p runmat-runtime sorting_sets:: -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+  - Result: all commands above passed on branch after the latest core/CLI/LSP analysis-stage and random-domain identifier ratchets.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

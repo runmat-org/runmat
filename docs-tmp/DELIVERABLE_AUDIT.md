@@ -352,6 +352,18 @@ This audit maps the active objective to concrete repository evidence and marks e
   - `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`
   - `cargo test -p runmat-vm --test fusion_gpu fusion_graph_helper_ignores_stale_compile_graph_metadata -- --nocapture`
   - `cargo test -p runmat-core --test error_namespace_compat -- --nocapture`
+  - consolidated remaining-partials gate refresh:
+    - `cargo test -p runmat-core compile_input_records_mir_analysis_facts -- --nocapture`
+    - `cargo test -p runmat --lib emit_bytecode_uses_source_context_project_symbols -- --nocapture`
+    - `cargo test -p runmat-lsp diagnostics_include_shape_lints -- --nocapture`
+    - `cargo test -p runmat-runtime exprnd_rejects_negative_mu -- --nocapture`
+    - `cargo test -p runmat-runtime normrnd_rejects_negative_sigma -- --nocapture`
+    - `cargo test -p runmat-runtime unifrnd_rejects_a_ge_b -- --nocapture`
+    - `cargo test -p runmat-runtime sorting_sets:: -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
   - `cargo fmt --all --check`
   - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
   - `cargo check --workspace`
