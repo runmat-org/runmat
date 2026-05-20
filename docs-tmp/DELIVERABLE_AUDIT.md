@@ -103,6 +103,10 @@ This audit maps the active objective to concrete repository evidence and marks e
   - VM selector-plan compile invariants now also reject misplaced range/end selector operands in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `MirIndexPlan::Slice` rejects range/end selectors that must lower through `IndexSliceExpr` (`RunMat:MirSliceIndexPlanInvalid`).
     - `MirIndexPlan::Scalar` rejects range/end selector operands that must lower through `IndexSliceExpr` (`RunMat:MirScalarIndexPlanInvalid`).
+  - VM slice-assignment RHS normalization in [write_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/write_slice.rs) now emits stable runtime identifiers for previously string-only error paths:
+    - shape mismatch paths emit `RunMat:ShapeMismatch`
+    - invalid RHS type paths emit `RunMat:InvalidSliceAssignmentRhs`
+    with direct identifier-contract unit coverage (`complex_rhs_view_shape_mismatch_reports_identifier`, `complex_rhs_view_invalid_rhs_type_reports_identifier`, `string_rhs_view_shape_mismatch_reports_identifier`, `string_rhs_view_invalid_rhs_type_reports_identifier`).
   - compile-level ratchets now assert these contracts in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_rejects_unsupported_mir_unary_operator_with_identifier`
     - `primary_compile_rejects_unsupported_mir_binary_operator_with_identifier`

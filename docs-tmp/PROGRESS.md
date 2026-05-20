@@ -12,6 +12,26 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM slice-assignment RHS identifier-contract ratchet
+  - `scope: in-scope`
+  - Normalized remaining string-only `write_slice` RHS error paths to stable runtime identifiers in [write_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/write_slice.rs):
+    - shape mismatch paths now emit `RunMat:ShapeMismatch` via `mex("ShapeMismatch", ...)`
+    - invalid RHS type paths now emit `RunMat:InvalidSliceAssignmentRhs` via `mex("InvalidSliceAssignmentRhs", ...)`
+  - Added direct unit identifier-contract coverage in [write_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/write_slice.rs):
+    - `complex_rhs_view_shape_mismatch_reports_identifier`
+    - `complex_rhs_view_invalid_rhs_type_reports_identifier`
+    - `string_rhs_view_shape_mismatch_reports_identifier`
+    - `string_rhs_view_invalid_rhs_type_reports_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib complex_rhs_view_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib complex_rhs_view_invalid_rhs_type_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib string_rhs_view_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib string_rhs_view_invalid_rhs_type_reports_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - MIR scalar-plan range/end normalization ratchet
   - `scope: in-scope`
   - Tightened VM compile invariants in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) so `MirIndexPlan::Scalar` now rejects selector operands that encode range/end expression semantics; these selectors must lower through `IndexSliceExpr`.

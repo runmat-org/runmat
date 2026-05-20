@@ -67,7 +67,7 @@ pub fn build_complex_rhs_view(
             }
             if shape.len() > dims {
                 if shape.iter().skip(dims).any(|&s| s != 1) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
                 shape.truncate(dims);
             }
@@ -75,7 +75,7 @@ pub fn build_complex_rhs_view(
                 let out_len = selection_lengths[d];
                 let rhs_len = shape[d];
                 if !(rhs_len == 1 || rhs_len == out_len) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
             }
             let mut rstrides = vec![0usize; dims];
@@ -90,7 +90,10 @@ pub fn build_complex_rhs_view(
                 strides: rstrides,
             })
         }
-        _ => Err("rhs must be numeric or tensor".to_string().into()),
+        _ => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            "rhs must be numeric or tensor",
+        )),
     }
 }
 
@@ -193,7 +196,7 @@ pub fn build_string_rhs_view(
         }
         if shape.len() > dims {
             if shape.iter().skip(dims).any(|&s| s != 1) {
-                return Err("shape mismatch for slice assign".to_string().into());
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
             shape.truncate(dims);
         }
@@ -201,7 +204,7 @@ pub fn build_string_rhs_view(
             let out_len = selection_lengths[d];
             let rhs_len = shape[d];
             if !(rhs_len == 1 || rhs_len == out_len) {
-                return Err("shape mismatch for slice assign".to_string().into());
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
         }
         let mut rstrides = vec![0usize; dims];
@@ -216,7 +219,10 @@ pub fn build_string_rhs_view(
             strides: rstrides,
         });
     }
-    Err("rhs must be string or string array".to_string().into())
+    Err(mex(
+        "InvalidSliceAssignmentRhs",
+        "rhs must be string or string array",
+    ))
 }
 
 pub fn scatter_string_with_plan(
@@ -747,4 +753,59 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
         .upload(&view)
         .map_err(|e| format!("reupload after slice assign: {e}"))?;
     Ok(Value::GpuTensor(new_h))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_complex_rhs_view, build_string_rhs_view};
+    use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
+
+    #[test]
+    fn complex_rhs_view_shape_mismatch_reports_identifier() {
+        let rhs = Value::ComplexTensor(
+            ComplexTensor::new(vec![(1.0, 0.0), (2.0, 0.0), (3.0, 0.0)], vec![1, 3])
+                .expect("complex tensor"),
+        );
+        let err = match build_complex_rhs_view(&rhs, &[2, 2]) {
+            Ok(_) => panic!("shape mismatch should fail"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn complex_rhs_view_invalid_rhs_type_reports_identifier() {
+        let rhs = Value::String("x".to_string());
+        let err = match build_complex_rhs_view(&rhs, &[1]) {
+            Ok(_) => panic!("non-numeric rhs should be rejected"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), Some("RunMat:InvalidSliceAssignmentRhs"));
+    }
+
+    #[test]
+    fn string_rhs_view_shape_mismatch_reports_identifier() {
+        let rhs = Value::StringArray(
+            StringArray::new(
+                vec!["a".to_string(), "b".to_string(), "c".to_string()],
+                vec![1, 3],
+            )
+            .expect("string array"),
+        );
+        let err = match build_string_rhs_view(&rhs, &[2, 2]) {
+            Ok(_) => panic!("shape mismatch should fail"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn string_rhs_view_invalid_rhs_type_reports_identifier() {
+        let rhs = Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).expect("tensor"));
+        let err = match build_string_rhs_view(&rhs, &[1]) {
+            Ok(_) => panic!("non-string rhs should be rejected"),
+            Err(err) => err,
+        };
+        assert_eq!(err.identifier(), Some("RunMat:InvalidSliceAssignmentRhs"));
+    }
 }
