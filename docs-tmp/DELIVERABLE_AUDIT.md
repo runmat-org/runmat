@@ -127,6 +127,10 @@ This audit maps the active objective to concrete repository evidence and marks e
   - `write_linear` GPU RHS scalar gather helpers now also map `gather rhs` failures to `RunMat:AccelerationOperationFailed` (for both real and complex scalar RHS paths), removing the last message-only wrapper pair in that indexing surface.
   - VM cell operation helpers in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now normalize cell-construction/indexing/deletion shape failures to stable `RunMat:ShapeMismatch` identifiers (replacing message-only wrappers), with direct unit coverage for the mapping helper contract.
   - Cell selector semantics now avoid post-read alias mutation in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs): assignment paths replace per-cell handles via fresh GC allocations instead of mutating shared `GcPtr<Value>` payloads in place. Regression coverage in [indexing_properties.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/indexing_properties.rs) (`cell_paren_range_end_and_colon_semantics`, `cell_brace_assignment_preserves_copied_cell_values`) ratchets both `C(2:end-1)` read stability across subsequent paren assignment and copy-on-write behavior for brace assignments (`B = C; C{2} = ...`) plus `C(:)` shape behavior.
+  - VM deletion runtime behavior now has explicit semantic contracts in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `cell_paren_delete_executes_with_semantic_store_back` (cell paren deletion positive behavior)
+    - `matrix_delete_reports_unsupported_deletion_identifier_contract` (`RunMat:UnsupportedDeletion`)
+    - `string_slice_delete_reports_identifier_contract` (`RunMat:UnsupportedSliceDeletion`)
   - compile-level ratchets now assert these contracts in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_rejects_unsupported_mir_unary_operator_with_identifier`
     - `primary_compile_rejects_unsupported_mir_binary_operator_with_identifier`

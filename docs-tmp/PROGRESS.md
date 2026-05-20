@@ -2454,6 +2454,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 runtime deletion identifier-contract ratchet
+  - Added VM semantic runtime coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `cell_paren_delete_executes_with_semantic_store_back` (positive deletion behavior for paren-indexed cell arrays)
+    - `matrix_delete_reports_unsupported_deletion_identifier_contract`
+    - `string_slice_delete_reports_identifier_contract`
+  - This ratchets deletion behavior and identifier contracts on semantic runtime paths:
+    - matrix linear deletion on non-vector tensors reports `RunMat:UnsupportedDeletion`
+    - string slice deletion reports `RunMat:UnsupportedSliceDeletion`
+  - Validation:
+    - `cargo test -p runmat-vm cell_paren_delete_executes_with_semantic_store_back -- --nocapture`
+    - `cargo test -p runmat-vm matrix_delete_reports_unsupported_deletion_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm string_slice_delete_reports_identifier_contract -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

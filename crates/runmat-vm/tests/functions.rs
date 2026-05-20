@@ -600,6 +600,38 @@ fn semantic_indexed_member_store_back_executes() {
 }
 
 #[test]
+fn cell_paren_delete_executes_with_semantic_store_back() {
+    let vars = execute_semantic_source("c = {1, 2, 3}; c(2) = []; y = c{2};");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+}
+
+#[test]
+fn matrix_delete_reports_unsupported_deletion_identifier_contract() {
+    let err = execute_semantic_source_result("x = [1 2; 3 4]; x(2) = [];")
+        .expect_err("matrix delete should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UnsupportedDeletion"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn string_slice_delete_reports_identifier_contract() {
+    let err = execute_semantic_source_result("s = [\"a\" \"b\"]; s(1:1) = [];")
+        .expect_err("string slice delete should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UnsupportedSliceDeletion"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn semantic_cell_member_store_back_executes() {
     let bytecode = compile_semantic_source("C = {struct()}; C{1}.a = 5; y = C{1}.a;").unwrap();
     let vars = interpret(&bytecode).expect("semantic cell member store-back should succeed");
