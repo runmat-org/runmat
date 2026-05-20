@@ -60,13 +60,17 @@ impl RunMatSession {
                     .with_top_level_await_enabled(self.top_level_await_enabled),
             )?
         };
-        let (mut bytecode, mir) = {
-            let _span = info_span!("runtime.compile.bytecode").entered();
-            self.compile_semantic_bytecode(&lowering)?
+        let mir = {
+            let _span = info_span!("runtime.compile.mir").entered();
+            runmat_mir::lowering::lower_assembly(&lowering.assembly)?
         };
         let analysis = {
             let _span = info_span!("runtime.analyze").entered();
             runmat_mir::analysis::analyze_assembly(&mir)
+        };
+        let mut bytecode = {
+            let _span = info_span!("runtime.compile.bytecode").entered();
+            self.compile_semantic_bytecode_from_mir(&lowering.assembly, &mir)?
         };
         bytecode.source_id = Some(source_id);
         let (semantic_function_registry_after_success, next_semantic_function_id_after_success) =
@@ -105,25 +109,21 @@ impl RunMatSession {
         error.context.call_stack = rendered;
     }
 
-    fn compile_semantic_bytecode(
+    fn compile_semantic_bytecode_from_mir(
         &self,
-        lowering: &LoweringResult,
-    ) -> std::result::Result<(runmat_vm::Bytecode, runmat_mir::MirAssembly), RunError> {
-        let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)?;
-        let Some(entrypoint) = lowering.assembly.entrypoints.first() else {
-            let semantic_functions =
-                runmat_vm::compile_semantic_function_registry(&lowering.assembly, &mir)?;
+        assembly: &runmat_hir::HirAssembly,
+        mir: &runmat_mir::MirAssembly,
+    ) -> std::result::Result<runmat_vm::Bytecode, RunError> {
+        let Some(entrypoint) = assembly.entrypoints.first() else {
+            let semantic_functions = runmat_vm::compile_semantic_function_registry(assembly, mir)?;
             let semantic_function_registry =
                 runmat_vm::SemanticFunctionRegistry::new(semantic_functions.clone());
             let mut bytecode = runmat_vm::Bytecode::empty();
             bytecode.semantic_functions = semantic_functions;
             bytecode.semantic_function_registry = semantic_function_registry;
-            return Ok((bytecode, mir));
+            return Ok(bytecode);
         };
-        Ok((
-            runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)?,
-            mir,
-        ))
+        Ok(runmat_vm::compile(assembly, mir, entrypoint.id)?)
     }
 
     fn prepare_session_semantic_function_registry(

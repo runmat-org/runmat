@@ -1802,6 +1802,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `rng_state_struct_requires_type`
   - Validation: `cargo test -p runmat-runtime rng_rejects_negative_seed -- --nocapture`, `cargo test -p runmat-runtime rng_rejects_unknown_generator -- --nocapture`, `cargo test -p runmat-runtime rng_state_struct_requires_type -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
+- (pending commit) Plan 1/3 core compile ordering ratchet to explicit `MIR -> analysis -> VM compile`
+  - Refactored `RunMatSession::compile_input` in `crates/runmat-core/src/session/compile.rs` to run:
+    - `runtime.compile.mir` (`runmat_mir::lowering::lower_assembly`)
+    - `runtime.analyze` (`runmat_mir::analysis::analyze_assembly`)
+    - `runtime.compile.bytecode` (VM compile from existing MIR via `compile_semantic_bytecode_from_mir`)
+  - This removes the previous ordering where VM compile occurred before MIR analysis in the core session compile path.
+  - Validation: `cargo test -p runmat-core compile_input_records_mir_analysis_facts -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test async_stdin pending_handler_returns_error -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
