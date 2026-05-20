@@ -18,17 +18,17 @@ pub enum PatchEdgeColorMode {
 
 #[derive(Debug, Clone)]
 pub struct PatchPlot {
-    pub vertices: Vec<Vec3>,
-    pub faces: Vec<Vec<usize>>,
-    pub face_color: Vec4,
-    pub edge_color: Vec4,
-    pub face_color_mode: PatchFaceColorMode,
-    pub edge_color_mode: PatchEdgeColorMode,
-    pub face_alpha: f32,
-    pub edge_alpha: f32,
-    pub line_width: f32,
-    pub label: Option<String>,
-    pub visible: bool,
+    vertices: Vec<Vec3>,
+    faces: Vec<Vec<usize>>,
+    face_color: Vec4,
+    edge_color: Vec4,
+    face_color_mode: PatchFaceColorMode,
+    edge_color_mode: PatchEdgeColorMode,
+    face_alpha: f32,
+    edge_alpha: f32,
+    line_width: f32,
+    label: Option<String>,
+    visible: bool,
     face_vertices: Option<Vec<Vertex>>,
     face_indices: Option<Vec<u32>>,
     edge_vertices: Option<Vec<Vertex>>,
@@ -41,17 +41,12 @@ impl PatchPlot {
         if vertices.is_empty() {
             return Err("patch: Vertices must not be empty".to_string());
         }
+        validate_finite_vertices(&vertices)?;
         let faces = normalize_faces(faces);
         if faces.is_empty() {
             return Err("patch: Faces must contain at least one polygon".to_string());
         }
-        for face in &faces {
-            for &idx in face {
-                if idx >= vertices.len() {
-                    return Err("patch: Faces index exceeds Vertices row count".to_string());
-                }
-            }
-        }
+        validate_faces(&vertices, &faces)?;
         Ok(Self {
             vertices,
             faces,
@@ -72,8 +67,115 @@ impl PatchPlot {
         })
     }
 
+    pub fn vertices(&self) -> &[Vec3] {
+        &self.vertices
+    }
+
+    pub fn faces(&self) -> &[Vec<usize>] {
+        &self.faces
+    }
+
+    pub fn face_color(&self) -> Vec4 {
+        self.face_color
+    }
+
+    pub fn edge_color(&self) -> Vec4 {
+        self.edge_color
+    }
+
+    pub fn face_color_mode(&self) -> PatchFaceColorMode {
+        self.face_color_mode
+    }
+
+    pub fn edge_color_mode(&self) -> PatchEdgeColorMode {
+        self.edge_color_mode
+    }
+
+    pub fn face_alpha(&self) -> f32 {
+        self.face_alpha
+    }
+
+    pub fn edge_alpha(&self) -> f32 {
+        self.edge_alpha
+    }
+
+    pub fn line_width(&self) -> f32 {
+        self.line_width
+    }
+
+    pub fn label(&self) -> Option<&str> {
+        self.label.as_deref()
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+
+    pub fn set_vertices(&mut self, vertices: Vec<Vec3>) -> Result<(), String> {
+        if vertices.is_empty() {
+            return Err("patch: Vertices must not be empty".to_string());
+        }
+        validate_finite_vertices(&vertices)?;
+        validate_faces(&vertices, &self.faces)?;
+        self.vertices = vertices;
+        self.mark_dirty();
+        Ok(())
+    }
+
+    pub fn set_faces(&mut self, faces: Vec<Vec<usize>>) -> Result<(), String> {
+        let faces = normalize_faces(faces);
+        if faces.is_empty() {
+            return Err("patch: Faces must contain at least one polygon".to_string());
+        }
+        validate_faces(&self.vertices, &faces)?;
+        self.faces = faces;
+        self.mark_dirty();
+        Ok(())
+    }
+
+    pub fn set_face_color(&mut self, color: Vec4) {
+        self.face_color = color;
+        self.mark_dirty();
+    }
+
+    pub fn set_edge_color(&mut self, color: Vec4) {
+        self.edge_color = color;
+        self.mark_dirty();
+    }
+
+    pub fn set_face_color_mode(&mut self, mode: PatchFaceColorMode) {
+        self.face_color_mode = mode;
+        self.mark_dirty();
+    }
+
+    pub fn set_edge_color_mode(&mut self, mode: PatchEdgeColorMode) {
+        self.edge_color_mode = mode;
+        self.mark_dirty();
+    }
+
+    pub fn set_face_alpha(&mut self, alpha: f32) {
+        self.face_alpha = alpha.clamp(0.0, 1.0);
+        self.mark_dirty();
+    }
+
+    pub fn set_edge_alpha(&mut self, alpha: f32) {
+        self.edge_alpha = alpha.clamp(0.0, 1.0);
+        self.mark_dirty();
+    }
+
+    pub fn set_line_width(&mut self, line_width: f32) {
+        self.line_width = line_width.max(0.0);
+        self.mark_dirty();
+    }
+
+    pub fn set_label(&mut self, label: Option<String>) {
+        self.label = label;
+        self.mark_dirty();
+    }
+
     pub fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
+        self.mark_dirty();
     }
 
     pub fn mark_dirty(&mut self) {
@@ -254,6 +356,30 @@ impl PatchPlot {
     }
 }
 
+fn validate_finite_vertices(vertices: &[Vec3]) -> Result<(), String> {
+    if vertices
+        .iter()
+        .any(|v| !v.x.is_finite() || !v.y.is_finite() || !v.z.is_finite())
+    {
+        return Err(
+            "patch: Vertices must contain finite Vec3 coordinates before bounds/render_data"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_faces(vertices: &[Vec3], faces: &[Vec<usize>]) -> Result<(), String> {
+    for face in faces {
+        for &idx in face {
+            if idx >= vertices.len() {
+                return Err("patch: Faces index exceeds Vertices row count".to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
 fn normalize_faces(faces: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
     faces
         .into_iter()
@@ -294,6 +420,39 @@ mod tests {
     }
 
     #[test]
+    fn patch_set_face_color_invalidates_cached_geometry() {
+        let mut patch = PatchPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            vec![vec![0, 1, 2]],
+        )
+        .unwrap();
+        let initial = patch.render_data();
+        assert_eq!(initial.vertices[0].color, [0.0, 0.447, 0.741, 1.0]);
+
+        patch.set_face_color(Vec4::new(1.0, 0.0, 0.0, 1.0));
+        let updated = patch.render_data();
+        assert_eq!(updated.vertices[0].color, [1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn patch_new_rejects_non_finite_vertices_before_render_data() {
+        let err = PatchPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(f32::NAN, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, f32::INFINITY),
+            ],
+            vec![vec![0, 1, 2]],
+        )
+        .expect_err("PatchPlot::new should reject non-finite Vec3 coordinates");
+        assert!(err.contains("finite Vec3 coordinates"));
+    }
+
+    #[test]
     fn patch_accepts_explicitly_closed_face() {
         let patch = PatchPlot::new(
             vec![
@@ -304,6 +463,6 @@ mod tests {
             vec![vec![0, 1, 2, 0]],
         )
         .unwrap();
-        assert_eq!(patch.faces, vec![vec![0, 1, 2]]);
+        assert_eq!(patch.faces(), &[vec![0, 1, 2]]);
     }
 }

@@ -1756,33 +1756,34 @@ fn get_patch_property(
     match property.map(canonical_property_name) {
         None => {
             let mut st = child_base_struct("patch", patch_handle.figure, patch_handle.axes_index);
-            st.insert("Faces", faces_tensor(&patch.faces));
-            st.insert("Vertices", vertices_tensor(&patch.vertices));
+            st.insert("Faces", faces_tensor(patch.faces()));
+            st.insert("Vertices", vertices_tensor(patch.vertices()));
             st.insert(
                 "XData",
-                tensor_from_vec(patch.vertices.iter().map(|p| p.x as f64).collect()),
+                tensor_from_vec(patch.vertices().iter().map(|p| p.x as f64).collect()),
             );
             st.insert(
                 "YData",
-                tensor_from_vec(patch.vertices.iter().map(|p| p.y as f64).collect()),
+                tensor_from_vec(patch.vertices().iter().map(|p| p.y as f64).collect()),
             );
             st.insert(
                 "ZData",
-                tensor_from_vec(patch.vertices.iter().map(|p| p.z as f64).collect()),
+                tensor_from_vec(patch.vertices().iter().map(|p| p.z as f64).collect()),
             );
             st.insert(
                 "FaceColor",
-                patch_color_property(patch.face_color_mode, patch.face_color),
+                patch_color_property(patch.face_color_mode(), patch.face_color()),
             );
             st.insert(
                 "EdgeColor",
-                patch_edge_color_property(patch.edge_color_mode, patch.edge_color),
+                patch_edge_color_property(patch.edge_color_mode(), patch.edge_color()),
             );
-            st.insert("FaceAlpha", Value::Num(patch.face_alpha as f64));
-            st.insert("EdgeAlpha", Value::Num(patch.edge_alpha as f64));
-            st.insert("LineWidth", Value::Num(patch.line_width as f64));
-            if let Some(label) = patch.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+            st.insert("FaceAlpha", Value::Num(patch.face_alpha() as f64));
+            st.insert("EdgeAlpha", Value::Num(patch.edge_alpha() as f64));
+            st.insert("LineWidth", Value::Num(patch.line_width() as f64));
+            st.insert("Visible", Value::Bool(patch.is_visible()));
+            if let Some(label) = patch.label() {
+                st.insert("DisplayName", Value::String(label.to_string()));
             }
             Ok(Value::Struct(st))
         }
@@ -1792,29 +1793,30 @@ fn get_patch_property(
             patch_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("faces") => Ok(faces_tensor(&patch.faces)),
-        Some("vertices") => Ok(vertices_tensor(&patch.vertices)),
+        Some("faces") => Ok(faces_tensor(patch.faces())),
+        Some("vertices") => Ok(vertices_tensor(patch.vertices())),
         Some("xdata") => Ok(tensor_from_vec(
-            patch.vertices.iter().map(|p| p.x as f64).collect(),
+            patch.vertices().iter().map(|p| p.x as f64).collect(),
         )),
         Some("ydata") => Ok(tensor_from_vec(
-            patch.vertices.iter().map(|p| p.y as f64).collect(),
+            patch.vertices().iter().map(|p| p.y as f64).collect(),
         )),
         Some("zdata") => Ok(tensor_from_vec(
-            patch.vertices.iter().map(|p| p.z as f64).collect(),
+            patch.vertices().iter().map(|p| p.z as f64).collect(),
         )),
         Some("facecolor") | Some("color") => Ok(patch_color_property(
-            patch.face_color_mode,
-            patch.face_color,
+            patch.face_color_mode(),
+            patch.face_color(),
         )),
         Some("edgecolor") => Ok(patch_edge_color_property(
-            patch.edge_color_mode,
-            patch.edge_color,
+            patch.edge_color_mode(),
+            patch.edge_color(),
         )),
-        Some("facealpha") => Ok(Value::Num(patch.face_alpha as f64)),
-        Some("edgealpha") => Ok(Value::Num(patch.edge_alpha as f64)),
-        Some("linewidth") => Ok(Value::Num(patch.line_width as f64)),
-        Some("displayname") => Ok(Value::String(patch.label.unwrap_or_default())),
+        Some("facealpha") => Ok(Value::Num(patch.face_alpha() as f64)),
+        Some("edgealpha") => Ok(Value::Num(patch.edge_alpha() as f64)),
+        Some("linewidth") => Ok(Value::Num(patch.line_width() as f64)),
+        Some("displayname") => Ok(Value::String(patch.label().unwrap_or_default().to_string())),
+        Some("visible") => Ok(Value::Bool(patch.is_visible())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported patch property `{other}`"),
@@ -3029,73 +3031,68 @@ fn apply_patch_property(
                 "facecolor" | "color" => {
                     if let Some(text) = value_as_string(value) {
                         match text.trim().to_ascii_lowercase().as_str() {
-                            "none" => {
-                                patch.face_color_mode = runmat_plot::plots::PatchFaceColorMode::None
-                            }
-                            "flat" => {
-                                patch.face_color_mode = runmat_plot::plots::PatchFaceColorMode::Flat
-                            }
+                            "none" => patch
+                                .set_face_color_mode(runmat_plot::plots::PatchFaceColorMode::None),
+                            "flat" => patch
+                                .set_face_color_mode(runmat_plot::plots::PatchFaceColorMode::Flat),
                             _ => {
                                 if let Ok(c) = parse_color_value(
                                     &LineStyleParseOptions::generic(builtin),
                                     value,
                                 ) {
-                                    patch.face_color = c;
-                                    patch.face_color_mode =
-                                        runmat_plot::plots::PatchFaceColorMode::Color;
+                                    patch.set_face_color(c);
+                                    patch.set_face_color_mode(
+                                        runmat_plot::plots::PatchFaceColorMode::Color,
+                                    );
                                 }
                             }
                         }
                     } else if let Ok(c) =
                         parse_color_value(&LineStyleParseOptions::generic(builtin), value)
                     {
-                        patch.face_color = c;
-                        patch.face_color_mode = runmat_plot::plots::PatchFaceColorMode::Color;
+                        patch.set_face_color(c);
+                        patch.set_face_color_mode(runmat_plot::plots::PatchFaceColorMode::Color);
                     }
-                    patch.mark_dirty();
                 }
                 "edgecolor" => {
                     if let Some(text) = value_as_string(value) {
                         if text.trim().eq_ignore_ascii_case("none") {
-                            patch.edge_color_mode = runmat_plot::plots::PatchEdgeColorMode::None;
+                            patch.set_edge_color_mode(runmat_plot::plots::PatchEdgeColorMode::None);
                         } else if let Ok(c) =
                             parse_color_value(&LineStyleParseOptions::generic(builtin), value)
                         {
-                            patch.edge_color = c;
-                            patch.edge_color_mode = runmat_plot::plots::PatchEdgeColorMode::Color;
+                            patch.set_edge_color(c);
+                            patch
+                                .set_edge_color_mode(runmat_plot::plots::PatchEdgeColorMode::Color);
                         }
                     } else if let Ok(c) =
                         parse_color_value(&LineStyleParseOptions::generic(builtin), value)
                     {
-                        patch.edge_color = c;
-                        patch.edge_color_mode = runmat_plot::plots::PatchEdgeColorMode::Color;
+                        patch.set_edge_color(c);
+                        patch.set_edge_color_mode(runmat_plot::plots::PatchEdgeColorMode::Color);
                     }
-                    patch.mark_dirty();
                 }
                 "facealpha" => {
                     if let Some(v) = value_as_f64(value) {
-                        patch.face_alpha = (v as f32).clamp(0.0, 1.0);
-                        patch.mark_dirty();
+                        patch.set_face_alpha(v as f32);
                     }
                 }
                 "edgealpha" => {
                     if let Some(v) = value_as_f64(value) {
-                        patch.edge_alpha = (v as f32).clamp(0.0, 1.0);
-                        patch.mark_dirty();
+                        patch.set_edge_alpha(v as f32);
                     }
                 }
                 "linewidth" => {
                     if let Some(v) = value_as_f64(value) {
-                        patch.line_width = (v as f32).max(0.0);
-                        patch.mark_dirty();
+                        patch.set_line_width(v as f32);
                     }
                 }
                 "displayname" => {
-                    patch.label = value_as_string(value).map(|s| s.to_string());
+                    patch.set_label(value_as_string(value).map(|s| s.to_string()));
                 }
                 "visible" => {
                     if let Some(v) = value_as_bool(value) {
-                        patch.visible = v;
+                        patch.set_visible(v);
                     }
                 }
                 _ => {}

@@ -162,15 +162,15 @@ fn parse_patch_plot(args: Vec<Value>) -> BuiltinResult<PatchPlot> {
 
     let mut plot = PatchPlot::new(vertices, faces)
         .map_err(|err| plotting_error(BUILTIN_NAME, format!("patch: {err}")))?;
-    plot.face_color = opts.face_color;
-    plot.edge_color = opts.edge_color;
-    plot.face_color_mode = opts.face_color_mode;
-    plot.edge_color_mode = opts.edge_color_mode;
-    plot.face_alpha = opts.face_alpha;
-    plot.edge_alpha = opts.edge_alpha;
-    plot.line_width = opts.line_width;
-    plot.label = opts.label;
-    plot.visible = opts.visible;
+    plot.set_face_color(opts.face_color);
+    plot.set_edge_color(opts.edge_color);
+    plot.set_face_color_mode(opts.face_color_mode);
+    plot.set_edge_color_mode(opts.edge_color_mode);
+    plot.set_face_alpha(opts.face_alpha);
+    plot.set_edge_alpha(opts.edge_alpha);
+    plot.set_line_width(opts.line_width);
+    plot.set_label(opts.label);
+    plot.set_visible(opts.visible);
     Ok(plot)
 }
 
@@ -180,6 +180,12 @@ fn apply_positional_data(opts: &mut PatchOptions, args: &mut Vec<Value>) -> Buil
         args.clear();
         return Ok(());
     }
+    if args.len() >= 3
+        && !is_property_name(&args[2])
+        && value_matches_coordinate_values(&args[0], &args[1], &args[2])
+    {
+        opts.z_data = Some(tensor_from_value(args.remove(2))?);
+    }
     opts.x_data = Some(tensor_from_value(args.remove(0))?);
     opts.y_data = Some(tensor_from_value(args.remove(0))?);
 
@@ -187,13 +193,44 @@ fn apply_positional_data(opts: &mut PatchOptions, args: &mut Vec<Value>) -> Buil
         return Ok(());
     }
 
+    if opts.z_data.is_some() {
+        apply_color_argument(opts, &args.remove(0));
+        return Ok(());
+    }
+
     if args.len() >= 2 && !is_property_name(&args[1]) {
         opts.z_data = Some(tensor_from_value(args.remove(0))?);
         apply_color_argument(opts, &args.remove(0));
     } else {
-        apply_color_argument(opts, &args.remove(0));
+        let value = args.remove(0);
+        if value_matches_coordinate_shape(opts, &value) {
+            opts.z_data = Some(tensor_from_value(value)?);
+        } else if !apply_color_argument(opts, &value) {
+            opts.z_data = Some(tensor_from_value(value)?);
+        }
     }
     Ok(())
+}
+
+fn value_matches_coordinate_values(x: &Value, y: &Value, value: &Value) -> bool {
+    let (Ok(x), Ok(y), Ok(tensor)) = (
+        Tensor::try_from(x),
+        Tensor::try_from(y),
+        Tensor::try_from(value),
+    ) else {
+        return false;
+    };
+    tensor.rows == x.rows && tensor.cols == x.cols && tensor.rows == y.rows && tensor.cols == y.cols
+}
+
+fn value_matches_coordinate_shape(opts: &PatchOptions, value: &Value) -> bool {
+    let (Some(x), Some(y)) = (&opts.x_data, &opts.y_data) else {
+        return false;
+    };
+    let Ok(tensor) = Tensor::try_from(value) else {
+        return false;
+    };
+    tensor.rows == x.rows && tensor.cols == x.cols && tensor.rows == y.rows && tensor.cols == y.cols
 }
 
 fn apply_struct_options(opts: &mut PatchOptions, st: &StructValue) -> BuiltinResult<()> {
@@ -263,11 +300,13 @@ fn tensor_from_value(value: Value) -> BuiltinResult<Tensor> {
     }
 }
 
-fn apply_color_argument(opts: &mut PatchOptions, value: &Value) {
+fn apply_color_argument(opts: &mut PatchOptions, value: &Value) -> bool {
     if let Ok(color) = parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value) {
         opts.face_color = color;
         opts.face_color_mode = PatchFaceColorMode::Color;
+        return true;
     }
+    false
 }
 
 fn apply_face_color(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()> {
@@ -476,9 +515,9 @@ mod tests {
             Value::String("r".into()),
         ])
         .unwrap();
-        assert_eq!(plot.faces.len(), 1);
-        assert_eq!(plot.vertices.len(), 3);
-        assert_eq!(plot.face_color, Vec4::new(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(plot.faces().len(), 1);
+        assert_eq!(plot.vertices().len(), 3);
+        assert_eq!(plot.face_color(), Vec4::new(1.0, 0.0, 0.0, 1.0));
     }
 
     #[test]
@@ -489,8 +528,38 @@ mod tests {
             Value::String("g".into()),
         ])
         .unwrap();
-        assert_eq!(plot.faces.len(), 2);
-        assert_eq!(plot.vertices.len(), 8);
+        assert_eq!(plot.faces().len(), 2);
+        assert_eq!(plot.vertices().len(), 8);
+    }
+
+    #[test]
+    fn patch_xyz_without_color_preserves_z_data() {
+        let plot = parse_patch_plot(vec![
+            tensor(3, 1, &[0.0, 1.0, 0.0]),
+            tensor(3, 1, &[0.0, 0.0, 1.0]),
+            tensor(3, 1, &[0.25, 0.5, 0.75]),
+        ])
+        .unwrap();
+        assert_eq!(plot.vertices().len(), 3);
+        assert_eq!(plot.vertices()[0].z, 0.25);
+        assert_eq!(plot.vertices()[1].z, 0.5);
+        assert_eq!(plot.vertices()[2].z, 0.75);
+    }
+
+    #[test]
+    fn patch_xyz_accepts_trailing_name_value_pairs() {
+        let plot = parse_patch_plot(vec![
+            tensor(3, 1, &[0.0, 1.0, 0.0]),
+            tensor(3, 1, &[0.0, 0.0, 1.0]),
+            tensor(3, 1, &[0.25, 0.5, 0.75]),
+            Value::String("FaceColor".into()),
+            Value::String("r".into()),
+        ])
+        .unwrap();
+        assert_eq!(plot.vertices()[0].z, 0.25);
+        assert_eq!(plot.vertices()[1].z, 0.5);
+        assert_eq!(plot.vertices()[2].z, 0.75);
+        assert_eq!(plot.face_color(), Vec4::new(1.0, 0.0, 0.0, 1.0));
     }
 
     #[test]
@@ -504,8 +573,8 @@ mod tests {
             Value::String("none".into()),
         ])
         .unwrap();
-        assert_eq!(plot.face_color, Vec4::new(1.0, 0.0, 0.0, 1.0));
-        assert_eq!(plot.edge_color_mode, PatchEdgeColorMode::None);
+        assert_eq!(plot.face_color(), Vec4::new(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(plot.edge_color_mode(), PatchEdgeColorMode::None);
     }
 
     #[test]
@@ -519,8 +588,8 @@ mod tests {
             Value::String("none".into()),
         ])
         .unwrap();
-        assert_eq!(plot.faces, vec![vec![0, 1, 2]]);
-        assert_eq!(plot.edge_color_mode, PatchEdgeColorMode::None);
+        assert_eq!(plot.faces(), &[vec![0, 1, 2]]);
+        assert_eq!(plot.edge_color_mode(), PatchEdgeColorMode::None);
     }
 
     #[test]
@@ -543,5 +612,46 @@ mod tests {
         let ty = crate::call_builtin("get", &[Value::Num(handle), Value::String("Type".into())])
             .expect("get patch type");
         assert_eq!(ty, Value::String("patch".into()));
+    }
+
+    #[test]
+    fn patch_get_visible_tracks_set_visible() {
+        unsafe {
+            std::env::set_var("RUNMAT_DISABLE_INTERACTIVE_PLOTS", "1");
+        }
+        let handle = crate::call_builtin(
+            "patch",
+            &[
+                tensor(3, 1, &[0.0, 1.0, 0.0]),
+                tensor(3, 1, &[0.0, 0.0, 1.0]),
+                Value::String("b".into()),
+            ],
+        )
+        .expect("patch builtin should dispatch");
+        let Value::Num(handle) = handle else {
+            panic!("expected numeric graphics handle");
+        };
+        crate::call_builtin(
+            "set",
+            &[
+                Value::Num(handle),
+                Value::String("Visible".into()),
+                Value::Bool(false),
+            ],
+        )
+        .expect("set patch visible");
+
+        let visible = crate::call_builtin(
+            "get",
+            &[Value::Num(handle), Value::String("Visible".into())],
+        )
+        .expect("get patch visible");
+        assert_eq!(visible, Value::Bool(false));
+
+        let all = crate::call_builtin("get", &[Value::Num(handle)]).expect("get patch struct");
+        let Value::Struct(st) = all else {
+            panic!("expected patch property struct");
+        };
+        assert_eq!(st.fields.get("Visible"), Some(&Value::Bool(false)));
     }
 }

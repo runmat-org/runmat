@@ -327,7 +327,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 1;
+    pub const SCHEMA_VERSION: u32 = 2;
 
     pub fn capture(figure: &Figure) -> Self {
         let snapshot = FigureSnapshot::capture(figure);
@@ -346,12 +346,7 @@ impl FigureScene {
     }
 
     pub fn into_figure(self) -> Result<Figure, String> {
-        if self.schema_version != Self::SCHEMA_VERSION {
-            return Err(format!(
-                "unsupported figure scene schema version {}",
-                self.schema_version
-            ));
-        }
+        self.validate_schema_version()?;
 
         let mut figure = Figure::new();
         figure.set_subplot_grid(
@@ -385,6 +380,28 @@ impl FigureScene {
         }
 
         Ok(figure)
+    }
+
+    fn validate_schema_version(&self) -> Result<(), String> {
+        if self.schema_version == 0 || self.schema_version > FigureScene::SCHEMA_VERSION {
+            return Err(format!(
+                "unsupported figure scene schema version {} (supported 1..={})",
+                self.schema_version,
+                FigureScene::SCHEMA_VERSION
+            ));
+        }
+        if self.schema_version < FigureScene::SCHEMA_VERSION
+            && self
+                .plots
+                .iter()
+                .any(|plot| matches!(plot, ScenePlot::Patch { .. }))
+        {
+            return Err(format!(
+                "patch plots require figure scene schema version {}",
+                FigureScene::SCHEMA_VERSION
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -899,25 +916,25 @@ impl ScenePlot {
             },
             PlotElement::Patch(patch) => Self::Patch {
                 vertices: patch
-                    .vertices
+                    .vertices()
                     .iter()
                     .map(|point| vec3_to_xyz(*point))
                     .collect(),
                 faces: patch
-                    .faces
+                    .faces()
                     .iter()
                     .map(|face| face.iter().map(|idx| *idx as u32).collect())
                     .collect(),
-                face_color_rgba: vec4_to_rgba(patch.face_color),
-                edge_color_rgba: vec4_to_rgba(patch.edge_color),
-                face_color_mode: format!("{:?}", patch.face_color_mode),
-                edge_color_mode: format!("{:?}", patch.edge_color_mode),
-                face_alpha: patch.face_alpha,
-                edge_alpha: patch.edge_alpha,
-                line_width: patch.line_width,
+                face_color_rgba: vec4_to_rgba(patch.face_color()),
+                edge_color_rgba: vec4_to_rgba(patch.edge_color()),
+                face_color_mode: format!("{:?}", patch.face_color_mode()),
+                edge_color_mode: format!("{:?}", patch.edge_color_mode()),
+                face_alpha: patch.face_alpha(),
+                edge_alpha: patch.edge_alpha(),
+                line_width: patch.line_width(),
                 axes_index,
-                label: patch.label.clone(),
-                visible: patch.visible,
+                label: patch.label().map(str::to_string),
+                visible: patch.is_visible(),
             },
             PlotElement::Line3(line) => Self::Line3 {
                 x: line.x_data.clone(),
@@ -1280,14 +1297,14 @@ impl ScenePlot {
                     .map(|face| face.into_iter().map(|idx| idx as usize).collect())
                     .collect();
                 let mut patch = PatchPlot::new(vertices, faces)?;
-                patch.face_color = rgba_to_vec4(face_color_rgba);
-                patch.edge_color = rgba_to_vec4(edge_color_rgba);
-                patch.face_color_mode = parse_patch_face_color_mode(&face_color_mode);
-                patch.edge_color_mode = parse_patch_edge_color_mode(&edge_color_mode);
-                patch.face_alpha = face_alpha.clamp(0.0, 1.0);
-                patch.edge_alpha = edge_alpha.clamp(0.0, 1.0);
-                patch.line_width = line_width.max(0.0);
-                patch.label = label;
+                patch.set_face_color(rgba_to_vec4(face_color_rgba));
+                patch.set_edge_color(rgba_to_vec4(edge_color_rgba));
+                patch.set_face_color_mode(parse_patch_face_color_mode(&face_color_mode));
+                patch.set_edge_color_mode(parse_patch_edge_color_mode(&edge_color_mode));
+                patch.set_face_alpha(face_alpha);
+                patch.set_edge_alpha(edge_alpha);
+                patch.set_line_width(line_width);
+                patch.set_label(label);
                 patch.set_visible(visible);
                 figure.add_patch_plot_on_axes(patch, axes_index as usize);
             }
@@ -1812,16 +1829,61 @@ mod tests {
             vec![vec![0, 1, 2]],
         )
         .unwrap();
-        patch.label = Some("tri".into());
+        patch.set_label(Some("tri".into()));
         figure.add_patch_plot(patch);
 
         let scene = FigureScene::capture(&figure);
+        assert_eq!(scene.schema_version, FigureScene::SCHEMA_VERSION);
+        assert!(matches!(scene.plots.first(), Some(ScenePlot::Patch { .. })));
         let rebuilt = scene.into_figure().expect("patch scene restore");
         let Some(PlotElement::Patch(patch)) = rebuilt.plots().next() else {
             panic!("expected patch plot");
         };
-        assert_eq!(patch.faces, vec![vec![0, 1, 2]]);
-        assert_eq!(patch.label.as_deref(), Some("tri"));
+        assert_eq!(patch.faces(), &[vec![0, 1, 2]]);
+        assert_eq!(patch.label(), Some("tri"));
+    }
+
+    #[test]
+    fn figure_scene_rejects_invalid_schema_versions() {
+        let mut scene = FigureScene::capture(&Figure::new());
+        scene.schema_version = 0;
+        let err = scene.clone().into_figure().expect_err("schema 0 must fail");
+        assert!(err.contains("unsupported figure scene schema version 0"));
+
+        scene.schema_version = FigureScene::SCHEMA_VERSION + 1;
+        let err = scene.into_figure().expect_err("future schema must fail");
+        assert!(err.contains(&format!(
+            "unsupported figure scene schema version {}",
+            FigureScene::SCHEMA_VERSION + 1
+        )));
+    }
+
+    #[test]
+    fn figure_scene_rejects_patch_in_older_schema() {
+        let mut figure = Figure::new();
+        figure.add_patch_plot(
+            PatchPlot::new(
+                vec![
+                    Vec3::new(0.0, 0.0, 0.0),
+                    Vec3::new(1.0, 0.0, 0.0),
+                    Vec3::new(0.0, 1.0, 0.0),
+                ],
+                vec![vec![0, 1, 2]],
+            )
+            .unwrap(),
+        );
+
+        let mut scene = FigureScene::capture(&figure);
+        assert!(matches!(scene.plots.first(), Some(ScenePlot::Patch { .. })));
+        scene.schema_version = FigureScene::SCHEMA_VERSION - 1;
+
+        let err = scene
+            .into_figure()
+            .expect_err("older patch schema must fail");
+        assert!(err.contains(&format!(
+            "patch plots require figure scene schema version {}",
+            FigureScene::SCHEMA_VERSION
+        )));
     }
 
     #[test]
