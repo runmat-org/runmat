@@ -1,6 +1,6 @@
 # Deliverable Audit
 
-Date: 2026-05-19
+Date: 2026-05-20
 
 This audit maps the active objective to concrete repository evidence and marks each item as `met`, `partial`, or `open`.
 
@@ -113,6 +113,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - VM slice-read result materialization in [read_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/read_slice.rs) now maps constructor shape failures through stable `RunMat:ShapeMismatch` identifier contracts (instead of string-shaped `"Slice error: ..."` conversion surfaces), with direct unit coverage for plan/result-shape mismatch paths (`tensor_slice_plan_shape_mismatch_reports_identifier`, `string_slice_plan_shape_mismatch_reports_identifier`, `complex_slice_plan_shape_mismatch_reports_identifier`).
   - VM `IndexSliceExpr` runtime dispatch in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now preserves typed runtime errors from slice-read helpers (tensor/complex/string) by removing stringifying `map_err(format!(...))` wrappers, avoiding identifier loss on dispatch boundaries.
   - VM `StoreSliceExpr` runtime dispatch in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now also preserves typed runtime errors from complex/string RHS view/scatter helpers by removing stringifying `map_err(format!(...))` wrappers, avoiding identifier loss for slice-assignment shape/type contracts.
+  - VM non-expr `IndexSlice`/`StoreSlice` runtime dispatch in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now preserves incoming identifiers when adding slice-context text (`map_slice_plan_error`) and removes remaining stringifying wrappers on complex/gpu/string selector/RHS paths, preventing dispatch-layer identifier erasure outside `*Expr` instructions.
   - compile-level ratchets now assert these contracts in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_rejects_unsupported_mir_unary_operator_with_identifier`
     - `primary_compile_rejects_unsupported_mir_binary_operator_with_identifier`

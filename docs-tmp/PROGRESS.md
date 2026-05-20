@@ -12,6 +12,18 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM slice dispatch context-wrapping identifier-preservation ratchet
+  - `scope: in-scope`
+  - Updated runtime error context wrapping in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) so `map_slice_plan_error` preserves incoming `RuntimeError.identifier()` while adding dispatch context text.
+  - Removed remaining stringifying wrappers in non-expr `IndexSlice`/`StoreSlice` complex/gpu/string and selector/RHS paths that previously downgraded typed runtime errors to message-only errors.
+  - Validation:
+    - `cargo test -p runmat-vm mixed_range_end_assign_shape_mismatch_error -- --nocapture`
+    - `cargo test -p runmat-vm --lib tensor_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib string_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib complex_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM slice-expr assignment dispatch identifier-preservation ratchet
   - `scope: in-scope`
   - Removed stringifying `map_err(format!(...))` wrappers in `StoreSliceExpr` dispatch path in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) for complex/string RHS view and scatter operations, so identifiers from `write_slice` helpers propagate unchanged.

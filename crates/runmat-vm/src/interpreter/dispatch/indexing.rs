@@ -15,12 +15,16 @@ use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
 use crate::interpreter::dispatch::calls::normalize_requested_outputs;
 use runmat_builtins::{CellArray, Value};
-use runmat_runtime::RuntimeError;
+use runmat_runtime::{build_runtime_error, RuntimeError};
 use std::future::Future;
 use std::pin::Pin;
 
 fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
-    format!("{context}: {}", err.message()).into()
+    let mut builder = build_runtime_error(format!("{context}: {}", err.message()));
+    if let Some(identifier) = err.identifier() {
+        builder = builder.with_identifier(identifier.to_string());
+    }
+    builder.build()
 }
 
 fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Option<RuntimeError> {
@@ -881,8 +885,7 @@ pub async fn dispatch_indexing(
                         *end_mask,
                         &numeric,
                     )
-                    .await
-                    .map_err(|e| format!("slice: {e}"))?,
+                    .await?,
                 ),
                 Value::GpuTensor(handle) => stack.push(
                     idx_read_slice::read_gpu_slice(
@@ -892,8 +895,7 @@ pub async fn dispatch_indexing(
                         *end_mask,
                         &numeric,
                     )
-                    .await
-                    .map_err(|e| format!("slice: {e}"))?,
+                    .await?,
                 ),
                 Value::StringArray(sa) => stack.push(
                     idx_read_slice::read_string_slice(&sa, *dims, *colon_mask, *end_mask, &numeric)
@@ -1068,7 +1070,7 @@ pub async fn dispatch_indexing(
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ct.shape)
                             .await
-                            .map_err(|e| format!("slice assign: {e}"))?;
+                            .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     let plan = build_index_plan(&selectors, *dims, &ct.shape)
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     if delete {
@@ -1081,16 +1083,16 @@ pub async fn dispatch_indexing(
                     }
                     let rhs_view =
                         idx_write_slice::build_complex_rhs_view(&rhs, &plan.selection_lengths)
-                            .map_err(|e| format!("slice assign: {e}"))?;
+                            .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     idx_write_slice::scatter_complex_with_plan(&mut ct, &plan, &rhs_view)
-                        .map_err(|e| format!("slice assign: {e}"))?;
+                        .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     stack.push(Value::ComplexTensor(ct));
                 }
                 Value::Cell(ca) => {
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ca.shape)
                             .await
-                            .map_err(|e| format!("cell slice assign: {e}"))?;
+                            .map_err(|e| map_slice_plan_error("cell slice assign", e))?;
                     let plan = build_index_plan(&selectors, *dims, &ca.shape)
                         .map_err(|e| map_slice_plan_error("cell slice assign", e))?;
                     let selected: Vec<usize> =
@@ -1111,7 +1113,7 @@ pub async fn dispatch_indexing(
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
                             .await
-                            .map_err(|e| format!("slice assign: {e}"))?;
+                            .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     let plan = build_index_plan(&selectors, *dims, &sa.shape)
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     if plan.indices.is_empty() {
@@ -1120,9 +1122,9 @@ pub async fn dispatch_indexing(
                     }
                     let rhs_view =
                         idx_write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)
-                            .map_err(|e| format!("slice assign: {e}"))?;
+                            .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     idx_write_slice::scatter_string_with_plan(&mut sa, &plan, &rhs_view)
-                        .map_err(|e| format!("slice assign: {e}"))?;
+                        .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     stack.push(Value::StringArray(sa));
                 }
                 other => {
