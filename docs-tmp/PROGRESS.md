@@ -12,6 +12,18 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- MIR scalar-plan range/end normalization ratchet
+  - `scope: in-scope`
+  - Tightened VM compile invariants in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) so `MirIndexPlan::Scalar` now rejects selector operands that encode range/end expression semantics; these selectors must lower through `IndexSliceExpr`.
+  - Added compile-level identifier-contract coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_scalar_plan_with_range_expr_component_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_scalar_plan_with_range_expr_component_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - MIR method-call callee invariant ratchet
   - `scope: in-scope`
   - Tightened VM compile invariants in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) so MIR method-syntax calls (`Method`/`DottedInvoke`) now reject non-static or semantic-function callees with stable identifier `RunMat:MirMethodCallCalleeInvalid` instead of falling through dynamic-call lowering.

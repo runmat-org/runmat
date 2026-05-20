@@ -2267,6 +2267,15 @@ impl Compiler {
                     .compile_error("scalar index lowering expects expression selectors only")
                     .with_identifier(IDENT_MIR_SCALAR_INDEX_PLAN_INVALID));
             };
+            if self.mir_operand_range_end_spec(operand).is_some()
+                || self.mir_operand_end_expr(operand).is_some()
+            {
+                return Err(self
+                    .compile_error(
+                        "scalar index lowering invariant violated: range/end selectors must lower through IndexSliceExpr",
+                    )
+                    .with_identifier(IDENT_MIR_SCALAR_INDEX_PLAN_INVALID));
+            }
             self.compile_mir_operand(operand)?;
         }
         Ok(())
