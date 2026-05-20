@@ -63,16 +63,14 @@ roots = []
     let err = parsed
         .validate(std::path::Path::new("."))
         .expect_err("validation should reject empty package name and empty source roots");
-    assert!(
-        err.messages
-            .iter()
-            .any(|msg| msg == "[package].name is required and must be non-empty")
-    );
-    assert!(
-        err.messages
-            .iter()
-            .any(|msg| msg == "[sources].roots is required and must be non-empty")
-    );
+    assert!(err
+        .messages
+        .iter()
+        .any(|msg| msg == "[package].name is required and must be non-empty"));
+    assert!(err
+        .messages
+        .iter()
+        .any(|msg| msg == "[sources].roots is required and must be non-empty"));
 }
 
 #[test]
@@ -96,12 +94,10 @@ path = "src/main"
     let ProjectManifestLoadError::Validation { source, .. } = err else {
         panic!("expected validation error");
     };
-    assert!(
-        source
-            .messages
-            .iter()
-            .any(|msg| msg.contains("source root `src`"))
-    );
+    assert!(source
+        .messages
+        .iter()
+        .any(|msg| msg.contains("source root `src`")));
 }
 
 #[test]
@@ -158,12 +154,10 @@ function = "run"
     let ProjectManifestLoadError::Validation { source, .. } = err else {
         panic!("expected validation error");
     };
-    assert!(
-        source
-            .messages
-            .iter()
-            .any(|msg| msg.contains("duplicate entrypoint name `main`"))
-    );
+    assert!(source
+        .messages
+        .iter()
+        .any(|msg| msg.contains("duplicate entrypoint name `main`")));
 }
 
 #[test]
@@ -790,9 +784,7 @@ dep_missing = { path = "dep_missing" }
         panic!("expected missing dependency manifest error");
     };
     assert_eq!(dependency, "dep_missing");
-    assert!(path.ends_with(
-        std::path::Path::new("dep_missing").join(PROJECT_MANIFEST_FILENAME)
-    ));
+    assert!(path.ends_with(std::path::Path::new("dep_missing").join(PROJECT_MANIFEST_FILENAME)));
 }
 
 #[test]

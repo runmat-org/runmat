@@ -1217,9 +1217,9 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use super::source_input_text;
     #[cfg(not(target_arch = "wasm32"))]
-    use crate::RunError;
-    #[cfg(not(target_arch = "wasm32"))]
     use crate::abi::SourceInput;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::RunError;
     #[cfg(not(target_arch = "wasm32"))]
     use std::fs;
     #[cfg(not(target_arch = "wasm32"))]
@@ -1316,7 +1316,10 @@ function = "main"
         let RunError::Runtime(runtime_err) = err else {
             panic!("expected runtime error");
         };
-        assert_eq!(runtime_err.identifier.as_deref(), Some("RunMat:EntrypointResolveFailed"));
+        assert_eq!(
+            runtime_err.identifier.as_deref(),
+            Some("RunMat:EntrypointResolveFailed")
+        );
     }
 
     #[test]

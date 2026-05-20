@@ -169,8 +169,7 @@ fn compile_fusion_plan_exposes_semantic_planner_metadata() {
         .expect("expected at least one fusion group for regression script");
 
     assert_eq!(
-        snapshot.planner.source,
-        "semantic-mir-analysis",
+        snapshot.planner.source, "semantic-mir-analysis",
         "unexpected planner source tag"
     );
     assert_eq!(
@@ -220,8 +219,7 @@ fn runtime_fusion_snapshot_exposes_semantic_planner_metadata() {
         .expect("expected runtime fusion plan snapshot");
 
     assert_eq!(
-        snapshot.planner.source,
-        "semantic-mir-analysis-runtime",
+        snapshot.planner.source, "semantic-mir-analysis-runtime",
         "unexpected runtime planner source tag"
     );
     assert_eq!(
