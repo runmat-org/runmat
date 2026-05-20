@@ -668,7 +668,6 @@ impl Callable {
                     runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
                     args.to_vec(),
                     1,
-                    user_functions::SemanticCallableKind::Arrayfun,
                 );
                 if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
                     return result;
@@ -681,7 +680,6 @@ impl Callable {
                     runmat_hir::CallableFallbackPolicy::ExternalBoundary,
                     args.to_vec(),
                     1,
-                    user_functions::SemanticCallableKind::Arrayfun,
                 );
                 if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
                     return result;
@@ -699,7 +697,6 @@ impl Callable {
                         function,
                         merged.clone(),
                         1,
-                        user_functions::SemanticCallableKind::Arrayfun,
                     );
                     if let Some(result) =
                         user_functions::try_call_semantic_descriptor(request).await

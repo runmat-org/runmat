@@ -197,7 +197,6 @@ async fn dispatch_callable_with_policy(
         fallback_policy,
         args.clone(),
         requested_outputs,
-        crate::user_functions::SemanticCallableKind::Other,
     );
     if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await {
         return result;
@@ -1296,7 +1295,6 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                 function,
                 rest.clone(),
                 requested_outputs,
-                crate::user_functions::SemanticCallableKind::Feval,
             );
             if let Some(result) = crate::user_functions::try_call_semantic_descriptor(request).await
             {
@@ -1315,7 +1313,6 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                     function,
                     args.clone(),
                     requested_outputs,
-                    crate::user_functions::SemanticCallableKind::Feval,
                 );
                 if let Some(result) =
                     crate::user_functions::try_call_semantic_descriptor(request).await
@@ -2005,7 +2002,6 @@ mod tests {
             runmat_hir::CallableFallbackPolicy::None,
             vec![Value::Num(4.0)],
             1,
-            crate::user_functions::SemanticCallableKind::Other,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request));
@@ -2034,7 +2030,6 @@ mod tests {
             runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
-            crate::user_functions::SemanticCallableKind::Other,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
@@ -2065,7 +2060,6 @@ mod tests {
             runmat_hir::CallableFallbackPolicy::ObjectDispatch,
             vec![Value::Num(4.0)],
             1,
-            crate::user_functions::SemanticCallableKind::Other,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request));
@@ -2094,7 +2088,6 @@ mod tests {
             runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
-            crate::user_functions::SemanticCallableKind::Other,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request));
@@ -2124,7 +2117,6 @@ mod tests {
             runmat_hir::CallableFallbackPolicy::ExternalBoundary,
             vec![Value::Num(4.0)],
             1,
-            crate::user_functions::SemanticCallableKind::Other,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
@@ -2155,7 +2147,6 @@ mod tests {
             runmat_hir::CallableFallbackPolicy::ExternalBoundary,
             vec![Value::Num(4.0)],
             1,
-            crate::user_functions::SemanticCallableKind::Other,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request));
@@ -2184,7 +2175,6 @@ mod tests {
             runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
-            crate::user_functions::SemanticCallableKind::Other,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
@@ -2215,7 +2205,6 @@ mod tests {
             runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
-            crate::user_functions::SemanticCallableKind::Other,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
@@ -2253,7 +2242,6 @@ mod tests {
             runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
             vec![Value::Num(4.0)],
             1,
-            crate::user_functions::SemanticCallableKind::Other,
         );
 
         let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))

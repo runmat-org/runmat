@@ -449,7 +449,6 @@ async fn execute_resolved_callable(
                 fallback_policy,
                 args.clone(),
                 requested_outputs,
-                runmat_runtime::user_functions::SemanticCallableKind::Other,
             );
             if let Some(result) =
                 runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
@@ -498,7 +497,6 @@ async fn try_execute_resolved_callable(
                 fallback_policy,
                 args.clone(),
                 requested_outputs,
-                runmat_runtime::user_functions::SemanticCallableKind::Other,
             );
             if let Some(result) =
                 runmat_runtime::user_functions::try_call_semantic_descriptor(request).await
@@ -648,7 +646,7 @@ mod tests {
     #[test]
     fn external_name_descriptor_external_boundary_can_use_semantic_resolver() {
         let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
-            Some(Arc::new(|name| (name == "remote_inc").then_some(7777))),
+            Some(Arc::new(|name| (name == "pkg.remote_inc").then_some(7777))),
         );
         let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
             Some(Arc::new(|function, args, requested_outputs| {
@@ -659,9 +657,10 @@ mod tests {
             })),
         );
         let descriptor = CallableDescriptor::resolved(
-            CallableIdentity::ExternalName(QualifiedName(vec![SymbolName(
-                "remote_inc".to_string(),
-            )])),
+            CallableIdentity::ExternalName(QualifiedName(vec![
+                SymbolName("pkg".to_string()),
+                SymbolName("remote_inc".to_string()),
+            ])),
             vec![Value::Num(2.0)],
             1,
             CallableFallbackPolicy::ExternalBoundary,

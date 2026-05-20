@@ -12,36 +12,21 @@ pub type SemanticFunctionInvoker =
     dyn Fn(usize, &[Value], usize) -> UserFunctionFuture + Send + Sync;
 pub type SemanticFunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SemanticCallableKind {
-    Feval,
-    Cellfun,
-    Arrayfun,
-    Other,
-}
-
 #[derive(Debug, Clone)]
 pub struct SemanticCallableRequest {
     identity: CallableIdentity,
     fallback_policy: CallableFallbackPolicy,
     args: Vec<Value>,
     requested_outputs: usize,
-    kind: SemanticCallableKind,
 }
 
 impl SemanticCallableRequest {
-    pub fn semantic(
-        function: usize,
-        args: Vec<Value>,
-        requested_outputs: usize,
-        kind: SemanticCallableKind,
-    ) -> Self {
+    pub fn semantic(function: usize, args: Vec<Value>, requested_outputs: usize) -> Self {
         Self {
             identity: CallableIdentity::SemanticFunction(runmat_hir::FunctionId(function)),
             fallback_policy: CallableFallbackPolicy::None,
             args,
             requested_outputs,
-            kind,
         }
     }
 
@@ -50,14 +35,12 @@ impl SemanticCallableRequest {
         fallback_policy: CallableFallbackPolicy,
         args: Vec<Value>,
         requested_outputs: usize,
-        kind: SemanticCallableKind,
     ) -> Self {
         Self {
             identity,
             fallback_policy,
             args,
             requested_outputs,
-            kind,
         }
     }
 }
@@ -151,7 +134,6 @@ pub async fn try_call_semantic_descriptor(
         fallback_policy,
         args,
         requested_outputs,
-        kind: _kind,
     } = request;
     if let CallableIdentity::SemanticFunction(function) = identity {
         return try_call_semantic_function(function.0, &args, requested_outputs).await;

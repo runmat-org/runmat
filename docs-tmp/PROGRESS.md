@@ -12,6 +12,25 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime callable-request ABI placeholder removal
+  - `scope: in-scope`
+  - Removed dead policy placeholder surface from runtime semantic callback request ABI:
+    - dropped `SemanticCallableKind` and `kind` field from [user_functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/user_functions.rs) (`SemanticCallableRequest` now carries only enforced fields: identity, fallback policy, args, requested outputs).
+    - updated all semantic descriptor callsites in runtime and VM call layer:
+      - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs)
+      - [cellfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/cells/core/cellfun.rs)
+      - [arrayfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs)
+      - [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs)
+  - Maintained external-boundary policy contract by updating VM descriptor semantic-resolver coverage to use a well-formed qualified external identity (`pkg.remote_inc`) in `external_name_descriptor_external_boundary_can_use_semantic_resolver`.
+  - Validation:
+    - `cargo test -p runmat-vm --lib external_name_descriptor_external_boundary_can_use_semantic_resolver -- --nocapture`
+    - `cargo test -p runmat-runtime cellfun_external_handle_uses_semantic_resolver -- --nocapture`
+    - `cargo test -p runmat-runtime arrayfun_external_handle_uses_semantic_resolver -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime callable-descriptor semantic-name resolution policy parity ratchet
   - `scope: in-scope`
   - Aligned semantic resolver eligibility with VM fallback-name eligibility across callable identity categories:
