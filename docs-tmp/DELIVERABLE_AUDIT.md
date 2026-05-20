@@ -97,6 +97,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `RunMat:MirIndexContextInvalid` for invalid MIR read-index result contexts at compile boundaries.
     - `RunMat:MirMultiAssignOutputCountMismatch` for MIR multi-assign call output-count invariants.
     - `RunMat:MirDeleteAssignmentRhsInvalid` for MIR delete-assignment invariants where delete markers must carry explicit empty tensor-literal RHS at compile boundaries.
+    - `RunMat:MirDeleteAssignmentPlaceMismatch` for MIR delete-assignment invariants where delete mutation targets must match following assign targets.
     - `RunMat:MirCallFallbackPolicyUnsupported` for unsupported static-call fallback policies.
     - `RunMat:MirMethodFallbackPolicyUnsupported` for unsupported method-call fallback policies.
     - `RunMat:MirMethodCallReceiverMissing` for method-call receiver arg invariants.
@@ -131,6 +132,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `primary_compile_rejects_invalid_read_index_context_with_identifier`
     - `primary_compile_rejects_multi_assign_call_output_count_mismatch_with_identifier`
     - `primary_compile_rejects_nonempty_delete_rhs_with_identifier`
+    - `primary_compile_rejects_delete_place_mismatch_with_identifier`
     - `primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier`
     - `primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier`
     - `primary_compile_rejects_missing_mir_method_call_receiver_with_identifier`

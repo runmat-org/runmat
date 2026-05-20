@@ -94,6 +94,7 @@ const IDENT_MIR_INDEX_CONTEXT_INVALID: &str = "RunMat:MirIndexContextInvalid";
 const IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH: &str =
     "RunMat:MirMultiAssignOutputCountMismatch";
 const IDENT_MIR_DELETE_ASSIGNMENT_RHS_INVALID: &str = "RunMat:MirDeleteAssignmentRhsInvalid";
+const IDENT_MIR_DELETE_ASSIGNMENT_PLACE_MISMATCH: &str = "RunMat:MirDeleteAssignmentPlaceMismatch";
 const IDENT_MIR_AGGREGATE_SHAPE_INVALID: &str = "RunMat:MirAggregateShapeInvalid";
 const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
 const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
@@ -880,18 +881,28 @@ impl Compiler {
         Ok(())
     }
 
-    fn take_assign_delete_flag(&mut self, place: &MirPlace) -> bool {
+    fn take_assign_delete_flag(&mut self, place: &MirPlace) -> Result<bool, CompileError> {
         let Some(mutation) = self.pending_place_mutation.take() else {
-            return false;
+            return Ok(false);
         };
-        mutation.place == *place && matches!(mutation.kind, runmat_hir::PlaceMutationKind::Delete)
+        if !matches!(mutation.kind, runmat_hir::PlaceMutationKind::Delete) {
+            return Ok(false);
+        }
+        if mutation.place != *place {
+            return Err(self
+                .compile_error(
+                    "MIR delete assignment invariant violated: place mutation target must match assign target",
+                )
+                .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_PLACE_MISMATCH));
+        }
+        Ok(true)
     }
 
     fn compile_mir_stmt(&mut self, stmt: &MirStmt) -> Result<(), CompileError> {
         let _span_guard = SpanGuard::new(self, stmt.span);
         match &stmt.kind {
             MirStmtKind::Assign { place, value } => {
-                let delete = self.take_assign_delete_flag(place);
+                let delete = self.take_assign_delete_flag(place)?;
                 self.compile_mir_assign(place, value, delete)
             }
             MirStmtKind::Expr(value) => {
