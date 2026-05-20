@@ -1355,6 +1355,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This keeps semicolon-suppression behavior checks aligned to runtime value contracts rather than display formatting.
   - Validation: `cargo test -p runmat-core --test semicolon_suppression test_matrix_semicolon_suppression -- --nocapture`.
 
+- (pending commit) Plan 5 core dependency-symbol composition ratchet
+  - Added `discover_known_project_symbols_includes_dependency_alias_qualified_names` in `crates/runmat-core/src/session/run.rs`.
+  - The test asserts core-known-symbol discovery (used by eval-hook parse/lower context) includes dependency package and dependency-alias qualified symbols from `runmat.toml` composition (`summarize`, `statslib.summarize`, `statsdep.summarize`).
+  - This strengthens manifest/composition-graph evidence at the core session boundary, not only in `runmat-config` unit tests.
+  - Validation: `cargo test -p runmat-core discover_known_project_symbols_includes_dependency_alias_qualified_names -- --nocapture`.
+
 ## Next Resolution Items
 
 - Finish converting remaining legacy test/doc references that imply removed APIs where they block semantic-only confidence.

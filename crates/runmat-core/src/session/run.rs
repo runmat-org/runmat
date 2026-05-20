@@ -1351,4 +1351,64 @@ roots = ["."]
             "source-context discovery should include project symbols for eval-hook lowering"
         );
     }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn discover_known_project_symbols_includes_dependency_alias_qualified_names() {
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dep_root = tmp.path().join("deps/statslib");
+        fs::create_dir_all(&dep_root).unwrap();
+        fs::write(
+            tmp.path().join("runmat.toml"),
+            r#"
+[package]
+name = "demo"
+
+[sources]
+roots = ["."]
+
+[dependencies]
+statsdep = { path = "deps/statslib" }
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dep_root.join("runmat.toml"),
+            r#"
+[package]
+name = "statslib"
+
+[sources]
+roots = ["."]
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dep_root.join("summarize.m"),
+            "function y = summarize(x); y = x; end",
+        )
+        .unwrap();
+        fs::write(tmp.path().join("main.m"), "x = 1;").unwrap();
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let symbols = discover_known_project_symbols(Some(
+            tmp.path().join("main.m").to_string_lossy().as_ref(),
+        ));
+
+        std::env::set_current_dir(prev).unwrap();
+        assert!(
+            symbols.contains("summarize"),
+            "expected base dependency symbol in known-project discovery"
+        );
+        assert!(
+            symbols.contains("statslib.summarize"),
+            "expected package-qualified dependency symbol in known-project discovery"
+        );
+        assert!(
+            symbols.contains("statsdep.summarize"),
+            "expected dependency-alias-qualified symbol in known-project discovery"
+        );
+    }
 }
