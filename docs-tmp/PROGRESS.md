@@ -2405,6 +2405,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 slice-plan range-selector end-dependency refinement
+  - Refined VM compile selector-plan invariant in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) so `MirIndexPlan::Slice` rejects only range operands that actually require end-relative expression lowering; concrete range-valued locals without `end` now stay on the non-expr slice path.
+  - This preserves mixed logical-mask + range indexing semantics for 3D slices while keeping `RunMat:MirSliceIndexPlanInvalid` for truly end-dependent selector expressions.
+  - Validation:
+    - `cargo test -p runmat-vm --test indexing_properties mixed_logical_mask_and_range_across_3d -- --nocapture`
+    - `cargo test -p runmat-vm --test indexing_properties -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

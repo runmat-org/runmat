@@ -2297,7 +2297,7 @@ impl Compiler {
                 MirIndexComponent::Colon => colon_mask |= 1u32 << dim,
                 MirIndexComponent::End { offset, .. } if *offset == 0 => end_mask |= 1u32 << dim,
                 MirIndexComponent::Expr(operand)
-                    if self.mir_operand_range_end_spec(operand).is_some()
+                    if self.mir_operand_range_needs_slice_expr(operand)
                         || self.mir_operand_end_expr(operand).is_some() =>
                 {
                     return Err(self
@@ -2528,6 +2528,24 @@ impl Compiler {
             end_expr,
             has_step: step.is_some(),
         })
+    }
+
+    fn mir_operand_range_needs_slice_expr(&self, operand: &MirOperand) -> bool {
+        let Some(MirRvalue::Range { start, step, end }) = self.mir_operand_rvalue(operand) else {
+            return false;
+        };
+        self.mir_operand_end_expr_internal(&start)
+            .map(|(_, has_end)| has_end)
+            .unwrap_or(false)
+            || step
+                .as_ref()
+                .and_then(|value| self.mir_operand_end_expr_internal(value))
+                .map(|(_, has_end)| has_end)
+                .unwrap_or(false)
+            || self
+                .mir_operand_end_expr_internal(&end)
+                .map(|(_, has_end)| has_end)
+                .unwrap_or(false)
     }
 
     fn mir_operand_any_end_expr(&self, operand: &MirOperand) -> Option<EndExpr> {

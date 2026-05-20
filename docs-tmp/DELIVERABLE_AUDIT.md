@@ -106,6 +106,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - VM selector-plan compile invariants now also reject misplaced range/end selector operands in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `MirIndexPlan::Slice` rejects range/end selectors that must lower through `IndexSliceExpr` (`RunMat:MirSliceIndexPlanInvalid`).
     - `MirIndexPlan::Scalar` rejects range/end selector operands that must lower through `IndexSliceExpr` (`RunMat:MirScalarIndexPlanInvalid`).
+  - VM `MirIndexPlan::Slice` compile gating in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) now distinguishes end-dependent range selectors from concrete range-valued locals: only end-dependent range operands are rejected to `IndexSliceExpr`/`RunMat:MirSliceIndexPlanInvalid`, while non-end-dependent local ranges stay on non-expr slice lowering (ratcheted by `mixed_logical_mask_and_range_across_3d` in [indexing_properties.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/indexing_properties.rs)).
   - VM slice-assignment RHS normalization in [write_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/write_slice.rs) now emits stable runtime identifiers for previously string-only error paths:
     - shape mismatch paths emit `RunMat:ShapeMismatch`
     - invalid RHS type paths emit `RunMat:InvalidSliceAssignmentRhs`
