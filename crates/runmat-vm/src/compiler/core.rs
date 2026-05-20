@@ -88,6 +88,7 @@ const IDENT_MIR_CELL_EXPAND_PLAN_INVALID: &str = "RunMat:MirCellExpandPlanInvali
 const IDENT_MIR_PAREN_CELL_PLAN_INVALID: &str = "RunMat:MirParenCellPlanInvalid";
 const IDENT_MIR_SCALAR_INDEX_PLAN_INVALID: &str = "RunMat:MirScalarIndexPlanInvalid";
 const IDENT_MIR_SLICE_INDEX_PLAN_INVALID: &str = "RunMat:MirSliceIndexPlanInvalid";
+const IDENT_MIR_AGGREGATE_SHAPE_INVALID: &str = "RunMat:MirAggregateShapeInvalid";
 const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
 const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
 
@@ -2027,9 +2028,9 @@ impl Compiler {
         elements: &[MirOperand],
     ) -> Result<(), CompileError> {
         if rows.checked_mul(cols) != Some(elements.len()) {
-            return Err(
-                self.compile_error("MIR aggregate shape does not match aggregate element count")
-            );
+            return Err(self
+                .compile_error("MIR aggregate shape does not match aggregate element count")
+                .with_identifier(IDENT_MIR_AGGREGATE_SHAPE_INVALID));
         }
 
         match kind {

@@ -87,9 +87,11 @@ This audit maps the active objective to concrete repository evidence and marks e
   - VM compile-stage MIR rejection paths now also emit stable compile identifiers in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `RunMat:MirOperatorUnsupported` for unsupported MIR operator lowering.
     - `RunMat:MirBuiltinUnknown` for unknown MIR builtin ids.
+    - `RunMat:MirAggregateShapeInvalid` for MIR aggregate shape/count mismatch (`rows * cols != elements.len()`).
   - compile-level ratchets now assert these contracts in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_rejects_unsupported_mir_binary_operator_with_identifier`
     - `primary_compile_rejects_unknown_mir_builtin_id_with_identifier`
+    - `primary_compile_rejects_invalid_mir_aggregate_shape_with_identifier`
 - Gap:
   - designed gaps still open (aggregate edge behavior and selector-plan normalization have both narrowed with early aggregate-shape semantic invariant checks plus compile-stage selector-plan invariant identifiers/ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 
