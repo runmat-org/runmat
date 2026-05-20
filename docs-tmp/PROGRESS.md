@@ -17,8 +17,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Tightened VM compile invariants in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) so MIR method-syntax calls (`Method`/`DottedInvoke`) now reject non-static or semantic-function callees with stable identifier `RunMat:MirMethodCallCalleeInvalid` instead of falling through dynamic-call lowering.
   - Added compile-level identifier-contract coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_rejects_invalid_mir_method_call_callee_with_identifier`
+    - `primary_compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier`
   - Validation:
     - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_mir_method_call_callee_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`

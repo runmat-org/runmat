@@ -114,6 +114,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier`
     - `primary_compile_rejects_missing_mir_method_call_receiver_with_identifier`
     - `primary_compile_rejects_invalid_mir_method_call_callee_with_identifier`
+    - `primary_compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier`
     - `primary_compile_rejects_slice_plan_with_range_expr_component_with_identifier`
 - Gap:
   - designed gaps still open (aggregate edge behavior and selector-plan normalization have both narrowed with early aggregate-shape semantic invariant checks plus compile-stage selector-plan invariant identifiers/ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
