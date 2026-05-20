@@ -1303,10 +1303,7 @@ pub async fn dispatch_indexing(
                         vars,
                     )
                     .await?;
-                    stack.push(
-                        idx_read_slice::read_complex_slice_from_plan(&t, &vm_plan)
-                            .map_err(|e| format!("Slice error: {e}"))?,
-                    );
+                    stack.push(idx_read_slice::read_complex_slice_from_plan(&t, &vm_plan)?);
                 }
                 Value::Tensor(t) => {
                     let vm_plan = build_expr_slice_plan(
@@ -1323,10 +1320,7 @@ pub async fn dispatch_indexing(
                         vars,
                     )
                     .await?;
-                    stack.push(
-                        idx_read_slice::read_tensor_slice_from_plan(&t, &vm_plan)
-                            .map_err(|e| format!("Slice error: {e}"))?,
-                    );
+                    stack.push(idx_read_slice::read_tensor_slice_from_plan(&t, &vm_plan)?);
                 }
                 Value::StringArray(sa) => {
                     let vm_plan = build_expr_slice_plan(
@@ -1343,10 +1337,7 @@ pub async fn dispatch_indexing(
                         vars,
                     )
                     .await?;
-                    stack.push(
-                        idx_read_slice::gather_string_slice(&sa, &vm_plan)
-                            .map_err(|e| format!("slice: {e}"))?,
-                    );
+                    stack.push(idx_read_slice::gather_string_slice(&sa, &vm_plan)?);
                 }
                 Value::Cell(ca) => {
                     let vm_plan = build_expr_slice_plan(

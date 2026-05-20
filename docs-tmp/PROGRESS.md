@@ -12,6 +12,19 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM slice-expr dispatch identifier-preservation ratchet
+  - `scope: in-scope`
+  - Removed stringifying `map_err(format!(...))` wrappers in `IndexSliceExpr` dispatch path in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) for tensor/complex/string slice reads, so identifiers returned by plan/read helpers propagate unchanged through runtime dispatch.
+  - This keeps `RunMat:ShapeMismatch` and other typed slice-read identifiers intact instead of downgrading them to message-only runtime errors.
+  - Validation:
+    - `cargo test -p runmat-vm --lib tensor_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib string_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib complex_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - MIR function-handle runtime-name identifier ratchet
   - `scope: in-scope`
   - Added stable VM compile identifier for malformed/unnamable external/imported/method function-handle targets in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
