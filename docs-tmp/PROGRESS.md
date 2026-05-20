@@ -2654,6 +2654,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 `feval` handle-variant descriptor execution ratchet
+  - Added VM callable-descriptor coverage in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
+    - `feval_external_function_handle_can_use_semantic_resolver`
+    - `feval_semantic_function_handle_prefers_embedded_function_id`
+  - This closes two previously unratcheted `from_feval_value` handle branches:
+    - `Value::ExternalFunctionHandle` now has explicit external-boundary semantic-resolver execution coverage
+    - `Value::SemanticFunctionHandle` now has explicit embedded semantic-function-id precedence coverage over runtime name resolver mapping
+  - Validation:
+    - `cargo test -p runmat-vm --lib call::descriptor::tests::feval_external_function_handle_can_use_semantic_resolver -- --nocapture`
+    - `cargo test -p runmat-vm --lib call::descriptor::tests::feval_semantic_function_handle_prefers_embedded_function_id -- --nocapture`
+    - `cargo test -p runmat-vm --lib call::descriptor::tests::feval_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - (pending commit) Plan 3 feval multi-output instruction-shape ratchet
   - Added VM functions coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `semantic_feval_multi_assign_uses_typed_instruction`
