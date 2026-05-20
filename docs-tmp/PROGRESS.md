@@ -1410,6 +1410,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This keeps runtime fallback semantics aligned with stack-layout-sensitive fusion planning behavior and further reduces compile-group dependence.
   - Validation: `cargo test -p runmat-vm runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing -- --nocapture`, `cargo test -p runmat-vm runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty -- --nocapture`, `cargo test -p runmat-vm primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`, `cargo check -p runmat-vm --features native-accel`.
 
+- (pending commit) Plan 7 shared runtime graph materialization for core/VM fusion surfaces
+  - Moved runtime accel-graph-on-demand helper into shared bytecode API: `Bytecode::runtime_accel_graph_for_fusion` in `crates/runmat-vm/src/bytecode/program.rs`.
+  - VM interpreter fusion planning and core fusion snapshot paths now both consume the shared materialization + graph-aware group helpers, aligning compile-preview/runtime diagnostics with actual runtime planning behavior when compile graph artifacts are missing.
+  - Updated:
+    - `crates/runmat-vm/src/interpreter/state.rs`
+    - `crates/runmat-core/src/session/compile.rs`
+    - `crates/runmat-core/src/session/run.rs`
+  - Validation: `cargo test -p runmat-vm runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing -- --nocapture`, `cargo test -p runmat-vm runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_candidates_without_bytecode_groups -- --nocapture`, `cargo check -p runmat-core`, `cargo check -p runmat-vm --features native-accel`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

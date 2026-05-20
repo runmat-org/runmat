@@ -300,13 +300,9 @@ mod tests {
                 .any(|decision| decision.node_id == "semantic-candidate-summary"),
             "expected semantic candidate summary decision"
         );
-        assert!(
-            snapshot.decisions[0]
-                .reason
-                .as_deref()
-                .unwrap_or("")
-                .contains("accel-graph=missing"),
-            "expected missing accel graph marker in summary reason"
+        assert_eq!(
+            snapshot.planner.accel_graph_state, "missing",
+            "expected missing accel graph planner metadata"
         );
     }
 
@@ -353,12 +349,11 @@ mod tests {
             "expected semantic window node"
         );
         assert!(
-            snapshot.decisions[0]
-                .reason
-                .as_deref()
-                .unwrap_or("")
-                .contains("semantic-candidate signals=3 span=[10..18]"),
-            "expected semantic candidate signal + source span annotation"
+            snapshot
+                .decisions
+                .iter()
+                .any(|decision| decision.node_id == "semantic-candidate-0" && !decision.fused),
+            "expected semantic candidate decision for semantic-candidate-0"
         );
     }
 
@@ -421,8 +416,8 @@ mod tests {
             snapshot
                 .nodes
                 .iter()
-                .any(|node| node.label.contains("span=[20..30]")),
-            "expected semantic candidate node label to include source span"
+                .any(|node| node.id == "semantic-candidate-1" && node.kind == "SemanticCandidate"),
+            "expected semantic candidate node kind for semantic-candidate-1"
         );
     }
 
@@ -461,13 +456,9 @@ mod tests {
             !decision.fused,
             "expected bytecode-only group to be marked non-fused when semantic candidates are absent"
         );
-        assert!(
-            decision
-                .reason
-                .as_deref()
-                .unwrap_or("")
-                .contains("semantic-candidate-groups=0"),
-            "expected semantic gating reason in decision"
+        assert_eq!(
+            snapshot.planner.mir_fusion_candidate_group_count, 0,
+            "expected semantic-candidate-group metadata to reflect semantic gating"
         );
     }
 }

@@ -1,4 +1,6 @@
 #[cfg(feature = "native-accel")]
+use crate::accel::graph::build_accel_graph;
+#[cfg(feature = "native-accel")]
 use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
 use crate::bytecode::instr::Instr;
 use crate::layout::VmAssemblyLayout;
@@ -355,6 +357,23 @@ impl Bytecode {
         }
         groups
     }
+
+    #[cfg(feature = "native-accel")]
+    pub fn runtime_accel_graph_for_fusion(
+        &self,
+        runtime_groups: &[FusionGroup],
+    ) -> Option<AccelGraph> {
+        if self.accel_graph.is_some()
+            || runtime_groups.is_empty()
+            || self
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_group_count
+                == 0
+        {
+            return None;
+        }
+        Some(build_accel_graph(&self.instructions, &self.var_types))
+    }
 }
 
 #[cfg(all(test, feature = "native-accel"))]
@@ -414,5 +433,42 @@ mod tests {
         assert_eq!(groups[0].nodes, vec![1]);
         assert_eq!(groups[0].span.start, 5);
         assert_eq!(groups[0].span.end, 5);
+    }
+
+    #[test]
+    fn runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing() {
+        let mut bytecode = Bytecode::empty();
+        bytecode.instructions = vec![crate::Instr::Add];
+        bytecode.var_types = vec![
+            runmat_builtins::Type::Num,
+            runmat_builtins::Type::Num,
+            runmat_builtins::Type::Num,
+        ];
+        bytecode
+            .semantic_fusion_metadata
+            .mir_fusion_candidate_group_count = 1;
+        bytecode
+            .semantic_fusion_metadata
+            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
+            span: InstrSpan { start: 0, end: 0 },
+            kind: SemanticFusionInstructionKind::Elementwise,
+        }];
+
+        let runtime_groups = bytecode.runtime_fusion_groups();
+        let graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
+        assert!(
+            graph.is_some(),
+            "runtime graph should be materialized when semantic runtime groups exist and compile graph is missing"
+        );
+    }
+
+    #[test]
+    fn runtime_accel_graph_is_not_materialized_when_runtime_groups_are_empty() {
+        let bytecode = Bytecode::empty();
+        let graph = bytecode.runtime_accel_graph_for_fusion(&[]);
+        assert!(
+            graph.is_none(),
+            "runtime graph materialization should remain gated when semantic runtime groups are absent"
+        );
     }
 }
