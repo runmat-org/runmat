@@ -1408,6 +1408,23 @@ fn semantic_expand_single_output_uses_typed_instruction() {
     )));
 }
 
+#[test]
+fn semantic_expand_multi_output_uses_typed_instruction() {
+    let source = "function [u,v] = pair(a,b); u = a; v = b; end; C = deal(7,8); [x,y] = pair(C{:}); s = x + y;";
+    let bytecode =
+        compile_semantic_source(source).expect("compile semantic expand multi-output source");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallSemanticFunctionExpandMultiOutput(_, specs, out_count)
+            if *out_count == 2 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+
+    let vars = interpret(&bytecode).expect("execute semantic expand multi-output");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 15.0).abs() < 1e-9)));
+}
+
 #[cfg(any(feature = "test-classes", test))]
 #[test]
 fn method_expand_single_output_uses_typed_instruction() {

@@ -2551,6 +2551,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 semantic expanded-call multi-output instruction-shape ratchet
+  - Added VM functions coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `semantic_expand_multi_output_uses_typed_instruction`
+  - This extends semantic expanded-call instruction-shape ratchets from single-output-only to explicit multi-output contracts on semantic function paths, pinning `pair(C{:})` lowering to:
+    - `Instr::CallSemanticFunctionExpandMultiOutput(_, specs, out_count)` with `out_count == 2`
+    - `specs[0].is_expand && specs[0].expand_all`
+  - Runtime behavior is also asserted by execution (`s = x + y == 15`) so bytecode shape and result semantics are both ratcheted.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions semantic_expand_multi_output_uses_typed_instruction -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
