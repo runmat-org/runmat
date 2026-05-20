@@ -511,11 +511,24 @@ fn discrete_response(num: &[f64], den: &[f64], count: usize) -> BuiltinResult<Ve
 async fn plot_response(eval: &StepEval) -> BuiltinResult<()> {
     let t = eval.t_value()?;
     let y = eval.y_value()?;
-    let _ = crate::call_builtin_async("plot", &[t, y]).await?;
+    if let Err(err) = crate::call_builtin_async("plot", &[t, y]).await {
+        if is_nonfatal_plot_setup_error(&err) {
+            return Ok(());
+        }
+        return Err(err);
+    }
     let _ = crate::call_builtin_async("title", &[Value::from("Step Response")]).await;
     let _ = crate::call_builtin_async("xlabel", &[Value::from("Time")]).await;
     let _ = crate::call_builtin_async("ylabel", &[Value::from("Amplitude")]).await;
     Ok(())
+}
+
+fn is_nonfatal_plot_setup_error(err: &RuntimeError) -> bool {
+    let lower = err.to_string().to_ascii_lowercase();
+    lower.contains("plotting is unavailable")
+        || lower.contains("non-main thread")
+        || lower.contains("interactive plotting failed")
+        || lower.contains("eventloop can't be recreated")
 }
 
 fn automatic_final_time(model: &TransferFunction) -> f64 {
