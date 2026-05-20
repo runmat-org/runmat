@@ -371,9 +371,6 @@ impl Bytecode {
         {
             return None;
         }
-        if let Some(graph) = self.accel_graph.clone() {
-            return Some(graph);
-        }
         Some(build_accel_graph(&self.instructions, &self.var_types))
     }
 }
@@ -381,6 +378,7 @@ impl Bytecode {
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
     use super::{Bytecode, SemanticFusionInstructionKind, SemanticFusionInstructionWindow};
+    use runmat_accelerate::graph::{AccelNodeLabel, PrimitiveOp};
     use runmat_accelerate::graph::InstrSpan;
 
     #[test]
@@ -496,6 +494,55 @@ mod tests {
         assert!(
             graph.is_some(),
             "runtime graph should still be materialized when compile graph metadata is present"
+        );
+    }
+
+    #[test]
+    fn runtime_accel_graph_ignores_stale_compile_graph_metadata() {
+        let mut bytecode = Bytecode::empty();
+        bytecode.instructions = vec![
+            crate::Instr::LoadVar(0),
+            crate::Instr::LoadVar(1),
+            crate::Instr::Add,
+        ];
+        bytecode.var_types = vec![
+            runmat_builtins::Type::Num,
+            runmat_builtins::Type::Num,
+            runmat_builtins::Type::Num,
+        ];
+
+        let stale_graph = crate::accel::graph::build_accel_graph(
+            &[crate::Instr::LoadVar(0), crate::Instr::LoadVar(1), crate::Instr::Mul],
+            &bytecode.var_types,
+        );
+        bytecode.accel_graph = Some(stale_graph);
+        bytecode
+            .semantic_fusion_metadata
+            .mir_fusion_candidate_group_count = 1;
+        bytecode
+            .semantic_fusion_metadata
+            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
+            span: InstrSpan { start: 2, end: 2 },
+            kind: SemanticFusionInstructionKind::Elementwise,
+        }];
+
+        let runtime_groups = bytecode.runtime_fusion_groups();
+        let graph = bytecode
+            .runtime_accel_graph_for_fusion(&runtime_groups)
+            .expect("runtime graph should be materialized from active bytecode instructions");
+        assert!(
+            graph.nodes.iter().any(|node| matches!(
+                node.label,
+                AccelNodeLabel::Primitive(PrimitiveOp::Add)
+            )),
+            "runtime graph should reflect active bytecode instructions"
+        );
+        assert!(
+            !graph.nodes.iter().any(|node| matches!(
+                node.label,
+                AccelNodeLabel::Primitive(PrimitiveOp::Mul)
+            )),
+            "stale compile graph metadata should not be reused at runtime"
         );
     }
 

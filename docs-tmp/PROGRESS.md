@@ -6,6 +6,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 runtime fusion graph materialization no longer reuses compile graph metadata
+  - Runtime fusion graph selection in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs) now always materializes from active bytecode instructions (`build_accel_graph`) when semantic runtime groups are present, instead of preferring `bytecode.accel_graph` when that compile-time artifact exists.
+  - Added regression coverage:
+    - `runtime_accel_graph_ignores_stale_compile_graph_metadata`
+  - Contract: runtime fusion planning uses runtime-owned graph materialization, and stale compile graph artifacts cannot override active instruction-derived graph shape.
+  - Validation:
+    - `cargo test -p runmat-vm runtime_accel_graph_ignores_stale_compile_graph_metadata -- --nocapture`
+
 - (pending commit) Plan 7 compile fusion ratchet for multi-window node-assignment boundary
   - Added VM compile regression coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_keeps_multi_window_groups_node_empty_before_runtime_reconciliation`
