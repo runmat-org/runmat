@@ -2613,6 +2613,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 embedded-closure semantic identity precedence ratchet
+  - Added VM callable-descriptor coverage in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
+    - `feval_closure_with_embedded_semantic_prefers_embedded_identity`
+  - This pins closure `feval` descriptor behavior to semantic identity-first execution:
+    - when `Closure.semantic_function` is present, descriptor dispatch must use that embedded semantic function id
+    - registry name mappings for the same closure name must not override embedded semantic identity
+  - Validation:
+    - `cargo test -p runmat-vm --lib call::descriptor::tests::feval_closure_with_embedded_semantic_prefers_embedded_identity -- --nocapture`
+    - `cargo test -p runmat-vm --lib call::descriptor::tests::feval_closure_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - (pending commit) Plan 3 feval multi-output instruction-shape ratchet
   - Added VM functions coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `semantic_feval_multi_assign_uses_typed_instruction`

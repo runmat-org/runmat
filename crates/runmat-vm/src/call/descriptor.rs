@@ -861,6 +861,35 @@ mod tests {
     }
 
     #[test]
+    fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
+        let mut registry = SemanticFunctionRegistry::default();
+        registry.names.insert("inc".to_string(), FunctionId(9999));
+
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 4242);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(10.0), Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(12.0)) })
+            })),
+        );
+
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::Closure(Closure {
+                function_name: "inc".to_string(),
+                semantic_function: Some(4242),
+                captures: vec![Value::Num(10.0)],
+            }),
+            vec![Value::Num(2.0)],
+            1,
+            &registry,
+        );
+        let value = block_on(execute_callable_descriptor(descriptor))
+            .expect("embedded semantic identity should take precedence");
+        assert_eq!(value, Value::Num(12.0));
+    }
+
+    #[test]
     fn malformed_qualified_function_handle_remains_dynamic_name() {
         let descriptor = CallableDescriptor::from_feval_value(
             Value::FunctionHandle("pkg..remote_inc".to_string()),
