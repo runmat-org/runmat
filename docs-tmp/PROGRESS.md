@@ -24,6 +24,18 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- MIR slice-plan range/end normalization ratchet
+  - `scope: in-scope`
+  - Tightened VM compile invariants in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) so `MirIndexPlan::Slice` now rejects range/end expression selector operands that must lower through `IndexSliceExpr`, with stable identifier `RunMat:MirSliceIndexPlanInvalid`.
+  - Added compile-level identifier-contract coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_slice_plan_with_range_expr_component_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_slice_plan_with_range_expr_component_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Plan 7 closeout cadence refresh for semantic fusion/runtime ownership
   - `scope: in-scope`
   - Closed the remaining Plan 7 evidence blocker by re-running semantic lifecycle + fusion regression cadence together, plus stale compile-graph exclusion guards:

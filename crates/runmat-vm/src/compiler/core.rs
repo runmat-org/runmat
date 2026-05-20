@@ -2284,6 +2284,16 @@ impl Compiler {
             match component {
                 MirIndexComponent::Colon => colon_mask |= 1u32 << dim,
                 MirIndexComponent::End { offset, .. } if *offset == 0 => end_mask |= 1u32 << dim,
+                MirIndexComponent::Expr(operand)
+                    if self.mir_operand_range_end_spec(operand).is_some()
+                        || self.mir_operand_end_expr(operand).is_some() =>
+                {
+                    return Err(self
+                        .compile_error(
+                            "MIR slice lowering invariant violated: range/end selectors must lower through IndexSliceExpr",
+                        )
+                        .with_identifier(IDENT_MIR_SLICE_INDEX_PLAN_INVALID))
+                }
                 MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
                     numeric_count += 1;
