@@ -727,6 +727,31 @@ mod tests {
     }
 
     #[test]
+    fn imported_identity_runtime_name_resolution_can_use_semantic_resolver() {
+        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
+            Some(Arc::new(|name| (name == "pkg.import_only").then_some(6262))),
+        );
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 6262);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(5.0)]);
+                Box::pin(async { Ok(Value::Num(6.0)) })
+            })),
+        );
+        let descriptor = CallableDescriptor::resolved(
+            imported_identity("import_only"),
+            vec![Value::Num(5.0)],
+            1,
+            CallableFallbackPolicy::RuntimeNameResolution,
+            CallableCallKind::Direct,
+        );
+        let value = block_on(execute_callable_descriptor(descriptor))
+            .expect("imported identity should resolve through semantic resolver");
+        assert_eq!(value, Value::Num(6.0));
+    }
+
+    #[test]
     fn method_identity_runtime_name_resolution_can_use_semantic_resolver() {
         let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
             Some(Arc::new(|name| (name == "method_only").then_some(9191))),

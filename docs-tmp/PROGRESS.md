@@ -2599,6 +2599,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 imported-identity descriptor semantic-resolution ratchet
+  - Added VM callable-descriptor coverage in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
+    - `imported_identity_runtime_name_resolution_can_use_semantic_resolver`
+  - This pins `CallableIdentity::Imported` runtime-name-resolution behavior at the VM descriptor boundary:
+    - imported identities can resolve through the semantic resolver/invoker when present
+    - imported identities still do not fall back to builtin-name execution when unresolved (`imported_identity_never_falls_back_to_builtin_name_resolution` remains green)
+  - Validation:
+    - `cargo test -p runmat-vm --lib call::descriptor::tests::imported_identity_runtime_name_resolution_can_use_semantic_resolver -- --nocapture`
+    - `cargo test -p runmat-vm --lib call::descriptor::tests::imported_identity_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - (pending commit) Plan 3 feval multi-output instruction-shape ratchet
   - Added VM functions coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `semantic_feval_multi_assign_uses_typed_instruction`
