@@ -49,14 +49,22 @@ fn classdef_method_attributes_round_trip() {
 fn classdef_property_attributes_enforced() {
     let src = "classdef C\n  properties(Static, Dependent)\n    p\n  end\nend";
     let ast = parse(src).unwrap();
-    let res = lower(&ast, &LoweringContext::empty());
-    assert!(res.is_err());
+    let err = lower(&ast, &LoweringContext::empty())
+        .expect_err("conflicting class property attributes should fail");
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:ClassPropertyAttributeConflict")
+    );
 }
 
 #[test]
 fn classdef_access_values_validated() {
     let src = "classdef D\n  properties(Access=protected)\n    p\n  end\n  methods(Access=internal)\n    function y = f(x); y = x; end\n  end\nend";
     let ast = parse(src).unwrap();
-    let res = lower(&ast, &LoweringContext::empty());
-    assert!(res.is_err());
+    let err = lower(&ast, &LoweringContext::empty())
+        .expect_err("invalid class access attribute values should fail");
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:ClassAccessValueInvalid")
+    );
 }

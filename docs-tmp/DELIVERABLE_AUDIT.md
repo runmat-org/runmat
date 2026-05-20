@@ -220,9 +220,13 @@ This audit maps the active objective to concrete repository evidence and marks e
   - semantic class attribute conflict diagnostics now expose stable identifier contracts in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs):
     - `RunMat:ClassPropertyAttributeConflict`
     - `RunMat:ClassMethodAttributeConflict`
+    - `RunMat:ClassAccessValueInvalid`
   - VM semantic compile coverage now ratchets these identifier contracts in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `class_property_attribute_conflicts_error`
     - `class_method_attribute_conflicts_error`
+  - HIR class-attribute coverage now also ratchets invalid access-value contracts in [attributes.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/attributes.rs):
+    - `classdef_access_values_validated` -> `RunMat:ClassAccessValueInvalid`
+    - `classdef_property_attributes_enforced` -> `RunMat:ClassPropertyAttributeConflict`
   - private object-property access failures now also carry stable identifier contracts across VM/runtime object access surfaces:
     - identifier: `RunMat:PropertyPrivateAccess`
     - VM object-resolve path: [resolve.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/object/resolve.rs)

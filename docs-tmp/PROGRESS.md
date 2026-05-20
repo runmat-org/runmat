@@ -34,6 +34,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added explicit prompt-to-artifact completion checklist in `docs-tmp/COMPLETION_AUDIT.md` mapping each objective requirement to concrete evidence commands/artifacts and latest gate/test results.
   - Current audit verdict remains `not achieved`; unresolved in-scope area remains objective section `### 3` (`MATLAB semantics as products`).
 
+- HIR class-access identifier contract ratchet
+  - `scope: in-scope`
+  - Added stable semantic-lowering identifier for invalid class access attribute values in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs):
+    - `RunMat:ClassAccessValueInvalid`
+  - Refactored class property/method attribute access parsing to use one typed access parser path (`parse_member_access_value`), so invalid `Access`/`GetAccess`/`SetAccess` values now consistently emit the stable identifier instead of message-only errors.
+  - Tightened HIR class-attribute tests in [attributes.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/attributes.rs):
+    - `classdef_access_values_validated` now asserts `RunMat:ClassAccessValueInvalid`
+    - `classdef_property_attributes_enforced` now asserts `RunMat:ClassPropertyAttributeConflict`
+  - Validation:
+    - `cargo test -p runmat-hir --test attributes -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - (pending commit) Plan 4 histcounts identifier-contract ratchet for option validation
   - Added stable `histcounts` identifiers for two option-parse validation surfaces in [histcounts.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/stats/hist/histcounts.rs):
     - `RunMat:histcounts:BinMethodConflict`

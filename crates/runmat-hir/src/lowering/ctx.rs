@@ -25,6 +25,7 @@ const IDENT_SPAWN_LEXICAL_CAPTURE_UNSUPPORTED: &str = "RunMat:SpawnLexicalCaptur
 const IDENT_UNDEFINED_VARIABLE: &str = "RunMat:UndefinedVariable";
 const IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassPropertyAttributeConflict";
 const IDENT_CLASS_METHOD_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassMethodAttributeConflict";
+const IDENT_CLASS_ACCESS_VALUE_INVALID: &str = "RunMat:ClassAccessValueInvalid";
 const IDENT_IMPORT_AMBIGUOUS: &str = "RunMat:ImportAmbiguous";
 const IDENT_IMPORT_DUPLICATE: &str = "RunMat:ImportDuplicate";
 
@@ -1973,16 +1974,19 @@ fn creation_policy_for_place(place: &HirPlace, deletion: bool) -> AssignmentCrea
     }
 }
 
-fn validate_access_value(
+fn parse_member_access_value(
     class_name: &str,
     section: &str,
-    value: &str,
-) -> Result<(), SemanticError> {
-    match value {
-        "public" | "private" => Ok(()),
+    raw: &str,
+) -> Result<crate::MemberAccess, SemanticError> {
+    let normalized = raw.trim().trim_matches('\'').to_ascii_lowercase();
+    match normalized.as_str() {
+        "public" => Ok(crate::MemberAccess::Public),
+        "private" => Ok(crate::MemberAccess::Private),
         other => Err(SemanticError::new(format!(
             "invalid access value '{other}' in class '{class_name}' {section} (allowed: public, private)"
-        ))),
+        ))
+        .with_identifier(IDENT_CLASS_ACCESS_VALUE_INVALID)),
     }
 }
 
@@ -2014,17 +2018,7 @@ fn property_attributes(
                     "Access requires value in class '{class_name}' properties block",
                 ))
             })?;
-            let access = member_access(raw).ok_or_else(|| {
-                let normalized = raw.trim().trim_matches('\'').to_ascii_lowercase();
-                SemanticError::new(format!(
-                    "invalid access value '{normalized}' in class '{class_name}' properties (allowed: public, private)"
-                ))
-            })?;
-            validate_access_value(
-                class_name,
-                "properties",
-                raw.trim().trim_matches('\'').to_ascii_lowercase().as_str(),
-            )?;
+            let access = parse_member_access_value(class_name, "properties", raw)?;
             result.access = access.clone();
             result.get_access = access.clone();
             result.set_access = access;
@@ -2034,17 +2028,7 @@ fn property_attributes(
                     "GetAccess requires value in class '{class_name}' properties block",
                 ))
             })?;
-            let access = member_access(raw).ok_or_else(|| {
-                let normalized = raw.trim().trim_matches('\'').to_ascii_lowercase();
-                SemanticError::new(format!(
-                    "invalid access value '{normalized}' in class '{class_name}' properties (allowed: public, private)"
-                ))
-            })?;
-            validate_access_value(
-                class_name,
-                "properties",
-                raw.trim().trim_matches('\'').to_ascii_lowercase().as_str(),
-            )?;
+            let access = parse_member_access_value(class_name, "properties", raw)?;
             result.get_access = access;
         } else if attr.name.eq_ignore_ascii_case("SetAccess") {
             let raw = attr.value.as_deref().ok_or_else(|| {
@@ -2052,17 +2036,7 @@ fn property_attributes(
                     "SetAccess requires value in class '{class_name}' properties block",
                 ))
             })?;
-            let access = member_access(raw).ok_or_else(|| {
-                let normalized = raw.trim().trim_matches('\'').to_ascii_lowercase();
-                SemanticError::new(format!(
-                    "invalid access value '{normalized}' in class '{class_name}' properties (allowed: public, private)"
-                ))
-            })?;
-            validate_access_value(
-                class_name,
-                "properties",
-                raw.trim().trim_matches('\'').to_ascii_lowercase().as_str(),
-            )?;
+            let access = parse_member_access_value(class_name, "properties", raw)?;
             result.set_access = access;
         }
     }
@@ -2095,17 +2069,7 @@ fn method_attributes(
                     "Access requires value in class '{class_name}' methods block",
                 ))
             })?;
-            let access = member_access(raw).ok_or_else(|| {
-                let normalized = raw.trim().trim_matches('\'').to_ascii_lowercase();
-                SemanticError::new(format!(
-                    "invalid access value '{normalized}' in class '{class_name}' methods (allowed: public, private)"
-                ))
-            })?;
-            validate_access_value(
-                class_name,
-                "methods",
-                raw.trim().trim_matches('\'').to_ascii_lowercase().as_str(),
-            )?;
+            let access = parse_member_access_value(class_name, "methods", raw)?;
             result.access = access;
         } else if attr.name.eq_ignore_ascii_case("Hidden") {
             result.is_hidden = true;
@@ -2124,19 +2088,6 @@ fn method_attributes(
         .with_identifier(IDENT_CLASS_METHOD_ATTRIBUTE_CONFLICT));
     }
     Ok(result)
-}
-
-fn member_access(value: &str) -> Option<crate::MemberAccess> {
-    match value
-        .trim()
-        .trim_matches('\'')
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "public" => Some(crate::MemberAccess::Public),
-        "private" => Some(crate::MemberAccess::Private),
-        _ => None,
-    }
 }
 
 fn is_builtin(name: &str) -> bool {
