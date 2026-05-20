@@ -470,7 +470,6 @@ async fn try_execute_resolved_callable(
     identity: CallableIdentity,
     args: Vec<Value>,
     requested_outputs: usize,
-    _metadata: CallableMetadata,
     fallback_policy: CallableFallbackPolicy,
 ) -> Result<Option<Value>, RuntimeError> {
     match identity {
@@ -545,21 +544,14 @@ pub(crate) async fn try_execute_callable_descriptor(
         target,
         args,
         requested_outputs,
-        metadata,
+        metadata: _,
     } = descriptor;
     match target {
         CallableTarget::Resolved {
             identity,
             fallback_policy,
         } => {
-            try_execute_resolved_callable(
-                identity,
-                args,
-                requested_outputs,
-                metadata,
-                fallback_policy,
-            )
-            .await
+            try_execute_resolved_callable(identity, args, requested_outputs, fallback_policy).await
         }
         CallableTarget::FevalForward(func_value) => {
             forward_builtin_feval(func_value, args, requested_outputs)
