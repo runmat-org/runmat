@@ -30,17 +30,17 @@ Scope contract for this goal:
 3. Manifest-driven composition and entrypoints
 - Evidence: config/discovery and entrypoint selection wired through config crates + CLI/session integration.
 - Evidence commands: `rg -n "runmat.toml|entrypoint|manifest|sources|dependencies" crates/runmat-config crates/runmat-core crates/runmat-cli`.
-- Current status: in progress. `runmat-config` has dedicated `runmat.toml` composition/discovery/entrypoint APIs with typed contract coverage; CLI/core entrypoint resolution and core known-symbol dependency-alias discovery are wired, but full composition-graph-driven closeout still requires explicit audit.
+- Current status: met for current scope; shared `runmat.toml` composition/discovery/entrypoint APIs are wired through config/core/CLI/LSP with typed contract coverage and resolver-path ratchets.
 
 4. Unified nominal class/builtin metadata
 - Evidence: shared callable/class identity and builtin semantics metadata surfaces used by runtime/lowering/analysis.
 - Evidence files: `crates/runmat-hir/src/hir.rs`, `crates/runmat-builtins/src/semantics.rs`, `docs-tmp/PLAN.6.md`.
-- Current status: in progress.
+- Current status: met for current scope; shared callable/class identity and builtin semantics metadata surfaces are active across lowering/runtime/analysis and covered by current ratchets.
 
 5. Semantic-fact-driven accel/fusion planning
 - Evidence: MIR analysis store + fusion planning interfaces consume semantic products, with runtime/provider owning placement.
 - Evidence commands: `rg -n "AnalysisStore|fusion|FusionPlan|Accel" crates/runmat-mir crates/runmat-vm crates/runmat-core`.
-- Current status: in progress; requires explicit Plan 7 closeout audit.
+- Current status: met for current scope; Plan 7 closeout evidence now includes semantic lifecycle + fusion regression cadence and stale compile-graph exclusion guards.
 
 6. Validation cadence green
 - Required gates per slice:

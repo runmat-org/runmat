@@ -165,7 +165,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `rg -n "cls\\.methods\\.get\\(|class_def\\.methods\\.get\\(" crates/runmat-runtime/src crates/runmat-vm/src`
   - Keep inheritance/cycle consumer ratchet tests in cadence across runtime+VM metadata consumers (`isa`, `fieldnames`, `getfield`/`setfield`, object member/static dispatch, constructor fallback).
 
-### 6) Semantic-fact-driven accel/fusion (`partial`)
+### 6) Semantic-fact-driven accel/fusion (`met` for current scope)
 
 - Evidence:
   - analysis facts exist in [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs) and [store.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-mir/src/analysis/store.rs).
@@ -344,14 +344,24 @@ This audit maps the active objective to concrete repository evidence and marks e
   - Fusion materialized-store write paths now also consume handle-aware exclusion clearing in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs), extending shared-handle preservation beyond interpreter dispatch overwrite hooks.
   - Fusion materialized-store shared-handle preservation is now directly covered by `fusion_writeback_preserves_shared_gpu_handles` in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs).
   - runtime gather/retry GPU recursion now includes `Value::Closure` captures and `Value::OutputList` entries in [dispatcher.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/dispatcher.rs), with explicit nested-provider-unavailable identifier coverage.
-- Blocking gap:
-  - compile/runtime scaffolding split is now in place (compile emits semantic-window groups; runtime reconciles nodes) and runtime graph sourcing is instruction-owned; explicit cross-entrypoint stale-compile-graph exclusion evidence is now in place across VM bytecode/runtime/core/fusion-gpu surfaces (`runtime_accel_graph_ignores_stale_compile_graph_metadata`, `runtime_state_ignores_stale_compile_graph_metadata`, compile/runtime `fusion_regressions` planner-source checks, and `fusion_graph_helper_ignores_stale_compile_graph_metadata`).
-  - spawned-task/provider lifecycle coverage breadth is strong, but closeout still needs explicit cadence evidence that semantic lifecycle suites remain green alongside fusion regressions after each Plan 7 graph/planning ratchet.
-  - targeted runtime fusion behavior gap is now closed in current coverage: `fused_safe_followup_builtins_remain_resident` is green on branch after scalar-only elementwise fusion bypass/runtime guard ratchets in VM + accelerate fusion planning.
+- Residual watchpoints:
+  - keep explicit cross-entrypoint stale-compile-graph exclusion coverage in cadence (`runtime_accel_graph_ignores_stale_compile_graph_metadata`, `runtime_state_ignores_stale_compile_graph_metadata`, `fusion_graph_helper_ignores_stale_compile_graph_metadata`).
+  - keep Plan 7 semantic lifecycle + fusion regression cadence green together (`runmat-vm --test spawn_semantic_lifecycle`, `runmat-core --test fusion_regressions`) after graph/planning ratchets.
+  - keep targeted runtime fusion behavior guard coverage (`fused_safe_followup_builtins_remain_resident`) in the fusion validation mix.
 
 ### 7) Validation cadence (`met` for current slices)
 
 - Latest executed gates:
+  - Plan 7 closeout cadence refresh:
+    - `cargo test -p runmat-vm --test spawn_semantic_lifecycle -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
+    - `cargo test -p runmat-vm runtime_accel_graph_ignores_stale_compile_graph_metadata -- --nocapture`
+    - `cargo test -p runmat-vm --lib runtime_state_ignores_stale_compile_graph_metadata -- --nocapture`
+    - `cargo test -p runmat-vm --test fusion_gpu fusion_graph_helper_ignores_stale_compile_graph_metadata -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
   - `cargo test -p runmat-core --test async_stdin async_call_without_await_or_spawn_stays_lazy_until_await -- --nocapture`
   - `cargo test -p runmat-vm string_slice_assignment_on_scalar_string_reports_slice_non_tensor -- --nocapture`
   - `cargo test -p runmat-vm --test spawn_semantic_lifecycle -- --nocapture`
@@ -469,7 +479,7 @@ Objective is **not achieved**.
 Highest-impact unresolved areas:
 
 1. In-scope blockers (must be zero for this goal):
-   - Objective sections marked `partial` remain open outside Plan 7 fusion details, especially non-builtin migration gaps called out in `### 3`.
+   - Objective section `### 3` remains `partial` (non-builtin migration gaps still tracked there).
 2. Validation closeout blocker (must be met for this goal):
    - Validation cadence is green for current slices, but full objective closeout still requires a consolidated end-to-end gate run tied explicitly to all remaining in-scope `partial` sections.
 3. Builtin completeness backlog (non-blocking for this goal unless explicitly linked as an in-scope blocker):

@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Plan 7 closeout cadence refresh for semantic fusion/runtime ownership
+  - `scope: in-scope`
+  - Closed the remaining Plan 7 evidence blocker by re-running semantic lifecycle + fusion regression cadence together, plus stale compile-graph exclusion guards:
+    - `cargo test -p runmat-vm --test spawn_semantic_lifecycle -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
+    - `cargo test -p runmat-vm --lib runtime_state_ignores_stale_compile_graph_metadata -- --nocapture`
+    - `cargo test -p runmat-vm runtime_accel_graph_ignores_stale_compile_graph_metadata -- --nocapture`
+    - `cargo test -p runmat-vm --test fusion_gpu fusion_graph_helper_ignores_stale_compile_graph_metadata -- --nocapture`
+  - Validation cadence run:
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+  - Audit impact:
+    - `docs-tmp/DELIVERABLE_AUDIT.md` section `### 6` advanced from `partial` to `met` for current scope.
+    - remaining unresolved objective surface is section `### 3` (MATLAB semantics as products).
+
 - (pending commit) Plan 4 histcounts identifier-contract ratchet for option validation
   - Added stable `histcounts` identifiers for two option-parse validation surfaces in [histcounts.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/stats/hist/histcounts.rs):
     - `RunMat:histcounts:BinMethodConflict`
