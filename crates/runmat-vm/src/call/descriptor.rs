@@ -959,6 +959,31 @@ mod tests {
     }
 
     #[test]
+    fn feval_at_handle_external_boundary_can_use_semantic_resolver() {
+        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
+            Some(Arc::new(|name| (name == "pkg.remote_inc").then_some(7171))),
+        );
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 7171);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(3.0)) })
+            })),
+        );
+
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::String("@pkg.remote_inc".to_string()),
+            vec![Value::Num(2.0)],
+            1,
+            &SemanticFunctionRegistry::default(),
+        );
+        let value = block_on(execute_callable_descriptor(descriptor))
+            .expect("@handle literal should resolve through semantic resolver");
+        assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
     fn resolved_descriptor_infers_display_name_from_identity_when_missing() {
         let descriptor = CallableDescriptor::resolved(
             CallableIdentity::ExternalName(QualifiedName(vec![

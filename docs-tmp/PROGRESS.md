@@ -2641,6 +2641,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 `@`-handle external-boundary resolver execution ratchet
+  - Added VM callable-descriptor coverage in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
+    - `feval_at_handle_external_boundary_can_use_semantic_resolver`
+  - This extends `feval("@pkg.remote_inc", ...)` behavior from classification-only to execution-path coverage:
+    - `@`-qualified handles remain `ExternalBoundary`-classified callable identities
+    - runtime semantic resolver/invoker dispatch is exercised directly from the descriptor path for `@`-handle literals
+  - Validation:
+    - `cargo test -p runmat-vm --lib call::descriptor::tests::feval_at_handle_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - (pending commit) Plan 3 feval multi-output instruction-shape ratchet
   - Added VM functions coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `semantic_feval_multi_assign_uses_typed_instruction`
