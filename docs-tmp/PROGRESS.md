@@ -1381,8 +1381,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Validation: `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core semantic_candidate_summary_emits_without_accel_graph -- --nocapture`.
 
 - (pending commit) Plan 7 runtime semantic-window scaffold fallback ratchet
-  - Added runtime helper `runtime_fusion_groups` in `crates/runmat-vm/src/interpreter/state.rs`.
+  - Added shared runtime helper `Bytecode::runtime_fusion_groups` in `crates/runmat-vm/src/bytecode/program.rs`.
   - Runtime planning now prefers compile-populated `bytecode.fusion_groups`, but when those are empty and semantic candidate/window metadata exists, it derives fusion-group scaffolds directly from semantic instruction windows before calling `prepare_fusion_plan`.
+  - Core fusion snapshot generation now consumes the same helper in `crates/runmat-core/src/session/compile.rs` and `crates/runmat-core/src/session/run.rs`, aligning diagnostics with runtime planning behavior.
   - This reduces runtime dependence on compile-populated fusion-group artifacts and keeps the runtime planning boundary semantic-window driven under missing-group conditions.
   - Added unit coverage:
     - `runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty`

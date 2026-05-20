@@ -31,49 +31,6 @@ pub struct InterpreterState {
     pub fusion_plan: Option<Arc<FusionPlan>>,
 }
 
-#[cfg(feature = "native-accel")]
-fn runtime_fusion_groups(bytecode: &Bytecode) -> Vec<runmat_accelerate::fusion::FusionGroup> {
-    if !bytecode.fusion_groups.is_empty() {
-        return bytecode.fusion_groups.clone();
-    }
-    if bytecode
-        .semantic_fusion_metadata
-        .mir_fusion_candidate_group_count
-        == 0
-        || bytecode
-            .semantic_fusion_metadata
-            .semantic_instruction_windows
-            .is_empty()
-    {
-        return Vec::new();
-    }
-    bytecode
-        .semantic_fusion_metadata
-        .semantic_instruction_windows
-        .iter()
-        .enumerate()
-        .map(|(id, window)| runmat_accelerate::fusion::FusionGroup {
-            id,
-            kind: match window.kind {
-                crate::bytecode::SemanticFusionInstructionKind::Elementwise => {
-                    runmat_accelerate::fusion::FusionKind::ElementwiseChain
-                }
-                crate::bytecode::SemanticFusionInstructionKind::Reduction => {
-                    runmat_accelerate::fusion::FusionKind::Reduction
-                }
-                crate::bytecode::SemanticFusionInstructionKind::Matmul => {
-                    runmat_accelerate::fusion::FusionKind::MatmulEpilogue
-                }
-            },
-            nodes: Vec::new(),
-            shape: runmat_accelerate::graph::ShapeInfo::Unknown,
-            span: window.span.clone(),
-            pattern: None,
-            stack_layout: None,
-        })
-        .collect()
-}
-
 impl InterpreterState {
     pub fn new(
         bytecode: Bytecode,
@@ -120,75 +77,12 @@ impl InterpreterState {
             // semantic instruction-window scaffolds when compile groups are absent.
             fusion_plan: prepare_fusion_plan(
                 bytecode.accel_graph.as_ref(),
-                &runtime_fusion_groups(&bytecode),
+                &bytecode.runtime_fusion_groups(),
                 bytecode
                     .semantic_fusion_metadata
                     .mir_fusion_candidate_group_count,
             ),
             bytecode,
         }
-    }
-}
-
-#[cfg(all(test, feature = "native-accel"))]
-mod tests {
-    use super::runtime_fusion_groups;
-    use crate::bytecode::{
-        Bytecode, SemanticFusionInstructionKind, SemanticFusionInstructionWindow,
-    };
-    use runmat_accelerate::graph::InstrSpan;
-
-    #[test]
-    fn runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty() {
-        let mut bytecode = Bytecode::empty();
-        bytecode
-            .semantic_fusion_metadata
-            .mir_fusion_candidate_group_count = 1;
-        bytecode
-            .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
-            span: InstrSpan { start: 2, end: 4 },
-            kind: SemanticFusionInstructionKind::Elementwise,
-        }];
-
-        let groups = runtime_fusion_groups(&bytecode);
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].span.start, 2);
-        assert_eq!(groups[0].span.end, 4);
-        assert!(groups[0].nodes.is_empty());
-        assert_eq!(
-            groups[0].kind,
-            runmat_accelerate::fusion::FusionKind::ElementwiseChain
-        );
-    }
-
-    #[test]
-    fn runtime_fusion_groups_prefer_existing_bytecode_groups() {
-        let mut bytecode = Bytecode::empty();
-        bytecode.fusion_groups = vec![runmat_accelerate::fusion::FusionGroup {
-            id: 7,
-            kind: runmat_accelerate::fusion::FusionKind::ElementwiseChain,
-            nodes: vec![1],
-            shape: runmat_accelerate::graph::ShapeInfo::Unknown,
-            span: InstrSpan { start: 5, end: 5 },
-            pattern: None,
-            stack_layout: None,
-        }];
-        bytecode
-            .semantic_fusion_metadata
-            .mir_fusion_candidate_group_count = 1;
-        bytecode
-            .semantic_fusion_metadata
-            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
-            span: InstrSpan { start: 10, end: 20 },
-            kind: SemanticFusionInstructionKind::Elementwise,
-        }];
-
-        let groups = runtime_fusion_groups(&bytecode);
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].id, 7);
-        assert_eq!(groups[0].nodes, vec![1]);
-        assert_eq!(groups[0].span.start, 5);
-        assert_eq!(groups[0].span.end, 5);
     }
 }

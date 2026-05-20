@@ -415,9 +415,10 @@ impl RunMatSession {
 
         #[cfg(not(target_arch = "wasm32"))]
         let fusion_snapshot = if self.emit_fusion_plan {
+            let runtime_groups = bytecode.runtime_fusion_groups();
             let analysis = runmat_mir::analysis::analyze_assembly(&mir);
             build_fusion_snapshot(
-                &bytecode.fusion_groups,
+                &runtime_groups,
                 &bytecode
                     .semantic_fusion_metadata
                     .mir_fusion_candidate_groups,

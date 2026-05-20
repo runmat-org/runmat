@@ -202,9 +202,10 @@ impl RunMatSession {
         input: &str,
     ) -> std::result::Result<Option<FusionPlanSnapshot>, RunError> {
         let prepared = self.compile_input(input)?;
+        let runtime_groups = prepared.bytecode.runtime_fusion_groups();
         let analysis = runmat_mir::analysis::analyze_assembly(&prepared.mir);
         Ok(build_fusion_snapshot(
-            &prepared.bytecode.fusion_groups,
+            &runtime_groups,
             &prepared
                 .bytecode
                 .semantic_fusion_metadata
