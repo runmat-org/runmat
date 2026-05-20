@@ -215,9 +215,12 @@ pub enum Instr {
     // `feval` keeps the callable value on the stack instead of naming the target statically.
     CallFevalMulti(usize, usize),
     CallFevalExpandMultiOutput(Vec<ArgSpec>, usize),
-    // Explicit async spawn boundary. Current runtime keeps value-lane identity.
+    // Create a lazy semantic-future descriptor from call arguments.
+    CreateSemanticFuture(FunctionId, usize, usize),
+    CreateSemanticFutureExpandMultiOutput(FunctionId, Vec<ArgSpec>, usize),
+    // Explicit async spawn boundary.
     Spawn,
-    // Explicit await boundary. Current runtime keeps value-lane identity.
+    // Explicit await boundary.
     Await,
 
     // Stack and exception-control operations.
@@ -346,6 +349,7 @@ impl Instr {
             Instr::CallSemanticFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
             Instr::CallMethodOrMemberIndexMulti { arg_count, .. } => effect(arg_count + 1, 1),
             Instr::CallFevalMulti(argc, _) => effect(argc + 1, 1),
+            Instr::CreateSemanticFuture(_, arg_count, _) => effect(*arg_count, 1),
             Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {
                 effect(rows * cols, 1)
             }
@@ -404,6 +408,7 @@ impl Instr {
             Instr::LoadStaticProperty(_, _) => effect(0, 1),
             Instr::RegisterClass { .. } => effect(0, 0),
             Instr::CallFevalExpandMultiOutput(specs, _)
+            | Instr::CreateSemanticFutureExpandMultiOutput(_, specs, _)
             | Instr::CallFunctionExpandMultiOutput { specs, .. }
             | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
             | Instr::CallBuiltinExpandMultiOutput(_, specs, _)

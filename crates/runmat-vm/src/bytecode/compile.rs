@@ -157,7 +157,8 @@ fn derive_semantic_async_metadata(
         mir_spawn_sites: spawn_sites,
         mir_await_site_count: await_sites.len(),
         mir_await_sites: await_sites,
-        runtime_model: crate::bytecode::program::SemanticAsyncRuntimeModel::EagerValueLane,
+        runtime_model:
+            crate::bytecode::program::SemanticAsyncRuntimeModel::LazyFutureDescriptorLane,
     }
 }
 
@@ -2453,8 +2454,8 @@ mod tests {
         );
         assert_eq!(
             bytecode.semantic_async_metadata.runtime_model,
-            crate::bytecode::program::SemanticAsyncRuntimeModel::EagerValueLane,
-            "semantic async metadata should surface the current eager spawn/await runtime model"
+            crate::bytecode::program::SemanticAsyncRuntimeModel::LazyFutureDescriptorLane,
+            "semantic async metadata should surface the current lazy-future runtime model"
         );
         assert_eq!(
             bytecode.semantic_async_metadata.mir_await_site_count, 0,
@@ -2525,8 +2526,8 @@ mod tests {
         );
         assert_eq!(
             bytecode.semantic_async_metadata.runtime_model,
-            crate::bytecode::program::SemanticAsyncRuntimeModel::EagerValueLane,
-            "semantic async metadata should surface the current eager spawn/await runtime model"
+            crate::bytecode::program::SemanticAsyncRuntimeModel::LazyFutureDescriptorLane,
+            "semantic async metadata should surface the current lazy-future runtime model"
         );
     }
 
@@ -3186,7 +3187,7 @@ mod tests {
     }
 
     #[test]
-    fn primary_compile_interprets_async_call_and_await_via_semantic_value_lane() {
+    fn primary_compile_interprets_async_call_and_await_via_semantic_future_lane() {
         let source = "async function y = inc(x); y = x + 1; end; t = inc(2); z = await(t);";
         let ast = runmat_parser::parse(source).expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
@@ -3194,6 +3195,13 @@ mod tests {
         let entrypoint = hir.assembly.entrypoints[0].id;
 
         let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        assert!(
+            bytecode
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, Instr::CreateSemanticFuture(FunctionId(_), 1, 1))),
+            "expected async direct call lowering to create a semantic future descriptor"
+        );
         let layout = bytecode.layout.as_ref().expect("layout");
         let z_export = layout.entrypoints[&entrypoint]
             .exports

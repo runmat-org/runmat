@@ -3,9 +3,7 @@
 use anyhow::Result;
 use futures::executor::block_on;
 use runmat_builtins::Value;
-use runmat_core::{
-    InputRequest, InputRequestKind, InputResponse, RunError, RunMatSession, StdinEventKind,
-};
+use runmat_core::{InputRequest, InputRequestKind, InputResponse, RunError, RunMatSession};
 use runmat_runtime::interaction::force_interactive_stdin_for_tests;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -311,7 +309,7 @@ fn spawn_error_stops_later_spawn_from_running() -> Result<()> {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn async_call_without_await_or_spawn_triggers_input_handler_in_current_model() -> Result<()> {
+fn async_call_without_await_or_spawn_stays_lazy_until_await() -> Result<()> {
     let _test_guard = test_mutex().lock().unwrap();
     let _guard = InteractiveGuard::new();
     let mut session = RunMatSession::with_options(false, false)?;
@@ -336,16 +334,12 @@ fn async_call_without_await_or_spawn_triggers_input_handler_in_current_model() -
     );
     assert_eq!(
         result.stdin_events.len(),
-        1,
-        "direct async call currently executes eagerly and triggers interaction"
+        0,
+        "direct async call should remain lazy before await/spawn boundaries"
     );
-    let event = &result.stdin_events[0];
-    assert_eq!(event.prompt, "lazy: ");
-    assert!(matches!(event.kind, StdinEventKind::Line));
-    assert_eq!(event.value.as_deref(), Some("11"));
     assert!(
-        event.error.is_none(),
-        "input handler response should complete without structured error"
+        prompts.lock().unwrap().is_empty(),
+        "direct async call should not prompt until awaited or spawned"
     );
 
     let marker = block_on(session.execute("marker")).map_err(anyhow::Error::new)?;
@@ -354,12 +348,24 @@ fn async_call_without_await_or_spawn_triggers_input_handler_in_current_model() -
         .expect("marker readback should produce a value");
     assert_eq!(value_as_f64(&marker_value), Some(9.0));
 
-    let fut = block_on(session.execute("fut")).map_err(anyhow::Error::new)?;
-    let fut_value = fut.value.expect("fut readback should produce a value");
+    let fut = block_on(session.execute("out = await(fut);")).map_err(anyhow::Error::new)?;
+    assert!(
+        fut.error.is_none(),
+        "awaiting deferred future should complete without runtime error"
+    );
+    let out = block_on(session.execute("out")).map_err(anyhow::Error::new)?;
+    let fut_value = out
+        .value
+        .expect("awaited future result should be materialized in out");
     assert_eq!(
         value_as_f64(&fut_value),
         Some(1.0),
-        "direct async calls currently execute eagerly and store the resolved value"
+        "await should resolve the deferred async function call"
+    );
+    assert_eq!(
+        prompts.lock().unwrap().as_slice(),
+        &["lazy: "],
+        "await should trigger the deferred interaction once"
     );
     Ok(())
 }

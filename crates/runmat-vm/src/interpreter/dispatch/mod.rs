@@ -211,6 +211,11 @@ const SPAWN_TASK_KIND_FIELD: &str = "__runmat_spawn_kind";
 const SPAWN_TASK_ID_FIELD: &str = "__runmat_spawn_id";
 const SPAWN_TASK_PAYLOAD_FIELD: &str = "__runmat_spawn_payload";
 const SPAWN_TASK_KIND_VALUE: &str = "task";
+const FUTURE_KIND_FIELD: &str = "__runmat_future_kind";
+const FUTURE_FUNCTION_FIELD: &str = "__runmat_future_function";
+const FUTURE_REQUESTED_OUTPUTS_FIELD: &str = "__runmat_future_requested_outputs";
+const FUTURE_ARGS_FIELD: &str = "__runmat_future_args";
+const FUTURE_KIND_VALUE: &str = "semantic_future";
 
 fn allocate_spawn_task_id(context: &mut crate::bytecode::program::ExecutionContext) -> u64 {
     loop {
@@ -241,13 +246,86 @@ fn wrap_spawned_value(
     Value::Struct(task)
 }
 
+fn create_semantic_future_value(
+    function: runmat_hir::FunctionId,
+    requested_outputs: usize,
+    args: Vec<Value>,
+) -> Value {
+    let mut future = StructValue::new();
+    future.fields.insert(
+        FUTURE_KIND_FIELD.to_string(),
+        Value::String(FUTURE_KIND_VALUE.to_string()),
+    );
+    future.fields.insert(
+        FUTURE_FUNCTION_FIELD.to_string(),
+        Value::Int(IntValue::U64(function.0 as u64)),
+    );
+    future.fields.insert(
+        FUTURE_REQUESTED_OUTPUTS_FIELD.to_string(),
+        Value::Int(IntValue::U64(requested_outputs as u64)),
+    );
+    future
+        .fields
+        .insert(FUTURE_ARGS_FIELD.to_string(), Value::OutputList(args));
+    Value::Struct(future)
+}
+
+async fn resolve_semantic_future_value(value: Value) -> Result<Value, RuntimeError> {
+    let Value::Struct(future) = value else {
+        return Ok(value);
+    };
+    let is_future = matches!(
+        future.fields.get(FUTURE_KIND_FIELD),
+        Some(Value::String(kind)) if kind == FUTURE_KIND_VALUE
+    );
+    if !is_future {
+        return Ok(Value::Struct(future));
+    }
+    let function = match future.fields.get(FUTURE_FUNCTION_FIELD) {
+        Some(Value::Int(IntValue::U64(id))) => runmat_hir::FunctionId(*id as usize),
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "AwaitOperandInvalid",
+                "future descriptor is missing a valid semantic function identifier",
+            ))
+        }
+    };
+    let requested_outputs = match future.fields.get(FUTURE_REQUESTED_OUTPUTS_FIELD) {
+        Some(Value::Int(IntValue::U64(count))) => *count as usize,
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "AwaitOperandInvalid",
+                "future descriptor is missing a valid requested output count",
+            ))
+        }
+    };
+    let args = match future.fields.get(FUTURE_ARGS_FIELD) {
+        Some(Value::OutputList(args)) => args.clone(),
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "AwaitOperandInvalid",
+                "future descriptor is missing argument payload values",
+            ))
+        }
+    };
+
+    let descriptor = crate::call::descriptor::CallableDescriptor::resolved(
+        runmat_hir::CallableIdentity::SemanticFunction(function),
+        args,
+        requested_outputs,
+        runmat_hir::CallableFallbackPolicy::None,
+        crate::call::descriptor::CallableCallKind::Direct,
+    );
+    let value = crate::call::descriptor::execute_callable_descriptor(descriptor).await?;
+    Ok(calls::normalize_requested_outputs(value, requested_outputs))
+}
+
 fn unwrap_spawned_value(
     context: &mut crate::bytecode::program::ExecutionContext,
     value: Value,
 ) -> Result<Value, RuntimeError> {
     let Value::Struct(task) = value else {
-        // Until async-call futures have a dedicated runtime lane, await currently
-        // preserves legacy/pass-through behavior for non-task values.
+        // Await preserves pass-through behavior for non-task values.
         return Ok(value);
     };
     let is_spawn_task = matches!(
@@ -1027,6 +1105,20 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
+        Instr::CreateSemanticFuture(function, arg_count, out_count) => {
+            let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
+            stack.push(create_semantic_future_value(*function, *out_count, args));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
+        Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count) => {
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            stack.push(create_semantic_future_value(*function, *out_count, args));
+            Ok(Some(DispatchHandled::Generic(
+                DispatchDecision::FallThrough,
+            )))
+        }
         Instr::Spawn => {
             let value = stack.pop().ok_or_else(|| {
                 crate::interpreter::errors::mex(
@@ -1034,6 +1126,7 @@ pub async fn dispatch_instruction(
                     "spawn instruction expected a value on the stack",
                 )
             })?;
+            let value = resolve_semantic_future_value(value).await?;
             enforce_spawn_value_concurrency_policy(&value)?;
             stack.push(wrap_spawned_value(context, value));
             Ok(Some(DispatchHandled::Generic(
@@ -1047,7 +1140,9 @@ pub async fn dispatch_instruction(
                     "await instruction expected a value on the stack",
                 )
             })?;
-            stack.push(unwrap_spawned_value(context, value)?);
+            let value = unwrap_spawned_value(context, value)?;
+            let value = resolve_semantic_future_value(value).await?;
+            stack.push(value);
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

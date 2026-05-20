@@ -55,7 +55,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - core async integration coverage now asserts spawned-handle consumption semantics directly in [integration.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/integration.rs) (`test_spawn_handle_is_consumed_after_await`): first await succeeds with value readback, second await on same handle fails with stable runtime identifier `RunMat:AwaitOperandInvalid`.
   - runtime callback builtins now normalize unresolved external callback identities to `RunMat:UndefinedFunction` for both `cellfun` and `arrayfun` in [cellfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/cells/core/cellfun.rs) and [arrayfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs), with direct unresolved external-handle coverage in builtin tests and core session diagnostic-path coverage in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs).
 - Gap:
-  - designed gaps still open (async/future/spawn runtime model and aggregate edge behavior; selector-plan normalization gap has narrowed with recent identifier ratchets).
+  - designed gaps still open (aggregate edge behavior; selector-plan normalization gap has narrowed with recent identifier ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 
 ### 4) Manifest-driven composition/entrypoints (`met`)
 
@@ -183,7 +183,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - compile-level coverage now ratchets this mixed mapping boundary via `semantic_windows_preserve_unmapped_windows_alongside_mapped_groups`.
   - VM bytecode now carries explicit semantic async/spawn metadata (`semantic_async_metadata`) in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs), derived from MIR spawn sites in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), and surfaced at interpreter setup in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs) so spawned-task transition semantics are explicit at runtime boundaries.
   - VM bytecode semantic async metadata now carries explicit MIR await-site inventory (`mir_await_site_count`, `mir_await_sites`) in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs), derived from MIR await terminators in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
-  - VM bytecode semantic async metadata now also carries an explicit runtime execution model contract (`SemanticAsyncRuntimeModel`) in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs), currently recorded as `EagerValueLane` in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) and surfaced at interpreter startup diagnostics in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs).
+  - VM bytecode semantic async metadata now also carries an explicit runtime execution model contract (`SemanticAsyncRuntimeModel`) in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs), currently recorded as `LazyFutureDescriptorLane` in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) and surfaced at interpreter startup diagnostics in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs).
   - compile-level async metadata ratchets now assert this runtime-model contract in `primary_compile_records_semantic_spawn_site_metadata` and `primary_compile_records_semantic_await_site_metadata` in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
   - MIR await boundaries now lower through explicit bytecode `Instr::Await` handling in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs), [instr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/instr.rs), [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs), and [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs), making async boundary opcodes explicit on both Spawn and Await paths.
   - VM runtime dispatch now also models explicit spawned-task value-lane semantics in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs): `Instr::Spawn` wraps payload values into task-handle records with explicit task IDs; `Instr::Await` pass-throughs non-task values for compatibility while validating spawned-task handle shape/ID and rejecting malformed or stale consumed handles with `RunMat:AwaitOperandInvalid`.
@@ -333,7 +333,7 @@ This audit maps the active objective to concrete repository evidence and marks e
 ### 7) Validation cadence (`met` for current slices)
 
 - Latest executed gates:
-  - `cargo test -p runmat-core --test async_stdin async_call_without_await_or_spawn_triggers_input_handler_in_current_model -- --nocapture`
+  - `cargo test -p runmat-core --test async_stdin async_call_without_await_or_spawn_stays_lazy_until_await -- --nocapture`
   - `cargo test -p runmat-vm string_slice_assignment_on_scalar_string_reports_slice_non_tensor -- --nocapture`
   - `cargo test -p runmat-vm --test spawn_semantic_lifecycle -- --nocapture`
   - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
@@ -350,7 +350,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - `cargo test -p runmat-core source_input_path_`
   - `cargo test -p runmat --lib resolve_script_input_`
   - `cargo test -p runmat-vm primary_compile_emits_explicit_spawn_instruction`
-  - `cargo test -p runmat-vm primary_compile_interprets_async_call_and_await_via_semantic_value_lane`
+  - `cargo test -p runmat-vm primary_compile_interprets_async_call_and_await_via_semantic_future_lane`
   - `cargo test -p runmat-vm semantic_candidates_build_fusion_groups_from_accel_graph_nodes`
   - `cargo test -p runmat-vm semantic_candidates_without_overlap_do_not_build_fusion_groups`
   - `cargo test -p runmat-vm fusion_group_semantic_span_filter_requires_full_group_coverage`
@@ -378,9 +378,9 @@ This audit maps the active objective to concrete repository evidence and marks e
   - `git diff --check`
 
 - Additional contract-hardening ratchet:
-  - Core async interaction coverage now explicitly ratchets direct async-call behavior in the current runtime model via [async_stdin.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/async_stdin.rs):
-    - `async_call_without_await_or_spawn_triggers_input_handler_in_current_model`
-  - This makes the eager direct-async-call behavior explicit and test-guarded while the broader lazy-future model gap remains tracked under section `### 3`.
+  - Core async interaction coverage now explicitly ratchets direct async-call laziness via [async_stdin.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/async_stdin.rs):
+    - `async_call_without_await_or_spawn_stays_lazy_until_await`
+  - This keeps direct async-call behavior semantic and boundary-driven: no interaction before `await`/`spawn`, with deferred interaction resolution asserted at `await`.
   - VM slice-assignment unsupported-base error surfaces in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now emit stable `RunMat:SliceNonTensor` identifiers for both `StoreSlice` and `StoreSliceExpr` paths instead of message-only errors.
   - VM semantic regression coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs) now ratchets this contract via `string_slice_assignment_on_scalar_string_reports_slice_non_tensor`.
   - Converted two VM tests in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) from message-substring assertions to identifier assertions:

@@ -6,12 +6,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
-- (pending commit) Plan 3/4 async runtime-model contract ratchet for direct async calls
-  - Added core async interaction coverage in [async_stdin.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/async_stdin.rs):
-    - `async_call_without_await_or_spawn_triggers_input_handler_in_current_model`
-  - Contract: in the current runtime model, direct async function calls execute eagerly and trigger interactive handlers even without `await`/`spawn`; this behavior is now explicit and regression-guarded while the broader async/future runtime-model gap remains tracked.
+- `d6489fbc` + follow-up (working tree): Plan 3/4 async direct-call lazy future-descriptor lane
+  - `MirRvalue::Future` now lowers to lazy semantic future descriptors (`CreateSemanticFuture*`) in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs) and [instr.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/instr.rs), rather than immediate semantic function calls.
+  - VM dispatch now materializes those descriptors at async boundaries in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/mod.rs): `spawn` eagerly resolves a future descriptor before wrapping task payload, while `await` resolves deferred descriptors and preserves existing spawned-task handle validation.
+  - Async runtime metadata now reflects this behavior as `LazyFutureDescriptorLane` in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs) and compile metadata assertions in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
+  - Core interaction ratchet in [async_stdin.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/async_stdin.rs):
+    - `async_call_without_await_or_spawn_stays_lazy_until_await`
+  - Contract: direct async calls are now lazy until `await`/`spawn`; `spawn` eager interaction behavior remains explicit and green.
   - Validation:
-    - `cargo test -p runmat-core --test async_stdin async_call_without_await_or_spawn_triggers_input_handler_in_current_model -- --nocapture`
+    - `cargo test -p runmat-core --test async_stdin -- --nocapture`
+    - `cargo test -p runmat-vm --test spawn_semantic_lifecycle -- --nocapture`
+    - `cargo check --workspace`
 
 - (pending commit) Plan 6/7 slice-assignment unsupported-base identifier ratchet
   - VM interpreter slice-assignment dispatch in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now emits stable `RunMat:SliceNonTensor` identifiers for unsupported base types in both `StoreSlice` and `StoreSliceExpr` paths instead of message-only runtime errors.
@@ -208,7 +213,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - (pending commit) Plan 7 explicit async runtime-model metadata contract
   - Added explicit semantic async runtime-model metadata in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs):
-    - `SemanticAsyncRuntimeModel` (current value: `EagerValueLane`)
+    - `SemanticAsyncRuntimeModel` (current value: `LazyFutureDescriptorLane`)
     - `SemanticAsyncMetadata.runtime_model`
   - VM compile now records this runtime model in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs), and interpreter startup diagnostics now surface the model in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs).
   - Updated async metadata ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):

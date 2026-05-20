@@ -190,19 +190,19 @@ pub struct SemanticAsyncMetadata {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SemanticAsyncRuntimeModel {
-    EagerValueLane,
+    LazyFutureDescriptorLane,
 }
 
 impl Default for SemanticAsyncRuntimeModel {
     fn default() -> Self {
-        Self::EagerValueLane
+        Self::LazyFutureDescriptorLane
     }
 }
 
 impl SemanticAsyncRuntimeModel {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::EagerValueLane => "eager_value_lane",
+            Self::LazyFutureDescriptorLane => "lazy_future_descriptor_lane",
         }
     }
 }

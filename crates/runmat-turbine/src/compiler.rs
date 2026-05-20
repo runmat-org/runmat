@@ -814,6 +814,8 @@ impl BytecodeCompiler {
                     | Instr::DeclareGlobal(_)
                     | Instr::DeclarePersistent(_)
                     | Instr::CallFevalMulti(_, _)
+                    | Instr::CreateSemanticFuture(_, _, _)
+                    | Instr::CreateSemanticFutureExpandMultiOutput(_, _, _)
                     | Instr::Spawn
                     | Instr::Await => {
                         return Err(execution_error(

@@ -1704,11 +1704,11 @@ impl Compiler {
                 }
                 let out_count = requested_outputs.fixed_count();
                 if has_expansion {
-                    self.emit(Instr::CallSemanticFunctionExpandMultiOutput(
+                    self.emit(Instr::CreateSemanticFutureExpandMultiOutput(
                         *function, specs, out_count,
                     ));
                 } else {
-                    self.emit(Instr::CallSemanticFunctionMulti(
+                    self.emit(Instr::CreateSemanticFuture(
                         *function,
                         args.len(),
                         out_count,
