@@ -18,10 +18,22 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const BUILTIN_NAME: &str = "histcounts";
 const DEFAULT_BIN_COUNT: usize = 10;
 const RANGE_EPS: f64 = 1.0e-12;
+const HISTCOUNTS_ERR_BINMETHOD_CONFLICT: &str = "RunMat:histcounts:BinMethodConflict";
+const HISTCOUNTS_ERR_BINWIDTH_INVALID: &str = "RunMat:histcounts:BinWidthInvalid";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
+        .build()
+}
+
+fn builtin_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(identifier)
         .build()
 }
 
@@ -656,8 +668,9 @@ impl HistcountsOptions {
                 || self.bin_width.is_some()
                 || self.num_bins.is_some())
         {
-            return Err(builtin_error(
+            return Err(builtin_error_with_identifier(
                 "histcounts: BinMethod cannot be combined with BinEdges, NumBins, or BinWidth",
+                HISTCOUNTS_ERR_BINMETHOD_CONFLICT,
             ));
         }
         if self.num_bins.is_some() && self.bin_width.is_some() {
@@ -898,6 +911,12 @@ fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usiz
 fn positive_scalar(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
     let scalar = scalar_value(value, name, option)?;
     if !scalar.is_finite() || scalar <= 0.0 {
+        if name == BUILTIN_NAME && option == "BinWidth" {
+            return Err(builtin_error_with_identifier(
+                format!("{name}: {option} must be a positive finite scalar"),
+                HISTCOUNTS_ERR_BINWIDTH_INVALID,
+            ));
+        }
         return Err(builtin_error(format!(
             "{name}: {option} must be a positive finite scalar"
         )));
@@ -1148,7 +1167,7 @@ pub(crate) mod tests {
     #[test]
     fn histcounts_binmethod_conflict_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let result = block_on(evaluate(
+        let err = block_on(evaluate(
             Value::Tensor(tensor),
             &[
                 Value::from("BinMethod"),
@@ -1156,19 +1175,23 @@ pub(crate) mod tests {
                 Value::from("NumBins"),
                 Value::Num(5.0),
             ],
-        ));
-        assert!(result.is_err());
+        ))
+        .err()
+        .expect("BinMethod + NumBins should fail");
+        assert_eq!(err.identifier(), Some(HISTCOUNTS_ERR_BINMETHOD_CONFLICT));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn histcounts_invalid_binwidth_errors() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let result = block_on(evaluate(
+        let err = block_on(evaluate(
             Value::Tensor(tensor),
             &[Value::from("BinWidth"), Value::Num(0.0)],
-        ));
-        assert!(result.is_err());
+        ))
+        .err()
+        .expect("non-positive BinWidth should fail");
+        assert_eq!(err.identifier(), Some(HISTCOUNTS_ERR_BINWIDTH_INVALID));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
