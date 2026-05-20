@@ -468,5 +468,9 @@ Objective is **not achieved**.
 
 Highest-impact unresolved areas:
 
-1. Objective sections marked `partial` remain open outside Plan 7 fusion details, especially MATLAB-semantics edge gaps called out in `### 3`.
-2. Validation cadence is green for current slices, but full objective closeout still requires a consolidated end-to-end gate run tied explicitly to all remaining `partial` sections before marking the goal achieved.
+1. In-scope blockers (must be zero for this goal):
+   - Objective sections marked `partial` remain open outside Plan 7 fusion details, especially non-builtin migration gaps called out in `### 3`.
+2. Validation closeout blocker (must be met for this goal):
+   - Validation cadence is green for current slices, but full objective closeout still requires a consolidated end-to-end gate run tied explicitly to all remaining in-scope `partial` sections.
+3. Builtin completeness backlog (non-blocking for this goal unless explicitly linked as an in-scope blocker):
+   - Builtin parity/completeness ratchets are tracked evidence, but do not block this goal by themselves.

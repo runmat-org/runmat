@@ -1,5 +1,13 @@
 # Progress
 
+## Scope Guard
+
+- Goal scope for this thread is compiler/runtime migration closure (Plans 0-7), not standalone builtin completeness.
+- Builtin edits are allowed only when they unblock an in-scope compiler/runtime/fusion closure item.
+- New progress entries must include:
+  - `scope: in-scope` or `scope: out-of-scope`
+  - If builtin touched under `in-scope`, include `blocker: <why this builtin change is required for in-scope closure>`.
+
 ## Current Focus
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.

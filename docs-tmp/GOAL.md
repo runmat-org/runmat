@@ -10,6 +10,11 @@ Complete the semantic migration of RunMat across Plans 0-7 until:
 - accel/fusion planning is semantic-fact-driven
 - workspace validation cadence stays green
 
+Scope contract for this goal:
+- In scope: compiler/runtime migration closure work across Plans 0-7.
+- Out of scope: standalone builtin completeness/parity work.
+- Exception: builtin edits are in scope only when required to unblock an in-scope compiler/runtime/fusion closure item.
+
 ## Success Criteria Checklist
 
 1. Semantic-only active pipeline
@@ -18,9 +23,9 @@ Complete the semantic migration of RunMat across Plans 0-7 until:
 - Current status: evidence command currently returns no matches in `crates`; treat as substantially met pending full closeout audit.
 
 2. MATLAB core semantics modeled by products
-- Evidence: semantic HIR/MIR + VM lowering coverage for indexing, calls, workspace effects, outputs, and compatibility diagnostics.
+- Evidence: semantic HIR/MIR + VM lowering coverage for indexing, calls, workspace effects, outputs, and compatibility diagnostics on the in-scope compiler/runtime migration path.
 - Evidence files: `docs-tmp/TARGET_MODEL.md`, `docs-tmp/ABI_DESIGN.md`, `docs-tmp/NEXT_STEPS.md`.
-- Current status: in progress (broad ratchet coverage landed; remaining designed gaps tracked in `NEXT_STEPS.md`).
+- Current status: in progress (remaining designed non-builtin migration gaps tracked in `NEXT_STEPS.md`; builtin parity items are tracked separately unless they block in-scope closure).
 
 3. Manifest-driven composition and entrypoints
 - Evidence: config/discovery and entrypoint selection wired through config crates + CLI/session integration.
