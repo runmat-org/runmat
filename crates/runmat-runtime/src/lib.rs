@@ -2194,7 +2194,7 @@ mod tests {
     }
 
     #[test]
-    fn method_identity_runtime_name_resolution_policy_does_not_use_semantic_resolver() {
+    fn method_identity_runtime_name_resolution_policy_uses_semantic_resolver() {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(45)
@@ -2218,8 +2218,48 @@ mod tests {
             crate::user_functions::SemanticCallableKind::Other,
         );
 
-        let result = block_on(crate::user_functions::try_call_semantic_descriptor(request));
-        assert!(result.is_none());
+        let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
+            .expect("method runtime-name policy should attempt semantic resolver")
+            .expect("semantic invoker should succeed");
+        assert_eq!(result, Value::Num(11.0));
+    }
+
+    #[test]
+    fn imported_identity_runtime_name_resolution_policy_uses_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "Point.origin").then_some(45)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 45);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(11.0)) })
+            }),
+        ));
+
+        let request = crate::user_functions::SemanticCallableRequest::resolved(
+            runmat_hir::CallableIdentity::Imported(runmat_hir::DefPath {
+                package: runmat_hir::PackageName("Point".to_string()),
+                module: runmat_hir::QualifiedName(vec![
+                    runmat_hir::SymbolName("Point".to_string()),
+                    runmat_hir::SymbolName("origin".to_string()),
+                ]),
+                item: vec![runmat_hir::DefPathSegment::Function(
+                    runmat_hir::SymbolName("origin".to_string()),
+                )],
+            }),
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            vec![Value::Num(4.0)],
+            1,
+            crate::user_functions::SemanticCallableKind::Other,
+        );
+
+        let result = block_on(crate::user_functions::try_call_semantic_descriptor(request))
+            .expect("imported runtime-name policy should attempt semantic resolver")
+            .expect("semantic invoker should succeed");
+        assert_eq!(result, Value::Num(11.0));
     }
 
     #[test]

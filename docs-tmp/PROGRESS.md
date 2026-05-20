@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime callable-descriptor semantic-name resolution policy parity ratchet
+  - `scope: in-scope`
+  - Aligned semantic resolver eligibility with VM fallback-name eligibility across callable identity categories:
+    - [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs): `CallableFallbackPolicy::allows_semantic_name_resolution_for(...)` now matches VM fallback categories (`DynamicName`/`Imported`/`Method` under runtime-name policy, and well-formed `ExternalName` under external-boundary policy).
+    - [user_functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/user_functions.rs): semantic descriptor dispatch now derives lookup names via `vm_fallback_name_for(...)`, removing ad hoc identity-only name extraction and keeping runtime semantic resolver behavior consistent with fallback policy semantics.
+  - Added runtime contract coverage in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `method_identity_runtime_name_resolution_policy_uses_semantic_resolver`
+    - `imported_identity_runtime_name_resolution_policy_uses_semantic_resolver`
+  - Validation:
+    - `cargo test -p runmat-hir callable_name_fallback_policies_require_well_formed_external_names -- --nocapture`
+    - `cargo test -p runmat-runtime method_identity_runtime_name_resolution_policy_uses_semantic_resolver -- --nocapture`
+    - `cargo test -p runmat-runtime imported_identity_runtime_name_resolution_policy_uses_semantic_resolver -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM source-level `isfield` string-array contract ratchet
   - `scope: in-scope`
   - Replaced placeholder coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) with a real source-level string-array semantic assertion:

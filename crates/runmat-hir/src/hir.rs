@@ -372,14 +372,7 @@ impl CallableFallbackPolicy {
     }
 
     pub fn allows_semantic_name_resolution_for(self, identity: &CallableIdentity) -> bool {
-        match identity {
-            CallableIdentity::DynamicName(_) => self.allows_runtime_name_resolution(),
-            CallableIdentity::ExternalName(name) => {
-                matches!(self, CallableFallbackPolicy::ExternalBoundary)
-                    && Self::is_well_formed_external_name(name)
-            }
-            _ => false,
-        }
+        self.allows_vm_name_fallback_for(identity)
     }
 
     pub fn allows_vm_name_fallback_for(self, identity: &CallableIdentity) -> bool {
@@ -1325,8 +1318,17 @@ mod tests {
 
         assert!(CallableFallbackPolicy::RuntimeNameResolution
             .allows_semantic_name_resolution_for(&dynamic));
+        assert!(CallableFallbackPolicy::RuntimeNameResolution
+            .allows_semantic_name_resolution_for(&imported));
+        assert!(CallableFallbackPolicy::RuntimeNameResolution
+            .allows_semantic_name_resolution_for(&method));
         assert!(
             !CallableFallbackPolicy::ExternalBoundary.allows_semantic_name_resolution_for(&dynamic)
+        );
+        assert!(!CallableFallbackPolicy::ExternalBoundary
+            .allows_semantic_name_resolution_for(&imported));
+        assert!(
+            !CallableFallbackPolicy::ExternalBoundary.allows_semantic_name_resolution_for(&method)
         );
         assert!(!CallableFallbackPolicy::ExternalBoundary
             .allows_semantic_name_resolution_for(&single_external));
