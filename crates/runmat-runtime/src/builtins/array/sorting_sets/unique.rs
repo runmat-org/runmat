@@ -59,6 +59,8 @@ fn unique_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("unique").build()
 }
 
+const UNIQUE_ERR_LEGACY_OPTION_UNSUPPORTED: &str = "RunMat:unique:LegacyOptionUnsupported";
+
 #[runtime_builtin(
     name = "unique",
     category = "array/sorting_sets",
@@ -178,9 +180,12 @@ fn parse_unique_option(
             opts.occurrence = UniqueOccurrence::Last;
         }
         "legacy" | "r2012a" => {
-            return Err(unique_error(
-                "unique: the 'legacy' behaviour is not supported",
-            ));
+            return Err(
+                build_runtime_error("unique: the 'legacy' behaviour is not supported")
+                    .with_builtin("unique")
+                    .with_identifier(UNIQUE_ERR_LEGACY_OPTION_UNSUPPORTED)
+                    .build(),
+            );
         }
         other => {
             return Err(unique_error(format!(
@@ -1682,10 +1687,8 @@ pub(crate) mod tests {
     #[test]
     fn unique_rejects_legacy_option() {
         let tensor = Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap();
-        let err = error_message(
-            evaluate_sync(Value::Tensor(tensor), &[Value::from("legacy")]).unwrap_err(),
-        );
-        assert!(err.contains("legacy"));
+        let err = evaluate_sync(Value::Tensor(tensor), &[Value::from("legacy")]).unwrap_err();
+        assert_eq!(err.identifier(), Some(UNIQUE_ERR_LEGACY_OPTION_UNSUPPORTED));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

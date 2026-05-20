@@ -53,6 +53,8 @@ fn ismember_error(message: impl Into<String>) -> crate::RuntimeError {
         .build()
 }
 
+const ISMEMBER_ERR_LEGACY_OPTION_UNSUPPORTED: &str = "RunMat:ismember:LegacyOptionUnsupported";
+
 #[runtime_builtin(
     name = "ismember",
     category = "array/sorting_sets",
@@ -122,9 +124,12 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<IsMemberOptions> {
         match lowered.as_str() {
             "rows" => opts.rows = true,
             "legacy" | "r2012a" => {
-                return Err(ismember_error(
+                return Err(build_runtime_error(
                     "ismember: the 'legacy' behaviour is not supported",
-                ))
+                )
+                .with_builtin("ismember")
+                .with_identifier(ISMEMBER_ERR_LEGACY_OPTION_UNSUPPORTED)
+                .build())
             }
             other => {
                 return Err(ismember_error(format!(
@@ -912,8 +917,11 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn options_reject_legacy() {
-        let err = error_message(parse_options(&[Value::from("legacy")]).unwrap_err());
-        assert!(err.contains("legacy"));
+        let err = parse_options(&[Value::from("legacy")]).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some(ISMEMBER_ERR_LEGACY_OPTION_UNSUPPORTED)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

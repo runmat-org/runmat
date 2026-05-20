@@ -56,6 +56,8 @@ fn union_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("union").build()
 }
 
+const UNION_ERR_LEGACY_OPTION_UNSUPPORTED: &str = "RunMat:union:LegacyOptionUnsupported";
+
 #[runtime_builtin(
     name = "union",
     category = "array/sorting_sets",
@@ -152,9 +154,12 @@ fn parse_union_option(
             opts.order = UnionOrder::Stable;
         }
         "legacy" | "r2012a" => {
-            return Err(union_error(
-                "union: the 'legacy' behaviour is not supported",
-            ));
+            return Err(
+                build_runtime_error("union: the 'legacy' behaviour is not supported")
+                    .with_builtin("union")
+                    .with_identifier(UNION_ERR_LEGACY_OPTION_UNSUPPORTED)
+                    .build(),
+            );
         }
         other => return Err(union_error(format!("union: unrecognised option '{other}'"))),
     }
@@ -1729,15 +1734,13 @@ pub(crate) mod tests {
     fn union_rejects_legacy_option() {
         let tensor =
             Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).expect("tensor construction failed");
-        let err = error_message(
-            evaluate_sync(
-                Value::Tensor(tensor.clone()),
-                Value::Tensor(tensor),
-                &[Value::from("legacy")],
-            )
-            .unwrap_err(),
-        );
-        assert!(err.contains("legacy"));
+        let err = evaluate_sync(
+            Value::Tensor(tensor.clone()),
+            Value::Tensor(tensor),
+            &[Value::from("legacy")],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some(UNION_ERR_LEGACY_OPTION_UNSUPPORTED));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

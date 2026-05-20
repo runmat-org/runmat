@@ -61,6 +61,8 @@ fn intersect_error(message: impl Into<String>) -> crate::RuntimeError {
         .build()
 }
 
+const INTERSECT_ERR_LEGACY_OPTION_UNSUPPORTED: &str = "RunMat:intersect:LegacyOptionUnsupported";
+
 #[runtime_builtin(
     name = "intersect",
     category = "array/sorting_sets",
@@ -182,9 +184,12 @@ fn parse_intersect_option(
             opts.order = IntersectOrder::Stable;
         }
         "legacy" | "r2012a" => {
-            return Err(intersect_error(
-                "intersect: the 'legacy' behaviour is not supported",
-            ));
+            return Err(
+                build_runtime_error("intersect: the 'legacy' behaviour is not supported")
+                    .with_builtin("intersect")
+                    .with_identifier(INTERSECT_ERR_LEGACY_OPTION_UNSUPPORTED)
+                    .build(),
+            );
         }
         other => {
             return Err(intersect_error(format!(
@@ -1544,15 +1549,16 @@ pub(crate) mod tests {
     #[test]
     fn intersect_rejects_legacy_option() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = error_message(
-            evaluate_sync(
-                Value::Tensor(tensor.clone()),
-                Value::Tensor(tensor),
-                &[Value::from("legacy")],
-            )
-            .unwrap_err(),
+        let err = evaluate_sync(
+            Value::Tensor(tensor.clone()),
+            Value::Tensor(tensor),
+            &[Value::from("legacy")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some(INTERSECT_ERR_LEGACY_OPTION_UNSUPPORTED)
         );
-        assert!(err.contains("legacy"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

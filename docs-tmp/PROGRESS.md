@@ -4,6 +4,24 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- (pending commit) Set builtins legacy-option identifier ratchet
+  - Replaced message-only legacy-option rejections in set builtins with stable identifiers:
+    - `RunMat:unique:LegacyOptionUnsupported`
+    - `RunMat:union:LegacyOptionUnsupported`
+    - `RunMat:intersect:LegacyOptionUnsupported`
+    - `RunMat:setdiff:LegacyOptionUnsupported`
+    - `RunMat:ismember:LegacyOptionUnsupported`
+  - Updated runtime unit coverage in:
+    - [unique.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/array/sorting_sets/unique.rs) (`unique_rejects_legacy_option`)
+    - [union.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/array/sorting_sets/union.rs) (`union_rejects_legacy_option`)
+    - [intersect.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/array/sorting_sets/intersect.rs) (`intersect_rejects_legacy_option`)
+    - [setdiff.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/array/sorting_sets/setdiff.rs) (`setdiff_rejects_legacy_option`)
+    - [ismember.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/array/sorting_sets/ismember.rs) (`options_reject_legacy`)
+  - Validation:
+    - `cargo test -p runmat-runtime legacy_option -- --nocapture`
+    - `cargo test -p runmat-runtime options_reject_legacy -- --nocapture`
+    - `cargo fmt --all`
+
 ## Latest Committed Slices (2026-05-19)
 
 - `d6489fbc` + follow-up (working tree): Plan 3/4 async direct-call lazy future-descriptor lane

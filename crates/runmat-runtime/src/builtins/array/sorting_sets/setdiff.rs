@@ -58,6 +58,8 @@ fn setdiff_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("setdiff").build()
 }
 
+const SETDIFF_ERR_LEGACY_OPTION_UNSUPPORTED: &str = "RunMat:setdiff:LegacyOptionUnsupported";
+
 #[runtime_builtin(
     name = "setdiff",
     category = "array/sorting_sets",
@@ -148,9 +150,12 @@ fn parse_setdiff_option(
             opts.order = SetdiffOrder::Stable;
         }
         "legacy" | "r2012a" => {
-            return Err(setdiff_error(
-                "setdiff: the 'legacy' behaviour is not supported",
-            ));
+            return Err(
+                build_runtime_error("setdiff: the 'legacy' behaviour is not supported")
+                    .with_builtin("setdiff")
+                    .with_identifier(SETDIFF_ERR_LEGACY_OPTION_UNSUPPORTED)
+                    .build(),
+            );
         }
         other => {
             return Err(setdiff_error(format!(
@@ -1220,10 +1225,6 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{CharArray, ResolveContext, StringArray, Tensor, Type, Value};
 
-    fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
-    }
-
     fn evaluate_sync(
         a: Value,
         b: Value,
@@ -1387,11 +1388,12 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn setdiff_rejects_legacy_option() {
-        let err = error_message(
-            evaluate_sync(Value::from(1.0), Value::from(2.0), &[Value::from("legacy")])
-                .unwrap_err(),
+        let err = evaluate_sync(Value::from(1.0), Value::from(2.0), &[Value::from("legacy")])
+            .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some(SETDIFF_ERR_LEGACY_OPTION_UNSUPPORTED)
         );
-        assert!(err.contains("setdiff: the 'legacy' behaviour is not supported"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
