@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 compile fusion ratchet for multi-window node-assignment boundary
+  - Added VM compile regression coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_keeps_multi_window_groups_node_empty_before_runtime_reconciliation`
+  - Contract: compile-time semantic fusion groups remain node-empty even across multiple semantic instruction windows split by non-accelerable operations; accel node reconciliation is runtime-owned (`prepare_fusion_plan`), not compile-owned.
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_keeps_multi_window_groups_node_empty_before_runtime_reconciliation -- --nocapture`
+
 - (pending commit) Plan 7 core error-namespace ratchet now requires identifier prefix
   - Tightened namespace compatibility coverage in [error_namespace_compat.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/error_namespace_compat.rs) to require namespace prefixing on the error identifier itself, removing the transitional message-fragment fallback (`identifier_ok || message_ok`).
   - This enforces the proper contract for namespace migration work: identifier behavior is authoritative, while display message text is non-authoritative.

@@ -982,6 +982,54 @@ mod tests {
 
     #[cfg(feature = "native-accel")]
     #[test]
+    fn primary_compile_keeps_multi_window_groups_node_empty_before_runtime_reconciliation() {
+        let ast = runmat_parser::parse(
+            "a = 1 + 2; b = a * 3; marker = 'x'; c = b - 4; d = c ./ 2;",
+        )
+        .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        assert!(
+            bytecode.fusion_groups.len() >= 2,
+            "expected multiple semantic-window fusion groups for split accel-capable runs"
+        );
+        assert!(
+            bytecode
+                .fusion_groups
+                .iter()
+                .all(|group| group.nodes.is_empty()),
+            "compile-time semantic-window groups must remain node-empty"
+        );
+
+        let runtime_groups = bytecode.runtime_fusion_groups();
+        let runtime_graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
+        let runtime_groups = if let Some(graph) = runtime_graph.as_ref() {
+            bytecode.runtime_fusion_groups_for_graph(graph)
+        } else {
+            bytecode.fusion_groups.clone()
+        };
+        let runtime_plan = prepare_fusion_plan(
+            runtime_graph.as_ref(),
+            &runtime_groups,
+            bytecode
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_group_count,
+        )
+        .expect("runtime fusion planning should reconcile executable groups");
+        assert!(
+            runtime_plan
+                .groups
+                .iter()
+                .any(|group| !group.group.nodes.is_empty()),
+            "runtime reconciliation should assign accel nodes"
+        );
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
     fn primary_compile_semantically_gates_bytecode_fusion_groups() {
         let ast = runmat_parser::parse("x = 1;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
