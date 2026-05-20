@@ -2,6 +2,14 @@ use crate::interpreter::errors::mex;
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
+fn map_assignment_shape_error(err: impl std::fmt::Display) -> RuntimeError {
+    mex("ShapeMismatch", &format!("assignment: {err}"))
+}
+
+fn map_acceleration_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
+    mex("AccelerationOperationFailed", &format!("{context}: {err}"))
+}
+
 fn is_empty_tensor(value: &Value) -> bool {
     matches!(value, Value::Tensor(t) if t.data.is_empty() || t.rows == 0 || t.cols == 0)
         || matches!(value, Value::ComplexTensor(t) if t.data.is_empty() || t.rows == 0 || t.cols == 0)
@@ -263,8 +271,8 @@ pub async fn assign_gpu_scalar(
     let host = provider
         .download(h)
         .await
-        .map_err(|e| format!("gather for assignment: {e}"))?;
-    let t = Tensor::new(host.data, host.shape).map_err(|e| format!("assignment: {e}"))?;
+        .map_err(|e| map_acceleration_error("gather for assignment", e))?;
+    let t = Tensor::new(host.data, host.shape).map_err(map_assignment_shape_error)?;
     let Value::Tensor(updated) = assign_tensor_scalar(t, indices, rhs, delete).await? else {
         unreachable!()
     };
@@ -274,6 +282,6 @@ pub async fn assign_gpu_scalar(
     };
     let new_h = provider
         .upload(&view)
-        .map_err(|e| format!("reupload after assignment: {e}"))?;
+        .map_err(|e| map_acceleration_error("reupload after assignment", e))?;
     Ok(Value::GpuTensor(new_h))
 }

@@ -10,6 +10,10 @@ fn map_slice_shape_error(err: impl std::fmt::Display) -> RuntimeError {
     )
 }
 
+fn map_slice_acceleration_error(err: impl std::fmt::Display) -> RuntimeError {
+    crate::interpreter::errors::mex("AccelerationOperationFailed", &format!("slice: {err}"))
+}
+
 pub async fn read_tensor_slice_1d(
     tensor: &Tensor,
     colon_mask: u32,
@@ -239,12 +243,12 @@ pub fn read_gpu_slice_from_plan(
     if plan.indices.is_empty() {
         let zeros = provider
             .zeros(&plan.output_shape)
-            .map_err(|e| format!("slice: {e}"))?;
+            .map_err(map_slice_acceleration_error)?;
         Ok(Value::GpuTensor(zeros))
     } else {
         let result = provider
             .gather_linear(handle, &plan.indices, &plan.output_shape)
-            .map_err(|e| format!("slice: {e}"))?;
+            .map_err(map_slice_acceleration_error)?;
         Ok(Value::GpuTensor(result))
     }
 }
@@ -295,8 +299,8 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
 #[cfg(test)]
 mod tests {
     use super::{
-        gather_string_slice, read_complex_slice_from_plan, read_string_slice,
-        read_tensor_slice_from_plan,
+        gather_string_slice, map_slice_acceleration_error, read_complex_slice_from_plan,
+        read_string_slice, read_tensor_slice_from_plan,
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
@@ -382,5 +386,11 @@ mod tests {
         let err =
             read_complex_slice_from_plan(&ct, &plan).expect_err("shape-mismatch plan should fail");
         assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn slice_acceleration_error_mapping_reports_identifier() {
+        let err = map_slice_acceleration_error("provider failed");
+        assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
     }
 }

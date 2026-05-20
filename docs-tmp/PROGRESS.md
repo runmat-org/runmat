@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM indexing GPU fallback identifier-contract ratchet
+  - `scope: in-scope`
+  - Removed remaining string-only acceleration/shape wrappers from indexing GPU helper paths:
+    - [read_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/read_slice.rs): `read_gpu_slice_from_plan` now maps provider `zeros`/`gather_linear` failures to `RunMat:AccelerationOperationFailed`.
+    - [write_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/write_slice.rs): GPU fallback download/upload failures now map to `RunMat:AccelerationOperationFailed`, and host tensor shape materialization failures map to `RunMat:ShapeMismatch`.
+    - [write_linear.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/write_linear.rs): GPU scalar assign gather/upload failures now map to `RunMat:AccelerationOperationFailed`, and host tensor shape materialization failures map to `RunMat:ShapeMismatch`.
+  - Added unit identifier-contract coverage:
+    - `indexing::read_slice::tests::slice_acceleration_error_mapping_reports_identifier`
+    - `indexing::write_slice::tests::slice_acceleration_error_mapping_reports_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib slice_acceleration_error_mapping_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm mixed_range_end_assign_shape_mismatch_error -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM slice dispatch fallback/error identifier ratchet
   - `scope: in-scope`
   - Removed remaining string-wrapped slice-error wrappers in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) for:

@@ -3,6 +3,14 @@ use crate::interpreter::errors::mex;
 use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
+fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
+    mex("ShapeMismatch", &format!("{context}: {err}"))
+}
+
+fn map_acceleration_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
+    mex("AccelerationOperationFailed", &format!("{context}: {err}"))
+}
+
 fn is_empty_delete_rhs(value: &Value) -> bool {
     matches!(
         value,
@@ -474,8 +482,9 @@ pub async fn assign_gpu_slice_with_plan(
     let host = provider
         .download(handle)
         .await
-        .map_err(|e| format!("gather for slice assign: {e}"))?;
-    let mut t = Tensor::new(host.data, host.shape).map_err(|e| format!("slice assign: {e}"))?;
+        .map_err(|e| map_acceleration_error("gather for slice assign", e))?;
+    let mut t =
+        Tensor::new(host.data, host.shape).map_err(|e| map_slice_shape_error("slice assign", e))?;
     scatter_real_with_plan(&mut t, plan, &rhs_values)?;
     upload_tensor_to_gpu(&t)
 }
@@ -503,8 +512,9 @@ pub async fn delete_gpu_slice_with_plan(
     let host = provider
         .download(handle)
         .await
-        .map_err(|e| format!("gather for slice deletion: {e}"))?;
-    let t = Tensor::new(host.data, host.shape).map_err(|e| format!("slice deletion: {e}"))?;
+        .map_err(|e| map_acceleration_error("gather for slice deletion", e))?;
+    let t = Tensor::new(host.data, host.shape)
+        .map_err(|e| map_slice_shape_error("slice deletion", e))?;
     let Value::Tensor(updated) = delete_tensor_with_plan(t, plan, rhs)? else {
         unreachable!()
     };
@@ -751,13 +761,13 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
     };
     let new_h = provider
         .upload(&view)
-        .map_err(|e| format!("reupload after slice assign: {e}"))?;
+        .map_err(|e| map_acceleration_error("reupload after slice assign", e))?;
     Ok(Value::GpuTensor(new_h))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{build_complex_rhs_view, build_string_rhs_view};
+    use super::{build_complex_rhs_view, build_string_rhs_view, map_acceleration_error};
     use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
 
     #[test]
@@ -807,5 +817,11 @@ mod tests {
             Err(err) => err,
         };
         assert_eq!(err.identifier(), Some("RunMat:InvalidSliceAssignmentRhs"));
+    }
+
+    #[test]
+    fn slice_acceleration_error_mapping_reports_identifier() {
+        let err = map_acceleration_error("slice assign", "provider failed");
+        assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
     }
 }
