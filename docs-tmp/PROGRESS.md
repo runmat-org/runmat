@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM cell paren selector aliasing semantics ratchet
+  - `scope: in-scope`
+  - Fixed a semantic selector/runtime-shape gap for cell paren indexing + assignment in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs):
+    - cell assignment paths now replace element handles with freshly allocated GC handles (`allocate_cell_handle`) instead of mutating shared `GcPtr<Value>` payloads in place.
+    - This prevents post-read alias mutation where `B = C(2:end-1)` could incorrectly change after `C(2:end-1) = {...}`.
+  - Added semantic regression coverage in [indexing_properties.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/indexing_properties.rs):
+    - `cell_paren_range_end_and_colon_semantics`
+    - ratchets `range` + `end` read semantics, subsequent paren assignment semantics, and `C(:)` shape contract.
+  - Validation:
+    - `cargo test -p runmat-vm --test indexing_properties cell_paren_range_end_and_colon_semantics -- --nocapture`
+    - `cargo test -p runmat-vm --test cell_arrays -- --nocapture`
+    - `cargo test -p runmat-vm mixed_range_end_assign_shape_mismatch_error -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM linear-index RHS gather identifier ratchet
   - `scope: in-scope`
   - Removed the last string-only GPU RHS gather wrappers in [write_linear.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/write_linear.rs):

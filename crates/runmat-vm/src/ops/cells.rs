@@ -10,6 +10,15 @@ fn map_cell_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeEr
     mex("ShapeMismatch", &format!("{context}: {err}"))
 }
 
+fn allocate_cell_handle(value: Value) -> Result<runmat_gc::GcPtr<Value>, RuntimeError> {
+    runmat_gc::gc_allocate(value).map_err(|e| {
+        mex(
+            "CellAllocationFailed",
+            &format!("failed to allocate cell element handle: {e}"),
+        )
+    })
+}
+
 fn decode_cell_end_plus(value: f64) -> Option<usize> {
     if !value.is_nan() {
         return None;
@@ -274,7 +283,7 @@ where
             if let Some(oldv) = ca.data.get(pos) {
                 on_write(oldv, &rhs);
             }
-            *ca.data[pos] = rhs;
+            ca.data[pos] = allocate_cell_handle(rhs)?;
             Ok(Value::Cell(ca))
         }
         2 => {
@@ -290,7 +299,7 @@ where
             if let Some(oldv) = ca.data.get(lin) {
                 on_write(oldv, &rhs);
             }
-            *ca.data[lin] = rhs;
+            ca.data[lin] = allocate_cell_handle(rhs)?;
             Ok(Value::Cell(ca))
         }
         _ => Err(mex(
@@ -416,7 +425,7 @@ pub fn assign_cell_paren_linear_indices_with_policy(
         if let Some(oldv) = ca.data.get(pos) {
             runmat_gc::gc_record_write(oldv, &newv);
         }
-        *ca.data[pos] = newv;
+        ca.data[pos] = allocate_cell_handle(newv)?;
     }
     Ok(Value::Cell(ca))
 }
@@ -459,7 +468,7 @@ fn assign_cell_paren_from_cell(
     if let Some(oldv) = ca.data.get(lin) {
         runmat_gc::gc_record_write(oldv, &newv);
     }
-    *ca.data[lin] = newv;
+    ca.data[lin] = allocate_cell_handle(newv)?;
     Ok(Value::Cell(ca))
 }
 

@@ -451,3 +451,61 @@ fn oop_negative_missing_subsasgn_mex() {
     let err = execute_semantic_source(program).expect_err("missing subsasgn should fail");
     assert_eq!(err.identifier(), Some("RunMat:MissingSubsasgn"));
 }
+
+#[test]
+fn cell_paren_range_end_and_colon_semantics() {
+    let src = r#"
+        C = {10, 20, 30, 40};
+        B = C(2:end-1);
+        C(2:end-1) = {200, 300};
+        D = C(:);
+    "#;
+    let vars = execute_semantic_source(src).expect("cell selector flow should execute");
+
+    let b = vars
+        .iter()
+        .find_map(|value| match value {
+            runmat_builtins::Value::Cell(cell) if cell.shape == vec![1, 2] => Some(cell.clone()),
+            _ => None,
+        })
+        .expect("expected B cell with row-vector shape");
+    assert_eq!(b.data.len(), 2);
+    assert!(
+        matches!(&*b.data[0], runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < f64::EPSILON)
+    );
+    assert!(
+        matches!(&*b.data[1], runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
+    );
+
+    let c_final = vars
+        .iter()
+        .find_map(|value| match value {
+            runmat_builtins::Value::Cell(cell) if cell.shape == vec![1, 4] => Some(cell.clone()),
+            _ => None,
+        })
+        .expect("expected final C cell");
+    assert_eq!(c_final.data.len(), 4);
+    assert!(
+        matches!(&*c_final.data[0], runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
+    );
+    assert!(
+        matches!(&*c_final.data[1], runmat_builtins::Value::Num(n) if (*n - 200.0).abs() < f64::EPSILON)
+    );
+    assert!(
+        matches!(&*c_final.data[2], runmat_builtins::Value::Num(n) if (*n - 300.0).abs() < f64::EPSILON)
+    );
+    assert!(
+        matches!(&*c_final.data[3], runmat_builtins::Value::Num(n) if (*n - 40.0).abs() < f64::EPSILON)
+    );
+
+    let d = vars
+        .iter()
+        .rev()
+        .find_map(|value| match value {
+            runmat_builtins::Value::Cell(cell) => Some(cell.clone()),
+            _ => None,
+        })
+        .expect("expected D cell");
+    assert_eq!(d.shape, vec![4, 1]);
+    assert_eq!(d.data.len(), 4);
+}
