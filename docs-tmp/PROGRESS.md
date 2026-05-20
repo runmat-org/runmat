@@ -1742,6 +1742,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Updated `docs-tmp/DELIVERABLE_AUDIT.md` Plan 7 blocking-gap language to reflect that cross-entrypoint stale compile-graph exclusion evidence is now explicit; remaining unresolved objective items are outside this specific Plan 7 graph-source boundary.
   - Validation: `cargo test -p runmat-vm runtime_accel_graph_ignores_stale_compile_graph_metadata -- --nocapture`, `cargo test -p runmat-vm runtime_state_ignores_stale_compile_graph_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-vm --test fusion_gpu fusion_graph_helper_ignores_stale_compile_graph_metadata -- --nocapture`.
 
+- (pending commit) Plan 1/3 core compile artifact promotes MIR analysis to first-class execution product
+  - `RunMatSession::compile_input` in `crates/runmat-core/src/session/compile.rs` now computes MIR analysis (`runmat_mir::analysis::analyze_assembly`) as part of the semantic compile path and stores it on `PreparedExecution` in `crates/runmat-core/src/session/mod.rs`.
+  - Core fusion preview/runtime metadata paths now consume this prepared analysis artifact directly (`prepared.analysis`) in `compile.rs`/`run.rs` instead of re-analyzing MIR at each call site.
+  - Eval-hook semantic compile path (`compile_eval_hook_bytecode`) in `crates/runmat-core/src/session/run.rs` now also runs MIR analysis before VM bytecode compile, aligning nested stdin/eval execution with the semantic HIR->MIR->analysis->VM lane.
+  - Added core compile-path regression `compile_input_records_mir_analysis_facts` in `crates/runmat-core/src/tests.rs`, asserting valid compile artifacts contain MIR local facts and no MIR diagnostics.
+  - Validation: `cargo test -p runmat-core compile_input_records_mir_analysis_facts -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test async_stdin pending_handler_returns_error -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

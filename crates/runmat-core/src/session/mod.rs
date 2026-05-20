@@ -107,7 +107,7 @@ pub struct RunMatSession {
 pub(crate) struct PreparedExecution {
     ast: runmat_parser::Program,
     lowering: LoweringResult,
-    mir: runmat_mir::MirAssembly,
+    analysis: runmat_mir::analysis::AnalysisStore,
     pub(crate) bytecode: runmat_vm::Bytecode,
     semantic_function_registry_after_success: runmat_vm::SemanticFunctionRegistry,
     next_semantic_function_id_after_success: usize,
@@ -117,6 +117,11 @@ impl PreparedExecution {
     #[cfg(test)]
     pub(crate) fn lowering(&self) -> &LoweringResult {
         &self.lowering
+    }
+
+    #[cfg(test)]
+    pub(crate) fn analysis(&self) -> &runmat_mir::analysis::AnalysisStore {
+        &self.analysis
     }
 }
 

@@ -148,6 +148,22 @@ fn compile_input_uses_semantic_vm_when_supported() {
 }
 
 #[test]
+fn compile_input_records_mir_analysis_facts() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let prepared = session
+        .compile_input("x = [1 2; 3 4]; y = x(:, 2);")
+        .expect("compile");
+    assert!(
+        prepared.analysis().diagnostics.is_empty(),
+        "valid semantic compile should not emit MIR diagnostics"
+    );
+    assert!(
+        !prepared.analysis().mir_locals.is_empty(),
+        "semantic compile should carry MIR local analysis facts for entrypoint execution"
+    );
+}
+
+#[test]
 fn compile_input_resolves_wildcard_import_from_project_source_index() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join("+stats")).expect("create package dir");

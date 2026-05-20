@@ -20,7 +20,9 @@ This audit maps the active objective to concrete repository evidence and marks e
 
 - Evidence:
   - semantic compile path in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs)
-  - prepared execution artifacts now carry MIR in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/mod.rs), and fusion-plan preview/runtime metadata paths reuse that prepared MIR in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs) and [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs).
+  - prepared execution artifacts now carry MIR analysis store in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/mod.rs), computed during `compile_input` in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs) (`runtime.analyze`) and reused by fusion-plan preview/runtime metadata paths in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs) and [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) instead of re-deriving per call site.
+  - core compile-path coverage now asserts compile artifacts include MIR analysis facts in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs) (`compile_input_records_mir_analysis_facts`).
+  - eval-hook semantic compile path in [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) (`compile_eval_hook_bytecode`) now also runs MIR analysis before VM compile, keeping stdin-triggered nested execution on the same semantic HIR->MIR->analysis->VM lane.
   - MIR lowering API used before VM compile in [stress.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-gc/tests/stress.rs)
 - Gap:
   - broad consumer migration across all crates remains in progress (see `PLAN.3.md` / `PROGRESS.md`).

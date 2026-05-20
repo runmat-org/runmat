@@ -356,7 +356,7 @@ impl RunMatSession {
         let PreparedExecution {
             ast,
             lowering,
-            mir,
+            analysis,
             mut bytecode,
             semantic_function_registry_after_success,
             next_semantic_function_id_after_success,
@@ -423,7 +423,6 @@ impl RunMatSession {
             } else {
                 runtime_groups
             };
-            let analysis = runmat_mir::analysis::analyze_assembly(&mir);
             build_fusion_snapshot(
                 &runtime_groups,
                 &bytecode
@@ -1095,6 +1094,7 @@ fn compile_eval_hook_bytecode(
     })?;
     let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)
         .map_err(runmat_vm::CompileError::from)?;
+    let _analysis = runmat_mir::analysis::analyze_assembly(&mir);
     runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)
 }
 

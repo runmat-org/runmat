@@ -64,13 +64,17 @@ impl RunMatSession {
             let _span = info_span!("runtime.compile.bytecode").entered();
             self.compile_semantic_bytecode(&lowering)?
         };
+        let analysis = {
+            let _span = info_span!("runtime.analyze").entered();
+            runmat_mir::analysis::analyze_assembly(&mir)
+        };
         bytecode.source_id = Some(source_id);
         let (semantic_function_registry_after_success, next_semantic_function_id_after_success) =
             self.prepare_session_semantic_function_registry(&mut bytecode);
         Ok(PreparedExecution {
             ast,
             lowering,
-            mir,
+            analysis,
             bytecode,
             semantic_function_registry_after_success,
             next_semantic_function_id_after_success,
@@ -211,7 +215,6 @@ impl RunMatSession {
         } else {
             runtime_groups
         };
-        let analysis = runmat_mir::analysis::analyze_assembly(&prepared.mir);
         Ok(build_fusion_snapshot(
             &runtime_groups,
             &prepared
@@ -231,10 +234,10 @@ impl RunMatSession {
                 },
                 accel_graph_source: runtime_graph_source.as_str().to_string(),
                 mir_local_fact_count: mir_local_fact_count_for_entrypoint(
-                    &analysis,
+                    &prepared.analysis,
                     &prepared.lowering.assembly,
                 ),
-                mir_diagnostic_count: analysis.diagnostics.len(),
+                mir_diagnostic_count: prepared.analysis.diagnostics.len(),
                 mir_fusion_signal_count: prepared
                     .bytecode
                     .semantic_fusion_metadata
