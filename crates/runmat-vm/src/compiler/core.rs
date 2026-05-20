@@ -1167,14 +1167,18 @@ impl Compiler {
             }
         }
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
-        if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke)
-            && matches!(call.callee, MirCallee::Static(_))
-            && !matches!(
-                call.callee,
+        if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
+            match &call.callee {
                 MirCallee::Static(CallableIdentity::SemanticFunction(_))
-            )
-        {
-            return self.compile_mir_method_call(call, has_expansion);
+                | MirCallee::Dynamic(_) => {
+                    return Err(self
+                        .compile_error(
+                            "MIR method-call lowering expected a non-semantic static callee",
+                        )
+                        .with_identifier(IDENT_MIR_METHOD_CALL_CALLEE_INVALID));
+                }
+                MirCallee::Static(_) => return self.compile_mir_method_call(call, has_expansion),
+            }
         }
         match &call.callee {
             MirCallee::Static(CallableIdentity::SemanticFunction(function)) => {
@@ -1795,14 +1799,18 @@ impl Compiler {
         let requested_outputs = self.resolved_call_output_count(call)?;
 
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
-        if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke)
-            && matches!(call.callee, MirCallee::Static(_))
-            && !matches!(
-                call.callee,
+        if matches!(call.syntax, CallSyntax::Method | CallSyntax::DottedInvoke) {
+            match &call.callee {
                 MirCallee::Static(CallableIdentity::SemanticFunction(_))
-            )
-        {
-            return self.compile_mir_method_call(call, has_expansion);
+                | MirCallee::Dynamic(_) => {
+                    return Err(self
+                        .compile_error(
+                            "MIR method-call lowering expected a non-semantic static callee",
+                        )
+                        .with_identifier(IDENT_MIR_METHOD_CALL_CALLEE_INVALID));
+                }
+                MirCallee::Static(_) => return self.compile_mir_method_call(call, has_expansion),
+            }
         }
         match &call.callee {
             MirCallee::Static(CallableIdentity::SemanticFunction(function)) => {
