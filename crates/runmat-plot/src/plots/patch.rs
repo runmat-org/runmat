@@ -134,12 +134,12 @@ impl PatchPlot {
     }
 
     pub fn set_face_color(&mut self, color: Vec4) {
-        self.face_color = color;
+        self.face_color = sanitize_color(color);
         self.mark_dirty();
     }
 
     pub fn set_edge_color(&mut self, color: Vec4) {
-        self.edge_color = color;
+        self.edge_color = sanitize_color(color);
         self.mark_dirty();
     }
 
@@ -154,12 +154,12 @@ impl PatchPlot {
     }
 
     pub fn set_face_alpha(&mut self, alpha: f32) {
-        self.face_alpha = alpha.clamp(0.0, 1.0);
+        self.face_alpha = sanitize_alpha(alpha);
         self.mark_dirty();
     }
 
     pub fn set_edge_alpha(&mut self, alpha: f32) {
-        self.edge_alpha = alpha.clamp(0.0, 1.0);
+        self.edge_alpha = sanitize_alpha(alpha);
         self.mark_dirty();
     }
 
@@ -356,6 +356,31 @@ impl PatchPlot {
     }
 }
 
+fn sanitize_color(color: Vec4) -> Vec4 {
+    Vec4::new(
+        sanitize_color_component(color.x),
+        sanitize_color_component(color.y),
+        sanitize_color_component(color.z),
+        sanitize_color_component(color.w),
+    )
+}
+
+fn sanitize_color_component(value: f32) -> f32 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
+}
+
+fn sanitize_alpha(alpha: f32) -> f32 {
+    if alpha.is_finite() {
+        alpha.clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
 fn validate_finite_vertices(vertices: &[Vec3]) -> Result<(), String> {
     if vertices
         .iter()
@@ -450,6 +475,36 @@ mod tests {
         )
         .expect_err("PatchPlot::new should reject non-finite Vec3 coordinates");
         assert!(err.contains("finite Vec3 coordinates"));
+    }
+
+    #[test]
+    fn patch_style_setters_sanitize_non_finite_values() {
+        let mut patch = PatchPlot::new(
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            vec![vec![0, 1, 2]],
+        )
+        .unwrap();
+
+        patch.set_face_color(Vec4::new(f32::NAN, 0.25, f32::INFINITY, 1.0));
+        patch.set_edge_color(Vec4::new(0.5, f32::NEG_INFINITY, 0.75, f32::NAN));
+        patch.set_face_alpha(f32::NAN);
+        patch.set_edge_alpha(f32::INFINITY);
+
+        assert_eq!(patch.face_color(), Vec4::new(0.0, 0.25, 0.0, 1.0));
+        assert_eq!(patch.edge_color(), Vec4::new(0.5, 0.0, 0.75, 0.0));
+        assert_eq!(patch.face_alpha(), 1.0);
+        assert_eq!(patch.edge_alpha(), 1.0);
+
+        let render = patch.render_data();
+        assert!(render.vertices[0]
+            .color
+            .iter()
+            .all(|component| component.is_finite()));
+        assert!(render.material.albedo.is_finite());
     }
 
     #[test]

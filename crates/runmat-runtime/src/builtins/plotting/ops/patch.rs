@@ -183,6 +183,7 @@ fn apply_positional_data(opts: &mut PatchOptions, args: &mut Vec<Value>) -> Buil
     if args.len() >= 3
         && !is_property_name(&args[2])
         && value_matches_coordinate_values(&args[0], &args[1], &args[2])
+        && !is_color_literal(&args[2])
     {
         opts.z_data = Some(tensor_from_value(args.remove(2))?);
     }
@@ -198,12 +199,14 @@ fn apply_positional_data(opts: &mut PatchOptions, args: &mut Vec<Value>) -> Buil
         return Ok(());
     }
 
-    if args.len() >= 2 && !is_property_name(&args[1]) {
+    if args.len() >= 2 && !is_property_name(&args[1]) && !is_color_literal(&args[0]) {
         opts.z_data = Some(tensor_from_value(args.remove(0))?);
         apply_color_argument(opts, &args.remove(0));
     } else {
         let value = args.remove(0);
-        if value_matches_coordinate_shape(opts, &value) || !apply_color_argument(opts, &value) {
+        if value_matches_coordinate_shape(opts, &value) && !is_color_literal(&value)
+            || !apply_color_argument(opts, &value)
+        {
             opts.z_data = Some(tensor_from_value(value)?);
         }
     }
@@ -229,6 +232,18 @@ fn value_matches_coordinate_shape(opts: &PatchOptions, value: &Value) -> bool {
         return false;
     };
     tensor.rows == x.rows && tensor.cols == x.cols && tensor.rows == y.rows && tensor.cols == y.cols
+}
+
+fn is_color_literal(value: &Value) -> bool {
+    if value_as_string(value).is_some() {
+        return parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value).is_ok();
+    }
+    let Ok(tensor) = Tensor::try_from(value) else {
+        return false;
+    };
+    tensor.rows == 1
+        && tensor.cols == 3
+        && parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value).is_ok()
 }
 
 fn apply_struct_options(opts: &mut PatchOptions, st: &StructValue) -> BuiltinResult<()> {
@@ -515,6 +530,19 @@ mod tests {
         .unwrap();
         assert_eq!(plot.faces().len(), 1);
         assert_eq!(plot.vertices().len(), 3);
+        assert_eq!(plot.face_color(), Vec4::new(1.0, 0.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn patch_xy_rgb_row_vector_treats_third_argument_as_color() {
+        let plot = parse_patch_plot(vec![
+            tensor(1, 3, &[0.0, 1.0, 0.0]),
+            tensor(1, 3, &[0.0, 0.0, 1.0]),
+            tensor(1, 3, &[1.0, 0.0, 0.0]),
+        ])
+        .unwrap();
+        assert_eq!(plot.vertices().len(), 3);
+        assert!(plot.vertices().iter().all(|vertex| vertex.z == 0.0));
         assert_eq!(plot.face_color(), Vec4::new(1.0, 0.0, 0.0, 1.0));
     }
 
