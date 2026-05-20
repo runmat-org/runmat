@@ -1366,6 +1366,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Current result: no matches in `crates`, indicating legacy compiler/runtime symbol surfaces tracked by this gate are absent from production code paths.
   - Updated `docs-tmp/GOAL.md` criterion statuses accordingly (criterion 1 now marked substantially met pending full closeout audit; criterion 3 status refreshed with current composition-wiring evidence).
 
+- (pending commit) Plan 7 fusion planner-source metadata exact-contract ratchet
+  - Tightened planner source assertions in `crates/runmat-core/tests/fusion_regressions.rs` from substring matching to exact equality:
+    - `compile_fusion_plan_exposes_semantic_planner_metadata` now asserts `semantic-mir-analysis+bytecode-accel-graph`.
+    - `runtime_fusion_snapshot_exposes_semantic_planner_metadata` now asserts `semantic-mir-analysis+bytecode-accel-graph-runtime`.
+  - This hardens semantic-fact-driven fusion planner metadata checks against accidental source-tag drift hidden by partial matches.
+  - Validation: `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`.
+
 ## Next Resolution Items
 
 - Finish converting remaining legacy test/doc references that imply removed APIs where they block semantic-only confidence.

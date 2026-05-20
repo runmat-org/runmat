@@ -168,13 +168,10 @@ fn compile_fusion_plan_exposes_semantic_planner_metadata() {
         .expect("compile fusion plan should succeed")
         .expect("expected at least one fusion group for regression script");
 
-    assert!(
-        snapshot
-            .planner
-            .source
-            .contains("semantic-mir-analysis+bytecode-accel-graph"),
-        "unexpected planner source tag: {}",
-        snapshot.planner.source
+    assert_eq!(
+        snapshot.planner.source,
+        "semantic-mir-analysis+bytecode-accel-graph",
+        "unexpected planner source tag"
     );
     assert!(
         snapshot.planner.mir_local_fact_count > 0,
@@ -218,13 +215,10 @@ fn runtime_fusion_snapshot_exposes_semantic_planner_metadata() {
         .fusion_plan
         .expect("expected runtime fusion plan snapshot");
 
-    assert!(
-        snapshot
-            .planner
-            .source
-            .contains("semantic-mir-analysis+bytecode-accel-graph-runtime"),
-        "unexpected runtime planner source tag: {}",
-        snapshot.planner.source
+    assert_eq!(
+        snapshot.planner.source,
+        "semantic-mir-analysis+bytecode-accel-graph-runtime",
+        "unexpected runtime planner source tag"
     );
     assert!(
         snapshot.planner.mir_local_fact_count > 0,
