@@ -3249,6 +3249,52 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_delete_on_brace_index_target_with_identifier() {
+        let ast = runmat_parser::parse("x = [1 2 3]; x(2) = [];").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched_assign = false;
+        let mut patched_mutation = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                match &mut stmt.kind {
+                    MirStmtKind::Assign { place, .. } => {
+                        if let MirPlace::Index(_, indexing) = place {
+                            indexing.kind = runmat_hir::IndexKind::Brace;
+                            patched_assign = true;
+                        }
+                    }
+                    MirStmtKind::PlaceMutation(mutation) => {
+                        if let MirPlace::Index(_, indexing) = &mut mutation.place {
+                            indexing.kind = runmat_hir::IndexKind::Brace;
+                            patched_mutation = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(
+            patched_assign,
+            "expected indexed delete assign stmt in lowered MIR"
+        );
+        assert!(
+            patched_mutation,
+            "expected delete place mutation stmt in lowered MIR"
+        );
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirDeleteAssignmentIndexKindInvalid")
+        );
+    }
+
+    #[test]
     fn primary_compile_rejects_invalid_read_index_context_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; y = x(2);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

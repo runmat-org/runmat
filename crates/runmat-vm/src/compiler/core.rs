@@ -96,6 +96,8 @@ const IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH: &str =
 const IDENT_MIR_DELETE_ASSIGNMENT_RHS_INVALID: &str = "RunMat:MirDeleteAssignmentRhsInvalid";
 const IDENT_MIR_DELETE_ASSIGNMENT_PLACE_MISMATCH: &str = "RunMat:MirDeleteAssignmentPlaceMismatch";
 const IDENT_MIR_DELETE_ASSIGNMENT_TARGET_INVALID: &str = "RunMat:MirDeleteAssignmentTargetInvalid";
+const IDENT_MIR_DELETE_ASSIGNMENT_INDEX_KIND_INVALID: &str =
+    "RunMat:MirDeleteAssignmentIndexKindInvalid";
 const IDENT_MIR_AGGREGATE_SHAPE_INVALID: &str = "RunMat:MirAggregateShapeInvalid";
 const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
 const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
@@ -1284,12 +1286,19 @@ impl Compiler {
         delete: bool,
     ) -> Result<(), CompileError> {
         if delete {
-            if !matches!(place, MirPlace::Index(_, _)) {
+            let MirPlace::Index(_, indexing) = place else {
                 return Err(self
                     .compile_error(
                         "MIR delete assignment invariant violated: delete mutation requires indexed assignment target",
                     )
                     .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_TARGET_INVALID));
+            };
+            if indexing.kind != IndexKind::Paren {
+                return Err(self
+                    .compile_error(
+                        "MIR delete assignment invariant violated: delete mutation currently requires paren indexing",
+                    )
+                    .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_INDEX_KIND_INVALID));
             }
             if !self.mir_delete_rhs_is_empty_tensor_literal(value) {
                 return Err(self
