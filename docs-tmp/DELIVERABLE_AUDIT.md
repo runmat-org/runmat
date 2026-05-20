@@ -102,6 +102,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `RunMat:MirMethodCallCalleeInvalid` for internal method-call static-callee invariants.
     - `RunMat:MirNumberLiteralInvalid` for invalid MIR numeric literal payloads.
     - `RunMat:MirConstantUnknown` for unknown MIR symbolic constants.
+    - `RunMat:MirFunctionHandleNameMissing` for malformed/unnamable external/imported/method function-handle targets at VM compile boundaries.
   - VM selector-plan compile invariants now also reject misplaced range/end selector operands in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
     - `MirIndexPlan::Slice` rejects range/end selectors that must lower through `IndexSliceExpr` (`RunMat:MirSliceIndexPlanInvalid`).
     - `MirIndexPlan::Scalar` rejects range/end selector operands that must lower through `IndexSliceExpr` (`RunMat:MirScalarIndexPlanInvalid`).
@@ -126,6 +127,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `primary_compile_rejects_invalid_mir_multi_assign_method_call_callee_with_identifier`
     - `primary_compile_rejects_invalid_mir_number_literal_with_identifier`
     - `primary_compile_rejects_unknown_mir_constant_with_identifier`
+    - `primary_compile_rejects_missing_mir_function_handle_runtime_name_with_identifier`
     - `primary_compile_rejects_scalar_plan_with_range_expr_component_with_identifier`
     - `primary_compile_rejects_slice_plan_with_range_expr_component_with_identifier`
 - Gap:

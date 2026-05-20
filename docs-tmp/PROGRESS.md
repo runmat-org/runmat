@@ -12,6 +12,19 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- MIR function-handle runtime-name identifier ratchet
+  - `scope: in-scope`
+  - Added stable VM compile identifier for malformed/unnamable external/imported/method function-handle targets in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `RunMat:MirFunctionHandleNameMissing`
+  - Added compile-level identifier-contract coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_missing_mir_function_handle_runtime_name_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_missing_mir_function_handle_runtime_name_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM slice-read result-shape identifier-contract ratchet
   - `scope: in-scope`
   - Normalized string-shaped slice-read result materialization errors to stable runtime identifiers in [read_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/read_slice.rs):

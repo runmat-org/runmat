@@ -98,6 +98,7 @@ const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
 const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
 const IDENT_MIR_NUMBER_LITERAL_INVALID: &str = "RunMat:MirNumberLiteralInvalid";
 const IDENT_MIR_CONSTANT_UNKNOWN: &str = "RunMat:MirConstantUnknown";
+const IDENT_MIR_FUNCTION_HANDLE_NAME_MISSING: &str = "RunMat:MirFunctionHandleNameMissing";
 const IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED: &str = "RunMat:MirCallFallbackPolicyUnsupported";
 const IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED: &str =
     "RunMat:MirMethodFallbackPolicyUnsupported";
@@ -2693,6 +2694,7 @@ impl Compiler {
                     self.compile_error(format!(
                         "missing runtime name for function handle target {target:?}"
                     ))
+                    .with_identifier(IDENT_MIR_FUNCTION_HANDLE_NAME_MISSING)
                 })?;
                 self.emit(Instr::CreateExternalFunctionHandle(name));
                 Ok(())
