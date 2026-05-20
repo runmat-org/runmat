@@ -6,6 +6,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 runtime scalar-fusion bypass for semantic literal/scalar paths
+  - VM fusion dispatch in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs) now bypasses elementwise fusion execution when all runtime inputs are scalar-shaped values, forcing these groups down the normal VM/runtime scalar path.
+  - Accelerate elementwise plan support in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs) now rejects scalar-shaped elementwise groups up front (`scalar_shape_known_one`), preventing scalar-only GPU kernel materialization at plan time.
+  - This closes the open runtime failure where scalar literal-negation fusion produced `GpuTensor([1,1])` values that leaked into matrix literal construction and triggered `cannot convert GpuTensor ... to f64`.
+  - Validation:
+    - `cargo test -p runmat-vm --test fusion_gpu fused_safe_followup_builtins_remain_resident -- --nocapture`
+    - `cargo test -p runmat-vm --test fusion_gpu direct_execution_of_safe_followup_group_returns_gpu_tensor -- --nocapture`
+    - `cargo test -p runmat-vm --test fusion_gpu explained_variance_matches_cpu -- --nocapture`
+
 - (pending commit) Plan 7 formatter unsupported-specifier identifier ratchet
   - Shared runtime formatter in [format.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/common/format.rs) now emits stable identifier `RunMat:format:UnsupportedSpecifier` when encountering unsupported `%` conversions (for example `%q`), instead of message-only runtime errors.
   - Core session integration coverage in [printf_semantics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/printf_semantics.rs) now asserts that stable identifier at the session boundary for `fprintf` format failures in both `SessionExecutionResult.error` and `RunError::Runtime` paths, replacing display-text substring checks.
@@ -24,8 +33,8 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`
     - `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_signals_exist_but_no_candidate_group -- --nocapture`
     - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
-  - Known follow-up:
-    - `cargo test -p runmat-vm --test fusion_gpu fused_safe_followup_builtins_remain_resident -- --nocapture` fails on current branch with `cannot convert GpuTensor ... to f64` during `interpret`; keep as open runtime fusion behavior investigation.
+  - Follow-up status:
+    - `fused_safe_followup_builtins_remain_resident` regression is now green on branch after scalar-only fusion bypass and scalar-shaped plan-support guards.
 
 - (pending commit) Plan 7 test-surface decoupling from compile accel-graph artifacts
   - VM compile-unit fusion tests in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs) now assert runtime graph materialization/reconciliation (`runtime_accel_graph_for_fusion`, `prepare_fusion_plan`) instead of asserting compile-populated `bytecode.accel_graph` presence.

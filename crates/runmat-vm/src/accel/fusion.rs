@@ -13,6 +13,7 @@ use runmat_accelerate::fusion_exec::{
 use runmat_accelerate::InstrSpan;
 use runmat_accelerate::{value_is_all_keyword, FusionKind, ShapeInfo, ValueOrigin, VarKind};
 use runmat_builtins::Value;
+use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
 
@@ -54,6 +55,19 @@ pub fn summarize_value(i: usize, v: &Value) -> String {
         Value::Bool(b) => format!("in#{i}:Bool({})", if *b { 1 } else { 0 }),
         Value::String(s) => format!("in#{i}:String({})", s),
         _ => format!("in#{i}:{}", value_kind(v)),
+    }
+}
+
+#[inline]
+fn is_scalarish_runtime_value(value: &Value) -> bool {
+    match value {
+        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => true,
+        Value::Tensor(tensor) => is_scalar_shape(&tensor.shape),
+        Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),
+        Value::LogicalArray(array) => is_scalar_shape(&array.shape),
+        Value::GpuTensor(handle) => is_scalar_shape(&handle.shape),
+        Value::CharArray(array) => array.rows * array.cols == 1,
+        _ => false,
     }
 }
 
@@ -916,6 +930,15 @@ pub async fn try_execute_fusion_group(
 ) -> Result<Value, RuntimeError> {
     let (stack_guard, request, consumed_inputs) =
         gather_fusion_inputs(plan, graph, stack, vars, context)?;
+    if plan.group.kind.is_elementwise()
+        && !request.inputs.is_empty()
+        && request.inputs.iter().all(is_scalarish_runtime_value)
+    {
+        return Err(mex(
+            "FusionScalarBypass",
+            "fusion: bypass scalar-only elementwise group",
+        ));
+    }
     log::debug!(
         "dispatch fusion kind {:?}, supported {}",
         plan.group.kind,

@@ -1364,7 +1364,14 @@ impl FusionGroupPlan {
         // - Reduction: require WGSL generation at plan time as well.
         // - Other kinds: executed via provider paths.
         let supported = if plan.kernel.kind.is_elementwise() {
-            plan.generate_wgsl("f32").is_some()
+            // Keep scalar ops on the VM/runtime scalar path. Fusing scalar elementwise
+            // spans can materialize scalar GPU handles that later leak into scalar-only
+            // VM coercion boundaries.
+            if scalar_shape_known_one(&plan.group.shape) {
+                false
+            } else {
+                plan.generate_wgsl("f32").is_some()
+            }
         } else if plan.kernel.kind.is_reduction() {
             plan.generate_reduction_wgsl("f32").is_some()
         } else {

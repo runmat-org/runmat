@@ -328,7 +328,7 @@ This audit maps the active objective to concrete repository evidence and marks e
 - Blocking gap:
   - executable fusion groups now preserve semantic-window scaffolding across both zero-mapping and partial-mapping compile outcomes, and runtime sanitization now revalidates both kind and span for pre-mapped nodes before recovery/drop; remaining gap is further minimizing compile-time node assignment heuristics in favor of runtime-only assignment.
   - spawned-task provider-handle policy now has explicit provider declarations plus VM enforcement, and provider-backed release semantics are covered for residency-clear/drop paths (including `Pop`) plus spawn/await completion/cancellation and compiled semantic spawn-overwrite lifecycle flows; semantic async spawn/await lifecycle coverage now includes unaliased helper/callee release behavior via semantic invoker path for direct, struct-nested, cell-nested, multi-output, `varargout`, nested-unrequested `varargout`, and multi-outstanding two-task await flows, with core interaction tests now ratcheting explicit serial eager spawn execution/order/failure boundaries.
-  - targeted runtime fusion behavior remains open in current coverage: `fused_safe_followup_builtins_remain_resident` fails on branch with `cannot convert GpuTensor ... to f64` during `interpret`, requiring focused runtime fusion boundary debugging before closeout.
+  - targeted runtime fusion behavior gap is now closed in current coverage: `fused_safe_followup_builtins_remain_resident` is green on branch after scalar-only elementwise fusion bypass/runtime guard ratchets in VM + accelerate fusion planning.
 
 ### 7) Validation cadence (`met` for current slices)
 
