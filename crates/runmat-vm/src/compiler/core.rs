@@ -91,6 +91,9 @@ const IDENT_MIR_SLICE_INDEX_PLAN_INVALID: &str = "RunMat:MirSliceIndexPlanInvali
 const IDENT_MIR_AGGREGATE_SHAPE_INVALID: &str = "RunMat:MirAggregateShapeInvalid";
 const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
 const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
+const IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED: &str = "RunMat:MirCallFallbackPolicyUnsupported";
+const IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED: &str =
+    "RunMat:MirMethodFallbackPolicyUnsupported";
 
 fn encode_cell_end_offset(offset: isize) -> f64 {
     if offset <= 0 {
@@ -1217,10 +1220,12 @@ impl Compiler {
             MirCallee::Static(identity) => {
                 let fallback_policy = call.fallback_policy;
                 if !fallback_policy.supports_vm_static_call() {
-                    return Err(self.compile_error(format!(
-                        "MIR call fallback policy {:?} is not supported for static callee {:?}",
-                        fallback_policy, identity
-                    )));
+                    return Err(self
+                        .compile_error(format!(
+                            "MIR call fallback policy {:?} is not supported for static callee {:?}",
+                            fallback_policy, identity
+                        ))
+                        .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED));
                 }
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
@@ -1844,10 +1849,12 @@ impl Compiler {
             MirCallee::Static(identity) => {
                 let fallback_policy = call.fallback_policy;
                 if !fallback_policy.supports_vm_static_call() {
-                    return Err(self.compile_error(format!(
-                        "MIR call fallback policy {:?} is not supported for static callee {:?}",
-                        fallback_policy, identity
-                    )));
+                    return Err(self
+                        .compile_error(format!(
+                            "MIR call fallback policy {:?} is not supported for static callee {:?}",
+                            fallback_policy, identity
+                        ))
+                        .with_identifier(IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED));
                 }
                 for arg in &call.args {
                     self.compile_mir_call_arg(arg)?;
@@ -1928,10 +1935,12 @@ impl Compiler {
         let identity = identity.clone();
         let fallback_policy = call.fallback_policy;
         if !fallback_policy.supports_vm_method_or_member_call() {
-            return Err(self.compile_error(format!(
-                "MIR method-call fallback policy {:?} is not supported for callee {:?}",
-                fallback_policy, identity
-            )));
+            return Err(self
+                .compile_error(format!(
+                    "MIR method-call fallback policy {:?} is not supported for callee {:?}",
+                    fallback_policy, identity
+                ))
+                .with_identifier(IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED));
         }
         if call.args.is_empty() {
             return Err(self.compile_error("MIR method calls require a base receiver"));

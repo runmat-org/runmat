@@ -825,7 +825,7 @@ mod tests {
     use runmat_builtins::Value;
     use runmat_hir::{
         lower, BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId, LoweringContext,
-        OperatorKind,
+        MethodId, OperatorKind,
     };
     use runmat_mir::lowering::lower_assembly;
     use runmat_mir::{
@@ -3001,6 +3001,86 @@ mod tests {
 
         let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
         assert_eq!(err.identifier.as_deref(), Some("RunMat:MirBuiltinUnknown"));
+    }
+
+    #[test]
+    fn primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier() {
+        let ast = runmat_parser::parse("x = sin(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign {
+                    value: MirRvalue::Call(call),
+                    ..
+                } = &mut stmt.kind
+                {
+                    call.callee = MirCallee::Static(CallableIdentity::Method(MethodId("m".into())));
+                    call.fallback_policy = CallableFallbackPolicy::ObjectDispatch;
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected call assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirCallFallbackPolicyUnsupported")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier() {
+        let ast = runmat_parser::parse("obj = 1; obj.method(1);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                let maybe_call = match &mut stmt.kind {
+                    MirStmtKind::Assign {
+                        value: MirRvalue::Call(call),
+                        ..
+                    }
+                    | MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call),
+                    _ => None,
+                };
+                if let Some(call) = maybe_call {
+                    if matches!(
+                        call.syntax,
+                        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
+                    ) {
+                        call.fallback_policy = CallableFallbackPolicy::ExternalBoundary;
+                        patched = true;
+                        break;
+                    }
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected method call assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirMethodFallbackPolicyUnsupported")
+        );
     }
 
     #[test]

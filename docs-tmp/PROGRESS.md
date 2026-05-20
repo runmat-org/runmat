@@ -2046,6 +2046,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 compile-identifier ratchet for MIR call fallback-policy invariants
+  - Added compile-time identifier contracts in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `RunMat:MirCallFallbackPolicyUnsupported` for unsupported static-call fallback policies.
+    - `RunMat:MirMethodFallbackPolicyUnsupported` for unsupported method-call fallback policies.
+  - Added compile-level invariant tests in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier`
+    - `primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
