@@ -376,6 +376,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - Semicolon suppression matrix-path coverage in [semicolon_suppression.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/semicolon_suppression.rs) now asserts typed tensor contracts (`shape`/`data`) instead of display substring checks.
   - Core session known-symbol discovery now has dependency composition coverage in [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs): `discover_known_project_symbols_includes_dependency_alias_qualified_names` confirms `runmat.toml` dependency aliases are surfaced to eval-hook parse/lower context.
   - Fusion planner-source metadata checks in [fusion_regressions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/fusion_regressions.rs) now assert exact source-tag contracts instead of substring matches for both compile and runtime fusion snapshot paths.
+  - Fusion planner metadata in [types.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/fusion/types.rs) now separates semantic planner source (`semantic-mir-analysis`, `semantic-mir-analysis-runtime`) from explicit accel graph presence state (`accel_graph_state`), reducing source-tag coupling to bytecode accel-graph naming.
 
 - Additional Plan 7 heuristic-reduction ratchet:
   - Removed compile-time disjoint-gap, partial-overlap, and covering-span fallbacks in semantic-window node mapping in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).

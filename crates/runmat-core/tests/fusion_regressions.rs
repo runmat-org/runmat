@@ -170,8 +170,12 @@ fn compile_fusion_plan_exposes_semantic_planner_metadata() {
 
     assert_eq!(
         snapshot.planner.source,
-        "semantic-mir-analysis+bytecode-accel-graph",
+        "semantic-mir-analysis",
         "unexpected planner source tag"
+    );
+    assert_eq!(
+        snapshot.planner.accel_graph_state, "present",
+        "unexpected accel graph state for compile fusion snapshot"
     );
     assert!(
         snapshot.planner.mir_local_fact_count > 0,
@@ -217,8 +221,12 @@ fn runtime_fusion_snapshot_exposes_semantic_planner_metadata() {
 
     assert_eq!(
         snapshot.planner.source,
-        "semantic-mir-analysis+bytecode-accel-graph-runtime",
+        "semantic-mir-analysis-runtime",
         "unexpected runtime planner source tag"
+    );
+    assert_eq!(
+        snapshot.planner.accel_graph_state, "present",
+        "unexpected accel graph state for runtime fusion snapshot"
     );
     assert!(
         snapshot.planner.mir_local_fact_count > 0,

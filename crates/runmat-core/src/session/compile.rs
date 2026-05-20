@@ -215,7 +215,12 @@ impl RunMatSession {
                 .semantic_fusion_metadata
                 .semantic_instruction_windows,
             Some(FusionPlannerMetadata {
-                source: "semantic-mir-analysis+bytecode-accel-graph".to_string(),
+                source: "semantic-mir-analysis".to_string(),
+                accel_graph_state: if prepared.bytecode.accel_graph.is_some() {
+                    "present".to_string()
+                } else {
+                    "missing".to_string()
+                },
                 mir_local_fact_count: mir_local_fact_count_for_entrypoint(
                     &analysis,
                     &prepared.lowering.assembly,

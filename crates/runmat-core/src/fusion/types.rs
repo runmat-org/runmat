@@ -10,6 +10,7 @@ pub struct FusionPlanSnapshot {
 #[derive(Debug, Clone)]
 pub struct FusionPlannerMetadata {
     pub source: String,
+    pub accel_graph_state: String,
     pub mir_local_fact_count: usize,
     pub mir_diagnostic_count: usize,
     pub mir_fusion_signal_count: usize,
@@ -20,7 +21,8 @@ pub struct FusionPlannerMetadata {
 impl Default for FusionPlannerMetadata {
     fn default() -> Self {
         Self {
-            source: "bytecode-accel-graph".to_string(),
+            source: "semantic-mir-analysis".to_string(),
+            accel_graph_state: "unknown".to_string(),
             mir_local_fact_count: 0,
             mir_diagnostic_count: 0,
             mir_fusion_signal_count: 0,

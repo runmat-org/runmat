@@ -13,12 +13,12 @@ pub(crate) fn build_fusion_snapshot(
     semantic_instruction_windows: &[runmat_vm::SemanticFusionInstructionWindow],
     planner: Option<FusionPlannerMetadata>,
 ) -> Option<FusionPlanSnapshot> {
-    let accel_graph_state = if graph.is_some() {
-        "present"
-    } else {
-        "missing"
-    };
     let planner = planner.unwrap_or_default();
+    let accel_graph_state = if planner.accel_graph_state.is_empty() {
+        if graph.is_some() { "present" } else { "missing" }
+    } else {
+        planner.accel_graph_state.as_str()
+    };
     if groups.is_empty() {
         if planner.mir_fusion_signal_count == 0 && planner.mir_fusion_candidate_group_count == 0 {
             return None;
@@ -284,6 +284,7 @@ mod tests {
             &[],
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
+                accel_graph_state: "missing".to_string(),
                 mir_local_fact_count: 0,
                 mir_diagnostic_count: 0,
                 mir_fusion_signal_count: 2,
@@ -331,6 +332,7 @@ mod tests {
             }],
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
+                accel_graph_state: "missing".to_string(),
                 mir_local_fact_count: 0,
                 mir_diagnostic_count: 0,
                 mir_fusion_signal_count: 3,
@@ -391,6 +393,7 @@ mod tests {
             }],
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
+                accel_graph_state: "missing".to_string(),
                 mir_local_fact_count: 0,
                 mir_diagnostic_count: 0,
                 mir_fusion_signal_count: 2,
@@ -444,6 +447,7 @@ mod tests {
             &[],
             Some(FusionPlannerMetadata {
                 source: "semantic".to_string(),
+                accel_graph_state: "missing".to_string(),
                 mir_local_fact_count: 0,
                 mir_diagnostic_count: 0,
                 mir_fusion_signal_count: 2,

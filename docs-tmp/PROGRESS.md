@@ -1368,8 +1368,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - (pending commit) Plan 7 fusion planner-source metadata exact-contract ratchet
   - Tightened planner source assertions in `crates/runmat-core/tests/fusion_regressions.rs` from substring matching to exact equality:
-    - `compile_fusion_plan_exposes_semantic_planner_metadata` now asserts `semantic-mir-analysis+bytecode-accel-graph`.
-    - `runtime_fusion_snapshot_exposes_semantic_planner_metadata` now asserts `semantic-mir-analysis+bytecode-accel-graph-runtime`.
+    - `compile_fusion_plan_exposes_semantic_planner_metadata` now asserts `semantic-mir-analysis`.
+    - `runtime_fusion_snapshot_exposes_semantic_planner_metadata` now asserts `semantic-mir-analysis-runtime`.
+  - Fusion planner metadata now carries explicit `accel_graph_state` (`present|missing|unknown`) separate from semantic source tags.
   - This hardens semantic-fact-driven fusion planner metadata checks against accidental source-tag drift hidden by partial matches.
   - Validation: `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`.
 
