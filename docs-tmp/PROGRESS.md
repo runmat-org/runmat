@@ -29,6 +29,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `docs-tmp/DELIVERABLE_AUDIT.md` section `### 6` advanced from `partial` to `met` for current scope.
     - remaining unresolved objective surface is section `### 3` (MATLAB semantics as products).
 
+- Goal completion audit refresh
+  - `scope: in-scope`
+  - Added explicit prompt-to-artifact completion checklist in `docs-tmp/COMPLETION_AUDIT.md` mapping each objective requirement to concrete evidence commands/artifacts and latest gate/test results.
+  - Current audit verdict remains `not achieved`; unresolved in-scope area remains objective section `### 3` (`MATLAB semantics as products`).
+
 - (pending commit) Plan 4 histcounts identifier-contract ratchet for option validation
   - Added stable `histcounts` identifiers for two option-parse validation surfaces in [histcounts.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/stats/hist/histcounts.rs):
     - `RunMat:histcounts:BinMethodConflict`
