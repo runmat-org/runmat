@@ -16,7 +16,7 @@ This audit maps the active objective to concrete repository evidence and marks e
 
 ## Evidence Checklist
 
-### 1) Semantic pipeline (`partial`)
+### 1) Semantic pipeline (`met`)
 
 - Evidence:
   - semantic compile path in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs)
@@ -28,8 +28,10 @@ This audit maps the active objective to concrete repository evidence and marks e
   - LSP compile-check path in [analysis.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-lsp/src/core/analysis.rs) (`compile_error_for_lowering`) now also runs MIR analysis before VM compile diagnostics, aligning document-analysis compile validation with semantic HIR->MIR->analysis->VM staging.
   - snapshot build compile path in [builder.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-snapshot/src/builder.rs) (`compile_assembly_to_bytecode`) now also runs MIR analysis between MIR lowering and VM compile, keeping snapshot bytecode caching on the same semantic HIR->MIR->analysis->VM lane.
   - MIR lowering API used before VM compile in [stress.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-gc/tests/stress.rs)
-- Gap:
-  - broad consumer migration across all crates remains in progress (see `PLAN.3.md` / `PROGRESS.md`).
+- Residual watchpoints:
+  - keep a cadence grep over production compile entrypoints to ensure `runmat_vm::compile(...)` callsites remain paired with MIR analysis in the same path:
+    - `rg -n "runmat_vm::compile\\(" crates -g '*.rs' -g '!**/tests/**' -g '!**/test_*.rs'`
+  - keep compile-stage order ratchet (`runtime.compile.mir` -> `runtime.analyze` -> `runtime.compile.bytecode`) in `runmat-core` compile path under test (`compile_input_records_mir_analysis_facts` + fusion planner metadata tests).
 
 ### 2) No production legacy path dependence (`met`)
 
@@ -461,5 +463,5 @@ Objective is **not achieved**.
 
 Highest-impact unresolved areas:
 
-1. Objective sections marked `partial` remain open outside Plan 7 fusion details, especially broad semantic-pipeline consumer migration evidence (`### 1`) and MATLAB-semantics edge gaps called out in `### 3`.
+1. Objective sections marked `partial` remain open outside Plan 7 fusion details, especially MATLAB-semantics edge gaps called out in `### 3`.
 2. Validation cadence is green for current slices, but full objective closeout still requires a consolidated end-to-end gate run tied explicitly to all remaining `partial` sections before marking the goal achieved.

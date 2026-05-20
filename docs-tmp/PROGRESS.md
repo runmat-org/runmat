@@ -1810,6 +1810,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This removes the previous ordering where VM compile occurred before MIR analysis in the core session compile path.
   - Validation: `cargo test -p runmat-core compile_input_records_mir_analysis_facts -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test async_stdin pending_handler_returns_error -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
+- (pending commit) Deliverable audit section 1 closeout to `met`
+  - Re-audited production semantic compile entrypoints (`runmat-core` session compile + eval hook, CLI bytecode emission, LSP compile-check diagnostics, snapshot bytecode cache build) and verified each active `runmat_vm::compile(...)` path now runs explicit MIR analysis before VM compile.
+  - Updated `docs-tmp/DELIVERABLE_AUDIT.md` section `### 1` from `partial` to `met`, replaced the old broad-gap note with concrete watchpoints (production compile-entrypoint grep + core compile order ratchet coverage).
+  - Updated unresolved-area summary to remove section 1 from highest-impact open items.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
