@@ -15,7 +15,7 @@ Complete the semantic migration of RunMat across Plans 0-7 until:
 1. Semantic-only active pipeline
 - Evidence: no production `compile_legacy`/legacy execute shims in active compiler/runtime paths.
 - Evidence command: `rg -n "compile_legacy|LegacyUserFunction|runmat_vm::execute|HirProgram|VarId" crates`
-- Current status: in progress (production paths are largely semantic; some test/docs compatibility references still exist).
+- Current status: evidence command currently returns no matches in `crates`; treat as substantially met pending full closeout audit.
 
 2. MATLAB core semantics modeled by products
 - Evidence: semantic HIR/MIR + VM lowering coverage for indexing, calls, workspace effects, outputs, and compatibility diagnostics.
@@ -25,7 +25,7 @@ Complete the semantic migration of RunMat across Plans 0-7 until:
 3. Manifest-driven composition and entrypoints
 - Evidence: config/discovery and entrypoint selection wired through config crates + CLI/session integration.
 - Evidence commands: `rg -n "runmat.toml|entrypoint|manifest|sources|dependencies" crates/runmat-config crates/runmat-core crates/runmat-cli`.
-- Current status: in progress. `runmat-config` now has dedicated `runmat.toml` manifest modeling, discovery, parse/load, and validation APIs/tests; CLI/core integration and composition-graph-driven resolution are still open.
+- Current status: in progress. `runmat-config` has dedicated `runmat.toml` composition/discovery/entrypoint APIs with typed contract coverage; CLI/core entrypoint resolution and core known-symbol dependency-alias discovery are wired, but full composition-graph-driven closeout still requires explicit audit.
 
 4. Unified nominal class/builtin metadata
 - Evidence: shared callable/class identity and builtin semantics metadata surfaces used by runtime/lowering/analysis.

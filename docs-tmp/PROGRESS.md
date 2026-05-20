@@ -1361,6 +1361,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This strengthens manifest/composition-graph evidence at the core session boundary, not only in `runmat-config` unit tests.
   - Validation: `cargo test -p runmat-core discover_known_project_symbols_includes_dependency_alias_qualified_names -- --nocapture`.
 
+- (pending commit) Goal checklist legacy-surface evidence refresh
+  - Re-ran goal criterion grep: `rg -n "compile_legacy|LegacyUserFunction|runmat_vm::execute|HirProgram|VarId" crates`.
+  - Current result: no matches in `crates`, indicating legacy compiler/runtime symbol surfaces tracked by this gate are absent from production code paths.
+  - Updated `docs-tmp/GOAL.md` criterion statuses accordingly (criterion 1 now marked substantially met pending full closeout audit; criterion 3 status refreshed with current composition-wiring evidence).
+
 ## Next Resolution Items
 
 - Finish converting remaining legacy test/doc references that imply removed APIs where they block semantic-only confidence.
