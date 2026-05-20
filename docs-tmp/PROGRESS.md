@@ -51,6 +51,18 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 7 runtime-state stale compile-graph exclusion ratchet
+  - Added VM interpreter-state regression in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs):
+    - `runtime_state_ignores_stale_compile_graph_metadata`
+  - Contract: the active runtime fusion execution state (`InterpreterState::new`) must retain a graph materialized from current bytecode instructions, not stale compile graph metadata.
+  - Validation:
+    - `cargo test -p runmat-vm runtime_state_ignores_stale_compile_graph_metadata -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
+    - `cargo test -p runmat-vm --test spawn_semantic_lifecycle -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - (pending commit) Plan 6/7 slice-assignment unsupported-base identifier ratchet
   - VM interpreter slice-assignment dispatch in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now emits stable `RunMat:SliceNonTensor` identifiers for unsupported base types in both `StoreSlice` and `StoreSliceExpr` paths instead of message-only runtime errors.
   - Added VM semantic regression coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):

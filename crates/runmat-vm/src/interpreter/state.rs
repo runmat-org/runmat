@@ -111,7 +111,7 @@ mod tests {
     use crate::bytecode::{
         Bytecode, SemanticFusionInstructionKind, SemanticFusionInstructionWindow,
     };
-    use runmat_accelerate::graph::InstrSpan;
+    use runmat_accelerate::graph::{AccelNodeLabel, InstrSpan, PrimitiveOp};
 
     #[test]
     fn runtime_materialized_graph_is_retained_for_fusion_execution() {
@@ -145,6 +145,60 @@ mod tests {
         assert!(
             state.fusion_accel_graph.is_some(),
             "expected runtime accel graph to be retained for fusion execution"
+        );
+    }
+
+    #[test]
+    fn runtime_state_ignores_stale_compile_graph_metadata() {
+        let mut bytecode = Bytecode::empty();
+        bytecode.instructions = vec![
+            crate::Instr::LoadVar(0),
+            crate::Instr::LoadVar(1),
+            crate::Instr::Add,
+        ];
+        bytecode.var_types = vec![
+            runmat_builtins::Type::Num,
+            runmat_builtins::Type::Num,
+            runmat_builtins::Type::Num,
+        ];
+        let stale_graph = crate::accel::graph::build_accel_graph(
+            &[
+                crate::Instr::LoadVar(0),
+                crate::Instr::LoadVar(1),
+                crate::Instr::Mul,
+            ],
+            &bytecode.var_types,
+        );
+        bytecode.accel_graph = Some(stale_graph);
+        bytecode
+            .semantic_fusion_metadata
+            .mir_fusion_candidate_group_count = 1;
+        bytecode
+            .semantic_fusion_metadata
+            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
+            span: InstrSpan { start: 2, end: 2 },
+            kind: SemanticFusionInstructionKind::Elementwise,
+        }];
+
+        let mut initial_vars = Vec::new();
+        let state = InterpreterState::new(bytecode, &mut initial_vars, Some("<main>"), Vec::new());
+        let graph = state
+            .fusion_accel_graph
+            .as_ref()
+            .expect("expected runtime accel graph to be retained");
+        assert!(
+            graph
+                .nodes
+                .iter()
+                .any(|node| matches!(node.label, AccelNodeLabel::Primitive(PrimitiveOp::Add))),
+            "runtime retained graph should reflect active bytecode instructions"
+        );
+        assert!(
+            !graph
+                .nodes
+                .iter()
+                .any(|node| matches!(node.label, AccelNodeLabel::Primitive(PrimitiveOp::Mul))),
+            "stale compile graph metadata should not be retained in runtime state"
         );
     }
 }
