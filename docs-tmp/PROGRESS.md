@@ -2596,6 +2596,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 feval multi-output instruction-shape ratchet
+  - Added VM functions coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `semantic_feval_multi_assign_uses_typed_instruction`
+    - `semantic_feval_expand_multi_assign_uses_typed_instruction`
+  - This pins semantic `feval` multi-output lowering to typed feval opcodes:
+    - `Instr::CallFevalMulti(argc == 0, out_count == 2)` for `[x,y] = feval(h)`
+    - `Instr::CallFevalExpandMultiOutput(specs, out_count == 2)` with `expand_all` arg specs for `[u,v] = feval(h, C{:})`
+  - Execution semantics are also asserted (`s = u + v == 15`) for the expanded multi-output path.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions semantic_feval_multi_assign_uses_typed_instruction -- --nocapture`
+    - `cargo test -p runmat-vm --test functions semantic_feval_expand_multi_assign_uses_typed_instruction -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

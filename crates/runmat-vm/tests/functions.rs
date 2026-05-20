@@ -399,6 +399,49 @@ fn semantic_feval_multi_assign_executes() {
 }
 
 #[test]
+fn semantic_feval_multi_assign_uses_typed_instruction() {
+    let source = r#"
+        function [a,b] = g()
+            a = 6;
+            b = 7;
+        end
+        h = @g;
+        [x,y] = feval(h);
+    "#;
+    let bytecode = compile_semantic_source(source).expect("compile semantic feval multi-assign");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 0 && *out_count == 2
+    )));
+}
+
+#[test]
+fn semantic_feval_expand_multi_assign_uses_typed_instruction() {
+    let source = r#"
+        function [a,b] = pair(x,y)
+            a = x;
+            b = y;
+        end
+        C = deal(7,8);
+        h = @pair;
+        [u,v] = feval(h, C{:});
+        s = u + v;
+    "#;
+    let bytecode =
+        compile_semantic_source(source).expect("compile semantic feval expanded multi-assign");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 2 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+
+    let vars = interpret(&bytecode).expect("execute semantic feval expanded multi-assign");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 15.0).abs() < 1e-9)));
+}
+
+#[test]
 fn semantic_size_builtin_multi_assign_executes() {
     let bytecode = compile_semantic_source("[r,c] = size([1 2; 3 4]); z = r + c;").unwrap();
     let vars = interpret(&bytecode).expect("semantic size multi-assign should execute");
