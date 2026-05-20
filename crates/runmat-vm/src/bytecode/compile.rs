@@ -81,11 +81,10 @@ pub fn compile(
                 )
             });
         }
-        if fusion_groups.is_empty() {
-            (None, Vec::new())
-        } else {
-            (Some(accel_graph), fusion_groups)
-        }
+        // Preserve accel graph whenever semantic candidate/window scaffolds exist.
+        // Runtime planning owns final executable-group reconciliation and may still
+        // recover groups from semantic windows when compile groups are empty.
+        (Some(accel_graph), fusion_groups)
     };
     let semantic_async_metadata = derive_semantic_async_metadata(mir, entrypoint_target);
 

@@ -1390,6 +1390,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `runtime_fusion_groups_prefer_existing_bytecode_groups`
   - Validation: `cargo test -p runmat-vm runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty -- --nocapture`, `cargo test -p runmat-vm runtime_fusion_groups_prefer_existing_bytecode_groups -- --nocapture`, `cargo check -p runmat-vm --features native-accel`.
 
+- (pending commit) Plan 7 preserve accel graph under semantic fusion scaffolds
+  - Updated VM compile path in `crates/runmat-vm/src/bytecode/compile.rs` to preserve `bytecode.accel_graph` whenever semantic candidate/window scaffolds exist, even when compile-time executable fusion groups are empty after filtering.
+  - Rationale: runtime planning now has a semantic-window fallback path (`Bytecode::runtime_fusion_groups`), so dropping the graph at compile time prematurely can block runtime semantic-fact-driven reconciliation.
+  - Validation: `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops -- --nocapture`, `cargo test -p runmat-vm primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_candidates_without_bytecode_groups -- --nocapture`, `cargo check -p runmat-vm --features native-accel`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
