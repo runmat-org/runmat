@@ -381,6 +381,9 @@ This audit maps the active objective to concrete repository evidence and marks e
   - Core async interaction coverage now explicitly ratchets direct async-call laziness via [async_stdin.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/async_stdin.rs):
     - `async_call_without_await_or_spawn_stays_lazy_until_await`
   - This keeps direct async-call behavior semantic and boundary-driven: no interaction before `await`/`spawn`, with deferred interaction resolution asserted at `await`.
+  - Core async interaction coverage now also ratchets deferred-future spawn-boundary realization in [async_stdin.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/async_stdin.rs):
+    - `deferred_future_triggers_interaction_when_spawned`
+  - This ensures semantic future descriptors stay lazy while stored, then realize interaction only when the deferred value crosses `spawn`.
   - VM slice-assignment unsupported-base error surfaces in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now emit stable `RunMat:SliceNonTensor` identifiers for both `StoreSlice` and `StoreSliceExpr` paths instead of message-only errors.
   - VM semantic regression coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs) now ratchets this contract via `string_slice_assignment_on_scalar_string_reports_slice_non_tensor`.
   - Converted two VM tests in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) from message-substring assertions to identifier assertions:

@@ -18,6 +18,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm --test spawn_semantic_lifecycle -- --nocapture`
     - `cargo check --workspace`
 
+- (pending commit) Plan 3/4 deferred-future spawn boundary ratchet
+  - Added core async interaction coverage in [async_stdin.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/async_stdin.rs):
+    - `deferred_future_triggers_interaction_when_spawned`
+  - Contract: semantic future descriptors remain lazy at creation (`fut = asks()` has zero stdin events), and interaction is realized when the deferred value crosses a spawn boundary (`spawn(fut)`).
+  - Validation:
+    - `cargo test -p runmat-core --test async_stdin deferred_future_triggers_interaction_when_spawned -- --nocapture`
+    - `cargo test -p runmat-core --test async_stdin -- --nocapture`
+    - `cargo test -p runmat-vm --test spawn_semantic_lifecycle -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - (pending commit) Plan 6/7 slice-assignment unsupported-base identifier ratchet
   - VM interpreter slice-assignment dispatch in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now emits stable `RunMat:SliceNonTensor` identifiers for unsupported base types in both `StoreSlice` and `StoreSliceExpr` paths instead of message-only runtime errors.
   - Added VM semantic regression coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):

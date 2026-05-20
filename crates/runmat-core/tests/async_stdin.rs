@@ -369,3 +369,63 @@ fn async_call_without_await_or_spawn_stays_lazy_until_await() -> Result<()> {
     );
     Ok(())
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn deferred_future_triggers_interaction_when_spawned() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
+    let _guard = InteractiveGuard::new();
+    let mut session = RunMatSession::with_options(false, false)?;
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let prompts_clone = Arc::clone(&prompts);
+    session.install_async_input_handler(move |request: InputRequest| {
+        let prompts_clone = Arc::clone(&prompts_clone);
+        async move {
+            prompts_clone.lock().unwrap().push(request.prompt.clone());
+            Ok(InputResponse::Line("5".into()))
+        }
+    });
+
+    let deferred = block_on(session.execute(
+        "async function y = asks(); input('spawned: '); y = 5; end; \
+         fut = asks(); marker = 3;",
+    ))
+    .map_err(anyhow::Error::new)?;
+    assert!(
+        deferred.error.is_none(),
+        "deferred async call should compile/execute without runtime errors"
+    );
+    assert_eq!(
+        deferred.stdin_events.len(),
+        0,
+        "future creation should remain lazy before spawn/await boundaries"
+    );
+    assert!(
+        prompts.lock().unwrap().is_empty(),
+        "future creation should not trigger input prompts"
+    );
+
+    let spawned = block_on(session.execute("t = spawn(fut); marker_after_spawn = 7;"))
+        .map_err(anyhow::Error::new)?;
+    assert!(
+        spawned.error.is_none(),
+        "spawning deferred future should not raise runtime errors"
+    );
+    assert_eq!(
+        spawned.stdin_events.len(),
+        1,
+        "spawn should realize deferred future and trigger input interaction"
+    );
+    assert_eq!(
+        prompts.lock().unwrap().as_slice(),
+        &["spawned: "],
+        "spawn should forward deferred future prompt through input handler"
+    );
+
+    let marker = block_on(session.execute("marker_after_spawn")).map_err(anyhow::Error::new)?;
+    let marker_value = marker
+        .value
+        .expect("spawn follow-up marker should be readable");
+    assert_eq!(value_as_f64(&marker_value), Some(7.0));
+    Ok(())
+}
