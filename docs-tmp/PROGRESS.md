@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM cell-ops shape-error identifier ratchet
+  - `scope: in-scope`
+  - Removed remaining string-only cell shape wrappers in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) and normalized them to typed `RunMat:ShapeMismatch` via `map_cell_shape_error`:
+    - `create_cell_2d`
+    - `gather_cell_paren_linear_indices`
+    - `gather_cell_member`
+    - `delete_cell_linear`
+    - `assign_cell_paren_linear_indices_with_policy` (delete branch)
+  - Added direct unit coverage:
+    - `ops::cells::tests::cell_shape_error_mapping_reports_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib cell_shape_error_mapping_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib assign_cell_member_rejects_shape_mismatch_cell_rhs -- --nocapture`
+    - `cargo test -p runmat-vm mixed_range_end_assign_shape_mismatch_error -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM indexing GPU fallback identifier-contract ratchet
   - `scope: in-scope`
   - Removed remaining string-only acceleration/shape wrappers from indexing GPU helper paths:

@@ -6,6 +6,10 @@ const CELL_END_PLUS_TAG_MASK: u64 = 0x7ff8_0000_0000_0000;
 const CELL_END_PLUS_TAG_VALUE: u64 = 0x7ff8_c311_0000_0000;
 const CELL_END_PLUS_OFFSET_MASK: u64 = 0x0000_0000_ffff_ffff;
 
+fn map_cell_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
+    mex("ShapeMismatch", &format!("{context}: {err}"))
+}
+
 fn decode_cell_end_plus(value: f64) -> Option<usize> {
     if !value.is_nan() {
         return None;
@@ -57,7 +61,7 @@ fn row_major_pos_from_linear(ca: &CellArray, idx: usize) -> Result<usize, Runtim
 
 pub fn create_cell_2d(values: Vec<Value>, rows: usize, cols: usize) -> Result<Value, RuntimeError> {
     runmat_runtime::make_cell_with_shape(values, vec![rows, cols])
-        .map_err(|e| format!("Cell creation error: {e}").into())
+        .map_err(|e| map_cell_shape_error("cell creation error", e))
 }
 
 pub fn index_cell_value(ca: &CellArray, indices: &[usize]) -> Result<Value, RuntimeError> {
@@ -129,7 +133,7 @@ pub fn gather_cell_paren_linear_indices(
     };
     Ok(Value::Cell(
         CellArray::new_handles_with_shape(handles, shape)
-            .map_err(|e| format!("Cell paren indexing error: {e}"))?,
+            .map_err(|e| map_cell_shape_error("cell paren indexing error", e))?,
     ))
 }
 
@@ -141,8 +145,8 @@ pub fn gather_cell_member(ca: &CellArray, field: &str) -> Result<Value, RuntimeE
             other => out.push(other.clone()),
         }
     }
-    let cell =
-        CellArray::new(out, ca.rows, ca.cols).map_err(|e| format!("cell field gather: {e}"))?;
+    let cell = CellArray::new(out, ca.rows, ca.cols)
+        .map_err(|e| map_cell_shape_error("cell field gather", e))?;
     Ok(Value::Cell(cell))
 }
 
@@ -318,7 +322,7 @@ pub fn delete_cell_linear(mut ca: CellArray, idx: usize) -> Result<Value, Runtim
     };
     Ok(Value::Cell(
         CellArray::new_handles_with_shape(ca.data, shape)
-            .map_err(|e| format!("Cell deletion error: {e}"))?,
+            .map_err(|e| map_cell_shape_error("cell deletion error", e))?,
     ))
 }
 
@@ -390,7 +394,7 @@ pub fn assign_cell_paren_linear_indices_with_policy(
         };
         return Ok(Value::Cell(
             CellArray::new_handles_with_shape(ca.data, shape)
-                .map_err(|e| format!("Cell deletion error: {e}"))?,
+                .map_err(|e| map_cell_shape_error("cell deletion error", e))?,
         ));
     }
     let Value::Cell(rhs_cell) = rhs else {
@@ -461,7 +465,7 @@ fn assign_cell_paren_from_cell(
 
 #[cfg(test)]
 mod tests {
-    use super::assign_cell_member;
+    use super::{assign_cell_member, map_cell_shape_error};
     use runmat_builtins::{CellArray, StructValue, Value};
 
     #[test]
@@ -479,5 +483,11 @@ mod tests {
         let err = assign_cell_member(base, "field".to_string(), Value::Cell(rhs), |_old, _new| {})
             .expect_err("shape mismatch should fail");
         assert_eq!(err.identifier(), Some("RunMat:CellMemberRhsShapeMismatch"));
+    }
+
+    #[test]
+    fn cell_shape_error_mapping_reports_identifier() {
+        let err = map_cell_shape_error("cell creation", "invalid shape");
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
     }
 }
