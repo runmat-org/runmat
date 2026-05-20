@@ -1395,6 +1395,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Rationale: runtime planning now has a semantic-window fallback path (`Bytecode::runtime_fusion_groups`), so dropping the graph at compile time prematurely can block runtime semantic-fact-driven reconciliation.
   - Validation: `cargo test -p runmat-vm primary_compile_omits_accel_graph_when_candidates_overlap_only_logical_ops -- --nocapture`, `cargo test -p runmat-vm primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_candidates_without_bytecode_groups -- --nocapture`, `cargo check -p runmat-vm --features native-accel`.
 
+- (pending commit) Plan 7 runtime accel-graph on-demand materialization ratchet
+  - Added runtime helper `runtime_accel_graph_for_fusion` in `crates/runmat-vm/src/interpreter/state.rs`.
+  - When compile-provided `bytecode.accel_graph` is missing but semantic runtime groups exist, interpreter startup now materializes a runtime accel graph from bytecode instructions/var types before `prepare_fusion_plan`.
+  - This further reduces hard dependency on compile-time accel-graph materialization while keeping semantic-gated runtime planning behavior intact.
+  - Added unit coverage:
+    - `runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing`
+    - `runtime_accel_graph_is_not_materialized_when_runtime_groups_are_empty`
+  - Validation: `cargo test -p runmat-vm runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing -- --nocapture`, `cargo test -p runmat-vm runtime_accel_graph_is_not_materialized_when_runtime_groups_are_empty -- --nocapture`, `cargo test -p runmat-vm runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty -- --nocapture`, `cargo check -p runmat-vm --features native-accel`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
