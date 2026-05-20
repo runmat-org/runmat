@@ -2436,6 +2436,18 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 indexed-member assignment-place MIR ratchet
+  - Added MIR lowering regression in [lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-mir/tests/lowering.rs):
+    - `indexed_member_assignment_lowers_to_index_place_over_member_base`
+  - The test ratchets compiler-product shape for `s.a(2) = 9` to an explicit indexed place over member base (`MirPlace::Index(MirPlace::Member(...), ...)`) with `IndexedAssign` mutation policy and scalar index plan.
+  - This closes a transitional ambiguity seam by pinning indexed member store-back to semantic MIR place chains instead of any dot-index compatibility interpretation.
+  - Validation:
+    - `cargo test -p runmat-mir indexed_member_assignment_lowers_to_index_place_over_member_base -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

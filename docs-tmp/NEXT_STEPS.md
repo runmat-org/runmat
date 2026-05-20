@@ -355,7 +355,7 @@ Target state:
 
 - Object and handle-object indexing should receive a structured index descriptor rather than ad hoc cells and protocol strings assembled at each call site.
 - The descriptor should represent paren, brace, dot/member, colon, range, end, and comma-list expansion directly.
-- `IndexKind::Dot` should be eliminated from MIR indexing if it is not semantically constructed, or explicitly mapped to member MIR if a parser/lowering path can produce it.
+- `IndexKind::Dot` has been eliminated from semantic compiler products (`IndexKind` is `Paren|Brace` only); member/dot semantics are represented by explicit member MIR shapes (`MirRvalue::Member`, `MirPlace::Member`, `MirPlace::DynamicMember`).
 
 Collapse opportunity:
 
@@ -386,7 +386,7 @@ Accepted resolution (A/A/A/A/A):
 - Use one canonical selector-plan representation across tensor/cell/object indexing and assignment paths.
 - Model deletion explicitly in MIR/bytecode (no runtime empty-RHS inference as the semantic source of truth).
 - Classify scalar-vs-slice assignment in MIR/lowering only; VM executes explicit operation kinds.
-- Remove remaining transitional `IndexKind::Dot` compatibility branches unless a sourced parser/HIR path requires them.
+- Keep dot/member semantics on explicit member MIR shapes; do not reintroduce dot-index compatibility branches in indexing plans.
 - Enforce selector-plan invariants at compile/lowering boundaries; runtime validation remains execution-safety focused.
 
 ### 6. Varargout And Multi-Output Semantics
@@ -487,8 +487,8 @@ Treat current MIR bytecode gap markers as follows:
 - `control-flow terminator`: design gap for async/await or future terminators, not a small VM patch unless a concrete source reproducer exists.
 - `varargout expansion`: parser/HIR does not currently construct this shape; keep as future ABI design work rather than a live bytecode gap.
 - `slice index`: comparison-derived logical tensor masks and call-result index variables now lower through semantic slice bytecode for read/write; remaining gaps are selector-plan normalization for range/end/colon in non-tensor and cell contexts.
-- `dot assignment` / `dot indexing`: static member read/write source now ratchets through semantic member MIR; remaining `IndexKind::Dot` branches appear transitional and should be verified for removal or mapped explicitly if a source reproducer reaches them.
-- `indexed member store-back`: struct-field indexed assignment and cell-member store-back are ratcheted through semantic place chains; remaining forms are likely object/dynamic/dot descriptor work.
+- `dot assignment` / `dot indexing`: resolved at indexing-plan level; semantic products no longer carry `IndexKind::Dot` and member semantics lower through explicit member MIR shapes.
+- `indexed member store-back`: struct-field indexed assignment and cell-member store-back are ratcheted through semantic place chains, with MIR coverage now pinning `s.a(2)=...` to `MirPlace::Index(MirPlace::Member(...), ...)`.
 - `rvalue` / `operand`: async/future/spawn/temp modeling or unsupported semantic forms; classify by source reproducer before implementing.
 - `{count} call outputs`: semantic user-function, `feval`, `size`, min/max family, sort/set/index builtins (`sort`, `unique`, `find`, `union`, `ismember`, `sortrows`), and linalg factorization builtins (`chol`, `lu`, `qr`, `svd`, `eig`) are ratcheted through multi-output bytecode/runtime output context; generic rvalue call outputs and broader builtin output splitting remain call ABI/output-list policy, so avoid ad hoc bytecode variants until call descriptor design is settled.
 - `call callee`: semantic resolver/DefPath work; do not fall back to string builtin guesses.

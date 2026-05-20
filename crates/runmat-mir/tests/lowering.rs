@@ -1594,6 +1594,27 @@ fn dynamic_member_assignment_lowers_to_dynamic_member_place() {
 }
 
 #[test]
+fn indexed_member_assignment_lowers_to_index_place_over_member_base() {
+    let mir = lower_mir("function s = write_member_index(s); s.a(2) = 9; end");
+    let body = mir.bodies.values().next().expect("body");
+
+    assert!(matches!(
+        body.blocks[0].statements[0].kind,
+        MirStmtKind::PlaceMutation(ref mutation)
+            if mutation.kind == runmat_hir::PlaceMutationKind::IndexedAssign
+                && mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::CreateArrayByIndex
+    ));
+    assert!(matches!(
+        &body.blocks[0].statements[1].kind,
+        MirStmtKind::Assign {
+            place: MirPlace::Index(base, indexing),
+            ..
+        } if matches!(&**base, MirPlace::Member(_, _))
+            && indexing.plan == MirIndexPlan::Scalar
+    ));
+}
+
+#[test]
 fn if_statement_lowers_to_branch_blocks_and_merge() {
     let mir = lower_mir("function y = choose(c, x); if c; y = x; else; y = 0; end; end");
     let body = mir.bodies.values().next().unwrap();
