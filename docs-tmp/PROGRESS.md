@@ -2085,6 +2085,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 HIR isolated-capture identifier contract ratchet
+  - Added semantic lowering identifier `RunMat:IsolatedLexicalCaptureUnsupported` in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs) for isolated functions that capture outer lexical bindings.
+  - Updated HIR regression in [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
+    - `isolated_function_cannot_capture_outer_binding` now asserts `err.identifier()` instead of message substring text.
+  - Validation:
+    - `cargo test -p runmat-hir isolated_function_cannot_capture_outer_binding -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

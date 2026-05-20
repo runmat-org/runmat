@@ -83,7 +83,10 @@ fn isolated_function_cannot_capture_outer_binding() {
     .unwrap();
     let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
 
-    assert!(err.message.contains("isolated functions cannot capture"));
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:IsolatedLexicalCaptureUnsupported")
+    );
 }
 
 #[test]

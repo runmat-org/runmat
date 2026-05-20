@@ -22,6 +22,7 @@ const IDENT_AWAIT_EXTENSION_DISABLED: &str = "RunMat:AwaitExtensionDisabled";
 const IDENT_AWAIT_CONTEXT_INVALID: &str = "RunMat:AwaitContextInvalid";
 const IDENT_SPAWN_EXTENSION_DISABLED: &str = "RunMat:SpawnExtensionDisabled";
 const IDENT_SPAWN_LEXICAL_CAPTURE_UNSUPPORTED: &str = "RunMat:SpawnLexicalCaptureUnsupported";
+const IDENT_ISOLATED_LEXICAL_CAPTURE_UNSUPPORTED: &str = "RunMat:IsolatedLexicalCaptureUnsupported";
 const IDENT_UNDEFINED_VARIABLE: &str = "RunMat:UndefinedVariable";
 const IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassPropertyAttributeConflict";
 const IDENT_CLASS_METHOD_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassMethodAttributeConflict";
@@ -615,6 +616,7 @@ impl SemanticCtx {
                     return Err(SemanticError::new(
                         "isolated functions cannot capture outer lexical bindings",
                     )
+                    .with_identifier(IDENT_ISOLATED_LEXICAL_CAPTURE_UNSUPPORTED)
                     .with_span(span));
                 }
                 ctx.semantic_index.functions.push(FunctionResolution {
