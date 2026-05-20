@@ -2581,6 +2581,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 VM method-identity descriptor semantic-resolution ratchet
+  - Added VM callable-descriptor coverage in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
+    - `method_identity_runtime_name_resolution_can_use_semantic_resolver`
+    - `method_identity_runtime_name_resolution_without_resolver_errors`
+  - This pins `CallableIdentity::Method` runtime-name-resolution behavior at VM descriptor boundaries:
+    - semantic resolver/invoker is used when available
+    - unresolved method identities remain `RunMat:UndefinedFunction`
+  - Validation:
+    - `cargo test -p runmat-vm --lib call::descriptor::tests::method_identity_runtime_name_resolution_can_use_semantic_resolver -- --nocapture`
+    - `cargo test -p runmat-vm --lib call::descriptor::tests::method_identity_runtime_name_resolution_without_resolver_errors -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

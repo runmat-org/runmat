@@ -571,7 +571,7 @@ mod tests {
     use runmat_builtins::{Tensor, Value};
     use runmat_hir::{
         BuiltinId, CallableFallbackPolicy, CallableIdentity, DefPath, DefPathSegment, FunctionId,
-        PackageName, QualifiedName, SymbolName,
+        MethodId, PackageName, QualifiedName, SymbolName,
     };
     use std::sync::Arc;
 
@@ -584,6 +584,10 @@ mod tests {
             ]),
             item: vec![DefPathSegment::Function(SymbolName(name.to_string()))],
         })
+    }
+
+    fn method_identity(name: &str) -> CallableIdentity {
+        CallableIdentity::Method(MethodId(name.to_string()))
     }
 
     #[test]
@@ -719,6 +723,45 @@ mod tests {
         );
         let err = block_on(execute_callable_descriptor(descriptor))
             .expect_err("imported identities should not fall back to builtin name resolution");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+    }
+
+    #[test]
+    fn method_identity_runtime_name_resolution_can_use_semantic_resolver() {
+        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
+            Some(Arc::new(|name| (name == "method_only").then_some(9191))),
+        );
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 9191);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(5.0)]);
+                Box::pin(async { Ok(Value::Num(6.0)) })
+            })),
+        );
+        let descriptor = CallableDescriptor::resolved(
+            method_identity("method_only"),
+            vec![Value::Num(5.0)],
+            1,
+            CallableFallbackPolicy::RuntimeNameResolution,
+            CallableCallKind::Direct,
+        );
+        let value = block_on(execute_callable_descriptor(descriptor))
+            .expect("method identity should resolve through semantic resolver");
+        assert_eq!(value, Value::Num(6.0));
+    }
+
+    #[test]
+    fn method_identity_runtime_name_resolution_without_resolver_errors() {
+        let descriptor = CallableDescriptor::resolved(
+            method_identity("definitely_missing_method"),
+            vec![Value::Num(5.0)],
+            1,
+            CallableFallbackPolicy::RuntimeNameResolution,
+            CallableCallKind::Direct,
+        );
+        let err = block_on(execute_callable_descriptor(descriptor))
+            .expect_err("unresolved method identity should remain undefined");
         assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
     }
 
