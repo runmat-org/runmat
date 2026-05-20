@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 removed compile-graph fallback from runtime fusion planning/snapshots
+  - Core fusion snapshot paths now use only runtime-owned graph materialization (`runtime_accel_graph_for_fusion`) in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs) and [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs), instead of falling back to `bytecode.accel_graph`.
+  - VM interpreter fusion-plan setup in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs) now similarly uses only runtime-owned graph selection for plan preparation/annotation.
+  - This removes remaining production fallback reads of compile-provided accel graph metadata in active fusion planning surfaces.
+  - Validation: `cargo test -p runmat-core --test fusion_regressions -- --nocapture`, `cargo test -p runmat-vm runtime_materialized_graph_is_retained_for_fusion_execution -- --nocapture`, `rg -n "or\\(.*bytecode\\.accel_graph|bytecode\\.accel_graph\\.as_ref\\(|prepared\\.bytecode\\.accel_graph\\.as_ref\\(" crates/runmat-core/src/session crates/runmat-vm/src/interpreter/state.rs` (no matches).
+
 - (pending commit) Plan 7 runtime-materialized accel graph now reaches fused execution
   - VM interpreter state now retains the exact accel graph used for runtime fusion-plan preparation in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs) (`fusion_accel_graph`), including on-demand runtime graph materialization when compile graph artifacts are missing.
   - Fused execution now uses that retained runtime graph in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) instead of hard-wiring execution to `bytecode.accel_graph`, closing a runtime path where prepared plans could exist but execution skipped fusion due to a missing compile graph.

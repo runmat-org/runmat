@@ -417,8 +417,7 @@ impl RunMatSession {
         let fusion_snapshot = if self.emit_fusion_plan {
             let runtime_groups = bytecode.runtime_fusion_groups();
             let runtime_graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
-            let accel_graph_ref = runtime_graph.as_ref().or(bytecode.accel_graph.as_ref());
-            let runtime_groups = if let Some(graph) = accel_graph_ref {
+            let runtime_groups = if let Some(graph) = runtime_graph.as_ref() {
                 bytecode.runtime_fusion_groups_for_graph(graph)
             } else {
                 runtime_groups
@@ -434,7 +433,7 @@ impl RunMatSession {
                     .semantic_instruction_windows,
                 Some(crate::fusion::FusionPlannerMetadata {
                     source: "semantic-mir-analysis-runtime".to_string(),
-                    accel_graph_state: if accel_graph_ref.is_some() {
+                    accel_graph_state: if runtime_graph.is_some() {
                         "present".to_string()
                     } else {
                         "missing".to_string()

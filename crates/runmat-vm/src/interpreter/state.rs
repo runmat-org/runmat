@@ -58,25 +58,23 @@ impl InterpreterState {
         }
         #[cfg(feature = "native-accel")]
         let (fusion_plan, fusion_accel_graph) = {
-            // Runtime planning prefers compile-populated groups but falls back to
-            // semantic instruction-window scaffolds when compile groups are absent.
+            // Runtime planning/execution owns accel-graph realization from the active
+            // bytecode instruction stream whenever semantic fusion scaffolds exist.
             let runtime_groups = bytecode.runtime_fusion_groups();
             let runtime_graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
-            let accel_graph_ref = runtime_graph.as_ref().or(bytecode.accel_graph.as_ref());
-            let runtime_groups = if let Some(graph) = accel_graph_ref {
+            let runtime_groups = if let Some(graph) = runtime_graph.as_ref() {
                 bytecode.runtime_fusion_groups_for_graph(graph)
             } else {
                 runtime_groups
             };
             let fusion_plan = prepare_fusion_plan(
-                accel_graph_ref,
+                runtime_graph.as_ref(),
                 &runtime_groups,
                 bytecode
                     .semantic_fusion_metadata
                     .mir_fusion_candidate_group_count,
             );
-            let fusion_accel_graph = runtime_graph.or_else(|| bytecode.accel_graph.clone());
-            (fusion_plan, fusion_accel_graph)
+            (fusion_plan, runtime_graph)
         };
         Self {
             stack: Vec::new(),
