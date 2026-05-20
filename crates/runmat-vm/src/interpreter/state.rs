@@ -2,6 +2,8 @@ use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::Bytecode;
 use log::debug;
 #[cfg(feature = "native-accel")]
+use runmat_accelerate::graph::AccelGraph;
+#[cfg(feature = "native-accel")]
 use runmat_accelerate::{prepare_fusion_plan, FusionPlan};
 use runmat_builtins::Value;
 use std::collections::HashMap;
@@ -29,6 +31,8 @@ pub struct InterpreterState {
     pub call_counts: Vec<(usize, usize)>,
     #[cfg(feature = "native-accel")]
     pub fusion_plan: Option<Arc<FusionPlan>>,
+    #[cfg(feature = "native-accel")]
+    pub fusion_accel_graph: Option<AccelGraph>,
 }
 
 impl InterpreterState {
@@ -52,6 +56,28 @@ impl InterpreterState {
                 bytecode.semantic_async_metadata.runtime_model.as_str()
             );
         }
+        #[cfg(feature = "native-accel")]
+        let (fusion_plan, fusion_accel_graph) = {
+            // Runtime planning prefers compile-populated groups but falls back to
+            // semantic instruction-window scaffolds when compile groups are absent.
+            let runtime_groups = bytecode.runtime_fusion_groups();
+            let runtime_graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
+            let accel_graph_ref = runtime_graph.as_ref().or(bytecode.accel_graph.as_ref());
+            let runtime_groups = if let Some(graph) = accel_graph_ref {
+                bytecode.runtime_fusion_groups_for_graph(graph)
+            } else {
+                runtime_groups
+            };
+            let fusion_plan = prepare_fusion_plan(
+                accel_graph_ref,
+                &runtime_groups,
+                bytecode
+                    .semantic_fusion_metadata
+                    .mir_fusion_candidate_group_count,
+            );
+            let fusion_accel_graph = runtime_graph.or_else(|| bytecode.accel_graph.clone());
+            (fusion_plan, fusion_accel_graph)
+        };
         Self {
             stack: Vec::new(),
             context: ExecutionContext {
@@ -73,26 +99,54 @@ impl InterpreterState {
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "<main>".to_string()),
             #[cfg(feature = "native-accel")]
-            // Runtime planning prefers compile-populated groups but falls back to
-            // semantic instruction-window scaffolds when compile groups are absent.
-            fusion_plan: {
-                let runtime_groups = bytecode.runtime_fusion_groups();
-                let runtime_graph = bytecode.runtime_accel_graph_for_fusion(&runtime_groups);
-                let accel_graph_ref = runtime_graph.as_ref().or(bytecode.accel_graph.as_ref());
-                let runtime_groups = if let Some(graph) = accel_graph_ref {
-                    bytecode.runtime_fusion_groups_for_graph(graph)
-                } else {
-                    runtime_groups
-                };
-                prepare_fusion_plan(
-                    accel_graph_ref,
-                    &runtime_groups,
-                    bytecode
-                        .semantic_fusion_metadata
-                        .mir_fusion_candidate_group_count,
-                )
-            },
+            fusion_plan,
+            #[cfg(feature = "native-accel")]
+            fusion_accel_graph,
             bytecode,
         }
+    }
+}
+
+#[cfg(all(test, feature = "native-accel"))]
+mod tests {
+    use super::InterpreterState;
+    use crate::bytecode::{
+        Bytecode, SemanticFusionInstructionKind, SemanticFusionInstructionWindow,
+    };
+    use runmat_accelerate::graph::InstrSpan;
+
+    #[test]
+    fn runtime_materialized_graph_is_retained_for_fusion_execution() {
+        let mut bytecode = Bytecode::empty();
+        bytecode.instructions = vec![
+            crate::Instr::LoadVar(0),
+            crate::Instr::LoadVar(1),
+            crate::Instr::Add,
+        ];
+        bytecode.var_types = vec![
+            runmat_builtins::Type::Num,
+            runmat_builtins::Type::Num,
+            runmat_builtins::Type::Num,
+        ];
+        bytecode
+            .semantic_fusion_metadata
+            .mir_fusion_candidate_group_count = 1;
+        bytecode
+            .semantic_fusion_metadata
+            .semantic_instruction_windows = vec![SemanticFusionInstructionWindow {
+            span: InstrSpan { start: 2, end: 2 },
+            kind: SemanticFusionInstructionKind::Elementwise,
+        }];
+
+        let mut initial_vars = Vec::new();
+        let state = InterpreterState::new(bytecode, &mut initial_vars, Some("<main>"), Vec::new());
+        assert!(
+            state.fusion_plan.is_some(),
+            "expected runtime fusion plan when semantic windows exist"
+        );
+        assert!(
+            state.fusion_accel_graph.is_some(),
+            "expected runtime accel graph to be retained for fusion execution"
+        );
     }
 }

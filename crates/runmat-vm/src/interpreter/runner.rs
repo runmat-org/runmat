@@ -294,6 +294,8 @@ async fn run_interpreter_inner(
         call_counts,
         #[cfg(feature = "native-accel")]
             fusion_plan: _,
+        #[cfg(feature = "native-accel")]
+        fusion_accel_graph,
         bytecode,
     } = state;
     let semantic_registry = Arc::new(bytecode.semantic_registry());
@@ -360,8 +362,7 @@ async fn run_interpreter_inner(
             return Err(err);
         }
         #[cfg(feature = "native-accel")]
-        if let (Some(plan), Some(graph)) =
-            (active_group_plan_clone(), bytecode.accel_graph.as_ref())
+        if let (Some(plan), Some(graph)) = (active_group_plan_clone(), fusion_accel_graph.as_ref())
         {
             if plan.group.span.start == pc {
                 #[cfg(feature = "native-accel")]

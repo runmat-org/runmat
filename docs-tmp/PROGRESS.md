@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 runtime-materialized accel graph now reaches fused execution
+  - VM interpreter state now retains the exact accel graph used for runtime fusion-plan preparation in [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs) (`fusion_accel_graph`), including on-demand runtime graph materialization when compile graph artifacts are missing.
+  - Fused execution now uses that retained runtime graph in [runner.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/runner.rs) instead of hard-wiring execution to `bytecode.accel_graph`, closing a runtime path where prepared plans could exist but execution skipped fusion due to a missing compile graph.
+  - Added state-level regression coverage:
+    - `runtime_materialized_graph_is_retained_for_fusion_execution`
+  - Validation: `cargo test -p runmat-vm runtime_materialized_graph_is_retained_for_fusion_execution -- --nocapture`, `cargo test -p runmat-vm runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions -- --nocapture`.
+
 - (pending commit) Plan 3/7 VM static-property missing-name identifier ratchet
   - Tightened VM semantic function coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `unqualified_static_property_without_imports_errors` now asserts stable identifier `RunMat:UndefinedVariable` instead of message-fragment matching (`undefined`/`not found` text).
