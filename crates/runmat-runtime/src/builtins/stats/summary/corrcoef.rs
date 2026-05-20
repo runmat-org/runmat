@@ -19,6 +19,7 @@ const NAME: &str = "corrcoef";
 const CORRCOEF_ERR_ROWS_MISMATCH: &str = "RunMat:corrcoef:RowsMismatch";
 const CORRCOEF_ERR_NORMALIZATION_INVALID: &str = "RunMat:corrcoef:NormalizationInvalid";
 const CORRCOEF_ERR_ROWS_OPTION_UNKNOWN: &str = "RunMat:corrcoef:RowsOptionUnknown";
+const CORRCOEF_ERR_NORMALIZATION_DUPLICATE: &str = "RunMat:corrcoef:NormalizationDuplicate";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
@@ -136,8 +137,9 @@ impl CorrcoefArgs {
                 }
                 Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
                     if normalization.is_some() {
-                        return Err(builtin_error(
+                        return Err(builtin_error_with_identifier(
                             "corrcoef: normalization flag specified more than once",
+                            CORRCOEF_ERR_NORMALIZATION_DUPLICATE,
                         ));
                     }
                     normalization = Some(parse_normalization(arg)?);
@@ -936,6 +938,18 @@ pub(crate) mod tests {
         ))
         .expect_err("expected unknown rows option error");
         assert_eq!(err.identifier(), Some(CORRCOEF_ERR_ROWS_OPTION_UNKNOWN));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn corrcoef_duplicate_normalization_flag_errors() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let err = block_on(corrcoef_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Num(0.0), Value::Num(1.0)],
+        ))
+        .expect_err("expected duplicate normalization flag error");
+        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_NORMALIZATION_DUPLICATE));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

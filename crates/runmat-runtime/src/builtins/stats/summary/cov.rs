@@ -18,6 +18,7 @@ const COV_ERR_ROWS_MISMATCH: &str = "RunMat:cov:RowsMismatch";
 const COV_ERR_NORMALIZATION_INVALID: &str = "RunMat:cov:NormalizationInvalid";
 const COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH: &str = "RunMat:cov:WeightVectorLengthMismatch";
 const COV_ERR_ROWS_OPTION_UNKNOWN: &str = "RunMat:cov:RowsOptionUnknown";
+const COV_ERR_NORMALIZATION_DUPLICATE: &str = "RunMat:cov:NormalizationDuplicate";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
@@ -140,8 +141,9 @@ impl CovArgs {
                 }
                 Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
                     if normalization_explicit || weight_candidate.is_some() {
-                        return Err(builtin_error(
+                        return Err(builtin_error_with_identifier(
                             "cov: normalization flag specified more than once",
+                            COV_ERR_NORMALIZATION_DUPLICATE,
                         ));
                     }
                     normalization = parse_normalization(arg)?;
@@ -1065,6 +1067,18 @@ pub(crate) mod tests {
         ))
         .expect_err("expected unknown rows option error");
         assert_eq!(err.identifier(), Some(COV_ERR_ROWS_OPTION_UNKNOWN));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cov_duplicate_normalization_flag_errors() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let err = block_on(cov_builtin(
+            Value::Tensor(tensor),
+            vec![Value::Num(0.0), Value::Num(1.0)],
+        ))
+        .expect_err("expected duplicate normalization flag error");
+        assert_eq!(err.identifier(), Some(COV_ERR_NORMALIZATION_DUPLICATE));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
