@@ -1749,6 +1749,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added core compile-path regression `compile_input_records_mir_analysis_facts` in `crates/runmat-core/src/tests.rs`, asserting valid compile artifacts contain MIR local facts and no MIR diagnostics.
   - Validation: `cargo test -p runmat-core compile_input_records_mir_analysis_facts -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test async_stdin pending_handler_returns_error -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
+- (pending commit) Plan 1/3 CLI+LSP semantic compile-check paths now execute MIR analysis stage
+  - CLI bytecode compilation path in `crates/runmat-cli/src/commands/bytecode.rs` (`compile_bytecode`) now runs MIR analysis after lowering and before VM compile.
+  - LSP compile-check path in `crates/runmat-lsp/src/core/analysis.rs` (`compile_error_for_lowering`) now runs MIR analysis before VM compile diagnostics.
+  - This extends explicit HIR->MIR->analysis->VM staging beyond core session execution into active CLI and LSP compile/analysis surfaces.
+  - Validation: `cargo test -p runmat --lib emit_bytecode_uses_source_context_project_symbols -- --nocapture`, `cargo test -p runmat-lsp source_context_symbol_discovery_reads_manifest_project_symbols -- --nocapture`, `cargo test -p runmat-lsp diagnostics_include_shape_lints -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

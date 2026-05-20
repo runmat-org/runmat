@@ -159,6 +159,7 @@ fn compile_error_for_lowering(lowering: &LoweringResult) -> Option<CompileError>
         Ok(mir) => mir,
         Err(err) => return Some(CompileError::from(err)),
     };
+    let _analysis = runmat_mir::analysis::analyze_assembly(&mir);
     runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id).err()
 }
 

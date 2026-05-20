@@ -45,6 +45,7 @@ fn compile_bytecode(lowering: &runmat_hir::LoweringResult) -> Result<runmat_vm::
         })?;
     let mir = runmat_mir::lowering::lower_assembly(&lowering.assembly)
         .map_err(|err| anyhow::anyhow!(format!("MIR lowering error: {err:?}")))?;
+    let _analysis = runmat_mir::analysis::analyze_assembly(&mir);
     let bytecode = runmat_vm::compile(&lowering.assembly, &mir, entrypoint.id)
         .map_err(|err| anyhow::anyhow!(format!("Compile error: {err:?}")))?;
     Ok(bytecode)
