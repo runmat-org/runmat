@@ -20,6 +20,8 @@ const CORRCOEF_ERR_ROWS_MISMATCH: &str = "RunMat:corrcoef:RowsMismatch";
 const CORRCOEF_ERR_NORMALIZATION_INVALID: &str = "RunMat:corrcoef:NormalizationInvalid";
 const CORRCOEF_ERR_ROWS_OPTION_UNKNOWN: &str = "RunMat:corrcoef:RowsOptionUnknown";
 const CORRCOEF_ERR_NORMALIZATION_DUPLICATE: &str = "RunMat:corrcoef:NormalizationDuplicate";
+const CORRCOEF_ERR_ROWS_OPTION_MALFORMED: &str = "RunMat:corrcoef:RowsOptionMalformed";
+const CORRCOEF_ERR_OPTION_UNKNOWN: &str = "RunMat:corrcoef:OptionUnknown";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
@@ -121,17 +123,26 @@ impl CorrcoefArgs {
                     match key.as_str() {
                         "rows" => {
                             let option = iter.next().ok_or_else(|| {
-                                builtin_error("corrcoef: expected a rows option after 'rows'")
+                                builtin_error_with_identifier(
+                                    "corrcoef: expected a rows option after 'rows'",
+                                    CORRCOEF_ERR_ROWS_OPTION_MALFORMED,
+                                )
                             })?;
                             let choice = value_to_string(&option)
                                 .ok_or_else(|| {
-                                    builtin_error("corrcoef: rows option must be a string value")
+                                    builtin_error_with_identifier(
+                                        "corrcoef: rows option must be a string value",
+                                        CORRCOEF_ERR_ROWS_OPTION_MALFORMED,
+                                    )
                                 })?
                                 .to_ascii_lowercase();
                             rows = parse_rows_option(&choice)?;
                         }
                         _ => {
-                            return Err(builtin_error(format!("corrcoef: unknown option '{key}'")))
+                            return Err(builtin_error_with_identifier(
+                                format!("corrcoef: unknown option '{key}'"),
+                                CORRCOEF_ERR_OPTION_UNKNOWN,
+                            ))
                         }
                     }
                 }
@@ -950,6 +961,31 @@ pub(crate) mod tests {
         ))
         .expect_err("expected duplicate normalization flag error");
         assert_eq!(err.identifier(), Some(CORRCOEF_ERR_NORMALIZATION_DUPLICATE));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn corrcoef_unknown_option_errors() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let err = block_on(corrcoef_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("bogus"), Value::from("value")],
+        ))
+        .expect_err("expected unknown option error");
+        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_OPTION_UNKNOWN));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn corrcoef_rows_option_malformed_errors() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let non_string_option = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let err = block_on(corrcoef_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("rows"), Value::Tensor(non_string_option)],
+        ))
+        .expect_err("expected malformed rows option error");
+        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_ROWS_OPTION_MALFORMED));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

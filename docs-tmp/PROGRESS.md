@@ -44,21 +44,29 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `RunMat:corrcoef:NormalizationInvalid`
     - `RunMat:corrcoef:RowsOptionUnknown`
     - `RunMat:corrcoef:NormalizationDuplicate`
+    - `RunMat:corrcoef:RowsOptionMalformed`
+    - `RunMat:corrcoef:OptionUnknown`
   - Runtime now emits these identifiers for:
     - paired-input row-count mismatch during matrix combination
     - invalid normalization-flag values/types (`0|1` contract violations, non-finite/non-integer numerics, non-numeric/non-logical inputs)
     - duplicate normalization-flag specification
+    - malformed `rows` option argument shape/type
+    - unsupported top-level option keys
     - unsupported `rows` option values
   - Tightened tests:
     - `corrcoef_mismatched_rows_errors`
     - `corrcoef_invalid_flag_errors`
     - `corrcoef_duplicate_normalization_flag_errors`
+    - `corrcoef_rows_option_malformed_errors`
+    - `corrcoef_unknown_option_errors`
     - `corrcoef_unknown_rows_option_errors`
     now assert `RuntimeError.identifier()` rather than message-fragment checks.
   - Validation:
     - `cargo test -p runmat-runtime corrcoef_mismatched_rows_errors -- --nocapture`
     - `cargo test -p runmat-runtime corrcoef_invalid_flag_errors -- --nocapture`
     - `cargo test -p runmat-runtime corrcoef_duplicate_normalization_flag_errors -- --nocapture`
+    - `cargo test -p runmat-runtime corrcoef_rows_option_malformed_errors -- --nocapture`
+    - `cargo test -p runmat-runtime corrcoef_unknown_option_errors -- --nocapture`
     - `cargo test -p runmat-runtime corrcoef_unknown_rows_option_errors -- --nocapture`
     - `cargo fmt --all --check`
     - `git diff --check`
