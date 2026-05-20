@@ -21,6 +21,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- (pending commit) Plan 4 histcounts2 identifier-contract ratchet for option validation
+  - Added stable `histcounts2` identifiers for two option-parse validation surfaces in [histcounts2.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/stats/hist/histcounts2.rs):
+    - `RunMat:histcounts2:NumBinsInvalid`
+    - `RunMat:histcounts2:BinMethodConflict`
+  - Runtime now emits these identifiers for:
+    - non-positive/non-finite `NumBins` values
+    - invalid `XBinMethod`/`YBinMethod` combinations with bin edges/width/count options
+  - Tightened tests:
+    - `histcounts2_num_bins_zero_errors`
+    - `histcounts2_binmethod_conflict_errors`
+    now assert `RuntimeError.identifier()` rather than broad `is_err()` proxies.
+  - Validation:
+    - `cargo test -p runmat-runtime histcounts2_num_bins_zero_errors -- --nocapture`
+    - `cargo test -p runmat-runtime histcounts2_binmethod_conflict_errors -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - (pending commit) Set builtins option-parse identifier ratchet
   - Added stable option-parse identifiers for set builtins:
     - `RunMat:unique:ConflictingOrderOptions`

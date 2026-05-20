@@ -17,9 +17,21 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const NAME: &str = "histcounts2";
 const DEFAULT_BIN_COUNT: usize = 10;
 const RANGE_EPS: f64 = 1.0e-12;
+const HISTCOUNTS2_ERR_NUMBINS_INVALID: &str = "RunMat:histcounts2:NumBinsInvalid";
+const HISTCOUNTS2_ERR_BINMETHOD_CONFLICT: &str = "RunMat:histcounts2:BinMethodConflict";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
+}
+
+fn builtin_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_identifier(identifier)
+        .build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::stats::hist::histcounts2")]
@@ -754,9 +766,12 @@ impl AxisOptions {
                 || self.bin_width.is_some()
                 || self.num_bins.is_some())
         {
-            return Err(builtin_error(format!(
-                "{NAME}: {axis}BinMethod cannot be combined with {axis}BinEdges, NumBins, or {axis}BinWidth"
-            )));
+            return Err(builtin_error_with_identifier(
+                format!(
+                    "{NAME}: {axis}BinMethod cannot be combined with {axis}BinEdges, NumBins, or {axis}BinWidth"
+                ),
+                HISTCOUNTS2_ERR_BINMETHOD_CONFLICT,
+            ));
         }
         if self.num_bins.is_some() && self.bin_width.is_some() {
             return Err(builtin_error(format!(
@@ -1093,6 +1108,12 @@ fn numeric_vector(value: &Value, name: &str, option: &str) -> BuiltinResult<Vec<
 fn positive_usize(value: &Value, name: &str, option: &str) -> BuiltinResult<usize> {
     let scalar = scalar_value(value, name, option)?;
     if scalar <= 0.0 || !scalar.is_finite() {
+        if name == NAME && option == "NumBins" {
+            return Err(builtin_error_with_identifier(
+                format!("{name}: {option} must be a positive finite scalar"),
+                HISTCOUNTS2_ERR_NUMBINS_INVALID,
+            ));
+        }
         return Err(builtin_error(format!(
             "{name}: {option} must be a positive finite scalar"
         )));
@@ -1142,6 +1163,12 @@ fn scalar_value(value: &Value, name: &str, option: &str) -> BuiltinResult<f64> {
 
 fn positive_usize_from_f64(value: f64, option: &str) -> BuiltinResult<usize> {
     if !value.is_finite() || value <= 0.0 {
+        if option == "NumBins" {
+            return Err(builtin_error_with_identifier(
+                format!("{NAME}: {option} must be a positive finite scalar"),
+                HISTCOUNTS2_ERR_NUMBINS_INVALID,
+            ));
+        }
         return Err(builtin_error(format!(
             "{NAME}: {option} must be a positive finite scalar"
         )));
@@ -1464,12 +1491,14 @@ pub(crate) mod tests {
     fn histcounts2_num_bins_zero_errors() {
         let x = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let y = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let result = block_on(evaluate(
+        let err = block_on(evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
             &[Value::from("NumBins"), Value::Num(0.0)],
-        ));
-        assert!(result.is_err());
+        ))
+        .err()
+        .expect("NumBins=0 should fail");
+        assert_eq!(err.identifier(), Some(HISTCOUNTS2_ERR_NUMBINS_INVALID));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1477,7 +1506,7 @@ pub(crate) mod tests {
     fn histcounts2_binmethod_conflict_errors() {
         let x = Tensor::new(vec![1.0, 1.0, 1.0], vec![3, 1]).unwrap();
         let y = Tensor::new(vec![1.0, 1.0, 1.0], vec![3, 1]).unwrap();
-        let result = block_on(evaluate(
+        let err = block_on(evaluate(
             Value::Tensor(x),
             Value::Tensor(y),
             &[
@@ -1486,8 +1515,10 @@ pub(crate) mod tests {
                 Value::from("XBinMethod"),
                 Value::from("auto"),
             ],
-        ));
-        assert!(result.is_err());
+        ))
+        .err()
+        .expect("XBinEdges + XBinMethod should fail");
+        assert_eq!(err.identifier(), Some(HISTCOUNTS2_ERR_BINMETHOD_CONFLICT));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
