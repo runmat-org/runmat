@@ -109,6 +109,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - shape mismatch paths emit `RunMat:ShapeMismatch`
     - invalid RHS type paths emit `RunMat:InvalidSliceAssignmentRhs`
     with direct identifier-contract unit coverage (`complex_rhs_view_shape_mismatch_reports_identifier`, `complex_rhs_view_invalid_rhs_type_reports_identifier`, `string_rhs_view_shape_mismatch_reports_identifier`, `string_rhs_view_invalid_rhs_type_reports_identifier`).
+  - VM slice-read result materialization in [read_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/read_slice.rs) now maps constructor shape failures through stable `RunMat:ShapeMismatch` identifier contracts (instead of string-shaped `"Slice error: ..."` conversion surfaces), with direct unit coverage for plan/result-shape mismatch paths (`tensor_slice_plan_shape_mismatch_reports_identifier`, `string_slice_plan_shape_mismatch_reports_identifier`).
   - compile-level ratchets now assert these contracts in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_rejects_unsupported_mir_unary_operator_with_identifier`
     - `primary_compile_rejects_unsupported_mir_binary_operator_with_identifier`

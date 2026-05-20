@@ -3,6 +3,13 @@ use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
 use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
+fn map_slice_shape_error(err: impl std::fmt::Display) -> RuntimeError {
+    crate::interpreter::errors::mex(
+        "ShapeMismatch",
+        &format!("shape mismatch for slice result: {err}"),
+    )
+}
+
 pub async fn read_tensor_slice_1d(
     tensor: &Tensor,
     colon_mask: u32,
@@ -36,8 +43,7 @@ pub fn try_tensor_slice_2d_fast_path(
             if out.len() == 1 {
                 Ok(Some(Value::Num(out[0])))
             } else {
-                let tens =
-                    Tensor::new(out, vec![rows, 1]).map_err(|e| format!("Slice error: {e}"))?;
+                let tens = Tensor::new(out, vec![rows, 1]).map_err(map_slice_shape_error)?;
                 Ok(Some(Value::Tensor(tens)))
             }
         }
@@ -56,15 +62,13 @@ pub fn try_tensor_slice_2d_fast_path(
             if out.len() == 1 {
                 Ok(Some(Value::Num(out[0])))
             } else {
-                let tens =
-                    Tensor::new(out, vec![1, cols]).map_err(|e| format!("Slice error: {e}"))?;
+                let tens = Tensor::new(out, vec![1, cols]).map_err(map_slice_shape_error)?;
                 Ok(Some(Value::Tensor(tens)))
             }
         }
         (SliceSelector::Colon, SliceSelector::Indices(js)) => {
             if js.is_empty() {
-                let tens = Tensor::new(Vec::new(), vec![rows, 0])
-                    .map_err(|e| format!("Slice error: {e}"))?;
+                let tens = Tensor::new(Vec::new(), vec![rows, 0]).map_err(map_slice_shape_error)?;
                 Ok(Some(Value::Tensor(tens)))
             } else {
                 let mut out: Vec<f64> = Vec::with_capacity(rows * js.len());
@@ -79,15 +83,13 @@ pub fn try_tensor_slice_2d_fast_path(
                     let start = j0 * rows;
                     out.extend_from_slice(&tensor.data[start..start + rows]);
                 }
-                let tens = Tensor::new(out, vec![rows, js.len()])
-                    .map_err(|e| format!("Slice error: {e}"))?;
+                let tens = Tensor::new(out, vec![rows, js.len()]).map_err(map_slice_shape_error)?;
                 Ok(Some(Value::Tensor(tens)))
             }
         }
         (SliceSelector::Indices(is), SliceSelector::Colon) => {
             if is.is_empty() {
-                let tens = Tensor::new(Vec::new(), vec![0, cols])
-                    .map_err(|e| format!("Slice error: {e}"))?;
+                let tens = Tensor::new(Vec::new(), vec![0, cols]).map_err(map_slice_shape_error)?;
                 Ok(Some(Value::Tensor(tens)))
             } else {
                 let mut out: Vec<f64> = Vec::with_capacity(is.len() * cols);
@@ -103,8 +105,7 @@ pub fn try_tensor_slice_2d_fast_path(
                         out.push(tensor.data[i0 + c * rows]);
                     }
                 }
-                let tens = Tensor::new(out, vec![is.len(), cols])
-                    .map_err(|e| format!("Slice error: {e}"))?;
+                let tens = Tensor::new(out, vec![is.len(), cols]).map_err(map_slice_shape_error)?;
                 Ok(Some(Value::Tensor(tens)))
             }
         }
@@ -127,7 +128,28 @@ pub async fn read_tensor_slice_nd(
     let plan = build_index_plan(&selectors, dims, &tensor.shape)?;
     if plan.indices.is_empty() {
         let out_tensor =
-            Tensor::new(Vec::new(), plan.output_shape).map_err(|e| format!("Slice error: {e}"))?;
+            Tensor::new(Vec::new(), plan.output_shape).map_err(map_slice_shape_error)?;
+        return Ok(Value::Tensor(out_tensor));
+    }
+    let mut out_data: Vec<f64> = Vec::with_capacity(plan.indices.len());
+    for &lin in &plan.indices {
+        out_data.push(tensor.data[lin as usize]);
+    }
+    if out_data.len() == 1 {
+        Ok(Value::Num(out_data[0]))
+    } else {
+        let out_tensor = Tensor::new(out_data, plan.output_shape).map_err(map_slice_shape_error)?;
+        Ok(Value::Tensor(out_tensor))
+    }
+}
+
+pub fn read_tensor_slice_from_plan(
+    tensor: &Tensor,
+    plan: &IndexPlan,
+) -> Result<Value, RuntimeError> {
+    if plan.indices.is_empty() {
+        let out_tensor =
+            Tensor::new(Vec::new(), plan.output_shape.clone()).map_err(map_slice_shape_error)?;
         return Ok(Value::Tensor(out_tensor));
     }
     let mut out_data: Vec<f64> = Vec::with_capacity(plan.indices.len());
@@ -138,29 +160,7 @@ pub async fn read_tensor_slice_nd(
         Ok(Value::Num(out_data[0]))
     } else {
         let out_tensor =
-            Tensor::new(out_data, plan.output_shape).map_err(|e| format!("Slice error: {e}"))?;
-        Ok(Value::Tensor(out_tensor))
-    }
-}
-
-pub fn read_tensor_slice_from_plan(
-    tensor: &Tensor,
-    plan: &IndexPlan,
-) -> Result<Value, RuntimeError> {
-    if plan.indices.is_empty() {
-        let out_tensor = Tensor::new(Vec::new(), plan.output_shape.clone())
-            .map_err(|e| format!("Slice error: {e}"))?;
-        return Ok(Value::Tensor(out_tensor));
-    }
-    let mut out_data: Vec<f64> = Vec::with_capacity(plan.indices.len());
-    for &lin in &plan.indices {
-        out_data.push(tensor.data[lin as usize]);
-    }
-    if out_data.len() == 1 {
-        Ok(Value::Num(out_data[0]))
-    } else {
-        let out_tensor = Tensor::new(out_data, plan.output_shape.clone())
-            .map_err(|e| format!("Slice error: {e}"))?;
+            Tensor::new(out_data, plan.output_shape.clone()).map_err(map_slice_shape_error)?;
         Ok(Value::Tensor(out_tensor))
     }
 }
@@ -184,7 +184,7 @@ pub fn read_complex_slice_from_plan(
 ) -> Result<Value, RuntimeError> {
     if plan.indices.is_empty() {
         let empty = ComplexTensor::new(Vec::new(), plan.output_shape.clone())
-            .map_err(|e| format!("Slice error: {e}"))?;
+            .map_err(map_slice_shape_error)?;
         return Ok(Value::ComplexTensor(empty));
     }
     if plan.indices.len() == 1 {
@@ -208,8 +208,8 @@ pub fn read_complex_slice_from_plan(
         })?;
         out.push(value);
     }
-    let out_ct = ComplexTensor::new(out, plan.output_shape.clone())
-        .map_err(|e| format!("Slice error: {e}"))?;
+    let out_ct =
+        ComplexTensor::new(out, plan.output_shape.clone()).map_err(map_slice_shape_error)?;
     Ok(Value::ComplexTensor(out_ct))
 }
 
@@ -264,7 +264,7 @@ pub async fn read_string_slice(
 pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, RuntimeError> {
     if plan.indices.is_empty() {
         let empty = StringArray::new(Vec::new(), plan.output_shape.clone())
-            .map_err(|e| format!("Slice error: {e}"))?;
+            .map_err(map_slice_shape_error)?;
         return Ok(Value::StringArray(empty));
     }
     if plan.indices.len() == 1 {
@@ -288,14 +288,14 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
         })?;
         out.push(value);
     }
-    let out_sa = StringArray::new(out, plan.output_shape.clone())
-        .map_err(|e| format!("Slice error: {e}"))?;
+    let out_sa = StringArray::new(out, plan.output_shape.clone()).map_err(map_slice_shape_error)?;
     Ok(Value::StringArray(out_sa))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::read_string_slice;
+    use super::{gather_string_slice, read_string_slice, read_tensor_slice_from_plan};
+    use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
     use runmat_builtins::{StringArray, Tensor, Value};
 
@@ -344,5 +344,31 @@ mod tests {
             }
             other => panic!("expected string array result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn tensor_slice_plan_shape_mismatch_reports_identifier() {
+        let tensor = Tensor::new(vec![10.0, 20.0], vec![1, 2]).expect("tensor");
+        let plan = IndexPlan::new(vec![0, 1], vec![1, 1], vec![2], 1, vec![1, 2]);
+        let err = read_tensor_slice_from_plan(&tensor, &plan)
+            .expect_err("shape-mismatch plan should fail");
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn string_slice_plan_shape_mismatch_reports_identifier() {
+        let sa = StringArray::new(
+            vec![
+                "a".to_string(),
+                "b".to_string(),
+                "c".to_string(),
+                "d".to_string(),
+            ],
+            vec![2, 2],
+        )
+        .expect("string array");
+        let plan = IndexPlan::new(vec![0, 1], vec![1, 1], vec![2], 1, vec![2, 2]);
+        let err = gather_string_slice(&sa, &plan).expect_err("shape-mismatch plan should fail");
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
     }
 }

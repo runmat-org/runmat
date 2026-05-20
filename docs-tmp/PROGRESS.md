@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM slice-read result-shape identifier-contract ratchet
+  - `scope: in-scope`
+  - Normalized string-shaped slice-read result materialization errors to stable runtime identifiers in [read_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/read_slice.rs):
+    - `Tensor::new`/`ComplexTensor::new`/`StringArray::new` slice-result shape failures now map through `mex("ShapeMismatch", ...)` via `map_slice_shape_error`.
+  - Added direct unit identifier-contract coverage in [read_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/read_slice.rs):
+    - `tensor_slice_plan_shape_mismatch_reports_identifier`
+    - `string_slice_plan_shape_mismatch_reports_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib tensor_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib string_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - MIR literal/constant identifier-contract ratchet
   - `scope: in-scope`
   - Added stable VM compile identifiers for MIR operand-constant validation in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
