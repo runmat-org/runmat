@@ -330,7 +330,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - Fusion materialized-store shared-handle preservation is now directly covered by `fusion_writeback_preserves_shared_gpu_handles` in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs).
   - runtime gather/retry GPU recursion now includes `Value::Closure` captures and `Value::OutputList` entries in [dispatcher.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/dispatcher.rs), with explicit nested-provider-unavailable identifier coverage.
 - Blocking gap:
-  - compile/runtime scaffolding split is now in place (compile emits semantic-window groups; runtime reconciles nodes) and runtime graph sourcing is instruction-owned; objective closeout still needs a final end-to-end audit proving no production reintroduction of compile-time node assignment heuristics or compile-graph preference across active fusion entrypoints.
+  - compile/runtime scaffolding split is now in place (compile emits semantic-window groups; runtime reconciles nodes) and runtime graph sourcing is instruction-owned; explicit cross-entrypoint stale-compile-graph exclusion evidence is now in place across VM bytecode/runtime/core/fusion-gpu surfaces (`runtime_accel_graph_ignores_stale_compile_graph_metadata`, `runtime_state_ignores_stale_compile_graph_metadata`, compile/runtime `fusion_regressions` planner-source checks, and `fusion_graph_helper_ignores_stale_compile_graph_metadata`).
   - spawned-task/provider lifecycle coverage breadth is strong, but closeout still needs explicit cadence evidence that semantic lifecycle suites remain green alongside fusion regressions after each Plan 7 graph/planning ratchet.
   - targeted runtime fusion behavior gap is now closed in current coverage: `fused_safe_followup_builtins_remain_resident` is green on branch after scalar-only elementwise fusion bypass/runtime guard ratchets in VM + accelerate fusion planning.
 
@@ -342,6 +342,10 @@ This audit maps the active objective to concrete repository evidence and marks e
   - `cargo test -p runmat-vm --test spawn_semantic_lifecycle -- --nocapture`
   - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
   - `cargo test -p runmat-vm runtime_accel_graph_ignores_stale_compile_graph_metadata -- --nocapture`
+  - `cargo test -p runmat-vm runtime_state_ignores_stale_compile_graph_metadata -- --nocapture`
+  - `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`
+  - `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`
+  - `cargo test -p runmat-vm --test fusion_gpu fusion_graph_helper_ignores_stale_compile_graph_metadata -- --nocapture`
   - `cargo test -p runmat-core --test error_namespace_compat -- --nocapture`
   - `cargo fmt --all --check`
   - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
@@ -437,6 +441,5 @@ Objective is **not achieved**.
 
 Highest-impact unresolved areas:
 
-1. Final Plan 7 closeout audit is still incomplete: we need end-to-end proof that no active production fusion entrypoint reintroduces compile-time node assignment or compile-graph preference after recent runtime-graph ownership changes.
-2. Objective sections marked `partial` remain open outside Plan 7 fusion details, especially broad semantic-pipeline consumer migration evidence (`### 1`) and MATLAB-semantics edge gaps called out in `### 3`.
-3. Validation cadence is green for current slices, but full objective closeout still requires a consolidated end-to-end gate run tied explicitly to all remaining `partial` sections before marking the goal achieved.
+1. Objective sections marked `partial` remain open outside Plan 7 fusion details, especially broad semantic-pipeline consumer migration evidence (`### 1`) and MATLAB-semantics edge gaps called out in `### 3`.
+2. Validation cadence is green for current slices, but full objective closeout still requires a consolidated end-to-end gate run tied explicitly to all remaining `partial` sections before marking the goal achieved.

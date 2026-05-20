@@ -1730,6 +1730,18 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This tightens Plan 7 end-to-end fusion execution evidence on the `fusion_gpu` surface against compile-graph preference regressions.
   - Validation: `cargo test -p runmat-vm --test fusion_gpu fusion_graph_helper_ignores_stale_compile_graph_metadata -- --nocapture`, `cargo test -p runmat-vm --test fusion_gpu direct_execution_of_safe_followup_group_returns_gpu_tensor -- --nocapture`, `cargo fmt --all --check`.
 
+- (pending commit) Plan 7 cross-entrypoint stale-compile-graph exclusion gate refresh
+  - Re-ran explicit stale-compile-graph exclusion coverage across active VM/core fusion entrypoints:
+    - `runmat-vm` bytecode source selection: `runtime_accel_graph_ignores_stale_compile_graph_metadata`
+    - `runmat-vm` runtime planning state: `runtime_state_ignores_stale_compile_graph_metadata`
+    - `runmat-core` compile/runtime snapshot planner-source contracts:
+      - `compile_fusion_plan_exposes_semantic_planner_metadata`
+      - `runtime_fusion_snapshot_exposes_semantic_planner_metadata`
+    - `runmat-vm` fusion execution coverage helper:
+      - `fusion_graph_helper_ignores_stale_compile_graph_metadata`
+  - Updated `docs-tmp/DELIVERABLE_AUDIT.md` Plan 7 blocking-gap language to reflect that cross-entrypoint stale compile-graph exclusion evidence is now explicit; remaining unresolved objective items are outside this specific Plan 7 graph-source boundary.
+  - Validation: `cargo test -p runmat-vm runtime_accel_graph_ignores_stale_compile_graph_metadata -- --nocapture`, `cargo test -p runmat-vm runtime_state_ignores_stale_compile_graph_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-vm --test fusion_gpu fusion_graph_helper_ignores_stale_compile_graph_metadata -- --nocapture`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
