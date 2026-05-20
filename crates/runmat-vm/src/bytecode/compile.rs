@@ -3341,6 +3341,42 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_deletion_context_without_delete_with_identifier() {
+        let ast = runmat_parser::parse("x = [1 2 3]; x(2) = 9;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched_assign = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
+                    if let MirPlace::Index(_, indexing) = place {
+                        indexing.result_context = IndexResultContext::DeletionTarget;
+                        patched_assign = true;
+                        break;
+                    }
+                }
+            }
+            if patched_assign {
+                break;
+            }
+        }
+        assert!(
+            patched_assign,
+            "expected indexed non-delete assign stmt in lowered MIR"
+        );
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirDeletionContextWithoutDeleteInvalid")
+        );
+    }
+
+    #[test]
     fn primary_compile_rejects_invalid_read_index_context_with_identifier() {
         let ast = runmat_parser::parse("x = [1 2 3]; y = x(2);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

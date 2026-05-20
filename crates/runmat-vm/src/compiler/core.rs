@@ -100,6 +100,8 @@ const IDENT_MIR_DELETE_ASSIGNMENT_INDEX_KIND_INVALID: &str =
     "RunMat:MirDeleteAssignmentIndexKindInvalid";
 const IDENT_MIR_DELETE_ASSIGNMENT_CONTEXT_INVALID: &str =
     "RunMat:MirDeleteAssignmentContextInvalid";
+const IDENT_MIR_DELETION_CONTEXT_WITHOUT_DELETE_INVALID: &str =
+    "RunMat:MirDeletionContextWithoutDeleteInvalid";
 const IDENT_MIR_AGGREGATE_SHAPE_INVALID: &str = "RunMat:MirAggregateShapeInvalid";
 const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
 const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
@@ -1287,6 +1289,17 @@ impl Compiler {
         value: &MirRvalue,
         delete: bool,
     ) -> Result<(), CompileError> {
+        if !delete {
+            if let MirPlace::Index(_, indexing) = place {
+                if indexing.result_context == IndexResultContext::DeletionTarget {
+                    return Err(self
+                        .compile_error(
+                            "MIR assignment invariant violated: DeletionTarget index context requires delete mutation",
+                        )
+                        .with_identifier(IDENT_MIR_DELETION_CONTEXT_WITHOUT_DELETE_INVALID));
+                }
+            }
+        }
         if delete {
             let MirPlace::Index(_, indexing) = place else {
                 return Err(self
