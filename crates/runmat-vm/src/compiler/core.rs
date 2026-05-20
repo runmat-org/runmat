@@ -96,6 +96,8 @@ const IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH: &str =
 const IDENT_MIR_AGGREGATE_SHAPE_INVALID: &str = "RunMat:MirAggregateShapeInvalid";
 const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
 const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
+const IDENT_MIR_NUMBER_LITERAL_INVALID: &str = "RunMat:MirNumberLiteralInvalid";
+const IDENT_MIR_CONSTANT_UNKNOWN: &str = "RunMat:MirConstantUnknown";
 const IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED: &str = "RunMat:MirCallFallbackPolicyUnsupported";
 const IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED: &str =
     "RunMat:MirMethodFallbackPolicyUnsupported";
@@ -2624,9 +2626,10 @@ impl Compiler {
                 Ok(())
             }
             MirOperand::Constant(MirConstant::Number(value)) => {
-                let value = value
-                    .parse()
-                    .map_err(|_| self.compile_error(format!("invalid number literal {value:?}")))?;
+                let value = value.parse().map_err(|_| {
+                    self.compile_error(format!("invalid number literal {value:?}"))
+                        .with_identifier(IDENT_MIR_NUMBER_LITERAL_INVALID)
+                })?;
                 self.emit(Instr::LoadConst(value));
                 Ok(())
             }
@@ -2644,7 +2647,10 @@ impl Compiler {
                 let constant = constants
                     .iter()
                     .find(|constant| constant.name == name)
-                    .ok_or_else(|| self.compile_error(format!("unknown constant {name}")))?;
+                    .ok_or_else(|| {
+                        self.compile_error(format!("unknown constant {name}"))
+                            .with_identifier(IDENT_MIR_CONSTANT_UNKNOWN)
+                    })?;
                 match &constant.value {
                     runmat_builtins::Value::Num(value) => self.emit(Instr::LoadConst(*value)),
                     runmat_builtins::Value::Complex(re, im) => {

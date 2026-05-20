@@ -3256,6 +3256,69 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_rejects_invalid_mir_number_literal_with_identifier() {
+        let ast = runmat_parser::parse("x = 1;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { value, .. } = &mut stmt.kind {
+                    *value = MirRvalue::Use(MirOperand::Constant(MirConstant::Number(
+                        "not_a_number".into(),
+                    )));
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirNumberLiteralInvalid")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_unknown_mir_constant_with_identifier() {
+        let ast = runmat_parser::parse("x = pi;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { value, .. } = &mut stmt.kind {
+                    *value = MirRvalue::Use(MirOperand::Constant(MirConstant::Symbol(
+                        runmat_hir::SymbolName("definitely_missing_constant".to_string()),
+                    )));
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(err.identifier.as_deref(), Some("RunMat:MirConstantUnknown"));
+    }
+
+    #[test]
     fn primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier() {
         let ast = runmat_parser::parse("x = sin(1);").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");

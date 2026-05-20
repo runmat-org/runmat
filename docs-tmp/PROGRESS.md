@@ -12,6 +12,22 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- MIR literal/constant identifier-contract ratchet
+  - `scope: in-scope`
+  - Added stable VM compile identifiers for MIR operand-constant validation in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `RunMat:MirNumberLiteralInvalid` for invalid MIR numeric literal payloads
+    - `RunMat:MirConstantUnknown` for unknown MIR symbolic constants
+  - Added compile-level identifier-contract coverage in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_invalid_mir_number_literal_with_identifier`
+    - `primary_compile_rejects_unknown_mir_constant_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_mir_number_literal_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_unknown_mir_constant_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM slice-assignment RHS identifier-contract ratchet
   - `scope: in-scope`
   - Normalized remaining string-only `write_slice` RHS error paths to stable runtime identifiers in [write_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/write_slice.rs):
