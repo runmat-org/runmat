@@ -2122,6 +2122,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 cell-index selector-plan compile invariants identifier ratchet
+  - Added compile-time identifiers in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `RunMat:MirCellIndexPlanInvalid` for brace-index selectors that violate expression/end-relative component invariants.
+    - `RunMat:MirCellIndexContextInvalid` for mismatched MIR cell-index result contexts at compile boundaries.
+  - Added compile-level invariant tests in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_invalid_cell_index_component_with_identifier`
+    - `primary_compile_rejects_mismatched_cell_index_context_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_invalid_cell_index_component_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_mismatched_cell_index_context_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

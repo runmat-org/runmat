@@ -88,6 +88,8 @@ const IDENT_MIR_CELL_EXPAND_PLAN_INVALID: &str = "RunMat:MirCellExpandPlanInvali
 const IDENT_MIR_PAREN_CELL_PLAN_INVALID: &str = "RunMat:MirParenCellPlanInvalid";
 const IDENT_MIR_SCALAR_INDEX_PLAN_INVALID: &str = "RunMat:MirScalarIndexPlanInvalid";
 const IDENT_MIR_SLICE_INDEX_PLAN_INVALID: &str = "RunMat:MirSliceIndexPlanInvalid";
+const IDENT_MIR_CELL_INDEX_PLAN_INVALID: &str = "RunMat:MirCellIndexPlanInvalid";
+const IDENT_MIR_CELL_INDEX_CONTEXT_INVALID: &str = "RunMat:MirCellIndexContextInvalid";
 const IDENT_MIR_AGGREGATE_SHAPE_INVALID: &str = "RunMat:MirAggregateShapeInvalid";
 const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
 const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
@@ -2141,9 +2143,9 @@ impl Compiler {
         expected_context: IndexResultContext,
     ) -> Result<Vec<(usize, isize)>, CompileError> {
         if !mir_indexing_context_matches(indexing.result_context.clone(), expected_context) {
-            return Err(self.compile_error(
-                "MIR cell index lowering received mismatched index result context",
-            ));
+            return Err(self
+                .compile_error("MIR cell index lowering received mismatched index result context")
+                .with_identifier(IDENT_MIR_CELL_INDEX_CONTEXT_INVALID));
         }
         let mut end_offsets = Vec::new();
         let mut index_position = 0usize;
@@ -2159,9 +2161,11 @@ impl Compiler {
                     index_position += 1;
                 }
                 _ => {
-                    return Err(self.compile_error(
-                        "MIR cell index lowering expects expression selectors or end-relative selectors",
-                    ))
+                    return Err(self
+                        .compile_error(
+                            "MIR cell index lowering expects expression selectors or end-relative selectors",
+                        )
+                        .with_identifier(IDENT_MIR_CELL_INDEX_PLAN_INVALID))
                 }
             }
         }
@@ -2186,9 +2190,11 @@ impl Compiler {
                     index_position += 1;
                 }
                 _ => {
-                    return Err(self.compile_error(
-                        "MIR cell index lowering expects expression selectors or end-relative selectors",
-                    ))
+                    return Err(self
+                        .compile_error(
+                            "MIR cell index lowering expects expression selectors or end-relative selectors",
+                        )
+                        .with_identifier(IDENT_MIR_CELL_INDEX_PLAN_INVALID))
                 }
             }
         }

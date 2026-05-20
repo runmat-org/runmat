@@ -829,7 +829,8 @@ mod tests {
     };
     use runmat_mir::lowering::lower_assembly;
     use runmat_mir::{
-        MirCallee, MirIndexComponent, MirIndexPlan, MirRvalue, MirStmtKind, MirTerminatorKind,
+        MirCallee, MirIndexComponent, MirIndexPlan, MirPlace, MirRvalue, MirStmtKind,
+        MirTerminatorKind,
     };
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -2931,6 +2932,82 @@ mod tests {
         assert_eq!(
             err.identifier.as_deref(),
             Some("RunMat:MirAggregateShapeInvalid")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_invalid_cell_index_component_with_identifier() {
+        let ast = runmat_parser::parse("c = {1}; c{1} = 2;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
+                    if let MirPlace::Index(_, indexing) = place {
+                        if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
+                            indexing.components = vec![MirIndexComponent::Colon];
+                            patched = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(
+            patched,
+            "expected brace index assignment place in lowered MIR"
+        );
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirCellIndexPlanInvalid")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_mismatched_cell_index_context_with_identifier() {
+        let ast = runmat_parser::parse("c = {1}; c{1} = 2;").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign { place, .. } = &mut stmt.kind {
+                    if let MirPlace::Index(_, indexing) = place {
+                        if matches!(indexing.kind, runmat_hir::IndexKind::Brace) {
+                            indexing.result_context = runmat_hir::IndexResultContext::ReadSingle;
+                            patched = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(
+            patched,
+            "expected brace index assignment place in lowered MIR"
+        );
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirCellIndexContextInvalid")
         );
     }
 

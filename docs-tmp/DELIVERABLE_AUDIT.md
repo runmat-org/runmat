@@ -91,6 +91,8 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `RunMat:MirOperatorUnsupported` for unsupported MIR operator lowering.
     - `RunMat:MirBuiltinUnknown` for unknown MIR builtin ids.
     - `RunMat:MirAggregateShapeInvalid` for MIR aggregate shape/count mismatch (`rows * cols != elements.len()`).
+    - `RunMat:MirCellIndexPlanInvalid` for invalid brace-index selector component invariants.
+    - `RunMat:MirCellIndexContextInvalid` for mismatched brace-index result-context invariants.
     - `RunMat:MirCallFallbackPolicyUnsupported` for unsupported static-call fallback policies.
     - `RunMat:MirMethodFallbackPolicyUnsupported` for unsupported method-call fallback policies.
     - `RunMat:MirMethodCallReceiverMissing` for method-call receiver arg invariants.
@@ -100,6 +102,8 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `primary_compile_rejects_unsupported_mir_binary_operator_with_identifier`
     - `primary_compile_rejects_unknown_mir_builtin_id_with_identifier`
     - `primary_compile_rejects_invalid_mir_aggregate_shape_with_identifier`
+    - `primary_compile_rejects_invalid_cell_index_component_with_identifier`
+    - `primary_compile_rejects_mismatched_cell_index_context_with_identifier`
     - `primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier`
     - `primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier`
     - `primary_compile_rejects_missing_mir_method_call_receiver_with_identifier`
