@@ -19,9 +19,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added direct unit identifier-contract coverage in [read_slice.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/read_slice.rs):
     - `tensor_slice_plan_shape_mismatch_reports_identifier`
     - `string_slice_plan_shape_mismatch_reports_identifier`
+    - `complex_slice_plan_shape_mismatch_reports_identifier`
   - Validation:
     - `cargo test -p runmat-vm --lib tensor_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
     - `cargo test -p runmat-vm --lib string_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib complex_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`

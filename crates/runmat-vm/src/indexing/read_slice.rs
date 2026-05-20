@@ -294,10 +294,13 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
 
 #[cfg(test)]
 mod tests {
-    use super::{gather_string_slice, read_string_slice, read_tensor_slice_from_plan};
+    use super::{
+        gather_string_slice, read_complex_slice_from_plan, read_string_slice,
+        read_tensor_slice_from_plan,
+    };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
-    use runmat_builtins::{StringArray, Tensor, Value};
+    use runmat_builtins::{ComplexTensor, StringArray, Tensor, Value};
 
     #[test]
     fn string_slice_linear_tensor_indices_preserve_selector_shape() {
@@ -369,6 +372,15 @@ mod tests {
         .expect("string array");
         let plan = IndexPlan::new(vec![0, 1], vec![1, 1], vec![2], 1, vec![2, 2]);
         let err = gather_string_slice(&sa, &plan).expect_err("shape-mismatch plan should fail");
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn complex_slice_plan_shape_mismatch_reports_identifier() {
+        let ct = ComplexTensor::new(vec![(1.0, 0.0), (2.0, 0.0)], vec![1, 2]).expect("complex");
+        let plan = IndexPlan::new(vec![0, 1], vec![1, 1], vec![2], 1, vec![1, 2]);
+        let err =
+            read_complex_slice_from_plan(&ct, &plan).expect_err("shape-mismatch plan should fail");
         assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
     }
 }
