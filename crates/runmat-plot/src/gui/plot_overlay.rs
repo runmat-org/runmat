@@ -2221,6 +2221,7 @@ impl PlotOverlay {
                 crate::plots::figure::PlotType::Bar
                 | crate::plots::figure::PlotType::Area
                 | crate::plots::figure::PlotType::Surface
+                | crate::plots::figure::PlotType::Patch
                 | crate::plots::figure::PlotType::Pie
                 | crate::plots::figure::PlotType::ContourFill => {
                     ui.painter().rect_filled(swatch_rect, 2.0, c);

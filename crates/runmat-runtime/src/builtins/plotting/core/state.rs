@@ -273,6 +273,7 @@ pub enum PlotChildHandleState {
     Heatmap(HeatmapHandleState),
     Area(AreaHandleState),
     Surface(SimplePlotHandleState),
+    Patch(SimplePlotHandleState),
     Line3(SimplePlotHandleState),
     Scatter3(SimplePlotHandleState),
     Contour(SimplePlotHandleState),
@@ -1289,6 +1290,10 @@ pub fn register_surface_handle(figure: FigureHandle, axes_index: usize, plot_ind
     )
 }
 
+pub fn register_patch_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
+    register_simple_plot_handle(figure, axes_index, plot_index, PlotChildHandleState::Patch)
+}
+
 pub fn register_line3_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
     register_simple_plot_handle(figure, axes_index, plot_index, PlotChildHandleState::Line3)
 }
@@ -1582,6 +1587,7 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         | PlotChildHandleState::Bar(plot)
         | PlotChildHandleState::Stairs(plot)
         | PlotChildHandleState::Surface(plot)
+        | PlotChildHandleState::Patch(plot)
         | PlotChildHandleState::Line3(plot)
         | PlotChildHandleState::Scatter3(plot)
         | PlotChildHandleState::Contour(plot)
@@ -1608,6 +1614,7 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         | PlotChildHandleState::Bar(plot)
         | PlotChildHandleState::Stairs(plot)
         | PlotChildHandleState::Surface(plot)
+        | PlotChildHandleState::Patch(plot)
         | PlotChildHandleState::Line3(plot)
         | PlotChildHandleState::Scatter3(plot)
         | PlotChildHandleState::Contour(plot)
