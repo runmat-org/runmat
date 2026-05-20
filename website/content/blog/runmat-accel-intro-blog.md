@@ -383,7 +383,7 @@ No. RunMat is a standalone runtime. It adheres to MATLAB core language grammar a
 Core array operations, elementwise math, reductions, common linear-algebra, FFT/signal/image, and statistics functions are covered. Check the function index for exact status. 
 
 **How do I run my existing `.m` files?**  
-Install RunMat and run your script with the CLI or the Jupyter kernel.
+Install RunMat and run your script with the CLI.
 **Can I mix CPU and GPU in one script?**  
 Yes. The planner chooses CPU JIT/BLAS or GPU per step. Fusion keeps GPU regions device-resident when beneficial.
 
@@ -392,4 +392,3 @@ Yes. The planner chooses CPU JIT/BLAS or GPU per step. Fusion keeps GPU regions 
 
 **How do I report an issue or contribute?**  
  Open an issue or PR in the repository. Include OS, GPU/CPU info, a minimal script, and steps to reproduce. [GitHub](https://github.com/runmat-org/runmat)
-

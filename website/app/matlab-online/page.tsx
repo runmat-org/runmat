@@ -335,6 +335,7 @@ const jsonLd = {
 export default function MatlabOnlinePage() {
   return (
     <div className="min-h-screen bg-background">
+      <link rel="preconnect" href="https://web.runmatstatic.com" crossOrigin="" />
       <link
         rel="preload"
         as="image"
@@ -397,18 +398,17 @@ export default function MatlabOnlinePage() {
                 data-ph-capture-attribute-cta="try-runmat-browser"
                 aria-label="Open the RunMat sandbox"
               >
-                <video
+                <LazyVideo
                   className="w-full h-auto rounded-lg"
-                  autoPlay
                   muted
                   loop
                   playsInline
-                  preload="none"
+                  initialPosterVariant="poster"
                   poster={heroPosterSrc}
                   aria-label="RunMat agent extending a clamped plate vibration simulation"
                 >
                   <source src={heroVideoSrc} type="video/mp4" />
-                </video>
+                </LazyVideo>
               </Link>
             </div>
           </div>
@@ -607,6 +607,17 @@ export default function MatlabOnlinePage() {
               <h3 className="text-lg font-semibold text-foreground">Every change is reviewable</h3>
               <p className="text-[0.938rem] text-foreground mt-1">Edits are presented as diffs. Accept or reject each change. Conversations are stored as searchable project files.</p>
             </div>
+          </div>
+          <div className="flex justify-center mt-2">
+            <Link
+              href="/agent"
+              className="text-[0.938rem] text-foreground underline hover:text-foreground/80"
+              data-ph-capture-attribute-destination="agent-page"
+              data-ph-capture-attribute-source="matlab-online-agent-section"
+              data-ph-capture-attribute-cta="learn-more-agent"
+            >
+              See what the agent can do
+            </Link>
           </div>
         </div>
       </section>

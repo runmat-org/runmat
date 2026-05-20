@@ -257,7 +257,7 @@ One runtime, three ways to use it, all of them fast.
 
 The [full runtime is open source](https://github.com/runmat-org/runmat) and MIT licensed. You can install it from Homebrew (`brew install runmat-org/tap/runmat`), NPM (`npm install runmat`), or crates.io (`cargo install runmat`), and see the source at [github.com/runmat-org/runmat](https://github.com/runmat-org/runmat).
 
-The NPM package ships the complete runtime — execution, GPU acceleration, and plotting — so you can embed RunMat inside your own web tools. There is also a Jupyter kernel if notebooks are your workflow.
+The NPM package ships the complete runtime — execution, GPU acceleration, and plotting — so you can embed RunMat inside your own web tools.
 
 Everything that powers the sandbox and RunMat App starts in this repo.
 

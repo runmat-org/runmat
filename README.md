@@ -283,7 +283,7 @@ On smaller arrays Fusion keeps work on CPU so you still get low overhead and a f
 ---
 
 <details>
-<summary><strong>Quick Start: all install methods, CLI features, and Jupyter integration</strong></summary>
+<summary><strong>Quick Start: install methods and CLI features</strong></summary>
 
 ### Installation
 
@@ -343,16 +343,6 @@ runmat info
 ```
 
 See [CLI Documentation](https://runmat.com/docs/cli) for the complete command reference.
-
-### Jupyter Integration
-
-```bash
-# Register RunMat as a Jupyter kernel
-runmat --install-kernel
-
-# Launch JupyterLab with RunMat support
-jupyter lab
-```
 
 </details>
 
@@ -419,7 +409,7 @@ RunMat follows a **fast-by-default runtime, open extension model** philosophy:
 - **Extensive built-ins**: 400+ functions covering core MATLAB built-ins, with more added continuously
 - **Tiered execution**: VM interpreter for fast startup, Turbine JIT for hot code
 - **GPU-first math**: Fusion engine automatically turns MATLAB code into fast GPU workloads
-- **Single portable binary**: One static binary includes the runtime, GPU engine, and plotting — fast startup, modern CLI, Jupyter kernel support
+- **Single portable binary**: One static binary includes the runtime, GPU engine, and plotting — fast startup and modern CLI
 - **Toolboxes as packages**: Signal processing, statistics, image processing, and other domains live as packages — the package manager is [in active design](https://runmat.com/docs/package-manager)
 
 The runtime intentionally ships GPU acceleration, fusion, JIT, and plotting as first-class subsystems rather than optional plugins — this is what makes RunMat fast by default. Domain-specific toolboxes (signal processing, statistics, image processing, etc.) live as packages. Use any editor you like, or the built-in [browser IDE](https://runmat.com/sandbox) and upcoming desktop app.

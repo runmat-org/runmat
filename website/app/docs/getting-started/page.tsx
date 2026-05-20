@@ -92,12 +92,6 @@ const jsonLd = {
           text: "Run 'curl -fsSL https://runmat.com/install | sh' to install the RunMat CLI for native GPU performance and local file access.",
           url: "https://runmat.com/download",
         },
-        {
-          "@type": "HowToStep",
-          name: "Set up Jupyter",
-          text: "Run 'runmat --install-kernel' to use RunMat as a Jupyter kernel for interactive notebooks.",
-          url: "https://runmat.com/docs/getting-started#jupyter-notebook-integration",
-        },
       ],
     },
   ],
@@ -147,7 +141,7 @@ export default function GettingStartedPage() {
           </p>
         </div>
 
-        {/* Getting Started Tabs: Browser | CLI | Jupyter */}
+        {/* Getting Started Tabs: Browser | CLI */}
         <section id="getting-started-tabs" className="mb-12">
           <h2 className="text-xl sm:text-2xl font-semibold mb-4 text-foreground">
             Choose your path
@@ -189,7 +183,6 @@ export default function GettingStartedPage() {
                     ["File storage", "text:Local filesystem", "text:In-memory (cleared on tab close)", "text:App (persists across sessions)"],
                     ["File versioning", "text:No (use git)", "no", "yes-text:Automatic"],
                     ["Project sharing", "no", "no", "text:Paid plans"],
-                    ["Jupyter support", "yes", "no", "no"],
                     ["Offline support", "yes", "no", "no"],
                     ["Built-in agent", "no", "yes", "yes"],
                   ] as [string, string, string, string][]).map(([feature, cli, sandbox, cloud]) => (

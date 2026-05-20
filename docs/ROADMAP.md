@@ -8,7 +8,7 @@ RunMat is a fast MATLAB-compatible runtime with an open-source core. Same syntax
 
 ## Current Shape
 
-- **CLI** — Install and run `runmat` in the terminal; REPL, script execution, Jupyter kernel.
+- **CLI** — Install and run `runmat` in the terminal; REPL and script execution.
 - **Browser** — Live at [runmat.com/sandbox](https://runmat.com/sandbox); full IDE with code and notebook editors, GPU-accelerated plotting, variable inspector, and file management — all running locally in the browser via WebAssembly and WebGPU.
 - **Desktop app** — In development; will offer a native-style experience, local project management, and optional integrations.
 
@@ -37,7 +37,6 @@ The below tracks the progress of the project towards the 1.0 release to date.
 - [x] High-level IR (`runmat-hir`) with scope and type annotations.
 - [x] Simple interpreter running on an unoptimised bytecode (`runmat-vm`).
 - [x] Headless plotting backend emitting SVG/PNG.
-- [x] Jupyter kernel communication skeleton.
 
 ### Milestone P2 - Performance Features
 
@@ -52,8 +51,6 @@ The below tracks the progress of the project towards the 1.0 release to date.
 - [x] Full language coverage (`/docs/language-coverage`).
 - [x] v0.2 release.
 - [x] Full standard library pass for canonical built-ins ((arrays, linalg, FFT/signal, stats, strings, I/O, ...).
-- [x] Implement LSP server.
-- [x] Implement VSCode / Cursor extension.
 - [x] Complete Accelerate (GPU) support.
 - [x] Finish plotting library integration.
 - [ ] Implement package manager.

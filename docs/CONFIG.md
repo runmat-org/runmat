@@ -131,27 +131,6 @@ plotting:
     format: png
     dpi: 200
     output_dir: ./plots
-    jupyter:
-      output_format: auto
-      enable_widgets: true
-      enable_static_fallback: true
-      widget:
-        client_side_rendering: true
-        server_side_streaming: false
-        cache_size_mb: 64
-        update_fps: 30
-        gpu_acceleration: true
-      static_export:
-        width: 800
-        height: 600
-        quality: 0.9
-        include_metadata: true
-        preferred_formats: [widget, png, svg]
-      performance:
-        max_render_time_ms: 16
-        progressive_rendering: true
-        lod_threshold: 10000
-        texture_compression: true
 ```
 
 ### JSON (runmat.config.json)
@@ -160,19 +139,12 @@ plotting:
   "runtime": {"timeout": 600, "verbose": true, "snapshot_path": "./stdlib.snapshot"},
   "jit": {"enabled": true, "threshold": 25, "optimization_level": "speed"},
   "gc": {"preset": "low-latency", "young_size_mb": 64, "threads": 4, "collect_stats": true},
-  "kernel": {"ip": "127.0.0.1", "key": null, "ports": null},
   "logging": {"level": "info", "debug": false, "file": null},
   "plotting": {
     "mode": "auto", "force_headless": false, "backend": "auto",
     "gui": {"width": 1280, "height": 800, "vsync": true, "maximized": false},
     "export": {
-      "format": "png", "dpi": 200, "output_dir": "./plots",
-      "jupyter": {
-        "output_format": "auto", "enable_widgets": true, "enable_static_fallback": true,
-        "widget": {"client_side_rendering": true, "server_side_streaming": false, "cache_size_mb": 64, "update_fps": 30, "gpu_acceleration": true},
-        "static_export": {"width": 800, "height": 600, "quality": 0.9, "include_metadata": true, "preferred_formats": ["widget", "png", "svg"]},
-        "performance": {"max_render_time_ms": 16, "progressive_rendering": true, "lod_threshold": 10000, "texture_compression": true}
-      }
+      "format": "png", "dpi": 200, "output_dir": "./plots"
     }
   }
 }
@@ -196,9 +168,6 @@ young_size_mb = 64
 threads = 4
 collect_stats = true
 
-[kernel]
-ip = "127.0.0.1"
-
 [logging]
 level = "warn"
 debug = false
@@ -219,30 +188,6 @@ format = "png"
 dpi = 200
 output_dir = "./plots"
 
-[plotting.export.jupyter]
-output_format = "auto"
-enable_widgets = true
-enable_static_fallback = true
-
-[plotting.export.jupyter.widget]
-client_side_rendering = true
-server_side_streaming = false
-cache_size_mb = 64
-update_fps = 30
-gpu_acceleration = true
-
-[plotting.export.jupyter.static_export]
-width = 800
-height = 600
-quality = 0.9
-include_metadata = true
-preferred_formats = ["widget", "png", "svg"]
-
-[plotting.export.jupyter.performance]
-max_render_time_ms = 16
-progressive_rendering = true
-lod_threshold = 10000
-texture_compression = true
 ```
 
 ## Configuration schema (by module)
@@ -266,18 +211,13 @@ parentheses.
 - `threads: usize` (none)
 - `collect_stats: bool` (false)
 
-### kernel
-- `ip: String` ("127.0.0.1")
-- `key: String` (none)
-- `ports` (optional): `shell|iopub|stdin|control|heartbeat: u16` (none)
-
 ### logging
 - `level: one of {error,warn,info,debug,trace}` (info)
 - `debug: bool` (false)
 - `file: Path` (none)
 
 ### plotting
-- `mode: one of {auto,gui,headless,jupyter}` (auto)
+- `mode: one of {auto,gui,headless}` (auto)
 - `force_headless: bool` (false)
 - `backend: one of {auto,wgpu,static,web}` (auto)
 - `gui` (optional):
@@ -289,27 +229,6 @@ parentheses.
   - `format: one of {png,svg,pdf,html}` (png)
   - `dpi: u32` (300)
   - `output_dir: Path` (none)
-  - `jupyter` (optional):
-    - `output_format: one of {widget,png,svg,base64,plotlyjson,auto}` (auto)
-    - `enable_widgets: bool` (true)
-    - `enable_static_fallback: bool` (true)
-    - `widget` (optional):
-      - `client_side_rendering: bool` (true)
-      - `server_side_streaming: bool` (false)
-      - `cache_size_mb: u32` (64)
-      - `update_fps: u32` (30)
-      - `gpu_acceleration: bool` (true)
-    - `static_export` (optional):
-      - `width: u32` (800)
-      - `height: u32` (600)
-      - `quality: f32` (0.9)
-      - `include_metadata: bool` (true)
-      - `preferred_formats: list<output_format>` ([widget, png, svg])
-    - `performance` (optional):
-      - `max_render_time_ms: u32` (16)
-      - `progressive_rendering: bool` (true)
-      - `lod_threshold: u32` (10000)
-      - `texture_compression: bool` (true)
 
 ## Environment variables (overrides)
 
@@ -319,17 +238,9 @@ All `RUNMAT_*` variables map onto the above fields. Notable ones:
 - JIT: `RUNMAT_JIT_ENABLE`, `RUNMAT_JIT_DISABLE`, `RUNMAT_JIT_THRESHOLD`, `RUNMAT_JIT_OPT_LEVEL`
 - GC: `RUNMAT_GC_PRESET`, `RUNMAT_GC_YOUNG_SIZE`, `RUNMAT_GC_THREADS`, `RUNMAT_GC_STATS`
 - Plotting: `RUNMAT_PLOT_MODE`, `RUNMAT_PLOT_HEADLESS`, `RUNMAT_PLOT_BACKEND`
-  Jupyter static export fallbacks: `RUNMAT_PLOT_JUPYTER_FORCE_CPU_EXPORT`,
-  `RUNMAT_PLOT_JUPYTER_ALLOW_HEADLESS_GPU`
 - Logging: `RUNMAT_DEBUG`, `RUNMAT_LOG_LEVEL`
-- Kernel: `RUNMAT_KERNEL_IP`, `RUNMAT_KERNEL_KEY`
 
 Boolean parsing accepts `1/0`, `true/false`, `yes/no`, `on/off`, `enable/disable`.
-
-For Jupyter `png`/`base64` output, RunMat prefers a CPU placeholder export in CI and
-headless Linux environments by default to avoid unstable GPU-driver paths. Set
-`RUNMAT_PLOT_JUPYTER_ALLOW_HEADLESS_GPU=1` to force the GPU export path in those
-environments.
 
 ### Acceleration provider (RunMat Accelerate)
 

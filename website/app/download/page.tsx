@@ -121,7 +121,7 @@ export default function DownloadPage() {
             <p className="text-sm text-foreground">
               <span className="font-medium text-foreground">Coming soon:</span>{" "}
               <span className="text-muted-foreground">
-                native desktop app, VS Code extension, JetBrains plugin.
+                native desktop app and package management.
               </span>
             </p>
             <Link
@@ -283,16 +283,16 @@ export default function DownloadPage() {
                 </Button>
               </div>
               <div className="rounded-lg border border-border bg-card p-6">
-                <h3 className="text-base font-semibold text-foreground">Use as a Jupyter kernel</h3>
+                <h3 className="text-base font-semibold text-foreground">Open the interactive shell</h3>
                 <p className="text-sm text-muted-foreground mt-1 mb-4">
-                  Run RunMat inside JupyterLab or Notebook.
+                  Start a local REPL for quick calculations and exploration.
                 </p>
                 <div className="bg-[var(--editor-background)] text-white rounded-md p-3 font-mono text-sm mb-4">
-                  <span className="text-white/40 select-none">$ </span>runmat --install-kernel
+                  <span className="text-white/40 select-none">$ </span>runmat
                 </div>
                 <Button variant="outline" size="sm" asChild className="w-full rounded-none">
-                  <Link href="/docs/getting-started#jupyter-notebook-integration">
-                    Jupyter setup guide
+                  <Link href="/docs/cli">
+                    CLI reference
                   </Link>
                 </Button>
               </div>

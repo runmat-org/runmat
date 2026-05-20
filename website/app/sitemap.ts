@@ -65,6 +65,20 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.9,
     },
     {
+      url: `${baseUrl}/agent`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.9,
+      videos: [
+        {
+          title: 'RunMat AI agent for MATLAB — writes and runs code in the browser',
+          thumbnail_loc: `${videoPosters}/clamp-agent-runmat.webp`,
+          content_loc: `${videoBase}/clamp-agent-runmat.mp4`,
+          description: "RunMat's built-in AI agent writes MATLAB-syntax code, runs it on GPU, and reads the figures it produces. A MATLAB Copilot alternative that works in the browser with no license required.",
+        },
+      ],
+    },
+    {
       url: `${baseUrl}/docs`,
       lastModified: currentDate,
       changeFrequency: 'daily',

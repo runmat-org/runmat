@@ -1,56 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Globe, Terminal, BookOpen } from "lucide-react";
+import { useState } from "react";
+import { Globe, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BrowserTabContent } from "./BrowserTab";
 import { CLITabContent } from "./CLITab";
-import { JupyterTabContent } from "./JupyterTab";
 
-type TabOption = "browser" | "cli" | "jupyter";
+type TabOption = "browser" | "cli";
 
 const tabs: { id: TabOption; label: string; icon: React.ReactNode }[] = [
   { id: "browser", label: "Browser", icon: <Globe className="h-4 w-4" /> },
   { id: "cli", label: "CLI", icon: <Terminal className="h-4 w-4" /> },
-  { id: "jupyter", label: "Jupyter", icon: <BookOpen className="h-4 w-4" /> },
 ];
 
 export function GettingStartedTabs() {
   const [activeTab, setActiveTab] = useState<TabOption>("browser");
-  const [pendingHash, setPendingHash] = useState<string | null>(null);
-
   const tabId = (tab: TabOption) => `getting-started-tab-${tab}`;
   const panelId = (tab: TabOption) => `getting-started-panel-${tab}`;
-
-  useEffect(() => {
-    const hashToTab: Record<string, TabOption> = {
-      "jupyter-notebook-integration": "jupyter",
-    };
-
-    const handleHashChange = () => {
-      const hash = window.location.hash.replace("#", "");
-      const nextTab = hashToTab[hash];
-
-      if (nextTab) {
-        setActiveTab(nextTab);
-        setPendingHash(hash);
-      }
-    };
-
-    handleHashChange();
-    window.addEventListener("hashchange", handleHashChange);
-    return () => window.removeEventListener("hashchange", handleHashChange);
-  }, []);
-
-  useEffect(() => {
-    if (!pendingHash) return;
-
-    const anchor = document.getElementById(pendingHash);
-    if (anchor) {
-      anchor.scrollIntoView({ behavior: "auto", block: "start" });
-      setPendingHash(null);
-    }
-  }, [activeTab, pendingHash]);
 
   return (
     <div className="w-full">
@@ -93,7 +59,6 @@ export function GettingStartedTabs() {
       >
         {activeTab === "browser" && <BrowserTabContent />}
         {activeTab === "cli" && <CLITabContent />}
-        {activeTab === "jupyter" && <JupyterTabContent />}
       </div>
     </div>
   );

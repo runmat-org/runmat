@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     "MATLAB", "Octave", "Rust", "JIT compiler", "scientific computing",
     "numerical computing", "open source", "high performance", "plotting",
     "mathematics", "engineering", "simulation",
-    "jupyter kernel", "jupyter matlab", "blas", "lapack", "matlab jupyter",
+    "blas", "lapack",
     "GPU acceleration", "RunMat App", "run matlab online", "free matlab runtime",
     "matlab alternative"
   ],

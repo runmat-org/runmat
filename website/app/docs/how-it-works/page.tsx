@@ -596,21 +596,6 @@ export default function HowItWorksPage() {
 
             <Card>
               <CardContent className="p-6">
-                <h4 className="text-xl font-semibold mb-3">First-class Jupyter integration</h4>
-                <p className="text-[0.938rem] text-foreground mb-4">
-                  Built for the notebook era. Install RunMat as a Jupyter kernel with one command, 
-                  and enjoy the same performance in your favorite notebook environment. 
-                  Rich display support for plots, matrices, and data structures.
-                </p>
-                <div className="bg-muted rounded p-3 font-mono text-sm">
-                  <span className="text-green-600 dark:text-green-400">$</span> runmat --install-kernel<br/>
-                  <span className="text-muted-foreground">✓ RunMat Jupyter kernel installed successfully!</span>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-6">
                 <h4 className="text-xl font-semibold mb-3">Modern cloud & container deployment</h4>
                 <p className="text-[0.938rem] text-foreground mb-4">
                   Single static binary with zero dependencies makes deployment trivial. Run MATLAB code in Docker 

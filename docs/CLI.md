@@ -1,8 +1,8 @@
 # RunMat CLI
 
 RunMat ships with a task-oriented command-line interface for running scripts,
-working interactively, operating Jupyter kernels, and managing remote
-project-backed storage. Use this page as a workflow guide first, then fall back
+working interactively, and managing remote project-backed storage. Use this
+page as a workflow guide first, then fall back
 to `runmat --help` and `runmat <command> --help` for the full generated
 reference.
 
@@ -103,23 +103,6 @@ Built-in REPL commands:
 - `.reset-stats`: reset execution statistics
 - `help`: show REPL help
 - `exit`, `quit`: leave the REPL
-
-### Jupyter kernel
-
-```sh
-# Install the kernel spec
-runmat --install-kernel
-
-# Start a kernel directly
-runmat kernel
-
-# Start from an existing connection file
-runmat kernel-connection connection.json
-```
-
-Advanced kernel flags exist for IP, ports, transport, signature scheme, and
-connection-file output. Use `runmat kernel --help` when you need to wire RunMat
-into an existing Jupyter environment manually.
 
 ### Diagnostics
 
@@ -294,7 +277,7 @@ Global flags apply to both direct script execution and subcommands.
 
 ### Plotting and artifacts
 
-- `--plot-mode <auto|gui|headless|jupyter>`
+- `--plot-mode <auto|gui|headless>`
 - `--plot-headless`
 - `--plot-backend <auto|wgpu|static|web>`
 - `--plot-scatter-target <n>`
@@ -304,10 +287,6 @@ Global flags apply to both direct script execution and subcommands.
 - `--capture-figures <off|auto|on>`
 - `--figure-size <WIDTHxHEIGHT>`
 - `--max-figures <n>`
-
-### Integrations
-
-- `--install-kernel`: install the RunMat Jupyter kernel
 
 ## Environment variables
 
@@ -346,16 +325,6 @@ values accept `1/0`, `true/false`, `yes/no`, `on/off`, and `enable/disable`.
 - `RUNMAT_FIGURE_SIZE`
 - `RUNMAT_MAX_FIGURES`
 
-### Kernel
-
-- `RUNMAT_KERNEL_IP`
-- `RUNMAT_KERNEL_KEY`
-- `RUNMAT_SHELL_PORT`
-- `RUNMAT_IOPUB_PORT`
-- `RUNMAT_STDIN_PORT`
-- `RUNMAT_CONTROL_PORT`
-- `RUNMAT_HB_PORT`
-
 ## Precedence
 
 CLI flags override environment variables, which override configuration files,
@@ -389,4 +358,3 @@ CMD ["runmat", "info"]
 - `0`: success
 - `1`: command execution, runtime, validation, or file/config errors
 - `2`: invalid CLI usage (for example, unknown flags or malformed arguments)
-

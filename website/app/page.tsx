@@ -136,9 +136,6 @@ export const metadata: Metadata = {
     "gnu octave vs",
     "high performance matlab",
     "matlab jit",
-    "jupyter matlab",
-    "matlab jupyter kernel",
-    "jupyter matlab integration",
     "matlab plotting",
     "matlab 3d plot",
     "matlab plotting online",
@@ -193,6 +190,7 @@ export const metadata: Metadata = {
 export default function HomePage() {
   return (
     <div className="flex flex-col min-h-screen home-page">
+      <link rel="preconnect" href="https://web.runmatstatic.com" crossOrigin="" />
       <link
         rel="preload"
         as="image"
@@ -299,6 +297,17 @@ export default function HomePage() {
               <h3 className="text-lg font-semibold text-foreground">Every change is reviewable</h3>
               <p className="text-[0.938rem] text-foreground mt-1">Edits are presented as diffs. Accept or reject each change. Conversations are stored as searchable project files.</p>
             </div>
+          </div>
+          <div className="flex justify-center mt-2">
+            <Link
+              href="/agent"
+              className="text-[0.938rem] text-foreground underline hover:text-foreground/80"
+              data-ph-capture-attribute-destination="agent-page"
+              data-ph-capture-attribute-source="homepage-agent-section"
+              data-ph-capture-attribute-cta="learn-more-agent"
+            >
+              See what the agent can do
+            </Link>
           </div>
         </div>
       </section>

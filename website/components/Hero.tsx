@@ -41,6 +41,7 @@ export default function Hero() {
               muted
               loop
               playsInline
+              initialPosterVariant="poster"
               poster="https://web.runmatstatic.com/video/posters/clamp-agent-runmat.webp"
               aria-label="RunMat agent extending a clamped plate vibration simulation"
             >
