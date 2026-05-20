@@ -266,6 +266,58 @@ fn compile_input_reports_class_self_inheritance_identifier() {
 }
 
 #[test]
+fn compile_input_reports_duplicate_class_member_identifier() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+classdef A
+    properties
+        x
+        x
+    end
+end
+"#;
+    let err = match session.compile_input(source) {
+        Ok(_) => panic!("duplicate class member should fail semantic compilation"),
+        Err(err) => err,
+    };
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic duplicate class member error");
+    };
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:ClassMemberDuplicate")
+    );
+}
+
+#[test]
+fn compile_input_reports_class_member_name_conflict_identifier() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let source = r#"
+classdef A
+    properties
+        x
+    end
+    methods
+        function y = x(obj)
+            y = 1;
+        end
+    end
+end
+"#;
+    let err = match session.compile_input(source) {
+        Ok(_) => panic!("class property/method name conflict should fail semantic compilation"),
+        Err(err) => err,
+    };
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic class member name conflict error");
+    };
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:ClassMemberNameConflict")
+    );
+}
+
+#[test]
 fn compile_input_resolves_wildcard_import_from_dependency_alias() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let dep_root = tmp.path().join("deps/statslib");

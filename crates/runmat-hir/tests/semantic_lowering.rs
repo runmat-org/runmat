@@ -101,6 +101,46 @@ fn class_cannot_inherit_from_itself_identifier_contract() {
 }
 
 #[test]
+fn class_duplicate_property_identifier_contract() {
+    let source = r#"
+classdef A
+    properties
+        x
+        x
+    end
+end
+"#;
+    let ast = runmat_parser::parse(source).unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:ClassMemberDuplicate")
+    );
+}
+
+#[test]
+fn class_property_method_name_conflict_identifier_contract() {
+    let source = r#"
+classdef A
+    properties
+        x
+    end
+    methods
+        function y = x(obj)
+            y = 1;
+        end
+    end
+end
+"#;
+    let ast = runmat_parser::parse(source).unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:ClassMemberNameConflict")
+    );
+}
+
+#[test]
 fn shared_input_output_name_reuses_one_binding() {
     let assembly = lower_semantic("function x = bump(x); x = x + 1; end");
     let function = &assembly.functions[0];

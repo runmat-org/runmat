@@ -2137,6 +2137,27 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 class member duplication/conflict identifier contract ratchet
+  - Added semantic lowering identifiers in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs):
+    - `RunMat:ClassMemberDuplicate` for duplicate class properties/methods/events/enumerations.
+    - `RunMat:ClassMemberNameConflict` for class member-name conflicts across property/method/event/enumeration namespaces.
+  - Added HIR and core contract coverage:
+    - [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
+      `class_duplicate_property_identifier_contract`,
+      `class_property_method_name_conflict_identifier_contract`
+    - [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs):
+      `compile_input_reports_duplicate_class_member_identifier`,
+      `compile_input_reports_class_member_name_conflict_identifier`
+  - Validation:
+    - `cargo test -p runmat-hir class_duplicate_property_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-hir class_property_method_name_conflict_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-core compile_input_reports_duplicate_class_member_identifier -- --nocapture`
+    - `cargo test -p runmat-core compile_input_reports_class_member_name_conflict_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

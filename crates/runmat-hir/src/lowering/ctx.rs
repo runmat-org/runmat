@@ -28,6 +28,8 @@ const IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassPropertyAttri
 const IDENT_CLASS_METHOD_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassMethodAttributeConflict";
 const IDENT_CLASS_ACCESS_VALUE_INVALID: &str = "RunMat:ClassAccessValueInvalid";
 const IDENT_CLASS_SELF_INHERITANCE_INVALID: &str = "RunMat:ClassSelfInheritanceInvalid";
+const IDENT_CLASS_MEMBER_DUPLICATE: &str = "RunMat:ClassMemberDuplicate";
+const IDENT_CLASS_MEMBER_NAME_CONFLICT: &str = "RunMat:ClassMemberNameConflict";
 const IDENT_AGGREGATE_SHAPE_MISMATCH: &str = "RunMat:AggregateShapeMismatch";
 const IDENT_IMPORT_AMBIGUOUS: &str = "RunMat:ImportAmbiguous";
 const IDENT_IMPORT_DUPLICATE: &str = "RunMat:ImportDuplicate";
@@ -690,12 +692,14 @@ impl SemanticCtx {
                         if !property_names.insert(prop_name.clone()) {
                             return Err(SemanticError::new(format!(
                                 "Duplicate property '{prop_name}' in class {name}"
-                            )));
+                            ))
+                            .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                         }
                         if method_names.contains(prop_name) {
                             return Err(SemanticError::new(format!(
                                 "Name '{prop_name}' used for both property and method in class {name}"
-                            )));
+                            ))
+                            .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                         }
                         properties.push(ClassProperty {
                             name: crate::MemberName(prop_name.clone()),
@@ -741,12 +745,14 @@ impl SemanticCtx {
                             if !method_names.insert(method_name.clone()) {
                                 return Err(SemanticError::new(format!(
                                     "Duplicate method '{method_name}' in class {name}",
-                                )));
+                                ))
+                                .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                             }
                             if property_names.contains(method_name) {
                                 return Err(SemanticError::new(format!(
                                     "Name '{method_name}' used for both property and method in class {name}",
-                                )));
+                                ))
+                                .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                             }
                             methods.push(ClassMethod {
                                 function: function_id,
@@ -764,13 +770,15 @@ impl SemanticCtx {
                         if !seen.insert(event_name) {
                             return Err(SemanticError::new(format!(
                                 "Duplicate event '{event_name}' in class {name}"
-                            )));
+                            ))
+                            .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                         }
                         if property_names.contains(event_name) || method_names.contains(event_name)
                         {
                             return Err(SemanticError::new(format!(
                                 "Name '{event_name}' used for event conflicts with existing member in class {name}"
-                            )));
+                            ))
+                            .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                         }
                         events.push(ClassEvent {
                             name: SymbolName(event_name.clone()),
@@ -784,12 +792,14 @@ impl SemanticCtx {
                         if !seen.insert(enum_name) {
                             return Err(SemanticError::new(format!(
                                 "Duplicate enumeration '{enum_name}' in class {name}"
-                            )));
+                            ))
+                            .with_identifier(IDENT_CLASS_MEMBER_DUPLICATE));
                         }
                         if property_names.contains(enum_name) || method_names.contains(enum_name) {
                             return Err(SemanticError::new(format!(
                                 "Name '{enum_name}' used for enumeration conflicts with existing member in class {name}"
-                            )));
+                            ))
+                            .with_identifier(IDENT_CLASS_MEMBER_NAME_CONFLICT));
                         }
                         enumerations.push(ClassEnumeration {
                             name: SymbolName(enum_name.clone()),
