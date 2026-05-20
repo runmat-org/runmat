@@ -12,6 +12,18 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM source-level `isfield` string-array contract ratchet
+  - `scope: in-scope`
+  - Replaced placeholder coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) with a real source-level string-array semantic assertion:
+    - `struct_isfield_string_array_names` now executes `names = ["a" "b"; "x" "a"]; r = isfield(s, names);`
+    - Asserts `LogicalArray` result shape/data contract (`shape == [2,2]`, column-major `data == [1,0,0,1]`) instead of proxy scalar-bool behavior.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions struct_isfield_string_array_names -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM cell paren selector aliasing semantics ratchet
   - `scope: in-scope`
   - Fixed a semantic selector/runtime-shape gap for cell paren indexing + assignment in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs):

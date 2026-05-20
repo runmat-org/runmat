@@ -33,6 +33,7 @@ Date: 2026-05-20
 - Incremental update: indexed member store-back semantics now have explicit MIR-shape ratchet coverage (`indexed_member_assignment_lowers_to_index_place_over_member_base`) pinning `s.a(2)=...` to `MirPlace::Index(MirPlace::Member(...), ...)` with `IndexedAssign` mutation policy, and semantic products no longer carry `IndexKind::Dot`.
 - Incremental update: semantic runtime deletion behavior now has direct contract coverage for both positive and rejection paths: cell paren deletion executes via semantic store-back (`cell_paren_delete_executes_with_semantic_store_back`), matrix linear deletion on non-vectors reports `RunMat:UnsupportedDeletion`, and string slice deletion reports `RunMat:UnsupportedSliceDeletion`.
 - Incremental update: source-level brace assignment with colon selectors now has explicit compile-path identifier contracts at both VM and core boundaries (`primary_compile_rejects_cell_assignment_colon_selector_from_source_with_identifier`, `compile_input_reports_cell_assignment_colon_selector_identifier`), pinning the semantic compiler rejection to `RunMat:MirCellIndexPlanInvalid`.
+- Incremental update: VM source-level `isfield` string-array coverage replaced placeholder semantics with a real matrix contract (`struct_isfield_string_array_names`), asserting `names = ["a" "b"; "x" "a"]` yields a `LogicalArray` with `shape [2,2]` and column-major data `[1,0,0,1]`.
 
 4. Manifest-driven composition and entrypoints
 - Artifact: `docs-tmp/DELIVERABLE_AUDIT.md` section `### 4` (`met`).

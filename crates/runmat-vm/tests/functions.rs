@@ -2116,18 +2116,19 @@ fn struct_isfield_multi_and_fieldnames() {
 }
 
 #[test]
-fn struct_isfield_string_array_placeholder() {
-    // String-array semantics placeholder: use empty numeric array to simulate empty string array and verify no-crash
+fn struct_isfield_string_array_names() {
     let program = r#"
         s = struct(); s = setfield(s, 'a', 1);
-        % In real MATLAB, this would be ["a" "b"; "x" "a"]. We signal via comment as parser lacks string arrays.
-        % For now, ensure isfield(s, 'a') works and returns true.
-        r = isfield(s, 'a');
+        names = ["a" "b"; "x" "a"];
+        r = isfield(s, names);
     "#;
     let vars = execute_semantic_source(program);
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Bool(true))));
+    // Expect r to be 2x2 logical matrix [[1,0];[0,1]] in column-major data [1,0,0,1]
+    assert!(vars.iter().any(|v| matches!(
+        v,
+        runmat_builtins::Value::LogicalArray(arr)
+            if arr.shape == vec![2, 2] && arr.data == vec![1, 0, 0, 1]
+    )));
 }
 
 #[test]
