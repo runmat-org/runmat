@@ -327,12 +327,14 @@ This audit maps the active objective to concrete repository evidence and marks e
   - runtime gather/retry GPU recursion now includes `Value::Closure` captures and `Value::OutputList` entries in [dispatcher.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/dispatcher.rs), with explicit nested-provider-unavailable identifier coverage.
 - Blocking gap:
   - compile/runtime scaffolding split is now in place (compile emits semantic-window groups; runtime reconciles nodes) and runtime graph sourcing is instruction-owned; objective closeout still needs a final end-to-end audit proving no production reintroduction of compile-time node assignment heuristics or compile-graph preference across active fusion entrypoints.
-  - spawned-task provider-handle policy now has explicit provider declarations plus VM enforcement, and provider-backed release semantics are covered for residency-clear/drop paths (including `Pop`) plus spawn/await completion/cancellation and compiled semantic spawn-overwrite lifecycle flows; semantic async spawn/await lifecycle coverage now includes unaliased helper/callee release behavior via semantic invoker path for direct, struct-nested, cell-nested, multi-output, `varargout`, nested-unrequested `varargout`, and multi-outstanding two-task await flows, with core interaction tests now ratcheting explicit serial eager spawn execution/order/failure boundaries.
+  - spawned-task/provider lifecycle coverage breadth is strong, but closeout still needs explicit cadence evidence that semantic lifecycle suites remain green alongside fusion regressions after each Plan 7 graph/planning ratchet.
   - targeted runtime fusion behavior gap is now closed in current coverage: `fused_safe_followup_builtins_remain_resident` is green on branch after scalar-only elementwise fusion bypass/runtime guard ratchets in VM + accelerate fusion planning.
 
 ### 7) Validation cadence (`met` for current slices)
 
 - Latest executed gates:
+  - `cargo test -p runmat-vm --test spawn_semantic_lifecycle -- --nocapture`
+  - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
   - `cargo test -p runmat-vm runtime_accel_graph_ignores_stale_compile_graph_metadata -- --nocapture`
   - `cargo test -p runmat-core --test error_namespace_compat -- --nocapture`
   - `cargo fmt --all --check`
@@ -419,4 +421,6 @@ Objective is **not achieved**.
 
 Highest-impact unresolved areas:
 
-1. Plan 7 shift from bytecode-first fusion realization to semantic/MIR/analysis-driven planning, including remaining accel-graph realization dependency and async spawn-provider lifecycle evidence gaps.
+1. Final Plan 7 closeout audit is still incomplete: we need end-to-end proof that no active production fusion entrypoint reintroduces compile-time node assignment or compile-graph preference after recent runtime-graph ownership changes.
+2. Objective sections marked `partial` remain open outside Plan 7 fusion details, especially broad semantic-pipeline consumer migration evidence (`### 1`) and MATLAB-semantics edge gaps called out in `### 3`.
+3. Unified nominal class/builtin metadata (`### 5`) still requires explicit closeout evidence beyond current ratchet coverage before the global objective can be marked achieved.
