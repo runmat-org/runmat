@@ -6,6 +6,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 core error-namespace ratchet now requires identifier prefix
+  - Tightened namespace compatibility coverage in [error_namespace_compat.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/error_namespace_compat.rs) to require namespace prefixing on the error identifier itself, removing the transitional message-fragment fallback (`identifier_ok || message_ok`).
+  - This enforces the proper contract for namespace migration work: identifier behavior is authoritative, while display message text is non-authoritative.
+  - Validation:
+    - `cargo test -p runmat-core --test error_namespace_compat -- --nocapture`
+
 - (pending commit) Plan 7 data-runtime identifier ratchet for manifest/transaction conflicts
   - Data runtime error paths in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/data/mod.rs) now emit stable identifiers for two high-value control paths instead of relying on message-fragment assertions:
     - `RunMat:data:ManifestConflict` for manifest sequence precondition conflicts.

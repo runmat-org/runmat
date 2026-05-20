@@ -38,10 +38,9 @@ fn assert_error_prefix(namespace: &str, code: &str) {
     let identifier_ok = identifier
         .as_deref()
         .is_some_and(|value| value.starts_with(&prefix));
-    let message_ok = message.contains(&prefix);
     assert!(
-        identifier_ok || message_ok,
-        "expected namespace prefix {prefix} in identifier/message. identifier={identifier:?} message={message:?} code={code}"
+        identifier_ok,
+        "expected namespace prefix {prefix} in identifier. identifier={identifier:?} message={message:?} code={code}"
     );
 }
 
