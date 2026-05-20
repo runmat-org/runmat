@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 formatter unsupported-specifier identifier ratchet
+  - Shared runtime formatter in [format.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/common/format.rs) now emits stable identifier `RunMat:format:UnsupportedSpecifier` when encountering unsupported `%` conversions (for example `%q`), instead of message-only runtime errors.
+  - Core session integration coverage in [printf_semantics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/printf_semantics.rs) now asserts that stable identifier at the session boundary for `fprintf` format failures in both `SessionExecutionResult.error` and `RunError::Runtime` paths, replacing display-text substring checks.
+  - Added runtime unit ratchet in [sprintf.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/strings/core/sprintf.rs):
+    - `sprintf_unsupported_specifier_reports_stable_identifier`
+  - Validation: `cargo test -p runmat-runtime sprintf_unsupported_specifier_reports_stable_identifier -- --nocapture`, `cargo test -p runmat-core --test printf_semantics fprintf_format_error_propagates_to_session_boundary -- --nocapture`, `cargo fmt --all --check`.
+
 - (pending commit) Plan 7 runtime-first fusion graph access migration in `fusion_gpu` coverage
   - Added shared runtime-first graph helper in [fusion_gpu.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/fusion_gpu.rs): `graph_for_fusion_test`.
   - Updated touched fusion tests to consume runtime-owned graph selection first (with compile-graph fallback only inside the helper), replacing direct `bytecode.accel_graph` call-site reads.

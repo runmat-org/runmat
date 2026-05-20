@@ -254,6 +254,18 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn sprintf_unsupported_specifier_reports_stable_identifier() {
+        let err = sprintf_builtin(Value::String("%q".to_string()), vec![Value::Num(1.0)])
+            .expect_err("sprintf should error");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:format:UnsupportedSpecifier"),
+            "unsupported formatter specifiers should expose a stable identifier"
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn sprintf_percent_c_from_numeric() {
         let result = sprintf_builtin(
             Value::String("%c".to_string()),

@@ -1,7 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 use futures::executor::block_on;
-use runmat_core::{ExecutionStreamKind, RunMatSession, SessionExecutionResult};
+use runmat_core::{ExecutionStreamKind, RunError, RunMatSession, SessionExecutionResult};
 use runmat_gc::gc_test_context;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -121,15 +121,18 @@ fn fprintf_format_error_propagates_to_session_boundary() {
     let result = block_on(engine.execute("fprintf('%q', 1);"));
     match result {
         Ok(exec) => {
-            let msg = exec
-                .error
-                .map(|err| err.message().to_string())
-                .unwrap_or_default();
-            assert!(msg.contains("unsupported format %q"), "{msg}");
+            let identifier = exec.error.as_ref().and_then(|err| err.identifier());
+            assert_eq!(
+                identifier,
+                Some("RunMat:format:UnsupportedSpecifier"),
+                "expected stable unsupported-format identifier in execution error"
+            );
         }
-        Err(err) => {
-            let msg = err.to_string();
-            assert!(msg.contains("unsupported format %q"), "{msg}");
-        }
+        Err(RunError::Runtime(err)) => assert_eq!(
+            err.identifier(),
+            Some("RunMat:format:UnsupportedSpecifier"),
+            "expected stable unsupported-format identifier in runtime error"
+        ),
+        Err(other) => panic!("expected runtime formatting error, got {other:?}"),
     }
 }
