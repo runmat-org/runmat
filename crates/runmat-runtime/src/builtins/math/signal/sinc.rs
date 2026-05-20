@@ -42,7 +42,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may execute normalized sinc on-device via unary_sinc; otherwise the runtime gathers and applies the MATLAB-compatible host implementation.",
+    notes: "Providers may execute real normalized sinc on-device via unary_sinc; complex-interleaved handles and unsupported hooks gather and apply the MATLAB-compatible host implementation.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::signal::sinc")]
@@ -114,6 +114,9 @@ async fn sinc_builtin(value: Value) -> BuiltinResult<Value> {
 
 async fn sinc_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
+            return sinc_gpu_host_fallback(provider, &handle).await;
+        }
         match provider.unary_sinc(&handle).await {
             Ok(out) => return Ok(gpu_helpers::resident_gpu_value(out)),
             Err(err) if provider_error_is_unsupported(&err) => {
@@ -137,7 +140,6 @@ async fn sinc_gpu_host_fallback(
                 .with_identifier("RunMat:gather:DownloadFailed")
                 .build()
         })?;
-    runmat_accelerate_api::clear_residency(handle);
 
     let runmat_accelerate_api::HostTensorOwned {
         mut data,
@@ -153,10 +155,11 @@ async fn sinc_gpu_host_fallback(
     }
 
     if storage == GpuTensorStorage::ComplexInterleaved {
-        let complex = data
-            .chunks_exact(2)
-            .map(|chunk| (chunk[0], chunk[1]))
-            .collect::<Vec<_>>();
+        let chunks = data.chunks_exact(2);
+        if !chunks.remainder().is_empty() {
+            return Err(builtin_error("sinc: malformed complex buffer, odd length"));
+        }
+        let complex = chunks.map(|chunk| (chunk[0], chunk[1])).collect::<Vec<_>>();
         let tensor =
             ComplexTensor::new(complex, shape).map_err(|e| builtin_error(format!("sinc: {e}")))?;
         return sinc_complex_tensor(tensor);
@@ -258,7 +261,7 @@ mod tests {
             Ok(GpuTensorHandle {
                 shape: host.shape.to_vec(),
                 device_id: self.device_id(),
-                buffer_id: 1,
+                buffer_id: 2,
             })
         }
 
@@ -317,6 +320,54 @@ mod tests {
             _: &'a GpuTensorHandle,
         ) -> AccelProviderFuture<'a, GpuTensorHandle> {
             Box::pin(async move { Err(anyhow::anyhow!("device lost while running unary_sinc")) })
+        }
+    }
+
+    struct ComplexSincProvider;
+
+    impl AccelProvider for ComplexSincProvider {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Ok(GpuTensorHandle {
+                shape: host.shape.to_vec(),
+                device_id: self.device_id(),
+                buffer_id: 3,
+            })
+        }
+
+        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async move {
+                if handle.buffer_id == 4 {
+                    return Ok(HostTensorOwned {
+                        data: vec![0.0, 0.0, 0.5],
+                        shape: vec![2, 1],
+                        storage: GpuTensorStorage::ComplexInterleaved,
+                    });
+                }
+                Ok(HostTensorOwned {
+                    data: vec![0.0, 0.0, 0.5, 0.25],
+                    shape: vec![2, 1],
+                    storage: GpuTensorStorage::ComplexInterleaved,
+                })
+            })
+        }
+
+        fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "complex-sinc-test-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            90_003
+        }
+
+        fn unary_sinc<'a>(
+            &'a self,
+            _: &'a GpuTensorHandle,
+        ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+            Box::pin(async move { Err(anyhow::anyhow!("unary_sinc should not be called")) })
         }
     }
 
@@ -494,7 +545,7 @@ mod tests {
         let handle = GpuTensorHandle {
             shape: vec![1, 3],
             device_id: provider.device_id(),
-            buffer_id: 1,
+            buffer_id: 2,
         };
         let result = call(Value::GpuTensor(handle)).expect("sinc gpu fallback");
         match result {
@@ -526,6 +577,47 @@ mod tests {
         assert!(err
             .message()
             .contains("device lost while running unary_sinc"));
+    }
+
+    #[test]
+    fn sinc_gpu_complex_interleaved_bypasses_real_unary_provider_hook() {
+        let _guard = test_support::accel_test_lock();
+        let provider: &'static dyn AccelProvider = Box::leak(Box::new(ComplexSincProvider));
+        let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let handle = GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: provider.device_id(),
+            buffer_id: 3,
+        };
+        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
+
+        let result = call(Value::GpuTensor(handle)).expect("complex sinc gpu fallback");
+        match result {
+            Value::ComplexTensor(out) => {
+                assert_eq!(out.shape, vec![2, 1]);
+                assert_complex_close(out.data[0], (1.0, 0.0));
+                assert_complex_close(out.data[1], sinc_complex_value(0.5, 0.25));
+            }
+            other => panic!("expected complex tensor fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sinc_gpu_complex_interleaved_rejects_odd_buffer_length() {
+        let _guard = test_support::accel_test_lock();
+        let provider: &'static dyn AccelProvider = Box::leak(Box::new(ComplexSincProvider));
+        let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let handle = GpuTensorHandle {
+            shape: vec![2, 1],
+            device_id: provider.device_id(),
+            buffer_id: 4,
+        };
+        runmat_accelerate_api::set_handle_storage(&handle, GpuTensorStorage::ComplexInterleaved);
+
+        let err = call(Value::GpuTensor(handle)).expect_err("odd complex buffer should error");
+        assert!(err
+            .message()
+            .contains("sinc: malformed complex buffer, odd length"));
     }
 
     #[test]
