@@ -2536,6 +2536,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 method/member callable identity ratchet for object-dispatch paths
+  - Switched VM object/member dispatch identity construction from `CallableIdentity::DynamicName` to typed `CallableIdentity::Method` in:
+    - [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs)
+    - [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/closures.rs)
+  - Updated method/member dispatch tests to assert object/classref method execution through `Method` identities (`classref_external_method_uses_external_boundary_semantic_resolution`, `classref_external_method_without_resolver_remains_unresolved`).
+  - This reduces remaining name-shaped callable behavior in VM object-dispatch execution while preserving existing fallback policy contracts.
+  - Validation:
+    - `cargo test -p runmat-vm --lib call::closures::tests::classref_external_method_uses_external_boundary_semantic_resolution -- --nocapture`
+    - `cargo test -p runmat-vm --lib call::closures::tests::classref_external_method_without_resolver_remains_unresolved -- --nocapture`
+    - `cargo test -p runmat-vm --lib call::closures::tests::method_member_call_rejects_identity_without_method_name -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

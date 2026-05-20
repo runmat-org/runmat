@@ -1,7 +1,7 @@
 use crate::bytecode::ArgSpec;
 use crate::bytecode::EndExpr;
 use runmat_builtins::Value;
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, QualifiedName, SymbolName};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId, QualifiedName, SymbolName};
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
@@ -359,7 +359,7 @@ pub(crate) async fn call_object_operator_method(
 ) -> Result<Value, RuntimeError> {
     crate::call::closures::call_method_or_member_index_with_outputs(
         base,
-        CallableIdentity::DynamicName(SymbolName(method.to_string())),
+        CallableIdentity::Method(MethodId(method.to_string())),
         vec![arg],
         1,
         CallableFallbackPolicy::ObjectDispatch,
@@ -375,7 +375,7 @@ pub(crate) async fn call_object_named_method_with_outputs(
 ) -> Result<Value, RuntimeError> {
     crate::call::closures::call_method_or_member_index_with_outputs(
         base,
-        CallableIdentity::DynamicName(SymbolName(method.clone())),
+        CallableIdentity::Method(MethodId(method.clone())),
         args,
         requested_outputs,
         CallableFallbackPolicy::ObjectDispatch,
@@ -457,7 +457,7 @@ pub(crate) async fn call_object_index_descriptor_method_with_outputs(
     let (base, method, args) = descriptor.into_method_invocation()?;
     crate::call::closures::call_method_or_member_index_with_outputs(
         base,
-        CallableIdentity::DynamicName(SymbolName(method.clone())),
+        CallableIdentity::Method(MethodId(method.clone())),
         args,
         requested_outputs,
         CallableFallbackPolicy::ObjectDispatch,

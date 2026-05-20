@@ -8,11 +8,11 @@ use crate::call::shared::{
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop_args, pop_value};
 use runmat_builtins::{builtin_functions, lookup_method, Access, Closure, Value};
-use runmat_hir::{CallableFallbackPolicy, CallableIdentity, SymbolName};
+use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId};
 use runmat_runtime::RuntimeError;
 
-fn dynamic_identity(name: String) -> CallableIdentity {
-    CallableIdentity::DynamicName(SymbolName(name))
+fn method_identity(name: String) -> CallableIdentity {
+    CallableIdentity::Method(MethodId(name))
 }
 
 fn method_member_name(identity: &CallableIdentity) -> Option<String> {
@@ -88,7 +88,7 @@ async fn call_member_index_on_object_like(
         full_args.push(receiver.clone());
         full_args.extend(args.iter().cloned());
         return call_identity_with_policy(
-            dynamic_identity(m.function_name.clone()),
+            method_identity(m.function_name.clone()),
             full_args,
             requested_outputs,
             CallableFallbackPolicy::RuntimeNameResolution,
@@ -111,7 +111,7 @@ async fn call_member_index_on_object_like(
         return Ok(v);
     }
     if let Some(v) = try_call_identity_with_policy(
-        dynamic_identity(name.clone()),
+        method_identity(name.clone()),
         method_args.clone(),
         requested_outputs,
         CallableFallbackPolicy::ObjectDispatch,
@@ -135,7 +135,7 @@ async fn call_member_index_on_object_like(
     }
 
     match call_identity_with_policy(
-        dynamic_identity(name.clone()),
+        method_identity(name.clone()),
         method_args,
         requested_outputs,
         post_object_fallback,
@@ -276,7 +276,7 @@ pub async fn call_method_or_member_index_with_outputs(
                     return Err(format!("Method '{}' is not static", name).into());
                 }
                 return call_identity_with_policy(
-                    dynamic_identity(m.function_name.clone()),
+                    method_identity(m.function_name.clone()),
                     args,
                     requested_outputs,
                     CallableFallbackPolicy::RuntimeNameResolution,
@@ -302,7 +302,7 @@ mod tests {
     use super::call_method_or_member_index_with_outputs;
     use futures::executor::block_on;
     use runmat_builtins::Value;
-    use runmat_hir::{CallableFallbackPolicy, CallableIdentity, SymbolName};
+    use runmat_hir::{CallableFallbackPolicy, CallableIdentity, MethodId};
     use std::sync::Arc;
 
     #[test]
@@ -321,7 +321,7 @@ mod tests {
         );
         let value = block_on(call_method_or_member_index_with_outputs(
             Value::ClassRef("Point".to_string()),
-            CallableIdentity::DynamicName(SymbolName("remote_inc".to_string())),
+            CallableIdentity::Method(MethodId("remote_inc".to_string())),
             vec![Value::Num(2.0)],
             1,
             CallableFallbackPolicy::ObjectDispatch,
@@ -334,7 +334,7 @@ mod tests {
     fn classref_external_method_without_resolver_remains_unresolved() {
         let err = block_on(call_method_or_member_index_with_outputs(
             Value::ClassRef("Point".to_string()),
-            CallableIdentity::DynamicName(SymbolName("sqrt".to_string())),
+            CallableIdentity::Method(MethodId("sqrt".to_string())),
             vec![Value::Num(9.0)],
             1,
             CallableFallbackPolicy::ObjectDispatch,
