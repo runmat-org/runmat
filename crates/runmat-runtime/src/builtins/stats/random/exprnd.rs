@@ -12,6 +12,18 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("exprnd").build()
 }
 
+const EXPRND_ERR_MU_MUST_BE_POSITIVE: &str = "RunMat:exprnd:MuMustBePositive";
+
+fn builtin_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> crate::RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("exprnd")
+        .with_identifier(identifier)
+        .build()
+}
+
 fn exprnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     if args.len() <= 1 {
         Type::Num
@@ -31,7 +43,10 @@ fn exprnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 async fn exprnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (mu, shape) = parse_args(args).await?;
     if mu <= 0.0 {
-        return Err(builtin_error("exprnd: mu must be greater than zero"));
+        return Err(builtin_error_with_identifier(
+            "exprnd: mu must be greater than zero",
+            EXPRND_ERR_MU_MUST_BE_POSITIVE,
+        ));
     }
     if let Some(value) = try_gpu_exponential(mu, &shape)? {
         return Ok(value);
@@ -164,13 +179,15 @@ mod tests {
     #[test]
     fn exprnd_rejects_negative_mu() {
         let args = vec![Value::Num(-1.0)];
-        assert!(block_on(exprnd_builtin(args)).is_err());
+        let err = block_on(exprnd_builtin(args)).expect_err("negative mu should error");
+        assert_eq!(err.identifier(), Some(EXPRND_ERR_MU_MUST_BE_POSITIVE));
     }
 
     #[test]
     fn exprnd_rejects_zero_mu() {
         let args = vec![Value::Num(0.0)];
-        assert!(block_on(exprnd_builtin(args)).is_err());
+        let err = block_on(exprnd_builtin(args)).expect_err("zero mu should error");
+        assert_eq!(err.identifier(), Some(EXPRND_ERR_MU_MUST_BE_POSITIVE));
     }
 
     #[test]

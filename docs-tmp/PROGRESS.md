@@ -1755,6 +1755,18 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - This extends explicit HIR->MIR->analysis->VM staging beyond core session execution into active CLI and LSP compile/analysis surfaces.
   - Validation: `cargo test -p runmat --lib emit_bytecode_uses_source_context_project_symbols -- --nocapture`, `cargo test -p runmat-lsp source_context_symbol_discovery_reads_manifest_project_symbols -- --nocapture`, `cargo test -p runmat-lsp diagnostics_include_shape_lints -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
 
+- (pending commit) Plan 4 stats-random identifier-contract ratchet for distribution domain guards
+  - Added stable runtime identifiers for random distribution domain guard failures:
+    - `RunMat:exprnd:MuMustBePositive`
+    - `RunMat:normrnd:SigmaMustBeNonnegative`
+    - `RunMat:unifrnd:LowerBoundMustBeLessThanUpperBound`
+  - Updated implementations in:
+    - `crates/runmat-runtime/src/builtins/stats/random/exprnd.rs`
+    - `crates/runmat-runtime/src/builtins/stats/random/normrnd.rs`
+    - `crates/runmat-runtime/src/builtins/stats/random/unifrnd.rs`
+  - Converted negative tests from broad `is_err()` checks to direct `RuntimeError.identifier()` assertions for those contracts.
+  - Validation: `cargo test -p runmat-runtime exprnd_rejects_negative_mu -- --nocapture`, `cargo test -p runmat-runtime exprnd_rejects_zero_mu -- --nocapture`, `cargo test -p runmat-runtime normrnd_rejects_negative_sigma -- --nocapture`, `cargo test -p runmat-runtime unifrnd_rejects_a_ge_b -- --nocapture`, `cargo test -p runmat-runtime unifrnd_rejects_a_eq_b -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

@@ -12,6 +12,18 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("normrnd").build()
 }
 
+const NORMRND_ERR_SIGMA_MUST_BE_NONNEGATIVE: &str = "RunMat:normrnd:SigmaMustBeNonnegative";
+
+fn builtin_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> crate::RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("normrnd")
+        .with_identifier(identifier)
+        .build()
+}
+
 fn normrnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     if args.len() <= 2 {
         Type::Num
@@ -31,7 +43,10 @@ fn normrnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 async fn normrnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (mu, sigma, shape) = parse_args(args).await?;
     if sigma < 0.0 {
-        return Err(builtin_error("normrnd: sigma must be non-negative"));
+        return Err(builtin_error_with_identifier(
+            "normrnd: sigma must be non-negative",
+            NORMRND_ERR_SIGMA_MUST_BE_NONNEGATIVE,
+        ));
     }
     if let Some(value) = try_gpu_normrnd(mu, sigma, &shape)? {
         return Ok(value);
@@ -169,7 +184,11 @@ mod tests {
     #[test]
     fn normrnd_rejects_negative_sigma() {
         let args = vec![Value::Num(0.0), Value::Num(-1.0)];
-        assert!(block_on(normrnd_builtin(args)).is_err());
+        let err = block_on(normrnd_builtin(args)).expect_err("negative sigma should error");
+        assert_eq!(
+            err.identifier(),
+            Some(NORMRND_ERR_SIGMA_MUST_BE_NONNEGATIVE)
+        );
     }
 
     #[test]

@@ -12,6 +12,18 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("unifrnd").build()
 }
 
+const UNIFRND_ERR_A_MUST_BE_LESS_THAN_B: &str = "RunMat:unifrnd:LowerBoundMustBeLessThanUpperBound";
+
+fn builtin_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> crate::RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("unifrnd")
+        .with_identifier(identifier)
+        .build()
+}
+
 fn unifrnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     if args.len() <= 2 {
         Type::Num
@@ -31,7 +43,10 @@ fn unifrnd_type(args: &[Type], _ctx: &ResolveContext) -> Type {
 async fn unifrnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (a, b, shape) = parse_args(args).await?;
     if a >= b {
-        return Err(builtin_error("unifrnd: a must be less than b"));
+        return Err(builtin_error_with_identifier(
+            "unifrnd: a must be less than b",
+            UNIFRND_ERR_A_MUST_BE_LESS_THAN_B,
+        ));
     }
     if let Some(value) = try_gpu_unifrnd(a, b, &shape)? {
         return Ok(value);
@@ -173,13 +188,15 @@ mod tests {
     #[test]
     fn unifrnd_rejects_a_ge_b() {
         let args = vec![Value::Num(5.0), Value::Num(2.0)];
-        assert!(block_on(unifrnd_builtin(args)).is_err());
+        let err = block_on(unifrnd_builtin(args)).expect_err("a >= b should error");
+        assert_eq!(err.identifier(), Some(UNIFRND_ERR_A_MUST_BE_LESS_THAN_B));
     }
 
     #[test]
     fn unifrnd_rejects_a_eq_b() {
         let args = vec![Value::Num(3.0), Value::Num(3.0)];
-        assert!(block_on(unifrnd_builtin(args)).is_err());
+        let err = block_on(unifrnd_builtin(args)).expect_err("a == b should error");
+        assert_eq!(err.identifier(), Some(UNIFRND_ERR_A_MUST_BE_LESS_THAN_B));
     }
 
     #[test]
