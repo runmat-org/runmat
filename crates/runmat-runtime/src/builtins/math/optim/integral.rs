@@ -128,7 +128,14 @@ impl IntegralOptions {
             "abstol" => self.abs_tol = numeric_option("AbsTol", value)?,
             "reltol" => self.rel_tol = numeric_option("RelTol", value)?,
             "maxfunevals" | "maxintervalcount" => {
-                self.max_fun_evals = integer_option(name, value)?.max(3)
+                let parsed = integer_option(name, value)?;
+                if parsed < 5 {
+                    return Err(optim_error(
+                        NAME,
+                        "integral: MaxFunEvals must be an integer scalar >= 5",
+                    ));
+                }
+                self.max_fun_evals = parsed;
             }
             "arrayvalued" => {
                 if bool_option("ArrayValued", value)? {
@@ -258,7 +265,13 @@ fn integer_option(name: &str, value: &Value) -> BuiltinResult<usize> {
             format!("integral: option {name} must be nonnegative"),
         ));
     }
-    Ok(parsed.floor() as usize)
+    if parsed.fract() != 0.0 {
+        return Err(optim_error(
+            NAME,
+            format!("integral: option {name} must be an integer scalar"),
+        ));
+    }
+    Ok(parsed as usize)
 }
 
 fn bool_option(name: &str, value: &Value) -> BuiltinResult<bool> {
@@ -543,5 +556,29 @@ mod tests {
             Value::Num(value) => assert!((value - 2.0).abs() < 1.0e-8),
             other => panic!("unexpected value {other:?}"),
         }
+    }
+
+    #[test]
+    fn rejects_too_small_max_fun_evals() {
+        let err = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("MaxFunEvals"), Value::Num(4.0)],
+        ))
+        .unwrap_err();
+        assert!(err.message().contains("integer scalar >= 5"));
+    }
+
+    #[test]
+    fn rejects_fractional_max_fun_evals() {
+        let err = block_on(integral_builtin(
+            Value::FunctionHandle("sin".into()),
+            Value::Num(0.0),
+            Value::Num(1.0),
+            vec![Value::from("MaxFunEvals"), Value::Num(5.5)],
+        ))
+        .unwrap_err();
+        assert!(err.message().contains("integer scalar"));
     }
 }
