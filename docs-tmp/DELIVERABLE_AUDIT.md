@@ -333,6 +333,7 @@ This audit maps the active objective to concrete repository evidence and marks e
 ### 7) Validation cadence (`met` for current slices)
 
 - Latest executed gates:
+  - `cargo test -p runmat-vm string_slice_assignment_on_scalar_string_reports_slice_non_tensor -- --nocapture`
   - `cargo test -p runmat-vm --test spawn_semantic_lifecycle -- --nocapture`
   - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
   - `cargo test -p runmat-vm runtime_accel_graph_ignores_stale_compile_graph_metadata -- --nocapture`
@@ -376,6 +377,8 @@ This audit maps the active objective to concrete repository evidence and marks e
   - `git diff --check`
 
 - Additional contract-hardening ratchet:
+  - VM slice-assignment unsupported-base error surfaces in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now emit stable `RunMat:SliceNonTensor` identifiers for both `StoreSlice` and `StoreSliceExpr` paths instead of message-only errors.
+  - VM semantic regression coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs) now ratchets this contract via `string_slice_assignment_on_scalar_string_reports_slice_non_tensor`.
   - Converted two VM tests in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) from message-substring assertions to identifier assertions:
     - `expansion_on_non_cell_errors` now asserts `RunMat:ExpandError`.
     - `mixed_range_end_assign_shape_mismatch_error` now asserts `RunMat:ShapeMismatch`.

@@ -1133,11 +1133,10 @@ pub async fn dispatch_indexing(
                         numeric,
                         rhs
                     );
-                    return Err(
-                        "Slicing assignment only supported on tensors or string arrays"
-                            .to_string()
-                            .into(),
-                    );
+                    return Err(crate::interpreter::errors::mex(
+                        "SliceNonTensor",
+                        "Slicing assignment only supported on tensors or string arrays",
+                    ));
                 }
             }
             Ok(true)
@@ -1673,11 +1672,10 @@ pub async fn dispatch_indexing(
                     );
                 }
                 _ => {
-                    return Err(
-                        "StoreSliceExpr only supports tensors, cells, and string arrays currently"
-                            .to_string()
-                            .into(),
-                    )
+                    return Err(crate::interpreter::errors::mex(
+                        "SliceNonTensor",
+                        "StoreSliceExpr only supports tensors, cells, and string arrays currently",
+                    ));
                 }
             }
             Ok(true)

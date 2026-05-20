@@ -537,6 +537,22 @@ fn scalar_slice_with_nonnumeric_selector_errors() {
 }
 
 #[test]
+fn string_slice_assignment_on_scalar_string_reports_slice_non_tensor() {
+    let input = r#"
+        x = "abc";
+        x(1:1) = "z";
+    "#;
+    let bytecode = compile_semantic_source(input).expect("compile semantic string slice assign");
+    let err = interpret(&bytecode).expect_err("string scalar slice assignment must error");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:SliceNonTensor"),
+        "unexpected identifier: {:?} ({err:?})",
+        err.identifier()
+    );
+}
+
+#[test]
 fn fft_complex_assignment_covers_scalar_slice_and_multidim_broadcast() {
     let input = r#"
         x = [1 2 3 4 5 6 7 8];
