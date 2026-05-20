@@ -3,7 +3,9 @@
 use anyhow::Result;
 use futures::executor::block_on;
 use runmat_builtins::Value;
-use runmat_core::{InputRequest, InputRequestKind, InputResponse, RunError, RunMatSession};
+use runmat_core::{
+    InputRequest, InputRequestKind, InputResponse, RunError, RunMatSession, StdinEventKind,
+};
 use runmat_runtime::interaction::force_interactive_stdin_for_tests;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -337,10 +339,13 @@ fn async_call_without_await_or_spawn_triggers_input_handler_in_current_model() -
         1,
         "direct async call currently executes eagerly and triggers interaction"
     );
-    assert_eq!(
-        prompts.lock().unwrap().as_slice(),
-        &["lazy: "],
-        "direct async call should forward prompt through input handler"
+    let event = &result.stdin_events[0];
+    assert_eq!(event.prompt, "lazy: ");
+    assert!(matches!(event.kind, StdinEventKind::Line));
+    assert_eq!(event.value.as_deref(), Some("11"));
+    assert!(
+        event.error.is_none(),
+        "input handler response should complete without structured error"
     );
 
     let marker = block_on(session.execute("marker")).map_err(anyhow::Error::new)?;
@@ -348,5 +353,13 @@ fn async_call_without_await_or_spawn_triggers_input_handler_in_current_model() -
         .value
         .expect("marker readback should produce a value");
     assert_eq!(value_as_f64(&marker_value), Some(9.0));
+
+    let fut = block_on(session.execute("fut")).map_err(anyhow::Error::new)?;
+    let fut_value = fut.value.expect("fut readback should produce a value");
+    assert_eq!(
+        value_as_f64(&fut_value),
+        Some(1.0),
+        "direct async calls currently execute eagerly and store the resolved value"
+    );
     Ok(())
 }
