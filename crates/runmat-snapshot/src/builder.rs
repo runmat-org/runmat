@@ -757,6 +757,7 @@ impl SnapshotBuilder {
                 "failed to lower semantic HIR assembly to MIR: {err:?}"
             ))
         })?;
+        let _analysis = runmat_mir::analysis::analyze_assembly(&mir);
         runmat_vm::compile(assembly, &mir, entrypoint.id).map_err(Into::into)
     }
 

@@ -25,6 +25,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - eval-hook semantic compile path in [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) (`compile_eval_hook_bytecode`) now also runs MIR analysis before VM compile, keeping stdin-triggered nested execution on the same semantic HIR->MIR->analysis->VM lane.
   - CLI bytecode emission path in [bytecode.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-cli/src/commands/bytecode.rs) now also runs MIR analysis after lowering and before VM compile, keeping `runmat --emit-bytecode` on the semantic analysis lane.
   - LSP compile-check path in [analysis.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-lsp/src/core/analysis.rs) (`compile_error_for_lowering`) now also runs MIR analysis before VM compile diagnostics, aligning document-analysis compile validation with semantic HIR->MIR->analysis->VM staging.
+  - snapshot build compile path in [builder.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-snapshot/src/builder.rs) (`compile_assembly_to_bytecode`) now also runs MIR analysis between MIR lowering and VM compile, keeping snapshot bytecode caching on the same semantic HIR->MIR->analysis->VM lane.
   - MIR lowering API used before VM compile in [stress.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-gc/tests/stress.rs)
 - Gap:
   - broad consumer migration across all crates remains in progress (see `PLAN.3.md` / `PROGRESS.md`).

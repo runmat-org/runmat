@@ -1782,6 +1782,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `git diff --check`
   - Result: all commands above passed on branch after the latest core/CLI/LSP analysis-stage and random-domain identifier ratchets.
 
+- (pending commit) Plan 1/3 snapshot bytecode-cache compile path now includes MIR analysis stage
+  - Updated `crates/runmat-snapshot/src/builder.rs` `compile_assembly_to_bytecode` to run `runmat_mir::analysis::analyze_assembly(&mir)` between MIR lowering and `runmat_vm::compile(...)`.
+  - This closes another production compile entrypoint on the explicit semantic HIR->MIR->analysis->VM lane (snapshot bytecode caching / prebuilt snapshot generation path).
+  - Validation: `cargo test -p runmat-snapshot --test integration test_snapshot_creation_and_loading -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
