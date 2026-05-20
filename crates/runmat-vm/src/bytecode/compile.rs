@@ -824,8 +824,8 @@ mod tests {
     use runmat_accelerate::fusion::prepare_fusion_plan;
     use runmat_builtins::Value;
     use runmat_hir::{
-        lower, BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId, LoweringContext,
-        MethodId, OperatorKind, RequestedOutputCount,
+        lower, BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId, IndexResultContext,
+        LoweringContext, MethodId, OperatorKind, RequestedOutputCount,
     };
     use runmat_mir::lowering::lower_assembly;
     use runmat_mir::{
@@ -3043,6 +3043,41 @@ mod tests {
         assert_eq!(
             err.identifier.as_deref(),
             Some("RunMat:MirMultiAssignOutputCountMismatch")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_invalid_read_index_context_with_identifier() {
+        let ast = runmat_parser::parse("x = [1 2 3]; y = x(2);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::Assign {
+                    value: MirRvalue::Index { indexing, .. },
+                    ..
+                } = &mut stmt.kind
+                {
+                    indexing.result_context = IndexResultContext::AssignmentTarget;
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected indexed read assignment in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirIndexContextInvalid")
         );
     }
 

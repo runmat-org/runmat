@@ -90,6 +90,7 @@ const IDENT_MIR_SCALAR_INDEX_PLAN_INVALID: &str = "RunMat:MirScalarIndexPlanInva
 const IDENT_MIR_SLICE_INDEX_PLAN_INVALID: &str = "RunMat:MirSliceIndexPlanInvalid";
 const IDENT_MIR_CELL_INDEX_PLAN_INVALID: &str = "RunMat:MirCellIndexPlanInvalid";
 const IDENT_MIR_CELL_INDEX_CONTEXT_INVALID: &str = "RunMat:MirCellIndexContextInvalid";
+const IDENT_MIR_INDEX_CONTEXT_INVALID: &str = "RunMat:MirIndexContextInvalid";
 const IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH: &str =
     "RunMat:MirMultiAssignOutputCountMismatch";
 const IDENT_MIR_AGGREGATE_SHAPE_INVALID: &str = "RunMat:MirAggregateShapeInvalid";
@@ -2113,9 +2114,11 @@ impl Compiler {
             indexing.result_context,
             IndexResultContext::ReadSingle | IndexResultContext::ReadCommaList
         ) {
-            return Err(self.compile_error(
-                "MIR index lowering expected ReadSingle/ReadCommaList result context",
-            ));
+            return Err(self
+                .compile_error(
+                    "MIR index lowering expected ReadSingle/ReadCommaList result context",
+                )
+                .with_identifier(IDENT_MIR_INDEX_CONTEXT_INVALID));
         }
 
         if indexing.kind == IndexKind::Brace
