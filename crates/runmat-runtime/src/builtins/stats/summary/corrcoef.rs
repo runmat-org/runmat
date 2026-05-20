@@ -18,6 +18,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const NAME: &str = "corrcoef";
 const CORRCOEF_ERR_ROWS_MISMATCH: &str = "RunMat:corrcoef:RowsMismatch";
 const CORRCOEF_ERR_NORMALIZATION_INVALID: &str = "RunMat:corrcoef:NormalizationInvalid";
+const CORRCOEF_ERR_ROWS_OPTION_UNKNOWN: &str = "RunMat:corrcoef:RowsOptionUnknown";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
@@ -254,9 +255,10 @@ fn parse_rows_option(value: &str) -> BuiltinResult<CorrcoefRows> {
         "pairwise" | "pairwisecomplete" | "pairwisecompletecase" | "pairwisecompletecases" => {
             Ok(CorrcoefRows::Pairwise)
         }
-        other => Err(builtin_error(format!(
-            "corrcoef: unknown rows option '{other}'"
-        ))),
+        other => Err(builtin_error_with_identifier(
+            format!("corrcoef: unknown rows option '{other}'"),
+            CORRCOEF_ERR_ROWS_OPTION_UNKNOWN,
+        )),
     }
 }
 
@@ -922,6 +924,18 @@ pub(crate) mod tests {
         ))
         .expect_err("expected invalid flag error");
         assert_eq!(err.identifier(), Some(CORRCOEF_ERR_NORMALIZATION_INVALID));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn corrcoef_unknown_rows_option_errors() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let err = block_on(corrcoef_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("rows"), Value::from("bogus")],
+        ))
+        .expect_err("expected unknown rows option error");
+        assert_eq!(err.identifier(), Some(CORRCOEF_ERR_ROWS_OPTION_UNKNOWN));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

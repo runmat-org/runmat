@@ -17,6 +17,7 @@ const NAME: &str = "cov";
 const COV_ERR_ROWS_MISMATCH: &str = "RunMat:cov:RowsMismatch";
 const COV_ERR_NORMALIZATION_INVALID: &str = "RunMat:cov:NormalizationInvalid";
 const COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH: &str = "RunMat:cov:WeightVectorLengthMismatch";
+const COV_ERR_ROWS_OPTION_UNKNOWN: &str = "RunMat:cov:RowsOptionUnknown";
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(NAME).build()
@@ -302,7 +303,10 @@ fn parse_rows_option(value: &str) -> BuiltinResult<CovRows> {
         "all" => Ok(CovRows::All),
         "omitrows" | "omit" => Ok(CovRows::OmitRows),
         "partialrows" | "partial" | "pairwise" => Ok(CovRows::PartialRows),
-        other => Err(builtin_error(format!("cov: unknown rows option '{other}'"))),
+        other => Err(builtin_error_with_identifier(
+            format!("cov: unknown rows option '{other}'"),
+            COV_ERR_ROWS_OPTION_UNKNOWN,
+        )),
     }
 }
 
@@ -1049,6 +1053,18 @@ pub(crate) mod tests {
             err.identifier(),
             Some(COV_ERR_WEIGHT_VECTOR_LENGTH_MISMATCH)
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cov_unknown_rows_option_errors() {
+        let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
+        let err = block_on(cov_builtin(
+            Value::Tensor(tensor),
+            vec![Value::from("rows"), Value::from("bogus")],
+        ))
+        .expect_err("expected unknown rows option error");
+        assert_eq!(err.identifier(), Some(COV_ERR_ROWS_OPTION_UNKNOWN));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

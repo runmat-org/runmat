@@ -42,16 +42,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added stable `corrcoef` identifiers in [corrcoef.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/stats/summary/corrcoef.rs):
     - `RunMat:corrcoef:RowsMismatch`
     - `RunMat:corrcoef:NormalizationInvalid`
+    - `RunMat:corrcoef:RowsOptionUnknown`
   - Runtime now emits these identifiers for:
     - paired-input row-count mismatch during matrix combination
     - invalid normalization-flag values/types (`0|1` contract violations, non-finite/non-integer numerics, non-numeric/non-logical inputs)
+    - unsupported `rows` option values
   - Tightened tests:
     - `corrcoef_mismatched_rows_errors`
     - `corrcoef_invalid_flag_errors`
+    - `corrcoef_unknown_rows_option_errors`
     now assert `RuntimeError.identifier()` rather than message-fragment checks.
   - Validation:
     - `cargo test -p runmat-runtime corrcoef_mismatched_rows_errors -- --nocapture`
     - `cargo test -p runmat-runtime corrcoef_invalid_flag_errors -- --nocapture`
+    - `cargo test -p runmat-runtime corrcoef_unknown_rows_option_errors -- --nocapture`
     - `cargo fmt --all --check`
     - `git diff --check`
 
@@ -60,19 +64,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `RunMat:cov:RowsMismatch`
     - `RunMat:cov:NormalizationInvalid`
     - `RunMat:cov:WeightVectorLengthMismatch`
+    - `RunMat:cov:RowsOptionUnknown`
   - Runtime now emits these identifiers for:
     - paired-input row-count mismatch during matrix combination
     - invalid normalization-flag values/types (`0|1` contract violations, non-finite/non-integer numerics, and non-numeric inputs)
     - weight-vector length mismatch against input row count
+    - unsupported `rows` option values
   - Added/tightened tests:
     - `cov_mismatched_rows_errors`
     - `cov_invalid_flag_errors`
     - `cov_weight_vector_length_mismatch_errors`
+    - `cov_unknown_rows_option_errors`
     now assert `RuntimeError.identifier()` on these paths.
   - Validation:
     - `cargo test -p runmat-runtime cov_mismatched_rows_errors -- --nocapture`
     - `cargo test -p runmat-runtime cov_invalid_flag_errors -- --nocapture`
     - `cargo test -p runmat-runtime cov_weight_vector_length_mismatch_errors -- --nocapture`
+    - `cargo test -p runmat-runtime cov_unknown_rows_option_errors -- --nocapture`
     - `cargo fmt --all --check`
     - `git diff --check`
 
