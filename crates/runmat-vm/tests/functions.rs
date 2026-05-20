@@ -87,6 +87,50 @@ fn unresolved_qualified_external_function_handle_uses_external_handle_instructio
 }
 
 #[test]
+fn unresolved_qualified_external_handle_multi_output_feval_uses_typed_instruction() {
+    let source = "h = @pkg.remote_inc; [a,b] = feval(h, 1);";
+    let bytecode = compile_semantic_source(source)
+        .expect("qualified external handle multi-output feval source should compile");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+    ));
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
+    ));
+    let err =
+        interpret(&bytecode).expect_err("unresolved qualified multi-output feval should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_instruction() {
+    let source = "h = @pkg.remote_inc; C = deal(1,2); [a,b] = feval(h, C{:});";
+    let bytecode = compile_semantic_source(source)
+        .expect("qualified external handle expanded multi-output feval source should compile");
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+    ));
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
+            if *out_count == 2 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
+    )));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved qualified expanded multi-output feval should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn unresolved_external_direct_call_fails_without_runtime_name_fallback() {
     let err = execute_semantic_source_result("y = definitely_missing_callback(1);")
         .expect_err("unresolved external direct call should fail");

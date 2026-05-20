@@ -2600,13 +2600,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added VM functions coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `semantic_feval_multi_assign_uses_typed_instruction`
     - `semantic_feval_expand_multi_assign_uses_typed_instruction`
+    - `unresolved_qualified_external_handle_multi_output_feval_uses_typed_instruction`
+    - `unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_instruction`
   - This pins semantic `feval` multi-output lowering to typed feval opcodes:
     - `Instr::CallFevalMulti(argc == 0, out_count == 2)` for `[x,y] = feval(h)`
     - `Instr::CallFevalExpandMultiOutput(specs, out_count == 2)` with `expand_all` arg specs for `[u,v] = feval(h, C{:})`
   - Execution semantics are also asserted (`s = u + v == 15`) for the expanded multi-output path.
+  - Unresolved qualified external-handle multi-output `feval` paths are explicitly ratcheted to:
+    - remain on typed external-handle + feval opcodes
+    - fail with stable `RunMat:UndefinedFunction` (no legacy reconstruction fallback)
   - Validation:
     - `cargo test -p runmat-vm --test functions semantic_feval_multi_assign_uses_typed_instruction -- --nocapture`
     - `cargo test -p runmat-vm --test functions semantic_feval_expand_multi_assign_uses_typed_instruction -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_qualified_external_handle_multi_output_feval_uses_typed_instruction -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_qualified_external_handle_expand_multi_output_feval_uses_typed_instruction -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
