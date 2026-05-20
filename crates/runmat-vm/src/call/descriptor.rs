@@ -832,6 +832,31 @@ mod tests {
     }
 
     #[test]
+    fn feval_function_handle_external_boundary_can_use_semantic_resolver() {
+        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
+            Some(Arc::new(|name| (name == "pkg.remote_inc").then_some(5151))),
+        );
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 5151);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(3.0)) })
+            })),
+        );
+
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::FunctionHandle("pkg.remote_inc".to_string()),
+            vec![Value::Num(2.0)],
+            1,
+            &SemanticFunctionRegistry::default(),
+        );
+        let value = block_on(execute_callable_descriptor(descriptor))
+            .expect("qualified function handle should resolve through semantic resolver");
+        assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
     fn feval_closure_without_embedded_semantic_uses_registry_name_resolution() {
         let mut registry = SemanticFunctionRegistry::default();
         registry.names.insert("inc".to_string(), FunctionId(4242));
