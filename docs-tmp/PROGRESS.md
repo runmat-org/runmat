@@ -19,9 +19,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - This prevents post-read alias mutation where `B = C(2:end-1)` could incorrectly change after `C(2:end-1) = {...}`.
   - Added semantic regression coverage in [indexing_properties.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/indexing_properties.rs):
     - `cell_paren_range_end_and_colon_semantics`
+    - `cell_brace_assignment_preserves_copied_cell_values`
     - ratchets `range` + `end` read semantics, subsequent paren assignment semantics, and `C(:)` shape contract.
+    - ratchets copy-on-write behavior for `B = C; C{2} = ...` so copied cells retain pre-assignment values.
   - Validation:
     - `cargo test -p runmat-vm --test indexing_properties cell_paren_range_end_and_colon_semantics -- --nocapture`
+    - `cargo test -p runmat-vm --test indexing_properties cell_brace_assignment_preserves_copied_cell_values -- --nocapture`
     - `cargo test -p runmat-vm --test cell_arrays -- --nocapture`
     - `cargo test -p runmat-vm mixed_range_end_assign_shape_mismatch_error -- --nocapture`
     - `cargo fmt --all --check`

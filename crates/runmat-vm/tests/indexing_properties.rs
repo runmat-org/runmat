@@ -509,3 +509,51 @@ fn cell_paren_range_end_and_colon_semantics() {
     assert_eq!(d.shape, vec![4, 1]);
     assert_eq!(d.data.len(), 4);
 }
+
+#[test]
+fn cell_brace_assignment_preserves_copied_cell_values() {
+    let src = r#"
+        C = {10, 20, 30};
+        B = C;
+        C{2} = 200;
+    "#;
+    let vars = execute_semantic_source(src).expect("cell brace assignment should execute");
+
+    let copied = vars
+        .iter()
+        .find_map(|value| match value {
+            runmat_builtins::Value::Cell(cell)
+                if cell.shape == vec![1, 3]
+                    && matches!(&*cell.data[1], runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < f64::EPSILON) =>
+            {
+                Some(cell.clone())
+            }
+            _ => None,
+        })
+        .expect("expected copied cell with preserved second element");
+    assert!(
+        matches!(&*copied.data[0], runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
+    );
+    assert!(
+        matches!(&*copied.data[2], runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
+    );
+
+    let updated = vars
+        .iter()
+        .find_map(|value| match value {
+            runmat_builtins::Value::Cell(cell)
+                if cell.shape == vec![1, 3]
+                    && matches!(&*cell.data[1], runmat_builtins::Value::Num(n) if (*n - 200.0).abs() < f64::EPSILON) =>
+            {
+                Some(cell.clone())
+            }
+            _ => None,
+        })
+        .expect("expected updated cell with replaced second element");
+    assert!(
+        matches!(&*updated.data[0], runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < f64::EPSILON)
+    );
+    assert!(
+        matches!(&*updated.data[2], runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < f64::EPSILON)
+    );
+}
