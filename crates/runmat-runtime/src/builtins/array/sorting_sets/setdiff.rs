@@ -59,6 +59,8 @@ fn setdiff_error(message: impl Into<String>) -> crate::RuntimeError {
 }
 
 const SETDIFF_ERR_LEGACY_OPTION_UNSUPPORTED: &str = "RunMat:setdiff:LegacyOptionUnsupported";
+const SETDIFF_ERR_CONFLICTING_ORDER_OPTIONS: &str = "RunMat:setdiff:ConflictingOrderOptions";
+const SETDIFF_ERR_UNKNOWN_OPTION: &str = "RunMat:setdiff:UnknownOption";
 
 #[runtime_builtin(
     name = "setdiff",
@@ -130,9 +132,12 @@ fn parse_setdiff_option(
         "sorted" => {
             if let Some(prev) = seen_order {
                 if *prev != SetdiffOrder::Sorted {
-                    return Err(setdiff_error(
+                    return Err(build_runtime_error(
                         "setdiff: cannot combine 'sorted' with 'stable'",
-                    ));
+                    )
+                    .with_builtin("setdiff")
+                    .with_identifier(SETDIFF_ERR_CONFLICTING_ORDER_OPTIONS)
+                    .build());
                 }
             }
             *seen_order = Some(SetdiffOrder::Sorted);
@@ -141,9 +146,12 @@ fn parse_setdiff_option(
         "stable" => {
             if let Some(prev) = seen_order {
                 if *prev != SetdiffOrder::Stable {
-                    return Err(setdiff_error(
+                    return Err(build_runtime_error(
                         "setdiff: cannot combine 'sorted' with 'stable'",
-                    ));
+                    )
+                    .with_builtin("setdiff")
+                    .with_identifier(SETDIFF_ERR_CONFLICTING_ORDER_OPTIONS)
+                    .build());
                 }
             }
             *seen_order = Some(SetdiffOrder::Stable);
@@ -158,9 +166,12 @@ fn parse_setdiff_option(
             );
         }
         other => {
-            return Err(setdiff_error(format!(
-                "setdiff: unrecognised option '{other}'"
-            )))
+            return Err(
+                build_runtime_error(format!("setdiff: unrecognised option '{other}'"))
+                    .with_builtin("setdiff")
+                    .with_identifier(SETDIFF_ERR_UNKNOWN_OPTION)
+                    .build(),
+            )
         }
     }
     Ok(())
@@ -1394,6 +1405,29 @@ pub(crate) mod tests {
             err.identifier(),
             Some(SETDIFF_ERR_LEGACY_OPTION_UNSUPPORTED)
         );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn setdiff_rejects_conflicting_order_options() {
+        let err = evaluate_sync(
+            Value::from(1.0),
+            Value::from(2.0),
+            &[Value::from("stable"), Value::from("sorted")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some(SETDIFF_ERR_CONFLICTING_ORDER_OPTIONS)
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn setdiff_rejects_unknown_option() {
+        let err =
+            evaluate_sync(Value::from(1.0), Value::from(2.0), &[Value::from("bogus")]).unwrap_err();
+        assert_eq!(err.identifier(), Some(SETDIFF_ERR_UNKNOWN_OPTION));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

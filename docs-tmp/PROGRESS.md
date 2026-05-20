@@ -4,6 +4,29 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- (pending commit) Set builtins option-parse identifier ratchet
+  - Added stable option-parse identifiers for set builtins:
+    - `RunMat:unique:ConflictingOrderOptions`
+    - `RunMat:unique:ConflictingOccurrenceOptions`
+    - `RunMat:unique:UnknownOption`
+    - `RunMat:union:ConflictingOrderOptions`
+    - `RunMat:union:UnknownOption`
+    - `RunMat:intersect:ConflictingOrderOptions`
+    - `RunMat:intersect:UnknownOption`
+    - `RunMat:setdiff:ConflictingOrderOptions`
+    - `RunMat:setdiff:UnknownOption`
+    - `RunMat:ismember:UnknownOption`
+  - Tightened set-builtin option tests to assert `RuntimeError.identifier()` instead of message substring checks for:
+    - unknown-option rejection (`unique`/`union`/`intersect`/`setdiff`/`ismember`)
+    - conflicting order-option rejection (`unique`/`union`/`intersect`/`setdiff`)
+    - conflicting occurrence-option rejection (`unique`)
+  - Validation:
+    - `cargo test -p runmat-runtime rejects_unknown_option -- --nocapture`
+    - `cargo test -p runmat-runtime conflicting_order -- --nocapture`
+    - `cargo test -p runmat-runtime conflicting_occurrence -- --nocapture`
+    - `cargo test -p runmat-runtime legacy_option -- --nocapture`
+    - `cargo fmt --all`
+
 - (pending commit) Set builtins legacy-option identifier ratchet
   - Replaced message-only legacy-option rejections in set builtins with stable identifiers:
     - `RunMat:unique:LegacyOptionUnsupported`

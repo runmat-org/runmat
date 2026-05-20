@@ -60,6 +60,10 @@ fn unique_error(message: impl Into<String>) -> crate::RuntimeError {
 }
 
 const UNIQUE_ERR_LEGACY_OPTION_UNSUPPORTED: &str = "RunMat:unique:LegacyOptionUnsupported";
+const UNIQUE_ERR_CONFLICTING_ORDER_OPTIONS: &str = "RunMat:unique:ConflictingOrderOptions";
+const UNIQUE_ERR_CONFLICTING_OCCURRENCE_OPTIONS: &str =
+    "RunMat:unique:ConflictingOccurrenceOptions";
+const UNIQUE_ERR_UNKNOWN_OPTION: &str = "RunMat:unique:UnknownOption";
 
 #[runtime_builtin(
     name = "unique",
@@ -139,9 +143,12 @@ fn parse_unique_option(
         "sorted" => {
             if let Some(prev) = seen_order {
                 if *prev != UniqueOrder::Sorted {
-                    return Err(unique_error(
+                    return Err(build_runtime_error(
                         "unique: cannot combine 'sorted' with 'stable'",
-                    ));
+                    )
+                    .with_builtin("unique")
+                    .with_identifier(UNIQUE_ERR_CONFLICTING_ORDER_OPTIONS)
+                    .build());
                 }
             }
             *seen_order = Some(UniqueOrder::Sorted);
@@ -150,9 +157,12 @@ fn parse_unique_option(
         "stable" => {
             if let Some(prev) = seen_order {
                 if *prev != UniqueOrder::Stable {
-                    return Err(unique_error(
+                    return Err(build_runtime_error(
                         "unique: cannot combine 'sorted' with 'stable'",
-                    ));
+                    )
+                    .with_builtin("unique")
+                    .with_identifier(UNIQUE_ERR_CONFLICTING_ORDER_OPTIONS)
+                    .build());
                 }
             }
             *seen_order = Some(UniqueOrder::Stable);
@@ -164,7 +174,12 @@ fn parse_unique_option(
         "first" => {
             if let Some(prev) = seen_occurrence {
                 if *prev != UniqueOccurrence::First {
-                    return Err(unique_error("unique: cannot combine 'first' with 'last'"));
+                    return Err(
+                        build_runtime_error("unique: cannot combine 'first' with 'last'")
+                            .with_builtin("unique")
+                            .with_identifier(UNIQUE_ERR_CONFLICTING_OCCURRENCE_OPTIONS)
+                            .build(),
+                    );
                 }
             }
             *seen_occurrence = Some(UniqueOccurrence::First);
@@ -173,7 +188,12 @@ fn parse_unique_option(
         "last" => {
             if let Some(prev) = seen_occurrence {
                 if *prev != UniqueOccurrence::Last {
-                    return Err(unique_error("unique: cannot combine 'first' with 'last'"));
+                    return Err(
+                        build_runtime_error("unique: cannot combine 'first' with 'last'")
+                            .with_builtin("unique")
+                            .with_identifier(UNIQUE_ERR_CONFLICTING_OCCURRENCE_OPTIONS)
+                            .build(),
+                    );
                 }
             }
             *seen_occurrence = Some(UniqueOccurrence::Last);
@@ -188,9 +208,12 @@ fn parse_unique_option(
             );
         }
         other => {
-            return Err(unique_error(format!(
-                "unique: unrecognised option '{other}'"
-            )));
+            return Err(
+                build_runtime_error(format!("unique: unrecognised option '{other}'"))
+                    .with_builtin("unique")
+                    .with_identifier(UNIQUE_ERR_UNKNOWN_OPTION)
+                    .build(),
+            );
         }
     }
     Ok(())
@@ -1695,28 +1718,35 @@ pub(crate) mod tests {
     #[test]
     fn unique_conflicting_order_flags() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = error_message(
-            evaluate_sync(
-                Value::Tensor(tensor),
-                &[Value::from("stable"), Value::from("sorted")],
-            )
-            .unwrap_err(),
-        );
-        assert!(err.contains("stable"));
+        let err = evaluate_sync(
+            Value::Tensor(tensor),
+            &[Value::from("stable"), Value::from("sorted")],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some(UNIQUE_ERR_CONFLICTING_ORDER_OPTIONS));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_conflicting_occurrence_flags() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
-        let err = error_message(
-            evaluate_sync(
-                Value::Tensor(tensor),
-                &[Value::from("first"), Value::from("last")],
-            )
-            .unwrap_err(),
+        let err = evaluate_sync(
+            Value::Tensor(tensor),
+            &[Value::from("first"), Value::from("last")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some(UNIQUE_ERR_CONFLICTING_OCCURRENCE_OPTIONS)
         );
-        assert!(err.contains("first"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn unique_rejects_unknown_option() {
+        let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
+        let err = evaluate_sync(Value::Tensor(tensor), &[Value::from("bogus")]).unwrap_err();
+        assert_eq!(err.identifier(), Some(UNIQUE_ERR_UNKNOWN_OPTION));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

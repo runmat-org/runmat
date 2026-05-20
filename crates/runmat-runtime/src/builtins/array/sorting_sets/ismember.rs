@@ -54,6 +54,7 @@ fn ismember_error(message: impl Into<String>) -> crate::RuntimeError {
 }
 
 const ISMEMBER_ERR_LEGACY_OPTION_UNSUPPORTED: &str = "RunMat:ismember:LegacyOptionUnsupported";
+const ISMEMBER_ERR_UNKNOWN_OPTION: &str = "RunMat:ismember:UnknownOption";
 
 #[runtime_builtin(
     name = "ismember",
@@ -132,9 +133,12 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<IsMemberOptions> {
                 .build())
             }
             other => {
-                return Err(ismember_error(format!(
-                    "ismember: unrecognised option '{other}'"
-                )))
+                return Err(
+                    build_runtime_error(format!("ismember: unrecognised option '{other}'"))
+                        .with_builtin("ismember")
+                        .with_identifier(ISMEMBER_ERR_UNKNOWN_OPTION)
+                        .build(),
+                )
             }
         }
     }
@@ -927,10 +931,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rejects_unknown_option() {
-        let err = error_message(
-            evaluate_sync(Value::Num(1.0), Value::Num(1.0), &[Value::from("stable")]).unwrap_err(),
-        );
-        assert!(err.contains("unrecognised option"));
+        let err =
+            evaluate_sync(Value::Num(1.0), Value::Num(1.0), &[Value::from("stable")]).unwrap_err();
+        assert_eq!(err.identifier(), Some(ISMEMBER_ERR_UNKNOWN_OPTION));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
