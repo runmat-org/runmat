@@ -12,6 +12,20 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM slice-expr assignment dispatch identifier-preservation ratchet
+  - `scope: in-scope`
+  - Removed stringifying `map_err(format!(...))` wrappers in `StoreSliceExpr` dispatch path in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) for complex/string RHS view and scatter operations, so identifiers from `write_slice` helpers propagate unchanged.
+  - This preserves typed `RunMat:ShapeMismatch` and `RunMat:InvalidSliceAssignmentRhs` contracts across runtime dispatch boundaries.
+  - Validation:
+    - `cargo test -p runmat-vm mixed_range_end_assign_shape_mismatch_error -- --nocapture`
+    - `cargo test -p runmat-vm --lib tensor_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib string_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib complex_slice_plan_shape_mismatch_reports_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM slice-expr dispatch identifier-preservation ratchet
   - `scope: in-scope`
   - Removed stringifying `map_err(format!(...))` wrappers in `IndexSliceExpr` dispatch path in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) for tensor/complex/string slice reads, so identifiers returned by plan/read helpers propagate unchanged through runtime dispatch.

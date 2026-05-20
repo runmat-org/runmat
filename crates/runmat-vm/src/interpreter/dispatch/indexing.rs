@@ -1510,10 +1510,8 @@ pub async fn dispatch_indexing(
                         let rhs_view = idx_write_slice::build_complex_rhs_view(
                             &rhs,
                             &vm_plan.selection_lengths,
-                        )
-                        .map_err(|e| format!("slice assign: {e}"))?;
-                        idx_write_slice::scatter_complex_with_plan(&mut t, &vm_plan, &rhs_view)
-                            .map_err(|e| format!("slice assign: {e}"))?;
+                        )?;
+                        idx_write_slice::scatter_complex_with_plan(&mut t, &vm_plan, &rhs_view)?;
                     }
                     stack.push(Value::ComplexTensor(t));
                 }
@@ -1629,10 +1627,8 @@ pub async fn dispatch_indexing(
                         let rhs_view = idx_write_slice::build_string_rhs_view(
                             &rhs,
                             &vm_plan.selection_lengths,
-                        )
-                        .map_err(|e| format!("slice assign: {e}"))?;
-                        idx_write_slice::scatter_string_with_plan(&mut sa, &vm_plan, &rhs_view)
-                            .map_err(|e| format!("slice assign: {e}"))?;
+                        )?;
+                        idx_write_slice::scatter_string_with_plan(&mut sa, &vm_plan, &rhs_view)?;
                     }
                     stack.push(Value::StringArray(sa));
                 }
