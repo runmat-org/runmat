@@ -59,6 +59,15 @@ fn union_error(message: impl Into<String>) -> crate::RuntimeError {
 const UNION_ERR_LEGACY_OPTION_UNSUPPORTED: &str = "RunMat:union:LegacyOptionUnsupported";
 const UNION_ERR_CONFLICTING_ORDER_OPTIONS: &str = "RunMat:union:ConflictingOrderOptions";
 const UNION_ERR_UNKNOWN_OPTION: &str = "RunMat:union:UnknownOption";
+const UNION_ERR_ROWS_COLUMN_MISMATCH: &str = "RunMat:union:RowsColumnMismatch";
+const UNION_ERR_UNSUPPORTED_INPUT_TYPE: &str = "RunMat:union:UnsupportedInputType";
+
+fn union_rows_column_mismatch_error() -> crate::RuntimeError {
+    build_runtime_error("union: inputs must have the same number of columns when using 'rows'")
+        .with_builtin("union")
+        .with_identifier(UNION_ERR_ROWS_COLUMN_MISMATCH)
+        .build()
+}
 
 #[runtime_builtin(
     name = "union",
@@ -267,10 +276,18 @@ fn union_host(a: Value, b: Value, opts: &UnionOptions) -> crate::BuiltinResult<U
 
         // Fallback to numeric (includes tensors, logical arrays, ints, bools, doubles)
         (left, right) => {
-            let tensor_a =
-                tensor::value_into_tensor_for("union", left).map_err(|e| union_error(e))?;
-            let tensor_b =
-                tensor::value_into_tensor_for("union", right).map_err(|e| union_error(e))?;
+            let tensor_a = tensor::value_into_tensor_for("union", left).map_err(|e| {
+                build_runtime_error(e)
+                    .with_builtin("union")
+                    .with_identifier(UNION_ERR_UNSUPPORTED_INPUT_TYPE)
+                    .build()
+            })?;
+            let tensor_b = tensor::value_into_tensor_for("union", right).map_err(|e| {
+                build_runtime_error(e)
+                    .with_builtin("union")
+                    .with_identifier(UNION_ERR_UNSUPPORTED_INPUT_TYPE)
+                    .build()
+            })?;
             union_numeric(tensor_a, tensor_b, opts)
         }
     }
@@ -363,9 +380,7 @@ fn union_numeric_rows(
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(union_error(
-            "union: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(union_rows_column_mismatch_error());
     }
     let rows_a = a.shape[0];
     let cols = a.shape[1];
@@ -505,9 +520,7 @@ fn union_complex_rows(
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(union_error(
-            "union: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(union_rows_column_mismatch_error());
     }
     let rows_a = a.shape[0];
     let cols = a.shape[1];
@@ -656,9 +669,7 @@ fn union_char_rows(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     if a.cols != b.cols {
-        return Err(union_error(
-            "union: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(union_rows_column_mismatch_error());
     }
     let rows_a = a.rows;
     let rows_b = b.rows;
@@ -796,9 +807,7 @@ fn union_string_rows(
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(union_error(
-            "union: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(union_rows_column_mismatch_error());
     }
     let rows_a = a.shape[0];
     let cols = a.shape[1];
@@ -1512,10 +1521,6 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, ResolveContext, Tensor, Type, Value};
 
-    fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
-    }
-
     fn evaluate_sync(a: Value, b: Value, rest: &[Value]) -> crate::BuiltinResult<UnionEvaluation> {
         futures::executor::block_on(evaluate(a, b, rest))
     }
@@ -1793,10 +1798,9 @@ pub(crate) mod tests {
     fn union_rows_dimension_mismatch() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = error_message(
-            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")]).unwrap_err(),
-        );
-        assert!(err.contains("same number of columns"));
+        let err =
+            evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[Value::from("rows")]).unwrap_err();
+        assert_eq!(err.identifier(), Some(UNION_ERR_ROWS_COLUMN_MISMATCH));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1804,18 +1808,16 @@ pub(crate) mod tests {
     fn union_requires_matching_types() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let b = CharArray::new(vec!['a', 'b'], 1, 2).unwrap();
-        let err = error_message(
-            union_host(
-                Value::Tensor(a),
-                Value::CharArray(b),
-                &UnionOptions {
-                    rows: false,
-                    order: UnionOrder::Sorted,
-                },
-            )
-            .unwrap_err(),
-        );
-        assert!(err.contains("unsupported input type"));
+        let err = union_host(
+            Value::Tensor(a),
+            Value::CharArray(b),
+            &UnionOptions {
+                rows: false,
+                order: UnionOrder::Sorted,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some(UNION_ERR_UNSUPPORTED_INPUT_TYPE));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

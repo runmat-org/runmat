@@ -64,6 +64,15 @@ const UNIQUE_ERR_CONFLICTING_ORDER_OPTIONS: &str = "RunMat:unique:ConflictingOrd
 const UNIQUE_ERR_CONFLICTING_OCCURRENCE_OPTIONS: &str =
     "RunMat:unique:ConflictingOccurrenceOptions";
 const UNIQUE_ERR_UNKNOWN_OPTION: &str = "RunMat:unique:UnknownOption";
+const UNIQUE_ERR_ROWS_REQUIRES_2D_MATRIX: &str = "RunMat:unique:RowsRequiresTwoDimensionalInput";
+const UNIQUE_ERR_UNSUPPORTED_INPUT_TYPE: &str = "RunMat:unique:UnsupportedInputType";
+
+fn unique_rows_requires_2d_matrix_error() -> crate::RuntimeError {
+    build_runtime_error("unique: 'rows' option requires a 2-D matrix input")
+        .with_builtin("unique")
+        .with_identifier(UNIQUE_ERR_ROWS_REQUIRES_2D_MATRIX)
+        .build()
+}
 
 #[runtime_builtin(
     name = "unique",
@@ -266,11 +275,16 @@ fn unique_host(value: Value, opts: &UniqueOptions) -> crate::BuiltinResult<Uniqu
             let array = StringArray::new(vec![s], vec![1, 1]).map_err(|e| unique_error(format!("unique: {e}")))?;
             unique_string_array(array, opts)
         }
-        other => Err(unique_error(format!(
-            "unique: unsupported input type {:?}; expected numeric, logical, char, string, or complex values",
-            other
-        ))
-        .into()),
+        other => Err(
+            build_runtime_error(format!(
+                "unique: unsupported input type {:?}; expected numeric, logical, char, string, or complex values",
+                other
+            ))
+            .with_builtin("unique")
+            .with_identifier(UNIQUE_ERR_UNSUPPORTED_INPUT_TYPE)
+            .build()
+            .into(),
+        ),
     }
 }
 
@@ -375,9 +389,7 @@ fn unique_numeric_rows(
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     if tensor.shape.len() != 2 {
-        return Err(unique_error(
-            "unique: 'rows' option requires a 2-D matrix input",
-        ));
+        return Err(unique_rows_requires_2d_matrix_error());
     }
     let rows = tensor.shape[0];
     let cols = tensor.shape[1];
@@ -576,9 +588,7 @@ fn unique_complex_rows(
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     if tensor.shape.len() != 2 {
-        return Err(unique_error(
-            "unique: 'rows' option requires a 2-D matrix input",
-        ));
+        return Err(unique_rows_requires_2d_matrix_error());
     }
     let rows = tensor.shape[0];
     let cols = tensor.shape[1];
@@ -968,9 +978,7 @@ fn unique_string_rows(
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     if array.shape.len() != 2 {
-        return Err(unique_error(
-            "unique: 'rows' option requires a 2-D matrix input",
-        ));
+        return Err(unique_rows_requires_2d_matrix_error());
     }
     let rows = array.shape[0];
     let cols = array.shape[1];
@@ -1326,10 +1334,6 @@ pub(crate) mod tests {
     use runmat_builtins::{
         CharArray, IntValue, LogicalArray, ResolveContext, StringArray, Tensor, Type, Value,
     };
-
-    fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
-    }
 
     fn evaluate_sync(value: Value, rest: &[Value]) -> crate::BuiltinResult<UniqueEvaluation> {
         futures::executor::block_on(evaluate(value, rest))
@@ -1753,10 +1757,8 @@ pub(crate) mod tests {
     #[test]
     fn unique_rows_requires_two_dimensional_input() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1, 1]).unwrap();
-        let err = error_message(
-            evaluate_sync(Value::Tensor(tensor), &[Value::from("rows")]).unwrap_err(),
-        );
-        assert!(err.contains("2-D matrix"));
+        let err = evaluate_sync(Value::Tensor(tensor), &[Value::from("rows")]).unwrap_err();
+        assert_eq!(err.identifier(), Some(UNIQUE_ERR_ROWS_REQUIRES_2D_MATRIX));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

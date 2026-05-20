@@ -55,6 +55,14 @@ fn ismember_error(message: impl Into<String>) -> crate::RuntimeError {
 
 const ISMEMBER_ERR_LEGACY_OPTION_UNSUPPORTED: &str = "RunMat:ismember:LegacyOptionUnsupported";
 const ISMEMBER_ERR_UNKNOWN_OPTION: &str = "RunMat:ismember:UnknownOption";
+const ISMEMBER_ERR_ROWS_COLUMN_MISMATCH: &str = "RunMat:ismember:RowsColumnMismatch";
+
+fn ismember_rows_column_mismatch_error() -> crate::RuntimeError {
+    build_runtime_error("ismember: inputs must have the same number of columns when using 'rows'")
+        .with_builtin("ismember")
+        .with_identifier(ISMEMBER_ERR_ROWS_COLUMN_MISMATCH)
+        .build()
+}
 
 #[runtime_builtin(
     name = "ismember",
@@ -292,9 +300,7 @@ fn ismember_numeric_rows(a: Tensor, b: Tensor) -> crate::BuiltinResult<IsMemberE
     let (rows_a, cols_a) = tensor_rows_cols(&a, "ismember")?;
     let (rows_b, cols_b) = tensor_rows_cols(&b, "ismember")?;
     if cols_a != cols_b {
-        return Err(ismember_error(
-            "ismember: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(ismember_rows_column_mismatch_error());
     }
 
     let mut map: HashMap<NumericRowKey, usize> = HashMap::new();
@@ -753,10 +759,6 @@ pub(crate) mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
 
-    fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
-    }
-
     fn evaluate_sync(
         a: Value,
         b: Value,
@@ -970,8 +972,8 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         assert!(ismember_numeric_rows(a.clone(), b.clone()).is_ok());
         let bad = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let err = error_message(ismember_numeric_rows(a, bad).unwrap_err());
-        assert!(err.contains("same number of columns"));
+        let err = ismember_numeric_rows(a, bad).unwrap_err();
+        assert_eq!(err.identifier(), Some(ISMEMBER_ERR_ROWS_COLUMN_MISMATCH));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

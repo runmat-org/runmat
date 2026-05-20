@@ -27,6 +27,26 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-runtime legacy_option -- --nocapture`
     - `cargo fmt --all`
 
+- (pending commit) Set builtins rows/type identifier ratchet
+  - Added stable identifier contracts for remaining set-builtin test paths that previously asserted message text:
+    - `RunMat:unique:RowsRequiresTwoDimensionalInput`
+    - `RunMat:unique:UnsupportedInputType`
+    - `RunMat:union:RowsColumnMismatch`
+    - `RunMat:union:UnsupportedInputType`
+    - `RunMat:intersect:RowsColumnMismatch`
+    - `RunMat:intersect:UnsupportedInputType`
+    - `RunMat:ismember:RowsColumnMismatch`
+  - Updated sorting-set tests to assert `RuntimeError.identifier()` for:
+    - `unique_rows_requires_two_dimensional_input`
+    - `union_rows_dimension_mismatch`
+    - `union_requires_matching_types`
+    - `intersect_rows_dimension_mismatch`
+    - `intersect_mixed_types_error`
+    - `ismember_rows_shape_checks`
+  - Validation:
+    - `cargo test -p runmat-runtime sorting_sets:: -- --nocapture`
+    - `cargo fmt --all --check`
+
 - (pending commit) Set builtins legacy-option identifier ratchet
   - Replaced message-only legacy-option rejections in set builtins with stable identifiers:
     - `RunMat:unique:LegacyOptionUnsupported`

@@ -64,6 +64,15 @@ fn intersect_error(message: impl Into<String>) -> crate::RuntimeError {
 const INTERSECT_ERR_LEGACY_OPTION_UNSUPPORTED: &str = "RunMat:intersect:LegacyOptionUnsupported";
 const INTERSECT_ERR_CONFLICTING_ORDER_OPTIONS: &str = "RunMat:intersect:ConflictingOrderOptions";
 const INTERSECT_ERR_UNKNOWN_OPTION: &str = "RunMat:intersect:UnknownOption";
+const INTERSECT_ERR_ROWS_COLUMN_MISMATCH: &str = "RunMat:intersect:RowsColumnMismatch";
+const INTERSECT_ERR_UNSUPPORTED_INPUT_TYPE: &str = "RunMat:intersect:UnsupportedInputType";
+
+fn intersect_rows_column_mismatch_error() -> crate::RuntimeError {
+    build_runtime_error("intersect: inputs must have the same number of columns when using 'rows'")
+        .with_builtin("intersect")
+        .with_identifier(INTERSECT_ERR_ROWS_COLUMN_MISMATCH)
+        .build()
+}
 
 #[runtime_builtin(
     name = "intersect",
@@ -300,10 +309,18 @@ fn intersect_host(
         }
 
         (left, right) => {
-            let tensor_a =
-                tensor::value_into_tensor_for("intersect", left).map_err(|e| intersect_error(e))?;
-            let tensor_b = tensor::value_into_tensor_for("intersect", right)
-                .map_err(|e| intersect_error(e))?;
+            let tensor_a = tensor::value_into_tensor_for("intersect", left).map_err(|e| {
+                build_runtime_error(e)
+                    .with_builtin("intersect")
+                    .with_identifier(INTERSECT_ERR_UNSUPPORTED_INPUT_TYPE)
+                    .build()
+            })?;
+            let tensor_b = tensor::value_into_tensor_for("intersect", right).map_err(|e| {
+                build_runtime_error(e)
+                    .with_builtin("intersect")
+                    .with_identifier(INTERSECT_ERR_UNSUPPORTED_INPUT_TYPE)
+                    .build()
+            })?;
             intersect_numeric(tensor_a, tensor_b, opts)
         }
     }
@@ -367,9 +384,7 @@ fn intersect_numeric_rows(
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(intersect_error(
-            "intersect: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(intersect_rows_column_mismatch_error());
     }
     let rows_a = a.shape[0];
     let cols = a.shape[1];
@@ -473,9 +488,7 @@ fn intersect_complex_rows(
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(intersect_error(
-            "intersect: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(intersect_rows_column_mismatch_error());
     }
     let rows_a = a.shape[0];
     let cols = a.shape[1];
@@ -574,9 +587,7 @@ fn intersect_char_rows(
     opts: &IntersectOptions,
 ) -> crate::BuiltinResult<IntersectEvaluation> {
     if a.cols != b.cols {
-        return Err(intersect_error(
-            "intersect: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(intersect_rows_column_mismatch_error());
     }
     let rows_a = a.rows;
     let rows_b = b.rows;
@@ -690,9 +701,7 @@ fn intersect_string_rows(
         ));
     }
     if a.shape[1] != b.shape[1] {
-        return Err(intersect_error(
-            "intersect: inputs must have the same number of columns when using 'rows'",
-        ));
+        return Err(intersect_rows_column_mismatch_error());
     }
     let rows_a = a.shape[0];
     let cols = a.shape[1];
@@ -1341,10 +1350,6 @@ pub(crate) mod tests {
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{ResolveContext, Type};
 
-    fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
-    }
-
     fn evaluate_sync(
         a: Value,
         b: Value,
@@ -1606,18 +1611,16 @@ pub(crate) mod tests {
     fn intersect_rows_dimension_mismatch() {
         let a = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let err = error_message(
-            intersect_numeric_rows(
-                a,
-                b,
-                &IntersectOptions {
-                    rows: true,
-                    order: IntersectOrder::Sorted,
-                },
-            )
-            .unwrap_err(),
-        );
-        assert!(err.contains("same number of columns"));
+        let err = intersect_numeric_rows(
+            a,
+            b,
+            &IntersectOptions {
+                rows: true,
+                order: IntersectOrder::Sorted,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some(INTERSECT_ERR_ROWS_COLUMN_MISMATCH));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1625,18 +1628,16 @@ pub(crate) mod tests {
     fn intersect_mixed_types_error() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let b = CharArray::new(vec!['a', 'b'], 1, 2).unwrap();
-        let err = error_message(
-            intersect_host(
-                Value::Tensor(a),
-                Value::CharArray(b),
-                &IntersectOptions {
-                    rows: false,
-                    order: IntersectOrder::Sorted,
-                },
-            )
-            .unwrap_err(),
-        );
-        assert!(err.contains("unsupported input type"));
+        let err = intersect_host(
+            Value::Tensor(a),
+            Value::CharArray(b),
+            &IntersectOptions {
+                rows: false,
+                order: IntersectOrder::Sorted,
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some(INTERSECT_ERR_UNSUPPORTED_INPUT_TYPE));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
