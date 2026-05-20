@@ -49,6 +49,22 @@ fn sort_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("sort").build()
 }
 
+const SORT_ERR_INVALID_DIMENSION: &str = "RunMat:sort:InvalidDimension";
+const SORT_ERR_COMPARISON_METHOD_REQUIRES_STRING: &str =
+    "RunMat:sort:ComparisonMethodRequiresString";
+const SORT_ERR_COMPARISON_METHOD_UNKNOWN: &str = "RunMat:sort:ComparisonMethodUnknown";
+const SORT_ERR_MISSINGPLACEMENT_UNSUPPORTED: &str = "RunMat:sort:MissingPlacementUnsupported";
+
+fn sort_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> crate::RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("sort")
+        .with_identifier(identifier)
+        .build()
+}
+
 #[runtime_builtin(
     name = "sort",
     category = "array/sorting_sets",
@@ -93,7 +109,10 @@ async fn sort_gpu(
     let shape = handle.shape.clone();
     let dim = args.dimension.unwrap_or_else(|| default_dimension(&shape));
     if dim == 0 {
-        return Err(sort_error("sort: dimension must be >= 1"));
+        return Err(sort_error_with_identifier(
+            "sort: dimension must be >= 1",
+            SORT_ERR_INVALID_DIMENSION,
+        ));
     }
     let dim_len = dimension_length(&shape, dim);
     if dim_len > 1 {
@@ -141,7 +160,10 @@ fn sort_real_tensor(tensor: Tensor, args: &SortArgs) -> crate::BuiltinResult<Sor
         .dimension
         .unwrap_or_else(|| default_dimension(&tensor.shape));
     if dim == 0 {
-        return Err(sort_error("sort: dimension must be >= 1"));
+        return Err(sort_error_with_identifier(
+            "sort: dimension must be >= 1",
+            SORT_ERR_INVALID_DIMENSION,
+        ));
     }
 
     let dim_len = dimension_length(&tensor.shape, dim);
@@ -198,7 +220,10 @@ fn sort_complex_tensor(
         .dimension
         .unwrap_or_else(|| default_dimension(&tensor.shape));
     if dim == 0 {
-        return Err(sort_error("sort: dimension must be >= 1"));
+        return Err(sort_error_with_identifier(
+            "sort: dimension must be >= 1",
+            SORT_ERR_INVALID_DIMENSION,
+        ));
     }
 
     let dim_len = dimension_length(&tensor.shape, dim);
@@ -443,7 +468,10 @@ impl SortArgs {
                     }
                     Err(err) => {
                         if matches!(rest[i], Value::Int(_) | Value::Num(_)) {
-                            return Err(sort_error(err));
+                            return Err(sort_error_with_identifier(
+                                err,
+                                SORT_ERR_INVALID_DIMENSION,
+                            ));
                         }
                     }
                 }
@@ -470,8 +498,9 @@ impl SortArgs {
                         let value = match tokens.get(i) {
                             Some(ArgToken::String(value)) => value.as_str(),
                             _ => {
-                                return Err(sort_error(
+                                return Err(sort_error_with_identifier(
                                     "sort: 'ComparisonMethod' requires a string value",
+                                    SORT_ERR_COMPARISON_METHOD_REQUIRES_STRING,
                                 ))
                             }
                         };
@@ -480,9 +509,10 @@ impl SortArgs {
                             "real" => ComparisonMethod::Real,
                             "abs" | "magnitude" => ComparisonMethod::Abs,
                             other => {
-                                return Err(sort_error(format!(
-                                    "sort: unsupported ComparisonMethod '{other}'"
-                                ))
+                                return Err(sort_error_with_identifier(
+                                    format!("sort: unsupported ComparisonMethod '{other}'"),
+                                    SORT_ERR_COMPARISON_METHOD_UNKNOWN,
+                                )
                                 .into())
                             }
                         };
@@ -490,8 +520,9 @@ impl SortArgs {
                         continue;
                     }
                     "missingplacement" => {
-                        return Err(sort_error(
+                        return Err(sort_error_with_identifier(
                             "sort: the 'MissingPlacement' option is not supported yet",
+                            SORT_ERR_MISSINGPLACEMENT_UNSUPPORTED,
                         )
                         .into());
                     }
@@ -526,8 +557,9 @@ impl SortArgs {
                                 ca.data.iter().copied().collect()
                             }
                             _ => {
-                                return Err(sort_error(
+                                return Err(sort_error_with_identifier(
                                     "sort: 'ComparisonMethod' requires a string value",
+                                    SORT_ERR_COMPARISON_METHOD_REQUIRES_STRING,
                                 ))
                             }
                         };
@@ -537,9 +569,10 @@ impl SortArgs {
                             "real" => ComparisonMethod::Real,
                             "abs" | "magnitude" => ComparisonMethod::Abs,
                             other => {
-                                return Err(sort_error(format!(
-                                    "sort: unsupported ComparisonMethod '{other}'"
-                                ))
+                                return Err(sort_error_with_identifier(
+                                    format!("sort: unsupported ComparisonMethod '{other}'"),
+                                    SORT_ERR_COMPARISON_METHOD_UNKNOWN,
+                                )
                                 .into())
                             }
                         };
@@ -547,8 +580,9 @@ impl SortArgs {
                         continue;
                     }
                     "missingplacement" => {
-                        return Err(sort_error(
+                        return Err(sort_error_with_identifier(
                             "sort: the 'MissingPlacement' option is not supported yet",
+                            SORT_ERR_MISSINGPLACEMENT_UNSUPPORTED,
                         )
                         .into());
                     }
@@ -601,10 +635,6 @@ pub(crate) mod tests {
 
     fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::sort_builtin(value, rest))
-    }
-
-    fn error_message(err: crate::RuntimeError) -> String {
-        err.message().to_string()
     }
 
     fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<SortEvaluation> {
@@ -899,62 +929,54 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sort_invalid_argument_errors() {
-        let err = error_message(
-            sort_builtin(
-                Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
-                vec![Value::from("missingplacement"), Value::from("first")],
-            )
-            .unwrap_err(),
+        let err = sort_builtin(
+            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+            vec![Value::from("missingplacement"), Value::from("first")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some(SORT_ERR_MISSINGPLACEMENT_UNSUPPORTED)
         );
-        assert!(err.contains("MissingPlacement"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sort_invalid_comparison_method_errors() {
-        let err = error_message(
-            sort_builtin(
-                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-                vec![Value::from("ComparisonMethod"), Value::from("unknown")],
-            )
-            .unwrap_err(),
-        );
-        assert!(err.contains("ComparisonMethod"), "unexpected error: {err}");
+        let err = sort_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+            vec![Value::from("ComparisonMethod"), Value::from("unknown")],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some(SORT_ERR_COMPARISON_METHOD_UNKNOWN));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sort_invalid_comparison_method_value_errors() {
-        let err = error_message(
-            sort_builtin(
-                Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
-                vec![
-                    Value::from("ComparisonMethod"),
-                    Value::Int(IntValue::I32(1)),
-                ],
-            )
-            .unwrap_err(),
-        );
-        assert!(
-            err.contains("requires a string value"),
-            "unexpected error: {err}"
+        let err = sort_builtin(
+            Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap()),
+            vec![
+                Value::from("ComparisonMethod"),
+                Value::Int(IntValue::I32(1)),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some(SORT_ERR_COMPARISON_METHOD_REQUIRES_STRING)
         );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn sort_dimension_zero_errors() {
-        let err = error_message(
-            sort_builtin(
-                Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
-                vec![Value::Num(0.0)],
-            )
-            .unwrap_err(),
-        );
-        assert!(
-            err.contains("dimension must be >= 1"),
-            "unexpected error: {err}"
-        );
+        let err = sort_builtin(
+            Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+            vec![Value::Num(0.0)],
+        )
+        .unwrap_err();
+        assert_eq!(err.identifier(), Some(SORT_ERR_INVALID_DIMENSION));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

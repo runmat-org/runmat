@@ -62,6 +62,30 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-runtime setdiff_rows_dimension_mismatch_reports_identifier -- --nocapture`
     - `cargo fmt --all`
 
+- (pending commit) Sort option/dimension identifier ratchet
+  - Added stable `sort` identifier contracts for option and dimension failure paths:
+    - `RunMat:sort:InvalidDimension`
+    - `RunMat:sort:ComparisonMethodRequiresString`
+    - `RunMat:sort:ComparisonMethodUnknown`
+    - `RunMat:sort:MissingPlacementUnsupported`
+  - Runtime parse/execution now emits those identifiers for:
+    - zero/invalid numeric dimension values
+    - `ComparisonMethod` with non-string value
+    - unsupported `ComparisonMethod` string value
+    - unsupported `MissingPlacement` option usage
+  - Tightened sort builtin coverage in [sort.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/array/sorting_sets/sort.rs):
+    - `sort_invalid_argument_errors`
+    - `sort_invalid_comparison_method_errors`
+    - `sort_invalid_comparison_method_value_errors`
+    - `sort_dimension_zero_errors`
+    now assert `RuntimeError.identifier()` instead of message-fragment checks.
+  - Validation:
+    - `cargo test -p runmat-runtime sort_invalid_argument_errors -- --nocapture`
+    - `cargo test -p runmat-runtime sort_invalid_comparison_method_errors -- --nocapture`
+    - `cargo test -p runmat-runtime sort_invalid_comparison_method_value_errors -- --nocapture`
+    - `cargo test -p runmat-runtime sort_dimension_zero_errors -- --nocapture`
+    - `cargo fmt --all`
+
 - (pending commit) Set builtins legacy-option identifier ratchet
   - Replaced message-only legacy-option rejections in set builtins with stable identifiers:
     - `RunMat:unique:LegacyOptionUnsupported`
