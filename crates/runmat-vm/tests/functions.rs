@@ -187,6 +187,18 @@ fn unresolved_external_cellfun_str2func_callback_fails_without_legacy_fallback()
 }
 
 #[test]
+fn function_handle_selector_colon_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("f = @sin; y = f(:);")
+        .expect_err("function-handle colon selector should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UnsupportedFunctionHandleSelector"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn nargin_nargout_in_user_functions() {
     // Single-output: nargin/nargout should reflect call site
     let program = r#"

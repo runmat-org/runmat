@@ -1815,6 +1815,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Updated `docs-tmp/DELIVERABLE_AUDIT.md` section `### 1` from `partial` to `met`, replaced the old broad-gap note with concrete watchpoints (production compile-entrypoint grep + core compile order ratchet coverage).
   - Updated unresolved-area summary to remove section 1 from highest-impact open items.
 
+- (pending commit) Plan 4 selector-contract ratchet for function-handle colon misuse
+  - Added VM semantic regression `function_handle_selector_colon_errors_with_identifier_contract` in `crates/runmat-vm/tests/functions.rs`.
+  - The test executes semantic bytecode for `f = @sin; y = f(:);` and asserts runtime identifier `RunMat:UnsupportedFunctionHandleSelector` (instead of relying on error message text).
+  - This extends selector-plan/selector-surface identifier evidence beyond object selector metadata paths into function-handle selector misuse boundaries.
+  - Validation: `cargo test -p runmat-vm --test functions function_handle_selector_colon_errors_with_identifier_contract -- --nocapture`, `cargo fmt --all --check`, `git diff --check`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
