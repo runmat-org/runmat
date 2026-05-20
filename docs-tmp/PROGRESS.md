@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM linear-index RHS gather identifier ratchet
+  - `scope: in-scope`
+  - Removed the last string-only GPU RHS gather wrappers in [write_linear.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/write_linear.rs):
+    - `rhs_to_real_scalar` GPU scalar gather failure
+    - `rhs_to_complex_scalar` GPU scalar gather failure
+  - Both now map to stable `RunMat:AccelerationOperationFailed` identifiers, with helper unit coverage for acceleration and shape mapping contracts:
+    - `indexing::write_linear::tests::assignment_acceleration_error_mapping_reports_identifier`
+    - `indexing::write_linear::tests::assignment_shape_error_mapping_reports_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib assignment_shape_error_mapping_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib assignment_acceleration_error_mapping_reports_identifier -- --nocapture`
+    - `cargo test -p runmat-vm mixed_range_end_assign_shape_mismatch_error -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM cell-ops shape-error identifier ratchet
   - `scope: in-scope`
   - Removed remaining string-only cell shape wrappers in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) and normalized them to typed `RunMat:ShapeMismatch` via `map_cell_shape_error`:

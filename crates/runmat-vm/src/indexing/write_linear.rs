@@ -100,7 +100,7 @@ pub async fn rhs_to_real_scalar(rhs: &Value) -> Result<f64, RuntimeError> {
             let host = provider
                 .download(h2)
                 .await
-                .map_err(|e| format!("gather rhs: {e}"))?;
+                .map_err(|e| map_acceleration_error("gather rhs", e))?;
             Ok(host.data[0])
         }
         _ => rhs
@@ -131,10 +131,27 @@ pub async fn rhs_to_complex_scalar(rhs: &Value) -> Result<(f64, f64), RuntimeErr
             let host = provider
                 .download(h)
                 .await
-                .map_err(|e| format!("gather rhs: {e}"))?;
+                .map_err(|e| map_acceleration_error("gather rhs", e))?;
             Ok((host.data[0], 0.0))
         }
         _ => Err(mex("NumericRequired", "RHS must be numeric")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{map_acceleration_error, map_assignment_shape_error};
+
+    #[test]
+    fn assignment_shape_error_mapping_reports_identifier() {
+        let err = map_assignment_shape_error("invalid shape");
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
+    }
+
+    #[test]
+    fn assignment_acceleration_error_mapping_reports_identifier() {
+        let err = map_acceleration_error("gather rhs", "provider failed");
+        assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
     }
 }
 
