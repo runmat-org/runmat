@@ -49,6 +49,28 @@ fn issorted_error(message: impl Into<String>) -> crate::RuntimeError {
         .build()
 }
 
+const ISSORTED_ERR_ROWS_REQUIRES_2D: &str = "RunMat:issorted:RowsRequiresTwoDimensionalInput";
+const ISSORTED_ERR_STRING_COMPARISON_UNSUPPORTED: &str =
+    "RunMat:issorted:StringComparisonMethodUnsupported";
+const ISSORTED_ERR_DUPLICATE_DIRECTION: &str = "RunMat:issorted:DuplicateDirection";
+
+fn issorted_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> crate::RuntimeError {
+    build_runtime_error(message)
+        .with_builtin("issorted")
+        .with_identifier(identifier)
+        .build()
+}
+
+fn issorted_rows_requires_2d_error() -> crate::RuntimeError {
+    issorted_error_with_identifier(
+        "issorted: 'rows' expects a 2-D matrix",
+        ISSORTED_ERR_ROWS_REQUIRES_2D,
+    )
+}
+
 #[runtime_builtin(
     name = "issorted",
     category = "array/sorting_sets",
@@ -303,8 +325,9 @@ impl IssortedArgs {
 
 fn ensure_unique_direction(direction: &Option<Direction>) -> crate::BuiltinResult<()> {
     if direction.is_some() {
-        Err(issorted_error(
+        Err(issorted_error_with_identifier(
             "issorted: sorting direction specified more than once",
+            ISSORTED_ERR_DUPLICATE_DIRECTION,
         ))
     } else {
         Ok(())
@@ -376,8 +399,9 @@ fn issorted_string(array: &StringArray, args: &IssortedArgs) -> crate::BuiltinRe
         return Ok(true);
     }
     if !matches!(args.comparison, ComparisonMethod::Auto) {
-        return Err(issorted_error(
+        return Err(issorted_error_with_identifier(
             "issorted: 'ComparisonMethod' is not supported for string arrays",
+            ISSORTED_ERR_STRING_COMPARISON_UNSUPPORTED,
         ));
     }
     match args.mode {
@@ -478,7 +502,7 @@ fn check_string_dimension(array: &StringArray, dim: usize, args: &IssortedArgs) 
 
 fn check_real_rows(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if tensor.shape.len() > 2 {
-        return Err(issorted_error("issorted: 'rows' expects a 2-D matrix"));
+        return Err(issorted_rows_requires_2d_error());
     }
     let rows = tensor.rows();
     let cols = tensor.cols();
@@ -500,7 +524,7 @@ fn check_real_rows(tensor: &Tensor, args: &IssortedArgs) -> crate::BuiltinResult
 
 fn check_complex_rows(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if tensor.shape.len() > 2 {
-        return Err(issorted_error("issorted: 'rows' expects a 2-D matrix"));
+        return Err(issorted_rows_requires_2d_error());
     }
     let rows = tensor.rows;
     let cols = tensor.cols;
@@ -522,7 +546,7 @@ fn check_complex_rows(tensor: &ComplexTensor, args: &IssortedArgs) -> crate::Bui
 
 fn check_string_rows(array: &StringArray, args: &IssortedArgs) -> crate::BuiltinResult<bool> {
     if array.shape.len() > 2 {
-        return Err(issorted_error("issorted: 'rows' expects a 2-D matrix"));
+        return Err(issorted_rows_requires_2d_error());
     }
     let rows = array.rows;
     let cols = array.cols;
@@ -1216,8 +1240,8 @@ pub(crate) mod tests {
     #[test]
     fn issorted_rows_dimension_error() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2, 1]).unwrap();
-        let result = issorted_builtin(Value::Tensor(tensor), vec![Value::from("rows")]);
-        assert!(result.is_err());
+        let err = issorted_builtin(Value::Tensor(tensor), vec![Value::from("rows")]).unwrap_err();
+        assert_eq!(err.identifier(), Some(ISSORTED_ERR_ROWS_REQUIRES_2D));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1277,8 +1301,11 @@ pub(crate) mod tests {
     fn issorted_string_comparison_method_error() {
         let array = StringArray::new(vec!["apple".into(), "berry".into()], vec![2, 1]).unwrap();
         let args = vec![Value::from("ComparisonMethod"), Value::from("real")];
-        let result = issorted_builtin(Value::StringArray(array), args);
-        assert!(result.is_err());
+        let err = issorted_builtin(Value::StringArray(array), args).unwrap_err();
+        assert_eq!(
+            err.identifier(),
+            Some(ISSORTED_ERR_STRING_COMPARISON_UNSUPPORTED)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1294,8 +1321,8 @@ pub(crate) mod tests {
     fn issorted_duplicate_direction_error() {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let args = vec![Value::from("ascend"), Value::from("descend")];
-        let result = issorted_builtin(Value::Tensor(tensor), args);
-        assert!(result.is_err());
+        let err = issorted_builtin(Value::Tensor(tensor), args).unwrap_err();
+        assert_eq!(err.identifier(), Some(ISSORTED_ERR_DUPLICATE_DIRECTION));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

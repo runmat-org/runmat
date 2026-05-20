@@ -86,6 +86,26 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-runtime sort_dimension_zero_errors -- --nocapture`
     - `cargo fmt --all`
 
+- (pending commit) Issorted rows/string/direction identifier ratchet
+  - Added stable `issorted` identifier contracts for three previously broad error surfaces:
+    - `RunMat:issorted:RowsRequiresTwoDimensionalInput`
+    - `RunMat:issorted:StringComparisonMethodUnsupported`
+    - `RunMat:issorted:DuplicateDirection`
+  - Runtime now emits these identifiers when:
+    - `'rows'` is used on non-2D inputs across real/complex/string row paths
+    - `ComparisonMethod` is used for string arrays (unsupported semantic mode)
+    - multiple sort-direction options are supplied in a single call
+  - Tightened tests in [issorted.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/array/sorting_sets/issorted.rs):
+    - `issorted_rows_dimension_error`
+    - `issorted_string_comparison_method_error`
+    - `issorted_duplicate_direction_error`
+    now assert `RuntimeError.identifier()` instead of `is_err()` proxies.
+  - Validation:
+    - `cargo test -p runmat-runtime issorted_rows_dimension_error -- --nocapture`
+    - `cargo test -p runmat-runtime issorted_string_comparison_method_error -- --nocapture`
+    - `cargo test -p runmat-runtime issorted_duplicate_direction_error -- --nocapture`
+    - `cargo fmt --all --check`
+
 - (pending commit) Set builtins legacy-option identifier ratchet
   - Replaced message-only legacy-option rejections in set builtins with stable identifiers:
     - `RunMat:unique:LegacyOptionUnsupported`
