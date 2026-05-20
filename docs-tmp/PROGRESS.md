@@ -6,6 +6,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 7 data-runtime identifier ratchet for manifest/transaction conflicts
+  - Data runtime error paths in [mod.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/data/mod.rs) now emit stable identifiers for two high-value control paths instead of relying on message-fragment assertions:
+    - `RunMat:data:ManifestConflict` for manifest sequence precondition conflicts.
+    - `RunMat:data:TransactionNotFound` for missing transaction registry lookups.
+  - Data runtime unit coverage now asserts these identifiers directly in:
+    - `ensure_manifest_sequence_rejects_conflict`
+    - `transaction_registry_roundtrip`
+  - Validation:
+    - `cargo test -p runmat-runtime ensure_manifest_sequence_rejects_conflict -- --nocapture`
+    - `cargo test -p runmat-runtime transaction_registry_roundtrip -- --nocapture`
+
 - (pending commit) Plan 7 runtime scalar-fusion bypass for semantic literal/scalar paths
   - VM fusion dispatch in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/accel/fusion.rs) now bypasses elementwise fusion execution when all runtime inputs are scalar-shaped values, forcing these groups down the normal VM/runtime scalar path.
   - Accelerate elementwise plan support in [fusion.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-accelerate/src/fusion.rs) now rejects scalar-shaped elementwise groups up front (`scalar_shape_known_one`), preventing scalar-only GPU kernel materialization at plan time.

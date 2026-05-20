@@ -135,6 +135,19 @@ pub fn data_error(message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
+fn data_error_with_identifier(
+    message: impl Into<String>,
+    identifier: &'static str,
+) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(identifier)
+        .with_builtin("data")
+        .build()
+}
+
+const DATA_MANIFEST_CONFLICT_IDENTIFIER: &str = "RunMat:data:ManifestConflict";
+const DATA_TRANSACTION_NOT_FOUND_IDENTIFIER: &str = "RunMat:data:TransactionNotFound";
+
 pub fn parse_string(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
@@ -920,8 +933,9 @@ pub fn ensure_manifest_sequence(expected: u64, manifest: &DataManifest) -> Built
             actual_sequence = manifest.txn_sequence,
             "manifest conflict detected"
         );
-        return Err(data_error(
+        return Err(data_error_with_identifier(
             "MANIFEST_CONFLICT: dataset changed since transaction begin",
+            DATA_MANIFEST_CONFLICT_IDENTIFIER,
         ));
     }
     Ok(())
@@ -996,9 +1010,12 @@ pub fn with_tx_mut<T>(
     f: impl FnOnce(&mut PendingTxn) -> BuiltinResult<T>,
 ) -> BuiltinResult<T> {
     let mut guard = tx_registry().lock().expect("tx registry lock poisoned");
-    let tx = guard
-        .get_mut(tx_id)
-        .ok_or_else(|| data_error(format!("transaction '{tx_id}' not found")))?;
+    let tx = guard.get_mut(tx_id).ok_or_else(|| {
+        data_error_with_identifier(
+            format!("transaction '{tx_id}' not found"),
+            DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
+        )
+    })?;
     f(tx)
 }
 
@@ -1007,9 +1024,12 @@ pub fn with_tx<T>(
     f: impl FnOnce(&PendingTxn) -> BuiltinResult<T>,
 ) -> BuiltinResult<T> {
     let guard = tx_registry().lock().expect("tx registry lock poisoned");
-    let tx = guard
-        .get(tx_id)
-        .ok_or_else(|| data_error(format!("transaction '{tx_id}' not found")))?;
+    let tx = guard.get(tx_id).ok_or_else(|| {
+        data_error_with_identifier(
+            format!("transaction '{tx_id}' not found"),
+            DATA_TRANSACTION_NOT_FOUND_IDENTIFIER,
+        )
+    })?;
     f(tx)
 }
 
@@ -1052,7 +1072,11 @@ mod tests {
             txn_sequence: 6,
         };
         let err = ensure_manifest_sequence(5, &manifest).expect_err("expected conflict error");
-        assert!(err.message().contains("MANIFEST_CONFLICT"));
+        assert_eq!(
+            err.identifier(),
+            Some(DATA_MANIFEST_CONFLICT_IDENTIFIER),
+            "manifest conflicts should expose a stable identifier"
+        );
     }
 
     #[test]
@@ -1062,7 +1086,11 @@ mod tests {
         assert_eq!(status, TxnStatus::Open);
         remove_tx(&tx_id);
         let err = with_tx(&tx_id, |_| Ok(())).expect_err("expected missing tx");
-        assert!(err.message().contains("not found"));
+        assert_eq!(
+            err.identifier(),
+            Some(DATA_TRANSACTION_NOT_FOUND_IDENTIFIER),
+            "missing transaction lookups should expose a stable identifier"
+        );
     }
 
     #[test]
