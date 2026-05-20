@@ -2422,6 +2422,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `RunMat:MirDeleteAssignmentIndexKindInvalid` for MIR delete mutations on non-paren index targets.
     - `RunMat:MirDeleteAssignmentContextInvalid` for MIR delete mutations that are not carried on `IndexResultContext::DeletionTarget`.
     - `RunMat:MirDeletionContextWithoutDeleteInvalid` for non-delete assignments that incorrectly carry `IndexResultContext::DeletionTarget`.
+    - `RunMat:MirDeleteAssignmentCreationPolicyInvalid` for delete mutations that do not carry `AssignmentCreationPolicy::ExistingOnly`.
   - This tightens deletion semantics to an explicit compiler-product contract (matched delete-marker + explicit empty-literal RHS), instead of relying on runtime empty-RHS checks or silent mutation-target drift.
   - Added compile-level invariant test in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
     - `primary_compile_rejects_nonempty_delete_rhs_with_identifier`
@@ -2430,6 +2431,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `primary_compile_rejects_delete_on_brace_index_target_with_identifier`
     - `primary_compile_rejects_delete_with_nondeletion_index_context_with_identifier`
     - `primary_compile_rejects_deletion_context_without_delete_with_identifier`
+    - `primary_compile_rejects_delete_with_nonexisting_creation_policy_with_identifier`
   - Validation:
     - `cargo test -p runmat-vm --lib primary_compile_rejects_nonempty_delete_rhs_with_identifier -- --nocapture`
     - `cargo test -p runmat-vm --lib primary_compile_rejects_delete_place_mismatch_with_identifier -- --nocapture`
@@ -2437,6 +2439,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm --lib primary_compile_rejects_delete_on_brace_index_target_with_identifier -- --nocapture`
     - `cargo test -p runmat-vm --lib primary_compile_rejects_delete_with_nondeletion_index_context_with_identifier -- --nocapture`
     - `cargo test -p runmat-vm --lib primary_compile_rejects_deletion_context_without_delete_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib primary_compile_rejects_delete_with_nonexisting_creation_policy_with_identifier -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`

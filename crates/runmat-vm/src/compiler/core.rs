@@ -102,6 +102,8 @@ const IDENT_MIR_DELETE_ASSIGNMENT_CONTEXT_INVALID: &str =
     "RunMat:MirDeleteAssignmentContextInvalid";
 const IDENT_MIR_DELETION_CONTEXT_WITHOUT_DELETE_INVALID: &str =
     "RunMat:MirDeletionContextWithoutDeleteInvalid";
+const IDENT_MIR_DELETE_ASSIGNMENT_CREATION_POLICY_INVALID: &str =
+    "RunMat:MirDeleteAssignmentCreationPolicyInvalid";
 const IDENT_MIR_AGGREGATE_SHAPE_INVALID: &str = "RunMat:MirAggregateShapeInvalid";
 const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
 const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
@@ -901,6 +903,13 @@ impl Compiler {
                     "MIR delete assignment invariant violated: place mutation target must match assign target",
                 )
                 .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_PLACE_MISMATCH));
+        }
+        if mutation.creation_policy != runmat_hir::AssignmentCreationPolicy::ExistingOnly {
+            return Err(self
+                .compile_error(
+                    "MIR delete assignment invariant violated: delete mutation requires ExistingOnly creation policy",
+                )
+                .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_CREATION_POLICY_INVALID));
         }
         Ok(true)
     }
