@@ -825,7 +825,7 @@ mod tests {
     use runmat_builtins::Value;
     use runmat_hir::{
         lower, BuiltinId, CallableFallbackPolicy, CallableIdentity, FunctionId, LoweringContext,
-        MethodId, OperatorKind,
+        MethodId, OperatorKind, RequestedOutputCount,
     };
     use runmat_mir::lowering::lower_assembly;
     use runmat_mir::{
@@ -3008,6 +3008,41 @@ mod tests {
         assert_eq!(
             err.identifier.as_deref(),
             Some("RunMat:MirCellIndexContextInvalid")
+        );
+    }
+
+    #[test]
+    fn primary_compile_rejects_multi_assign_call_output_count_mismatch_with_identifier() {
+        let ast = runmat_parser::parse("[a, b] = deal(1, 2);").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mut mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let function = hir.assembly.entrypoints[0].target;
+        let body = mir.bodies.get_mut(&function).expect("entry body");
+
+        let mut patched = false;
+        for block in &mut body.blocks {
+            for stmt in &mut block.statements {
+                if let MirStmtKind::MultiAssign {
+                    value: MirRvalue::Call(call),
+                    ..
+                } = &mut stmt.kind
+                {
+                    call.requested_outputs = RequestedOutputCount::One;
+                    patched = true;
+                    break;
+                }
+            }
+            if patched {
+                break;
+            }
+        }
+        assert!(patched, "expected multi-assign call in lowered MIR");
+
+        let err = compile(&hir.assembly, &mir, entrypoint).expect_err("compile should fail");
+        assert_eq!(
+            err.identifier.as_deref(),
+            Some("RunMat:MirMultiAssignOutputCountMismatch")
         );
     }
 

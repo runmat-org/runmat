@@ -90,6 +90,8 @@ const IDENT_MIR_SCALAR_INDEX_PLAN_INVALID: &str = "RunMat:MirScalarIndexPlanInva
 const IDENT_MIR_SLICE_INDEX_PLAN_INVALID: &str = "RunMat:MirSliceIndexPlanInvalid";
 const IDENT_MIR_CELL_INDEX_PLAN_INVALID: &str = "RunMat:MirCellIndexPlanInvalid";
 const IDENT_MIR_CELL_INDEX_CONTEXT_INVALID: &str = "RunMat:MirCellIndexContextInvalid";
+const IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH: &str =
+    "RunMat:MirMultiAssignOutputCountMismatch";
 const IDENT_MIR_AGGREGATE_SHAPE_INVALID: &str = "RunMat:MirAggregateShapeInvalid";
 const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
 const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
@@ -1158,9 +1160,9 @@ impl Compiler {
             RequestedOutputCount::One if output_count == 1 => {}
             RequestedOutputCount::Exactly(count) if count == output_count => {}
             _ => {
-                return Err(
-                    self.compile_error("MIR multi-assign call output count does not match targets")
-                )
+                return Err(self
+                    .compile_error("MIR multi-assign call output count does not match targets")
+                    .with_identifier(IDENT_MIR_MULTI_ASSIGN_OUTPUT_COUNT_MISMATCH))
             }
         }
         let (specs, has_expansion) = self.mir_call_arg_specs(&call.args);
