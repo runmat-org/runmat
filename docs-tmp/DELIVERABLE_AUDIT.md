@@ -101,6 +101,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `RunMat:MirDeleteAssignmentPlaceMismatch` for MIR delete-assignment invariants where delete mutation targets must match following assign targets.
     - `RunMat:MirDeleteAssignmentTargetInvalid` for MIR delete-assignment invariants where delete mutations must target indexed assignment places.
     - `RunMat:MirDeleteAssignmentIndexKindInvalid` for MIR delete-assignment invariants where delete mutations must target paren indexing (not brace indexing) at compile boundaries.
+    - `RunMat:MirDeleteAssignmentContextInvalid` for MIR delete-assignment invariants where delete mutations must carry `IndexResultContext::DeletionTarget`.
     - `RunMat:MirCallFallbackPolicyUnsupported` for unsupported static-call fallback policies.
     - `RunMat:MirMethodFallbackPolicyUnsupported` for unsupported method-call fallback policies.
     - `RunMat:MirMethodCallReceiverMissing` for method-call receiver arg invariants.
@@ -138,6 +139,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `primary_compile_rejects_delete_place_mismatch_with_identifier`
     - `primary_compile_rejects_delete_on_nonindexed_target_with_identifier`
     - `primary_compile_rejects_delete_on_brace_index_target_with_identifier`
+    - `primary_compile_rejects_delete_with_nondeletion_index_context_with_identifier`
     - `primary_compile_rejects_unsupported_mir_static_call_fallback_policy_with_identifier`
     - `primary_compile_rejects_unsupported_mir_method_call_fallback_policy_with_identifier`
     - `primary_compile_rejects_missing_mir_method_call_receiver_with_identifier`

@@ -98,6 +98,8 @@ const IDENT_MIR_DELETE_ASSIGNMENT_PLACE_MISMATCH: &str = "RunMat:MirDeleteAssign
 const IDENT_MIR_DELETE_ASSIGNMENT_TARGET_INVALID: &str = "RunMat:MirDeleteAssignmentTargetInvalid";
 const IDENT_MIR_DELETE_ASSIGNMENT_INDEX_KIND_INVALID: &str =
     "RunMat:MirDeleteAssignmentIndexKindInvalid";
+const IDENT_MIR_DELETE_ASSIGNMENT_CONTEXT_INVALID: &str =
+    "RunMat:MirDeleteAssignmentContextInvalid";
 const IDENT_MIR_AGGREGATE_SHAPE_INVALID: &str = "RunMat:MirAggregateShapeInvalid";
 const IDENT_MIR_OPERATOR_UNSUPPORTED: &str = "RunMat:MirOperatorUnsupported";
 const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
@@ -1299,6 +1301,13 @@ impl Compiler {
                         "MIR delete assignment invariant violated: delete mutation currently requires paren indexing",
                     )
                     .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_INDEX_KIND_INVALID));
+            }
+            if indexing.result_context != IndexResultContext::DeletionTarget {
+                return Err(self
+                    .compile_error(
+                        "MIR delete assignment invariant violated: delete mutation requires DeletionTarget index context",
+                    )
+                    .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_CONTEXT_INVALID));
             }
             if !self.mir_delete_rhs_is_empty_tensor_literal(value) {
                 return Err(self
