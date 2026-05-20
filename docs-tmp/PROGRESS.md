@@ -1721,6 +1721,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `crates/runmat-core/src/session/run.rs`
   - Validation: `cargo test -p runmat-vm runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing -- --nocapture`, `cargo test -p runmat-vm runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`, `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_candidates_without_bytecode_groups -- --nocapture`, `cargo check -p runmat-core`, `cargo check -p runmat-vm --features native-accel`.
 
+- (pending commit) Plan 7 fusion-gpu runtime-graph-only helper ratchet
+  - Updated `crates/runmat-vm/tests/fusion_gpu.rs` graph helper to use `Bytecode::runtime_accel_graph_for_fusion(...)` only; removed legacy fallback to `bytecode.accel_graph`.
+  - Added regression `fusion_graph_helper_ignores_stale_compile_graph_metadata`:
+    - injects stale compile-graph metadata from a different compiled program,
+    - asserts runtime graph source remains `runtime_materialized_from_instructions`,
+    - asserts runtime graph/fusion-group behavior is derived from active bytecode, not stale compile metadata.
+  - This tightens Plan 7 end-to-end fusion execution evidence on the `fusion_gpu` surface against compile-graph preference regressions.
+  - Validation: `cargo test -p runmat-vm --test fusion_gpu fusion_graph_helper_ignores_stale_compile_graph_metadata -- --nocapture`, `cargo test -p runmat-vm --test fusion_gpu direct_execution_of_safe_followup_group_returns_gpu_tensor -- --nocapture`, `cargo fmt --all --check`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

@@ -52,9 +52,62 @@ fn graph_for_fusion_test(
     bytecode: &runmat_vm::Bytecode,
 ) -> Option<runmat_accelerate::graph::AccelGraph> {
     let runtime_groups = bytecode.runtime_fusion_groups();
-    bytecode
-        .runtime_accel_graph_for_fusion(&runtime_groups)
-        .or_else(|| bytecode.accel_graph.clone())
+    bytecode.runtime_accel_graph_for_fusion(&runtime_groups)
+}
+
+#[test]
+fn fusion_graph_helper_ignores_stale_compile_graph_metadata() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        let mut bytecode = compile_semantic(
+            r#"
+            x = [-5.5, -1.25, 5.5];
+            y = mod(x, 2) + rem(x, 2);
+            "#,
+        );
+        let stale_bytecode = compile_semantic(
+            r#"
+            x = [0.25, 0.5, 0.75];
+            y = asinh(x) + atanh(x) + acosh(x + 1);
+            "#,
+        );
+        let stale_groups = stale_bytecode.runtime_fusion_groups();
+        assert!(
+            !stale_groups.is_empty(),
+            "expected stale fixture to produce runtime fusion groups"
+        );
+        let stale_graph = stale_bytecode
+            .runtime_accel_graph_for_fusion(&stale_groups)
+            .expect("stale runtime graph");
+        bytecode.accel_graph = Some(stale_graph.clone());
+
+        let runtime_groups = bytecode.runtime_fusion_groups();
+        let (runtime_graph, source) =
+            bytecode.runtime_accel_graph_for_fusion_with_source(&runtime_groups);
+        assert_eq!(source.as_str(), "runtime_materialized_from_instructions");
+
+        let runtime_graph = runtime_graph.expect("runtime graph for fusion");
+        assert!(
+            !runtime_graph.nodes.is_empty(),
+            "expected runtime-materialized graph nodes"
+        );
+        assert_ne!(
+            runtime_graph.nodes.len(),
+            stale_graph.nodes.len(),
+            "runtime graph should not reuse stale compile graph metadata"
+        );
+
+        let graph = graph_for_fusion_test(&bytecode).expect("fusion helper graph");
+        let groups = graph.detect_fusion_groups();
+        assert!(
+            groups
+                .iter()
+                .any(|g| matches!(g.kind, FusionKind::ElementwiseChain)),
+            "expected elementwise fusion group from runtime graph, got {:?}",
+            groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
+        );
+    });
 }
 
 struct TestProvider {

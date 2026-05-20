@@ -413,7 +413,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - interpreter-state coverage now explicitly asserts stale compile graph exclusion in active runtime fusion setup (`InterpreterState::new`) via [state.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/state.rs) test `runtime_state_ignores_stale_compile_graph_metadata`.
   - Core/session fusion snapshot paths no longer fall back to compile-provided graph metadata: [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/compile.rs) and [run.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/session/run.rs) now consume runtime graph materialization only, matching VM runtime planning behavior.
   - VM compile and matrix-division tests were updated to assert runtime-graph behavior and semantic observable outcomes rather than compile-graph internals, reducing test-level coupling to transitional compile accel-graph artifacts.
-  - `fusion_gpu` call-sites now use a shared runtime-first graph helper for fusion introspection, reducing direct compile-graph reads in execution coverage while preserving compatibility fallback inside that helper.
+  - `fusion_gpu` call-sites now use a runtime-only graph helper for fusion introspection (`runtime_accel_graph_for_fusion`), with compile-graph fallback removed and stale-metadata exclusion ratcheted by `fusion_graph_helper_ignores_stale_compile_graph_metadata`.
 
 - Additional Plan 7 heuristic-reduction ratchet:
   - Removed compile-time disjoint-gap, partial-overlap, and covering-span fallbacks in semantic-window node mapping in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs).
