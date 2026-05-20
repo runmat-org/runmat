@@ -27,6 +27,7 @@ const IDENT_UNDEFINED_VARIABLE: &str = "RunMat:UndefinedVariable";
 const IDENT_CLASS_PROPERTY_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassPropertyAttributeConflict";
 const IDENT_CLASS_METHOD_ATTRIBUTE_CONFLICT: &str = "RunMat:ClassMethodAttributeConflict";
 const IDENT_CLASS_ACCESS_VALUE_INVALID: &str = "RunMat:ClassAccessValueInvalid";
+const IDENT_CLASS_SELF_INHERITANCE_INVALID: &str = "RunMat:ClassSelfInheritanceInvalid";
 const IDENT_AGGREGATE_SHAPE_MISMATCH: &str = "RunMat:AggregateShapeMismatch";
 const IDENT_IMPORT_AMBIGUOUS: &str = "RunMat:ImportAmbiguous";
 const IDENT_IMPORT_DUPLICATE: &str = "RunMat:ImportDuplicate";
@@ -666,9 +667,10 @@ impl SemanticCtx {
         span: Span,
     ) -> Result<HirClass, SemanticError> {
         if super_class.is_some_and(|sup| sup == name) {
-            return Err(SemanticError::new(format!(
-                "Class '{name}' cannot inherit from itself"
-            )));
+            return Err(
+                SemanticError::new(format!("Class '{name}' cannot inherit from itself"))
+                    .with_identifier(IDENT_CLASS_SELF_INHERITANCE_INVALID),
+            );
         }
         let class_id = ClassId(self.assembly.classes.len());
         self.assembly.modules[self.module.0].classes.push(class_id);

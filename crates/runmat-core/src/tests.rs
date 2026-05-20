@@ -250,6 +250,22 @@ fn compile_input_reports_isolated_capture_identifier() {
 }
 
 #[test]
+fn compile_input_reports_class_self_inheritance_identifier() {
+    let mut session = RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+    let err = match session.compile_input("classdef A < A; end") {
+        Ok(_) => panic!("class self-inheritance should fail semantic compilation"),
+        Err(err) => err,
+    };
+    let RunError::Semantic(err) = err else {
+        panic!("expected semantic class self-inheritance error");
+    };
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:ClassSelfInheritanceInvalid")
+    );
+}
+
+#[test]
 fn compile_input_resolves_wildcard_import_from_dependency_alias() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let dep_root = tmp.path().join("deps/statslib");

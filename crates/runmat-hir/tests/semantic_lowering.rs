@@ -90,6 +90,17 @@ fn isolated_function_cannot_capture_outer_binding() {
 }
 
 #[test]
+fn class_cannot_inherit_from_itself_identifier_contract() {
+    let ast = runmat_parser::parse("classdef A < A; end").unwrap();
+    let err = lower(&ast, &LoweringContext::empty()).unwrap_err();
+
+    assert_eq!(
+        err.identifier.as_deref(),
+        Some("RunMat:ClassSelfInheritanceInvalid")
+    );
+}
+
+#[test]
 fn shared_input_output_name_reuses_one_binding() {
     let assembly = lower_semantic("function x = bump(x); x = x + 1; end");
     let function = &assembly.functions[0];

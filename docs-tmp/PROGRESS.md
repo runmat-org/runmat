@@ -2107,6 +2107,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- (pending commit) Plan 3 classdef self-inheritance identifier contract ratchet
+  - Added semantic lowering identifier `RunMat:ClassSelfInheritanceInvalid` in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs) for `classdef` self-inheritance rejection (`classdef A < A`).
+  - Added HIR and core contract coverage:
+    - [semantic_lowering.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/tests/semantic_lowering.rs):
+      `class_cannot_inherit_from_itself_identifier_contract`
+    - [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs):
+      `compile_input_reports_class_self_inheritance_identifier`
+  - Validation:
+    - `cargo test -p runmat-hir class_cannot_inherit_from_itself_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-core compile_input_reports_class_self_inheritance_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
