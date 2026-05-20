@@ -101,6 +101,11 @@ impl InterpreterState {
                 let runtime_groups = bytecode.runtime_fusion_groups();
                 let runtime_graph = runtime_accel_graph_for_fusion(&bytecode, &runtime_groups);
                 let accel_graph_ref = runtime_graph.as_ref().or(bytecode.accel_graph.as_ref());
+                let runtime_groups = if let Some(graph) = accel_graph_ref {
+                    bytecode.runtime_fusion_groups_for_graph(graph)
+                } else {
+                    runtime_groups
+                };
                 prepare_fusion_plan(
                     accel_graph_ref,
                     &runtime_groups,

@@ -1,3 +1,5 @@
+#[cfg(feature = "native-accel")]
+use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
 use crate::bytecode::instr::Instr;
 use crate::layout::VmAssemblyLayout;
 #[cfg(feature = "native-accel")]
@@ -340,6 +342,18 @@ impl Bytecode {
                 stack_layout: None,
             })
             .collect()
+    }
+
+    #[cfg(feature = "native-accel")]
+    pub fn runtime_fusion_groups_for_graph(&self, graph: &AccelGraph) -> Vec<FusionGroup> {
+        let mut groups = self.runtime_fusion_groups();
+        if groups.is_empty() {
+            return groups;
+        }
+        if groups.iter().any(|group| group.stack_layout.is_none()) {
+            annotate_fusion_groups_with_stack_layout(&self.instructions, graph, &mut groups);
+        }
+        groups
     }
 }
 

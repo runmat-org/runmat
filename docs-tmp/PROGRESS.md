@@ -1404,6 +1404,12 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `runtime_accel_graph_is_not_materialized_when_runtime_groups_are_empty`
   - Validation: `cargo test -p runmat-vm runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing -- --nocapture`, `cargo test -p runmat-vm runtime_accel_graph_is_not_materialized_when_runtime_groups_are_empty -- --nocapture`, `cargo test -p runmat-vm runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty -- --nocapture`, `cargo check -p runmat-vm --features native-accel`.
 
+- (pending commit) Plan 7 runtime stack-layout annotation for semantic fallback groups
+  - Added `Bytecode::runtime_fusion_groups_for_graph` in `crates/runmat-vm/src/bytecode/program.rs`, which applies `annotate_fusion_groups_with_stack_layout` to runtime-selected fusion groups when a graph is available.
+  - Interpreter runtime planning now uses that graph-aware helper in `crates/runmat-vm/src/interpreter/state.rs` before `prepare_fusion_plan`, so semantic-window fallback groups can carry stack-layout metadata rather than only compile-populated groups.
+  - This keeps runtime fallback semantics aligned with stack-layout-sensitive fusion planning behavior and further reduces compile-group dependence.
+  - Validation: `cargo test -p runmat-vm runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing -- --nocapture`, `cargo test -p runmat-vm runtime_fusion_groups_fallback_to_semantic_windows_when_bytecode_groups_are_empty -- --nocapture`, `cargo test -p runmat-vm primary_compile_emits_semantic_window_scaffolds_and_runtime_plan_reconciles_nodes -- --nocapture`, `cargo check -p runmat-vm --features native-accel`.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
