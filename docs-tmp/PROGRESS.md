@@ -6,6 +6,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 ## Latest Committed Slices (2026-05-19)
 
+- (pending commit) Plan 3/4 async runtime-model contract ratchet for direct async calls
+  - Added core async interaction coverage in [async_stdin.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/async_stdin.rs):
+    - `async_call_without_await_or_spawn_triggers_input_handler_in_current_model`
+  - Contract: in the current runtime model, direct async function calls execute eagerly and trigger interactive handlers even without `await`/`spawn`; this behavior is now explicit and regression-guarded while the broader async/future runtime-model gap remains tracked.
+  - Validation:
+    - `cargo test -p runmat-core --test async_stdin async_call_without_await_or_spawn_triggers_input_handler_in_current_model -- --nocapture`
+
 - (pending commit) Plan 6/7 slice-assignment unsupported-base identifier ratchet
   - VM interpreter slice-assignment dispatch in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now emits stable `RunMat:SliceNonTensor` identifiers for unsupported base types in both `StoreSlice` and `StoreSliceExpr` paths instead of message-only runtime errors.
   - Added VM semantic regression coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):

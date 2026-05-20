@@ -55,7 +55,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - core async integration coverage now asserts spawned-handle consumption semantics directly in [integration.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/integration.rs) (`test_spawn_handle_is_consumed_after_await`): first await succeeds with value readback, second await on same handle fails with stable runtime identifier `RunMat:AwaitOperandInvalid`.
   - runtime callback builtins now normalize unresolved external callback identities to `RunMat:UndefinedFunction` for both `cellfun` and `arrayfun` in [cellfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/cells/core/cellfun.rs) and [arrayfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs), with direct unresolved external-handle coverage in builtin tests and core session diagnostic-path coverage in [tests.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/src/tests.rs).
 - Gap:
-  - designed gaps still open (async/future/spawn runtime model, aggregate edge behavior, remaining selector-plan normalization).
+  - designed gaps still open (async/future/spawn runtime model and aggregate edge behavior; selector-plan normalization gap has narrowed with recent identifier ratchets).
 
 ### 4) Manifest-driven composition/entrypoints (`met`)
 
@@ -333,6 +333,7 @@ This audit maps the active objective to concrete repository evidence and marks e
 ### 7) Validation cadence (`met` for current slices)
 
 - Latest executed gates:
+  - `cargo test -p runmat-core --test async_stdin async_call_without_await_or_spawn_triggers_input_handler_in_current_model -- --nocapture`
   - `cargo test -p runmat-vm string_slice_assignment_on_scalar_string_reports_slice_non_tensor -- --nocapture`
   - `cargo test -p runmat-vm --test spawn_semantic_lifecycle -- --nocapture`
   - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
@@ -377,6 +378,9 @@ This audit maps the active objective to concrete repository evidence and marks e
   - `git diff --check`
 
 - Additional contract-hardening ratchet:
+  - Core async interaction coverage now explicitly ratchets direct async-call behavior in the current runtime model via [async_stdin.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-core/tests/async_stdin.rs):
+    - `async_call_without_await_or_spawn_triggers_input_handler_in_current_model`
+  - This makes the eager direct-async-call behavior explicit and test-guarded while the broader lazy-future model gap remains tracked under section `### 3`.
   - VM slice-assignment unsupported-base error surfaces in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now emit stable `RunMat:SliceNonTensor` identifiers for both `StoreSlice` and `StoreSliceExpr` paths instead of message-only errors.
   - VM semantic regression coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs) now ratchets this contract via `string_slice_assignment_on_scalar_string_reports_slice_non_tensor`.
   - Converted two VM tests in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) from message-substring assertions to identifier assertions:
@@ -426,4 +430,4 @@ Highest-impact unresolved areas:
 
 1. Final Plan 7 closeout audit is still incomplete: we need end-to-end proof that no active production fusion entrypoint reintroduces compile-time node assignment or compile-graph preference after recent runtime-graph ownership changes.
 2. Objective sections marked `partial` remain open outside Plan 7 fusion details, especially broad semantic-pipeline consumer migration evidence (`### 1`) and MATLAB-semantics edge gaps called out in `### 3`.
-3. Unified nominal class/builtin metadata (`### 5`) still requires explicit closeout evidence beyond current ratchet coverage before the global objective can be marked achieved.
+3. Validation cadence is green for current slices, but full objective closeout still requires a consolidated end-to-end gate run tied explicitly to all remaining `partial` sections before marking the goal achieved.

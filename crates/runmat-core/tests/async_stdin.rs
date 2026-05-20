@@ -306,3 +306,47 @@ fn spawn_error_stops_later_spawn_from_running() -> Result<()> {
     );
     Ok(())
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn async_call_without_await_or_spawn_triggers_input_handler_in_current_model() -> Result<()> {
+    let _test_guard = test_mutex().lock().unwrap();
+    let _guard = InteractiveGuard::new();
+    let mut session = RunMatSession::with_options(false, false)?;
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let prompts_clone = Arc::clone(&prompts);
+    session.install_async_input_handler(move |request: InputRequest| {
+        let prompts_clone = Arc::clone(&prompts_clone);
+        async move {
+            prompts_clone.lock().unwrap().push(request.prompt.clone());
+            Ok(InputResponse::Line("11".into()))
+        }
+    });
+
+    let result = block_on(session.execute(
+        "async function y = asks(); input('lazy: '); y = 1; end; \
+         fut = asks(); marker = 9;",
+    ))
+    .map_err(anyhow::Error::new)?;
+    assert!(
+        result.error.is_none(),
+        "direct async call should not raise runtime errors in current runtime model"
+    );
+    assert_eq!(
+        result.stdin_events.len(),
+        1,
+        "direct async call currently executes eagerly and triggers interaction"
+    );
+    assert_eq!(
+        prompts.lock().unwrap().as_slice(),
+        &["lazy: "],
+        "direct async call should forward prompt through input handler"
+    );
+
+    let marker = block_on(session.execute("marker")).map_err(anyhow::Error::new)?;
+    let marker_value = marker
+        .value
+        .expect("marker readback should produce a value");
+    assert_eq!(value_as_f64(&marker_value), Some(9.0));
+    Ok(())
+}
