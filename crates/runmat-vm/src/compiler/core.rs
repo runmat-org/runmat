@@ -111,6 +111,8 @@ const IDENT_MIR_BUILTIN_UNKNOWN: &str = "RunMat:MirBuiltinUnknown";
 const IDENT_MIR_NUMBER_LITERAL_INVALID: &str = "RunMat:MirNumberLiteralInvalid";
 const IDENT_MIR_CONSTANT_UNKNOWN: &str = "RunMat:MirConstantUnknown";
 const IDENT_MIR_FUNCTION_HANDLE_NAME_MISSING: &str = "RunMat:MirFunctionHandleNameMissing";
+const IDENT_MIR_FUNCTION_HANDLE_TARGET_UNSUPPORTED: &str =
+    "RunMat:MirFunctionHandleTargetUnsupported";
 const IDENT_MIR_CALL_FALLBACK_POLICY_UNSUPPORTED: &str = "RunMat:MirCallFallbackPolicyUnsupported";
 const IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED: &str =
     "RunMat:MirMethodFallbackPolicyUnsupported";
@@ -2800,11 +2802,15 @@ impl Compiler {
         target: &CallableIdentity,
     ) -> Result<(), CompileError> {
         match target {
+            CallableIdentity::Method(_) => Err(self
+                .compile_error(
+                    "method function-handle lowering requires explicit semantic/defpath ABI",
+                )
+                .with_identifier(IDENT_MIR_FUNCTION_HANDLE_TARGET_UNSUPPORTED)),
             CallableIdentity::Builtin(_)
             | CallableIdentity::DynamicName(_)
             | CallableIdentity::ExternalName(_)
-            | CallableIdentity::Imported(_)
-            | CallableIdentity::Method(_) => {
+            | CallableIdentity::Imported(_) => {
                 let name = self.mir_runtime_name_callee(target).ok_or_else(|| {
                     self.compile_error(format!(
                         "missing runtime name for function handle target {target:?}"
@@ -2813,9 +2819,7 @@ impl Compiler {
                 })?;
                 if matches!(
                     target,
-                    CallableIdentity::ExternalName(_)
-                        | CallableIdentity::Imported(_)
-                        | CallableIdentity::Method(_)
+                    CallableIdentity::ExternalName(_) | CallableIdentity::Imported(_)
                 ) {
                     self.emit(Instr::CreateExternalFunctionHandle(name));
                 } else {

@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Method function-handle MIR targets now fail fast as unsupported ABI instead of degrading to external-name bytecode
+  - `scope: in-scope`
+  - `blocker: MIR function-handle lowering still converted `CallableIdentity::Method` into `CreateExternalFunctionHandle(...)`, which leaked under-specified method-handle ABI through runtime name-shaped dispatch instead of an explicit compiler-product contract.`
+  - Tightened compile invariant in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - method function-handle targets now fail at compile boundaries with `RunMat:MirFunctionHandleTargetUnsupported`.
+    - textual runtime-name derivation remains only for builtin/dynamic/external/imported handle targets.
+  - Added ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_method_function_handle_target_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_method_function_handle_target_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Cell paren scalar-selector normalization now rejects non-positive indices at selector materialization
   - `scope: in-scope`
   - `blocker: non-tensor cell paren selector materialization (`build_cell_scalar_selectors`) still converted non-positive scalar selectors to sentinel zero values before plan construction, leaving an avoidable normalization seam in selector planning.`

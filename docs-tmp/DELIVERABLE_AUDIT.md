@@ -121,16 +121,18 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `RunMat:MirMethodCallCalleeInvalid` for internal method-call static-callee invariants.
     - `RunMat:MirNumberLiteralInvalid` for invalid MIR numeric literal payloads.
     - `RunMat:MirConstantUnknown` for unknown MIR symbolic constants.
-    - `RunMat:MirFunctionHandleNameMissing` for malformed/unnamable external/imported/method function-handle targets at VM compile boundaries.
+    - `RunMat:MirFunctionHandleNameMissing` for malformed/unnamable external/imported function-handle targets at VM compile boundaries.
+    - `RunMat:MirFunctionHandleTargetUnsupported` for unsupported method function-handle targets at VM compile boundaries (explicit ABI invariant until typed method-handle semantic identity exists).
   - VM function-handle compile lowering now enforces one strict textual-name policy for all textual handle identities in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
-    - `Builtin`, `DynamicName`, `ExternalName`, `Imported`, and `Method` targets now derive runtime names through `strict_callable_display_name(...)` before instruction emission.
+    - `Builtin`, `DynamicName`, `ExternalName`, and `Imported` targets now derive runtime names through `strict_callable_display_name(...)` before instruction emission.
+    - `Method` function-handle targets now reject at compile time with `RunMat:MirFunctionHandleTargetUnsupported` instead of lowering to generic external-handle bytecode.
     - empty builtin/dynamic handle names now reject at compile time with `RunMat:MirFunctionHandleNameMissing` instead of emitting empty runtime handles.
     - single-segment `ExternalName` handle targets now reject at compile time with `RunMat:MirFunctionHandleNameMissing` (external identities must be qualified to remain on external-handle lowering paths).
     - `Imported` handle targets with empty `DefPath.item` now reject at compile time with `RunMat:MirFunctionHandleNameMissing`.
     - compile-level ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
       - `primary_compile_rejects_empty_dynamic_function_handle_name_with_identifier`
       - `primary_compile_rejects_empty_builtin_function_handle_name_with_identifier`
-      - `primary_compile_rejects_empty_method_function_handle_name_with_identifier`
+      - `primary_compile_rejects_method_function_handle_target_with_identifier`
       - `primary_compile_rejects_empty_imported_module_function_handle_name_with_identifier`
       - `primary_compile_rejects_single_segment_external_function_handle_name_with_identifier`
       - `primary_compile_rejects_imported_function_handle_missing_item_with_identifier`
