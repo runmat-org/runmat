@@ -1340,19 +1340,6 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         call_by_identity(identity, fallback_policy, args, requested_outputs).await
     }
 
-    async fn call_external_by_name(
-        name: &str,
-        args: &[Value],
-        requested_outputs: usize,
-    ) -> crate::BuiltinResult<Value> {
-        call_by_identity(
-            external_callable_identity_for_name(name),
-            runmat_hir::CallableFallbackPolicy::ExternalBoundary,
-            args,
-            requested_outputs,
-        )
-        .await
-    }
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(1);
 
     match f {
@@ -1410,9 +1397,7 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             }
         }
         Value::FunctionHandle(name) => call_by_name(&name, &rest, requested_outputs).await,
-        Value::ExternalFunctionHandle(name) => {
-            call_external_by_name(&name, &rest, requested_outputs).await
-        }
+        Value::ExternalFunctionHandle(name) => call_by_name(&name, &rest, requested_outputs).await,
         Value::SemanticFunctionHandle { name, function } => {
             let request = crate::user_functions::SemanticCallableRequest::semantic(
                 function,
@@ -2028,6 +2013,29 @@ mod tests {
             err.message().contains("missing.external"),
             "unexpected error: {err:?}"
         );
+    }
+
+    #[test]
+    fn feval_single_segment_external_function_handle_uses_runtime_name_resolution() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_target").then_some(4501)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 4501);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(12.0)) })
+            }),
+        ));
+
+        let result = block_on(feval_builtin(
+            Value::ExternalFunctionHandle("resolved_target".to_string()),
+            vec![Value::Num(4.0)],
+        ))
+        .expect("single-segment external function handle should use runtime-name resolution");
+        assert_eq!(result, Value::Num(12.0));
     }
 
     #[test]

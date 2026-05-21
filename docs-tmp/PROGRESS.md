@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime `feval` external-handle dispatch now shares strict typed name classification
+  - `scope: in-scope`
+  - `blocker: runtime `feval_builtin(...)` still forced `Value::ExternalFunctionHandle(name)` through external-boundary dispatch (`call_external_by_name`), so single-segment external handles bypassed shared runtime-name resolution semantics used by typed callable descriptors and could not resolve via semantic runtime-name policy.`
+  - Tightened runtime `feval` dispatch in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `Value::ExternalFunctionHandle(name)` now routes through shared `call_by_name(...)` classification.
+    - well-formed qualified names still classify as external-boundary identities.
+    - single-segment names now classify as dynamic runtime-name identities and can resolve via semantic runtime-name policy.
+  - Added ratchet:
+    - `feval_single_segment_external_function_handle_uses_runtime_name_resolution`
+  - Validation:
+    - `cargo test -p runmat-runtime feval_single_segment_external_function_handle_uses_runtime_name_resolution -- --nocapture`
+    - `cargo test -p runmat-runtime feval_external_function_handle_errors_when_unresolved -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - External-function-handle descriptor classification now shares strict typed target resolution
   - `scope: in-scope`
   - `blocker: `CallableDescriptor::from_feval_value(...)` still special-cased `Value::ExternalFunctionHandle` into external-boundary identity even for malformed/single-segment names, leaving a callable-ABI seam where non-qualified handle names could bypass shared runtime-name resolution semantics.`

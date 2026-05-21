@@ -312,6 +312,12 @@ This audit maps the active objective to concrete repository evidence and marks e
     - direct ratchets:
       - `malformed_qualified_external_function_handle_remains_dynamic_name`
       - `single_segment_external_function_handle_uses_runtime_name_resolution`
+  - runtime `feval` now mirrors this external-handle classification boundary in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `Value::ExternalFunctionHandle(name)` routes through shared `call_by_name(...)` classification instead of fixed external-boundary dispatch.
+    - single-segment handle names now participate in runtime-name semantic resolution while unresolved qualified names remain explicit undefined-function failures.
+    - direct ratchets:
+      - `feval_single_segment_external_function_handle_uses_runtime_name_resolution`
+      - `feval_external_function_handle_errors_when_unresolved`
 - Gap:
   - designed gaps still open (selector-plan normalization and callable/assignment ABI cleanup have narrowed with compile/runtime invariant identifiers/ratchets). Struct/object aggregate-literal work remains a forward design track rather than an active migration blocker because current parser/HIR/MIR surfaces only tensor/cell aggregate forms. Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 
