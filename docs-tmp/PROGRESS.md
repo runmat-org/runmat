@@ -20,8 +20,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Added runtime ratchets in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
     - `call_method_rejects_non_object_receiver_with_identifier`
     - `call_method_rejects_empty_method_name_with_identifier`
+  - Added VM end-to-end ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `object_getmethod_instance_method_handle_direct_call_executes`
+    - `call_method_empty_name_errors_with_identifier_contract`
+    - `call_method_nonobject_receiver_errors_with_identifier_contract`
   - Validation:
     - `cargo test -p runmat-runtime call_method_ -- --nocapture`
+    - `cargo test -p runmat-vm object_getmethod_instance_method_handle_direct_call_executes -- --nocapture`
+    - `cargo test -p runmat-vm call_method_empty_name_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm call_method_nonobject_receiver_errors_with_identifier_contract -- --nocapture`
     - `cargo test -p runmat-vm unresolved_qualified_direct_call_ -- --nocapture`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo fmt --all --check`

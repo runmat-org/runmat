@@ -1509,6 +1509,31 @@ fn classref_getmethod_static_method_handle_direct_call_executes() {
 }
 
 #[test]
+fn object_getmethod_instance_method_handle_direct_call_executes() {
+    let program = "__register_test_classes(); c = new_object('Circle'); c = setfield(c,'r', 2); h = getmethod(c, 'area'); a = h();";
+    let vars = execute_semantic_source(program);
+    assert!(vars.iter().any(
+        |v| matches!(v, runmat_builtins::Value::Num(n) if (*n - std::f64::consts::PI * 4.0).abs() < 1e-9)
+    ));
+}
+
+#[test]
+fn call_method_empty_name_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result(
+        "__register_test_classes(); p = new_object('Point'); call_method(p, '   ');",
+    )
+    .expect_err("empty call_method name should fail");
+    assert_eq!(err.identifier(), Some("RunMat:CallMethodNameInvalid"));
+}
+
+#[test]
+fn call_method_nonobject_receiver_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("call_method(1, 'origin');")
+        .expect_err("non-object call_method receiver should fail");
+    assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
+}
+
+#[test]
 fn import_precedence_specific_over_wildcard_and_locals() {
     // Specific imports should take precedence over wildcard imports; locals should shadow both
     let program = r#"
