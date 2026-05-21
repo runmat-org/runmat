@@ -528,7 +528,9 @@ fn events() -> &'static Mutex<EventRegistry> {
 
 pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Value) -> Value {
     fn resolve_text_handle(text: &str) -> Option<Value> {
-        let name = text.strip_prefix('@')?;
+        let trimmed = text.trim();
+        let rest = trimmed.strip_prefix('@')?;
+        let name = rest.trim();
         if name.is_empty() {
             return None;
         }

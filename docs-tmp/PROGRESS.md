@@ -5269,6 +5269,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: normalize callback text-handle whitespace canonicalization
+  - Runtime callback canonicalization in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now trims surrounding whitespace before `@`-handle parsing in `canonicalize_callback_handle_for_semantic_resolution(...)`.
+  - This closes a name-shaped callback seam where resolver-known text handles with surrounding whitespace were not prebound to semantic handles during callback canonicalization.
+  - Added optimization callback ratchets in [common.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/math/optim/common.rs):
+    - `callback_handle_canonicalizer_trims_text_handle_when_resolved`
+    - `callback_handle_canonicalizer_trims_string_array_text_handle_when_resolved`
+    - `callback_handle_canonicalizer_trims_char_text_handle_when_resolved`
+  - Validation:
+    - `cargo test -p runmat-runtime callback_handle_canonicalizer_trims_text_handle_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime callback_handle_canonicalizer_trims_string_array_text_handle_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime callback_handle_canonicalizer_trims_char_text_handle_when_resolved -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

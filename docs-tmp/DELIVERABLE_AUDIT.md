@@ -110,6 +110,11 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `feval_rejects_empty_at_string_handle_with_identifier`
       - `feval_rejects_empty_function_handle_value_with_identifier`
       - `feval_trims_text_handle_name_for_resolution`
+  - runtime callback canonicalization now trims surrounding whitespace on text `@` handles before semantic resolver prebinding in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs), extending callback-name normalization consistency across string/string-array/char handle forms.
+    - direct ratchets in [common.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/math/optim/common.rs):
+      - `callback_handle_canonicalizer_trims_text_handle_when_resolved`
+      - `callback_handle_canonicalizer_trims_string_array_text_handle_when_resolved`
+      - `callback_handle_canonicalizer_trims_char_text_handle_when_resolved`
   - VM source-level `isfield` string-array semantics now have direct contract coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) (`struct_isfield_string_array_names`), asserting matrix-shaped logical result semantics (`shape [2,2]`, column-major logical data `[1,0,0,1]`) instead of a placeholder scalar proxy.
   - VM cell aggregate member-assignment now carries stable identifier coverage for RHS shape mismatch in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs): `RunMat:CellMemberRhsShapeMismatch` (`assign_cell_member_rejects_shape_mismatch_cell_rhs`).
   - VM static-property missing-name semantic coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) now asserts stable `RunMat:UndefinedVariable` identifier (`unqualified_static_property_without_imports_errors`) instead of message-text proxy checks.
