@@ -141,3 +141,17 @@ fn range_step_selector_rejects_non_numeric_value() {
         .expect_err("non-numeric range step selector should fail");
     assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
 }
+
+#[test]
+fn scalar_store_index_rejects_negative_index() {
+    let err = execute_semantic_source("A=[1,2,3]; A(-1)=0;")
+        .expect_err("negative scalar store index should fail");
+    assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+}
+
+#[test]
+fn scalar_store_index_rejects_zero_index() {
+    let err = execute_semantic_source("A=[1,2,3]; A(0)=0;")
+        .expect_err("zero scalar store index should fail");
+    assert_eq!(err.identifier(), Some("RunMat:IndexOutOfBounds"));
+}

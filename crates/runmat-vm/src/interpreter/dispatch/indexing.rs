@@ -939,7 +939,13 @@ pub async fn dispatch_indexing(
                         "StoreIndex requires scalar indices; use StoreSlice for vector, range, or logical indices",
                     )
                 })?;
-                indices.push(if idx_val <= 0 { 0 } else { idx_val as usize });
+                if idx_val < 1 {
+                    return Err(crate::interpreter::errors::mex(
+                        "IndexOutOfBounds",
+                        "Index out of bounds",
+                    ));
+                }
+                indices.push(idx_val as usize);
             }
             indices.reverse();
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(

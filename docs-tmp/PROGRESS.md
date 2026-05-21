@@ -20,6 +20,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - added shared `range_selector_scalar_to_f64(...)` conversion that accepts only numeric scalar shapes (`Num`/`Int`/scalar tensor/scalar gathered GPU tensor) and rejects non-numeric range start/step operands as `RunMat:UnsupportedIndexType`.
     - removed read-path fallback coercions that previously converted malformed range start/step operands to `1.0`.
     - unified store-path range start/step conversion on the same typed scalar boundary instead of open `try_into()` string errors.
+    - removed `StoreIndex` non-positive scalar-index clamping (`<= 0 -> 0`) so scalar store indices now fail directly with `RunMat:IndexOutOfBounds` instead of silently normalizing invalid indices before assignment/object dispatch.
   - Added ratchets:
     - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
       - `validate_expr_range_step_metadata_rejects_mismatched_arity`
@@ -27,9 +28,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/indexing.rs):
       - `range_start_selector_rejects_non_numeric_value`
       - `range_step_selector_rejects_non_numeric_value`
+      - `scalar_store_index_rejects_negative_index`
+      - `scalar_store_index_rejects_zero_index`
   - Validation:
     - `cargo test -p runmat-vm range_start_selector_rejects_non_numeric_value -- --nocapture`
     - `cargo test -p runmat-vm range_step_selector_rejects_non_numeric_value -- --nocapture`
+    - `cargo test -p runmat-vm scalar_store_index_rejects_negative_index -- --nocapture`
+    - `cargo test -p runmat-vm scalar_store_index_rejects_zero_index -- --nocapture`
     - `cargo test -p runmat-vm --lib validate_expr_range_step_metadata_rejects_mismatched_arity -- --nocapture`
     - `cargo test -p runmat-vm --lib range_selector_scalar_to_f64_rejects_non_numeric_scalar -- --nocapture`
     - `cargo fmt --all`
