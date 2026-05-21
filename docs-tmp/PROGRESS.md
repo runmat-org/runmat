@@ -55,6 +55,13 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-runtime getmethod_ -- --nocapture`
     - `cargo test -p runmat-vm classref_getmethod_static_method_handle_executes -- --nocapture`
 
+- VM unresolved expanded dynamic-call single-output error-surface ratchet
+  - `scope: in-scope`
+  - Tightened unresolved expanded dynamic-call contract so single-output path asserts runtime identifier, not just instruction shape:
+    - [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) `unresolved_function_expand_single_output_uses_typed_instruction` now asserts `RunMat:UndefinedFunction` at execution boundary.
+  - Validation:
+    - `cargo test -p runmat-vm unresolved_function_expand_single_output_uses_typed_instruction -- --nocapture`
+
 - VM DefPath/static-method function-handle direct-call ratchet
   - `scope: in-scope`
   - Closed a callable ABI coverage gap where imported/qualified static-method function handles were ratcheted only through `feval(...)` callsites:

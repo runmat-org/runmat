@@ -1798,6 +1798,9 @@ fn unresolved_function_expand_single_output_uses_typed_instruction() {
             && specs[0].is_expand
             && specs[0].expand_all
     )));
+
+    let err = interpret(&bytecode).expect_err("unresolved expanded call should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 
 #[test]
