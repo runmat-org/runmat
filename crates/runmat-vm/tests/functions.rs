@@ -1301,6 +1301,63 @@ fn semantic_cell_member_store_back_executes() {
 }
 
 #[test]
+fn semantic_indexed_cell_member_vector_store_back_lowers_to_slice_instruction() {
+    let source = "C = {struct('a', [10 20 30 40])}; idx = [2 4]; C{1}.a(idx) = 99; y = C{1}.a(4);";
+    let bytecode =
+        compile_semantic_source(source).expect("compile indexed cell member vector store");
+    assert!(
+        bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreSlice(..)
+                | runmat_vm::Instr::StoreSliceDelete(..)
+                | runmat_vm::Instr::StoreSliceExpr { .. }
+                | runmat_vm::Instr::StoreSliceExprDelete { .. }
+        )),
+        "indexed cell-member vector assignment should lower through StoreSlice*"
+    );
+    assert!(
+        !bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreIndex(_) | runmat_vm::Instr::StoreIndexDelete(_)
+        )),
+        "indexed cell-member vector assignment should not lower through StoreIndex*"
+    );
+    let vars = interpret(&bytecode).expect("execute indexed cell member vector store");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
+}
+
+#[test]
+fn semantic_indexed_cell_member_logical_store_back_lowers_to_slice_instruction() {
+    let source =
+        "C = {struct('a', [1 2 3 4])}; mask = logical([1 0 1 0]); C{1}.a(mask) = 0; y = C{1}.a(3);";
+    let bytecode =
+        compile_semantic_source(source).expect("compile indexed cell member logical store");
+    assert!(
+        bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreSlice(..)
+                | runmat_vm::Instr::StoreSliceDelete(..)
+                | runmat_vm::Instr::StoreSliceExpr { .. }
+                | runmat_vm::Instr::StoreSliceExprDelete { .. }
+        )),
+        "indexed cell-member logical assignment should lower through StoreSlice*"
+    );
+    assert!(
+        !bytecode.instructions.iter().any(|instr| matches!(
+            instr,
+            runmat_vm::Instr::StoreIndex(_) | runmat_vm::Instr::StoreIndexDelete(_)
+        )),
+        "indexed cell-member logical assignment should not lower through StoreIndex*"
+    );
+    let vars = interpret(&bytecode).expect("execute indexed cell member logical store");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
+}
+
+#[test]
 fn empty_array_member_assignment_assigns_empty_value() {
     let bytecode = compile_semantic_source(
         "s = struct('x', {1, 2}); s(2).x = []; t = s(2); y = getfield(t, 'x');",
