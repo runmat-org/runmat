@@ -1288,14 +1288,15 @@ fn classes_static_and_inheritance() {
 }
 
 #[test]
-fn static_method_via_classref_uses_namespaced_builtin_without_class_registry() {
-    let vars = execute_semantic_source("P = classref(\"Point\").origin(); point_class = class(P);");
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
-    assert!(vars
-        .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "Point")));
+fn static_method_via_classref_without_class_registry_is_unresolved() {
+    let err = execute_semantic_source_result("P = classref(\"Point\").origin();")
+        .expect_err("classref static call should be unresolved without class registration");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
 }
 
 #[cfg(any(feature = "test-classes", test))]
