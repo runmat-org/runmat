@@ -12,6 +12,32 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM expr-slice range-selector scalar/type and metadata arity hardening
+  - `scope: in-scope`
+  - `blocker: IndexSliceExpr range selector decoding accepted non-numeric start/step operands by silently coercing them to `1.0`, and both expr-slice read/write paths indexed `range_has_step` without explicit arity validation against `range_dims`, leaving malformed metadata to panic instead of failing with typed selector-plan identifiers.`
+  - Hardened expr-slice range operand + metadata contracts in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - added `validate_expr_range_step_metadata(...)` guard for `IndexSliceExpr`/`StoreSliceExpr` to reject inconsistent `range_dims` vs `range_has_step` metadata as `RunMat:InvalidRangeSelectorPlan`.
+    - added shared `range_selector_scalar_to_f64(...)` conversion that accepts only numeric scalar shapes (`Num`/`Int`/scalar tensor/scalar gathered GPU tensor) and rejects non-numeric range start/step operands as `RunMat:UnsupportedIndexType`.
+    - removed read-path fallback coercions that previously converted malformed range start/step operands to `1.0`.
+    - unified store-path range start/step conversion on the same typed scalar boundary instead of open `try_into()` string errors.
+  - Added ratchets:
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+      - `validate_expr_range_step_metadata_rejects_mismatched_arity`
+      - `range_selector_scalar_to_f64_rejects_non_numeric_scalar`
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/indexing.rs):
+      - `range_start_selector_rejects_non_numeric_value`
+      - `range_step_selector_rejects_non_numeric_value`
+  - Validation:
+    - `cargo test -p runmat-vm range_start_selector_rejects_non_numeric_value -- --nocapture`
+    - `cargo test -p runmat-vm range_step_selector_rejects_non_numeric_value -- --nocapture`
+    - `cargo test -p runmat-vm --lib validate_expr_range_step_metadata_rejects_mismatched_arity -- --nocapture`
+    - `cargo test -p runmat-vm --lib range_selector_scalar_to_f64_rejects_non_numeric_scalar -- --nocapture`
+    - `cargo fmt --all`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - HIR callable fallback-policy imported-identity shape ratchet
   - `scope: in-scope`
   - `blocker: fallback-policy gating for `CallableIdentity::Imported` accepted runtime-name resolution and VM name-fallback eligibility without requiring a well-formed imported function path, leaving malformed imported identities policy-eligible even when compile/runtime handle-shape invariants rejected them.`

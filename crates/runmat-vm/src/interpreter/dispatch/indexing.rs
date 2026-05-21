@@ -77,6 +77,40 @@ async fn linear_index_values_to_f64(values: &[Value]) -> Result<Vec<f64>, Runtim
     Ok(out)
 }
 
+async fn range_selector_scalar_to_f64(value: &Value) -> Result<f64, RuntimeError> {
+    let mut scalar = value.clone();
+    if matches!(scalar, Value::GpuTensor(_)) {
+        scalar = runmat_runtime::dispatcher::gather_if_needed_async(&scalar).await?;
+    }
+    match scalar {
+        Value::Num(n) => Ok(n),
+        Value::Int(i) => Ok(i.to_f64()),
+        Value::Tensor(t)
+            if t.data.len() == 1
+                && runmat_runtime::builtins::common::shape::is_scalar_shape(&t.shape) =>
+        {
+            Ok(t.data[0])
+        }
+        _ => Err(crate::interpreter::errors::mex(
+            "UnsupportedIndexType",
+            "Range selector operands must be numeric scalars",
+        )),
+    }
+}
+
+fn validate_expr_range_step_metadata(
+    range_dims: &[usize],
+    range_has_step: &[bool],
+) -> Result<(), RuntimeError> {
+    if range_dims.len() != range_has_step.len() {
+        return Err(crate::interpreter::errors::mex(
+            "InvalidRangeSelectorPlan",
+            "inconsistent range step metadata",
+        ));
+    }
+    Ok(())
+}
+
 fn assign_scalar_struct_index(
     _base: runmat_builtins::StructValue,
     indices: &[usize],
@@ -1402,6 +1436,7 @@ pub async fn dispatch_indexing(
             range_end_exprs,
             end_numeric_exprs,
         } => {
+            validate_expr_range_step_metadata(range_dims, range_has_step)?;
             let mut numeric: Vec<Value> = Vec::with_capacity(*numeric_count);
             for _ in 0..*numeric_count {
                 numeric.push(stack.pop().ok_or(crate::interpreter::errors::mex(
@@ -1418,12 +1453,7 @@ pub async fn dispatch_indexing(
                         "StackUnderflow",
                         "stack underflow",
                     ))?;
-                    match v {
-                        Value::Num(n) => n,
-                        Value::Int(i) => i.to_f64(),
-                        Value::Tensor(t) if !t.data.is_empty() => t.data[0],
-                        _ => 1.0,
-                    }
+                    range_selector_scalar_to_f64(&v).await?
                 } else {
                     1.0
                 };
@@ -1431,12 +1461,7 @@ pub async fn dispatch_indexing(
                     "StackUnderflow",
                     "stack underflow",
                 ))?;
-                let start = match v {
-                    Value::Num(n) => n,
-                    Value::Int(i) => i.to_f64(),
-                    Value::Tensor(t) if !t.data.is_empty() => t.data[0],
-                    _ => 1.0,
-                };
+                let start = range_selector_scalar_to_f64(&v).await?;
                 range_params.push((start, step));
             }
             range_params.reverse();
@@ -1684,6 +1709,7 @@ pub async fn dispatch_indexing(
             range_end_exprs,
             end_numeric_exprs,
         } => {
+            validate_expr_range_step_metadata(range_dims, range_has_step)?;
             let delete = matches!(instr, crate::bytecode::Instr::StoreSliceExprDelete { .. });
             let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
@@ -1693,20 +1719,19 @@ pub async fn dispatch_indexing(
             for i in (0..range_dims.len()).rev() {
                 let has = range_has_step[i];
                 let step = if has {
-                    let v: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
+                    let v = stack.pop().ok_or(crate::interpreter::errors::mex(
                         "StackUnderflow",
                         "stack underflow",
-                    ))?)
-                        .try_into()?;
-                    v
+                    ))?;
+                    range_selector_scalar_to_f64(&v).await?
                 } else {
                     1.0
                 };
-                let st: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
+                let st = stack.pop().ok_or(crate::interpreter::errors::mex(
                     "StackUnderflow",
                     "stack underflow",
-                ))?)
-                    .try_into()?;
+                ))?;
+                let st = range_selector_scalar_to_f64(&st).await?;
                 range_params.push((st, step));
             }
             range_params.reverse();
@@ -1972,7 +1997,8 @@ pub async fn dispatch_indexing(
 mod tests {
     use super::{
         apply_cell_end_exprs_for_base, apply_cell_end_offsets_for_base,
-        apply_end_offsets_to_numeric, map_slice_plan_error, IndexContext,
+        apply_end_offsets_to_numeric, map_slice_plan_error, range_selector_scalar_to_f64,
+        validate_expr_range_step_metadata, IndexContext,
     };
     use crate::bytecode::EndExpr;
     use futures::executor::block_on;
@@ -1992,6 +2018,22 @@ mod tests {
         let mapped = map_slice_plan_error("slice assign", err);
         assert_eq!(mapped.identifier(), None);
         assert_eq!(mapped.message(), "slice assign: plain error");
+    }
+
+    #[test]
+    fn validate_expr_range_step_metadata_rejects_mismatched_arity() {
+        let err = validate_expr_range_step_metadata(&[0, 1], &[true])
+            .expect_err("mismatched range step metadata should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn range_selector_scalar_to_f64_rejects_non_numeric_scalar() {
+        let err = block_on(range_selector_scalar_to_f64(&Value::String(
+            "x".to_string(),
+        )))
+        .expect_err("non-numeric range selector scalar should fail");
+        assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
     }
 
     #[test]

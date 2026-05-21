@@ -127,3 +127,17 @@ fn cell_paren_range_index_returns_cell_subset() {
         "expected D{{1}} and D{{2}} values to be preserved"
     );
 }
+
+#[test]
+fn range_start_selector_rejects_non_numeric_value() {
+    let err = execute_semantic_source("A=1:5; s='x'; y=A(s:end);")
+        .expect_err("non-numeric range start selector should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+}
+
+#[test]
+fn range_step_selector_rejects_non_numeric_value() {
+    let err = execute_semantic_source("A=1:10; st='x'; y=A(1:st:end);")
+        .expect_err("non-numeric range step selector should fail");
+    assert_eq!(err.identifier(), Some("RunMat:UnsupportedIndexType"));
+}

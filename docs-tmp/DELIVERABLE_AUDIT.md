@@ -234,6 +234,14 @@ This audit maps the active objective to concrete repository evidence and marks e
     - interpreter ratchets:
       - `apply_cell_end_offsets_rejects_duplicate_positions`
       - `apply_cell_end_exprs_rejects_duplicate_positions`
+  - non-object expr-slice range scalar decoding now enforces typed numeric-scalar operands for range start/step values and validates step-metadata arity before stack decode:
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now rejects inconsistent `range_dims`/`range_has_step` metadata as `RunMat:InvalidRangeSelectorPlan` and rejects non-numeric range start/step operands as `RunMat:UnsupportedIndexType` via shared `range_selector_scalar_to_f64(...)`.
+    - `IndexSliceExpr` no longer silently coerces malformed range start/step operands to `1.0`.
+    - direct ratchets:
+      - `validate_expr_range_step_metadata_rejects_mismatched_arity`
+      - `range_selector_scalar_to_f64_rejects_non_numeric_scalar`
+      - `range_start_selector_rejects_non_numeric_value`
+      - `range_step_selector_rejects_non_numeric_value`
   - callable method-identity runtime policy now separates semantic resolver lookup from VM named fallback:
     - [hir.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/hir.rs) now keeps `Method` identities eligible for semantic name resolution under `RuntimeNameResolution`, while excluding `Method` from VM named fallback eligibility.
     - [user_functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/user_functions.rs) now resolves semantic descriptor names through `semantic_resolution_name_for(...)` instead of `vm_fallback_name_for(...)`.
