@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM `feval` external-handle semantic binding for qualified registry-known callbacks
+  - `scope: in-scope`
+  - `blocker: qualified `ExternalFunctionHandle` callback values stayed name-shaped until runtime semantic resolver fallback even when the active semantic function registry already had a stable `FunctionId`, leaving an avoidable name-resolution seam in callable descriptor execution.`
+  - Tightened descriptor construction in [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
+    - `CallableDescriptor::from_feval_value(...)` now binds well-formed qualified `Value::ExternalFunctionHandle(name)` values to `CallableIdentity::SemanticFunction` with `CallableFallbackPolicy::None` when `semantic_registry.resolve_name(name)` succeeds.
+    - unresolved/unknown qualified external handles preserve prior `ExternalBoundary` behavior and remain unresolved without semantic identity.
+  - Added ratchet:
+    - [descriptor.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/descriptor.rs):
+      - `feval_external_function_handle_prefers_registry_semantic_identity`
+  - Validation:
+    - `cargo test -p runmat-vm feval_external_function_handle_can_use_semantic_resolver -- --nocapture`
+    - `cargo test -p runmat-vm feval_external_function_handle_prefers_registry_semantic_identity -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM expr-slice range-selector scalar/type and metadata arity hardening
   - `scope: in-scope`
   - `blocker: IndexSliceExpr range selector decoding accepted non-numeric start/step operands by silently coercing them to `1.0`, and both expr-slice read/write paths indexed `range_has_step` without explicit arity validation against `range_dims`, leaving malformed metadata to panic instead of failing with typed selector-plan identifiers.`

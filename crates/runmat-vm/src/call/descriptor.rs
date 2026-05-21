@@ -276,13 +276,26 @@ impl CallableDescriptor {
                     Self::resolve_named_target(&name, semantic_registry);
                 Self::feval_resolved_name(identity, name, fallback_policy, args, requested_outputs)
             }
-            Value::ExternalFunctionHandle(name) => Self::feval_resolved_name(
-                Self::qualified_identity_from_name(&name),
-                name,
-                CallableFallbackPolicy::ExternalBoundary,
-                args,
-                requested_outputs,
-            ),
+            Value::ExternalFunctionHandle(name) => {
+                if Self::is_well_formed_qualified_name(&name) {
+                    if let Some(function) = semantic_registry.resolve_name(&name) {
+                        return Self::feval_semantic(
+                            function.0,
+                            name,
+                            CallableFallbackPolicy::None,
+                            args,
+                            requested_outputs,
+                        );
+                    }
+                }
+                Self::feval_resolved_name(
+                    Self::qualified_identity_from_name(&name),
+                    name,
+                    CallableFallbackPolicy::ExternalBoundary,
+                    args,
+                    requested_outputs,
+                )
+            }
             Value::SemanticFunctionHandle { name, function } => Self::feval_semantic(
                 function,
                 name,
@@ -1019,6 +1032,35 @@ mod tests {
         );
         let value = block_on(execute_callable_descriptor(descriptor))
             .expect("external function handle should resolve through semantic resolver");
+        assert_eq!(value, Value::Num(3.0));
+    }
+
+    #[test]
+    fn feval_external_function_handle_prefers_registry_semantic_identity() {
+        let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(
+            Some(Arc::new(|name| (name == "pkg.remote_inc").then_some(9999))),
+        );
+        let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
+            Some(Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 8181);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(2.0)]);
+                Box::pin(async { Ok(Value::Num(3.0)) })
+            })),
+        );
+        let mut registry = SemanticFunctionRegistry::default();
+        registry
+            .names
+            .insert("pkg.remote_inc".to_string(), FunctionId(8181));
+
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::ExternalFunctionHandle("pkg.remote_inc".to_string()),
+            vec![Value::Num(2.0)],
+            1,
+            &registry,
+        );
+        let value = block_on(execute_callable_descriptor(descriptor))
+            .expect("external handle should prefer registry semantic identity");
         assert_eq!(value, Value::Num(3.0));
     }
 
