@@ -315,6 +315,18 @@ async fn execute_brace_operation(
     raw_indices: &[Value],
     operation: BraceIndexOperation,
 ) -> Result<BraceIndexOutcome, RuntimeError> {
+    if matches!(
+        base,
+        Value::FunctionHandle(_)
+            | Value::ExternalFunctionHandle(_)
+            | Value::SemanticFunctionHandle { .. }
+            | Value::Closure(_)
+    ) {
+        return Err(crate::interpreter::errors::mex(
+            "UnsupportedFunctionHandleSelector",
+            "Function handle call does not support brace selector syntax",
+        ));
+    }
     match operation {
         BraceIndexOperation::ReadSingle => {
             let value = match base {

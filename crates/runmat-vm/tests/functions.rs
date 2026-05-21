@@ -612,6 +612,30 @@ fn function_handle_slice_assignment_selector_errors_with_identifier_contract() {
 }
 
 #[test]
+fn function_handle_brace_selector_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("f = @sin; y = f{1};")
+        .expect_err("function-handle brace selector should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UnsupportedFunctionHandleSelector"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn function_handle_brace_assignment_selector_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("f = @sin; f{1} = 2;")
+        .expect_err("function-handle brace assignment selector should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UnsupportedFunctionHandleSelector"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn nargin_nargout_in_user_functions() {
     // Single-output: nargin/nargout should reflect call site
     let program = r#"

@@ -4552,13 +4552,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
   - Reduced callable/assignment ABI ambiguity for paren-assignment against function-handle values in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
     - `StoreIndex` and `StoreSlice` now reject `FunctionHandle`/`ExternalFunctionHandle`/`SemanticFunctionHandle`/`Closure` assignment-selector paths with stable identifier `RunMat:UnsupportedFunctionHandleSelector`.
     - This removes the previous generic fallback identifiers (`RunMat:IndexAssignmentUnsupportedBase` / `RunMat:SliceNonTensor`) for function-handle assignment selectors and aligns misuse behavior to the dedicated function-handle selector contract.
+    - brace-selector paths now use the same dedicated identifier: `execute_brace_operation(...)` rejects function-handle brace selectors (`f{...}` / `f{...}=...`) with `RunMat:UnsupportedFunctionHandleSelector` instead of generic cell-on-noncell identifiers.
   - Added source-level semantic VM ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `function_handle_scalar_assignment_selector_errors_with_identifier_contract`
     - `function_handle_slice_assignment_selector_errors_with_identifier_contract`
+    - `function_handle_brace_selector_errors_with_identifier_contract`
+    - `function_handle_brace_assignment_selector_errors_with_identifier_contract`
   - Validation:
-    - `cargo test -p runmat-vm function_handle_selector_colon_errors_with_identifier_contract -- --nocapture`
-    - `cargo test -p runmat-vm function_handle_scalar_assignment_selector_errors_with_identifier_contract -- --nocapture`
-    - `cargo test -p runmat-vm function_handle_slice_assignment_selector_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm function_handle_ -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo check --workspace`
