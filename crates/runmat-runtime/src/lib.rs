@@ -1660,7 +1660,11 @@ async fn warning_builtin(fmt: String, rest: Vec<Value>) -> crate::BuiltinResult<
 async fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Value> {
     let method_name = name.trim();
     if method_name.is_empty() {
-        return Err(("getmethod: method name must not be empty".to_string()).into());
+        return Err(
+            build_runtime_error("getmethod method name must not be empty")
+                .with_identifier("RunMat:GetMethodNameInvalid")
+                .build(),
+        );
     }
     match obj {
         Value::Object(o) => {
@@ -1674,7 +1678,11 @@ async fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Val
         Value::ClassRef(cls) => {
             str2func_builtin(Value::String(format!("@{cls}.{method_name}")))
         }
-        other => Err((format!("getmethod unsupported on {other:?}")).into()),
+        other => Err(
+            build_runtime_error(format!("getmethod unsupported on {other:?}"))
+                .with_identifier("RunMat:GetMethodReceiverUnsupported")
+                .build(),
+        ),
     }
 }
 
@@ -1858,7 +1866,14 @@ mod tests {
             "   ".to_string(),
         ))
         .expect_err("empty method name should be rejected");
-        assert!(err.message().contains("method name must not be empty"));
+        assert_eq!(err.identifier(), Some("RunMat:GetMethodNameInvalid"));
+    }
+
+    #[test]
+    fn getmethod_rejects_unsupported_receiver_with_identifier() {
+        let err = block_on(getmethod_builtin(Value::Num(1.0), "origin".to_string()))
+            .expect_err("unsupported receiver should be rejected");
+        assert_eq!(err.identifier(), Some("RunMat:GetMethodReceiverUnsupported"));
     }
 
     #[test]
