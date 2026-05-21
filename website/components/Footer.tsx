@@ -1,14 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
 import { Heart } from "lucide-react";
 import { SiGithub, SiLinkedin, SiX } from "react-icons/si";
 import Image from "next/image";
 import NewsletterCta from "@/components/NewsletterCta";
 
 export default function Footer() {
-  const currentYear = useMemo(() => new Date().getFullYear(), []);
+  const currentYear = new Date().getUTCFullYear();
 
   return (
     <footer className="bg-background">

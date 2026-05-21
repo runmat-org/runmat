@@ -3,7 +3,6 @@ import React from "react";
 import Link from "next/link";
 import { Check } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import CloudPricingCard from "@/components/pricing/CloudPricingCard";
@@ -49,19 +48,19 @@ const pricingFaqItems: FAQItem[] = [
     id: "pricing-diff",
     question: "What's the difference between RunMat, App, and Enterprise?",
     answer:
-      "RunMat is the free, open-source runtime — GPU acceleration, plotting, CLI, and browser sandbox. The desktop app is coming soon. RunMat App adds persistent storage, project sharing, and version history on top, with Hobby, Pro, and Team tiers. RunMat Enterprise is everything in App, deployed on your own infrastructure for air-gapped, compliance-ready environments.",
+      "RunMat is the free, open-source runtime — GPU acceleration, plotting, CLI, browser sandbox, and desktop app. RunMat App adds persistent storage, project sharing, and version history on top, with Hobby, Pro, and Team tiers. RunMat Enterprise is everything in App, deployed on your own infrastructure for air-gapped, compliance-ready environments.",
   },
   {
     id: "pricing-free",
     question: "Is RunMat really free?",
     answer:
-      "Yes. The RunMat runtime is open source and the browser sandbox is free. The desktop app is coming soon and will also be free. RunMat App has a $0 Hobby tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
+      "Yes. The RunMat runtime is open source, and the browser sandbox and desktop app are free. RunMat App has a $0 Hobby tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
   },
   {
     id: "pricing-account",
     question: "Do I need an account to use RunMat?",
     answer:
-      "No. The browser sandbox works without an account. The desktop app (coming soon) will also work without one. An account is only required for cloud storage and team features.",
+      "No. The browser sandbox and desktop app work without an account. An account is only required for cloud storage and team features.",
   },
   {
     id: "pricing-tiers",
@@ -188,7 +187,7 @@ export default function PricingPage() {
                     href="/contact?type=enterprise"
                     data-ph-capture-attribute-destination="contact"
                     data-ph-capture-attribute-source="pricing-enterprise"
-                    data-ph-capture-attribute-cta="contact-sales"
+                    data-ph-capture-attribute-cta="book-demo"
                   >
                     Book a demo
                   </Link>

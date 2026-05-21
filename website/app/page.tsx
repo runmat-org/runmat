@@ -199,14 +199,6 @@ const features = [
     mediaNote: "Agent working with code, plots, and runtime state.",
     tone: "muted" as const,
   },
-  //{
-  //  title: "Model agnostic, platform agnostic",
-  //  body:
-  //    "RunMat works with any model for inference. Use the latest frontier models from OpenAI, Claude or Gemini, or mix and match as you work.",
-  //  mediaLabel: "Model provider media",
-  //  mediaNote: "Provider and platform options.",
-  //  tone: "surface" as const,
-  //},
   {
     title: "Made for modern engineering challenges",
     body:

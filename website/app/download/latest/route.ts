@@ -98,14 +98,16 @@ function resolvePlatform(request: NextRequest): Platform | null {
   const uaArch = normalizeHeader(request.headers.get("sec-ch-ua-arch"));
 
   if (uaPlatform.includes("windows")) return "windows-x86_64";
+  // ARM Linux installers are not published yet; send those users to the chooser.
   if (uaPlatform.includes("linux")) return uaArch.includes("arm") ? null : "linux-x86_64";
   if (uaPlatform.includes("mac")) return resolveMacPlatform(uaArch);
 
   const userAgent = request.headers.get("user-agent")?.toLowerCase() ?? "";
   if (userAgent.includes("windows")) return "windows-x86_64";
+  // ARM Linux installers are not published yet; send those users to the chooser.
   if (userAgent.includes("linux")) return userAgent.includes("aarch64") || userAgent.includes("arm64") ? null : "linux-x86_64";
   if (userAgent.includes("mac os x") || userAgent.includes("macintosh")) {
-    return resolveMacPlatform(uaArch);
+    return resolveMacPlatform(uaArch) ?? resolveMacPlatformFromUserAgent(userAgent);
   }
 
   return null;
@@ -116,6 +118,16 @@ function resolveMacPlatform(arch: string): Platform | null {
   if (arch.includes("x86") || arch.includes("amd64")) return "darwin-x86_64";
 
   return null;
+}
+
+function resolveMacPlatformFromUserAgent(userAgent: string): Platform {
+  if (userAgent.includes("arm") || userAgent.includes("aarch64")) return "darwin-aarch64";
+  if (userAgent.includes("x86_64")) return "darwin-x86_64";
+
+  // Safari and Firefox do not send Client Hints, and modern macOS UAs do not
+  // reliably expose CPU architecture. Default to Apple Silicon for the direct
+  // download path; the download page still offers explicit Intel and Apple links.
+  return "darwin-aarch64";
 }
 
 async function fetchDownloadManifest(channel: ReleaseChannel): Promise<DownloadManifest> {

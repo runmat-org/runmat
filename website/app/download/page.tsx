@@ -3,9 +3,6 @@ import { Button } from "@/components/ui/button";
 import {
   Package,
   Cpu,
-  ArrowRight,
-  Download as DownloadIcon,
-  ChevronRight,
   Download,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
@@ -76,7 +73,7 @@ export default function DownloadPage() {
                 >
                   <Link href="/download/latest">
                 Download RunMat Desktop
-                <Download className="ml h-4 w-4" aria-hidden="true" />
+                <Download className="h-4 w-4" aria-hidden="true" />
                   </Link>
             </Button>
 
@@ -181,11 +178,8 @@ export default function DownloadPage() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground mb-1">Or build the latest from source</p>
-                    <div className="bg-[var(--editor-background)] text-white rounded-md p-3 font-mono text-sm break-all">
-                      <span className="text-white/40 select-none">$ </span>cargo install --git
-                      <br />
-                      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-                      https://github.com/runmat-org/runmat
+                    <div className="bg-[var(--editor-background)] text-white rounded-md p-3 font-mono text-sm overflow-x-auto whitespace-nowrap">
+                      <span className="text-white/40 select-none">$ </span>cargo install --git https://github.com/runmat-org/runmat
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">
