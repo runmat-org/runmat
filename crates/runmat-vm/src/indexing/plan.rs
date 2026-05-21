@@ -178,6 +178,7 @@ pub fn build_index_plan(
         let count = zero_based.len();
         let shape = match list {
             SliceSelector::LinearIndices { output_shape, .. } => output_shape,
+            _ if count == 0 => vec![0, 1],
             _ if count <= 1 => vec![1, 1],
             _ => vec![count, 1],
         };
@@ -509,7 +510,7 @@ where
     let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
     if total_out == 0 {
         let output_shape = if spec.dims == 1 {
-            linear_output_shape.clone().unwrap_or_else(|| vec![1, 0])
+            linear_output_shape.clone().unwrap_or_else(|| vec![0, 1])
         } else {
             let mut dims_out: Vec<(usize, usize, bool)> = selection_lengths
                 .iter()
@@ -992,6 +993,50 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(plain.indices, expr.indices);
+            assert_eq!(plain.output_shape, expr.output_shape);
+            assert_eq!(plain.selection_lengths, expr.selection_lengths);
+        })
+    }
+
+    #[test]
+    fn linear_empty_selector_uses_empty_column_shape() {
+        let plan = build_index_plan(&[SliceSelector::Indices(Vec::new())], 1, &[1, 5])
+            .expect("empty linear selector should build");
+        assert!(plan.indices.is_empty());
+        assert_eq!(plan.output_shape, vec![0, 1]);
+    }
+
+    #[test]
+    fn expr_plan_linear_empty_logical_mask_matches_plain_shape() {
+        futures::executor::block_on(async {
+            let shape = vec![1, 5];
+            let numeric = vec![Value::LogicalArray(
+                LogicalArray::new(vec![0, 0, 0, 0, 0], vec![1, 5]).expect("logical selector"),
+            )];
+            let plain_selectors = build_slice_selectors(1, 0, 0, &numeric, &shape)
+                .await
+                .unwrap();
+            let plain = build_index_plan(&plain_selectors, 1, &shape).unwrap();
+            let expr = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 1,
+                    colon_mask: 0,
+                    end_mask: 0,
+                    range_dims: &[],
+                    range_params: &[],
+                    range_start_exprs: &[],
+                    range_step_exprs: &[],
+                    range_end_exprs: &[],
+                    numeric: &numeric,
+                    shape: &shape,
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .unwrap();
+            assert!(plain.indices.is_empty());
+            assert!(expr.indices.is_empty());
+            assert_eq!(plain.output_shape, vec![0, 1]);
             assert_eq!(plain.output_shape, expr.output_shape);
             assert_eq!(plain.selection_lengths, expr.selection_lengths);
         })

@@ -59,6 +59,17 @@ fn logical_mask_linear_indexing_matrix_mask_returns_column() {
 }
 
 #[test]
+fn logical_mask_linear_indexing_all_false_returns_empty_column() {
+    let vars = execute_semantic_source("A=[1,2;3,4]; idx=logical([0,0,0,0]); v=A(idx);").unwrap();
+    if let Value::Tensor(v) = &vars[2] {
+        assert_eq!(v.shape, vec![0, 1]);
+        assert!(v.data.is_empty());
+    } else {
+        panic!("v");
+    }
+}
+
+#[test]
 fn host_linear_indexing_accepts_gpu_backed_range_selector() {
     let vars =
         execute_semantic_source("a=length(1:10); k=floor(a/2)+1; x=(1:10)'; y=x(1:k);").unwrap();

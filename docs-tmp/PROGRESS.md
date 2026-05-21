@@ -12,6 +12,25 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Linear empty-selector shape semantics now preserve empty column-vector contract
+  - `scope: in-scope`
+  - `blocker: linear selector planning (`dims == 1`) still emitted non-linear-index empty selections as `[1,1]`, which cannot represent empty payloads and diverged from column-vector linear indexing semantics and expr/plain parity on empty logical selections.`
+  - Tightened linear empty-selector planning in [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs):
+    - plain linear non-tensor empty selections now plan to `[0,1]`.
+    - expr linear empty selections now use matching `[0,1]` fallback when no selector tensor shape is carried.
+  - Added ratchets:
+    - `linear_empty_selector_uses_empty_column_shape`
+    - `expr_plan_linear_empty_logical_mask_matches_plain_shape`
+    - `logical_mask_linear_indexing_all_false_returns_empty_column`
+  - Validation:
+    - `cargo test -p runmat-vm linear_empty_selector_uses_empty_column_shape -- --nocapture`
+    - `cargo test -p runmat-vm expr_plan_linear_empty_logical_mask_matches_plain_shape -- --nocapture`
+    - `cargo test -p runmat-vm logical_mask_linear_indexing_all_false_returns_empty_column -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `timeit` text callback handles now prebind resolver-known semantic identity
   - `scope: in-scope`
   - `blocker: `timeit` callback normalization in `prepare_callable(...)` still left text handle forms (`Value::String("@name")`, row `Value::CharArray('@name')`, scalar `Value::StringArray(["@name"])`) name-shaped even when semantic resolver identity was available.`
