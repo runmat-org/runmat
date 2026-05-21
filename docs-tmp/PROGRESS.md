@@ -14,12 +14,15 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - VM object expr-slice numeric-end selector-plan invariant ratchet
   - `scope: in-scope`
-  - Closed a remaining non-tensor selector-plan normalization hole in object expr-slice descriptor serialization:
+  - Closed remaining non-tensor selector-plan normalization holes in object expr-slice descriptor serialization:
     - [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs) now validates `end_numeric_exprs` metadata positions against concrete non-colon/non-end/non-range selector slots before descriptor materialization.
     - duplicate or out-of-bounds numeric end-expression selector positions now fail fast with stable identifier `RunMat:InvalidEndSelectorPlan` instead of being silently ignored/overwritten in mixed selector plans.
+    - range-selector dimensions that conflict with colon/end selector masks now fail as invalid range-plan metadata (`RunMat:InvalidRangeSelectorPlan`) instead of being silently shadowed by mask precedence.
   - Added call-layer invariant ratchets in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
     - `object_paren_expr_selector_values_reject_duplicate_numeric_end_expr_positions`
     - `object_paren_expr_selector_values_reject_out_of_bounds_numeric_end_expr_positions`
+    - `object_paren_expr_selector_values_reject_range_dim_conflicting_with_colon_mask`
+    - `object_paren_expr_selector_values_reject_range_dim_conflicting_with_end_mask`
   - Validation:
     - `cargo test -p runmat-vm --lib object_paren_expr_selector_values_reject_ -- --nocapture`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`

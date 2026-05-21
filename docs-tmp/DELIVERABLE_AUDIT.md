@@ -198,6 +198,7 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `IndexSliceExpr` runtime dispatch now routes object/handle-object bases through `subsref_paren_from_expr_slice(...)` descriptor execution (instead of tensor-only slice planning), closing mixed selector payload failures that previously surfaced as `RunMat:SliceNonTensor` on object expr-slice reads.
     - expr-slice descriptor serialization now carries `end_numeric_exprs` as encoded end-expression selector payloads for numeric selector positions tied to `end` arithmetic, rather than placeholder numeric stack values.
     - expr-slice descriptor serialization now validates numeric end-expression selector positions against concrete selector slots; duplicate or out-of-bounds positions fail with stable identifier `RunMat:InvalidEndSelectorPlan` rather than being silently accepted in malformed metadata plans.
+    - range-selector dimensions that overlap colon/end selector masks now fail as `RunMat:InvalidRangeSelectorPlan` instead of being silently shadowed by selector-mask precedence.
     - call-layer ratchets now assert mixed selector preservation and unsupported-type rejection boundaries:
       - `object_paren_selector_values_accept_string_selector`
       - `object_paren_selector_values_reject_unsupported_selector_type`
@@ -206,6 +207,8 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `object_paren_expr_selector_values_encode_numeric_end_expressions`
       - `object_paren_expr_selector_values_reject_duplicate_numeric_end_expr_positions`
       - `object_paren_expr_selector_values_reject_out_of_bounds_numeric_end_expr_positions`
+      - `object_paren_expr_selector_values_reject_range_dim_conflicting_with_colon_mask`
+      - `object_paren_expr_selector_values_reject_range_dim_conflicting_with_end_mask`
       - `object_paren_expr_selector_values_reject_unsupported_numeric_selector_type` (unsupported `Struct` payload)
       - end-to-end semantic VM contract: `object_range_end_indexing_accepts_mixed_string_selector_payload`
       - end-to-end semantic VM assignment contract: `object_range_end_assignment_accepts_mixed_string_selector_payload`

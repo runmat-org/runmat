@@ -736,6 +736,18 @@ pub(crate) fn build_object_paren_expr_selector_values(
         range_step_exprs,
         range_end_exprs,
     )?;
+    for d in 0..dims {
+        if range_pos_by_dim[d].is_some() {
+            let is_colon = (colon_mask & (1u32 << d)) != 0;
+            let is_end = (end_mask & (1u32 << d)) != 0;
+            if is_colon || is_end {
+                return Err(crate::interpreter::errors::mex(
+                    "InvalidRangeSelectorPlan",
+                    "object range selector conflicts with colon/end selector masks",
+                ));
+            }
+        }
+    }
     let slot_count = (0..dims)
         .filter(|&d| {
             let is_colon = (colon_mask & (1u32 << d)) != 0;
@@ -1212,6 +1224,42 @@ mod tests {
             &[Value::Num(4.0)],
         )
         .expect_err("inconsistent range metadata should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_range_dim_conflicting_with_colon_mask() {
+        let err = build_object_paren_expr_selector_values(
+            2,
+            0b01,
+            0,
+            &[0],
+            &[(1.0, 2.0)],
+            &[None],
+            &[None],
+            &[EndExpr::End],
+            &[],
+            &[Value::Num(4.0)],
+        )
+        .expect_err("range dimension conflicting with colon mask should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_range_dim_conflicting_with_end_mask() {
+        let err = build_object_paren_expr_selector_values(
+            2,
+            0,
+            0b01,
+            &[0],
+            &[(1.0, 2.0)],
+            &[None],
+            &[None],
+            &[EndExpr::End],
+            &[],
+            &[Value::Num(4.0)],
+        )
+        .expect_err("range dimension conflicting with end mask should fail");
         assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
     }
 
