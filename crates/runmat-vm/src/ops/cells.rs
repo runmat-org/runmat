@@ -70,6 +70,23 @@ fn parse_cell_index_value(value: &Value) -> Result<usize, RuntimeError> {
     parse_positive_cell_index(index)
 }
 
+fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, RuntimeError> {
+    match value {
+        Value::Num(n) => {
+            if let Some(idx) = resolve_cell_end_relative_index(*n, len)? {
+                return Ok(idx);
+            }
+        }
+        Value::Tensor(t) if t.data.len() == 1 && t.shape.iter().product::<usize>() == 1 => {
+            if let Some(idx) = resolve_cell_end_relative_index(t.data[0], len)? {
+                return Ok(idx);
+            }
+        }
+        _ => {}
+    }
+    parse_cell_index_value(value)
+}
+
 fn decode_cell_end_plus(value: f64) -> Option<usize> {
     if !value.is_nan() {
         return None;
@@ -290,6 +307,10 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                 .data
                 .iter()
                 .map(|&val| {
+                    if t.data.len() == 1 && t.shape.iter().product::<usize>() == 1 {
+                        let idx = parse_cell_index_value_for_len(&indices[0], ca.data.len())?;
+                        return index_cell_value(ca, &[idx]);
+                    }
                     let idx = exact_index_from_f64(val)
                         .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?;
                     let idx = parse_positive_cell_index(idx)?;
@@ -305,7 +326,7 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                 return expand_all_cell_values(ca);
             }
             if row_colon {
-                let c = parse_cell_index_value(&indices[1])?;
+                let c = parse_cell_index_value_for_len(&indices[1], ca.cols)?;
                 let mut values = Vec::with_capacity(ca.rows);
                 for r in 1..=ca.rows {
                     values.push(index_cell_value(ca, &[r, c])?);
@@ -313,15 +334,15 @@ pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Valu
                 return Ok(values);
             }
             if col_colon {
-                let r = parse_cell_index_value(&indices[0])?;
+                let r = parse_cell_index_value_for_len(&indices[0], ca.rows)?;
                 let mut values = Vec::with_capacity(ca.cols);
                 for c in 1..=ca.cols {
                     values.push(index_cell_value(ca, &[r, c])?);
                 }
                 return Ok(values);
             }
-            let r = parse_cell_index_value(&indices[0])?;
-            let c = parse_cell_index_value(&indices[1])?;
+            let r = parse_cell_index_value_for_len(&indices[0], ca.rows)?;
+            let c = parse_cell_index_value_for_len(&indices[1], ca.cols)?;
             Ok(vec![index_cell_value(ca, &[r, c])?])
         }
         _ => Err(mex("CellIndexType", "Unsupported cell index type")),
@@ -672,5 +693,27 @@ mod tests {
         let err = expand_cell_indices(&cell, &[Value::Tensor(row), Value::Num(1.0)])
             .expect_err("non-scalar tensor row selector should fail");
         assert_eq!(err.identifier(), Some("RunMat:CellIndexType"));
+    }
+
+    #[test]
+    fn expand_cell_indices_supports_end_selectors_for_2d_cells() {
+        let cell = CellArray::new(
+            vec![
+                Value::Num(11.0),
+                Value::Num(12.0),
+                Value::Num(21.0),
+                Value::Num(22.0),
+            ],
+            2,
+            2,
+        )
+        .expect("2d cell");
+        let row_end = expand_cell_indices(&cell, &[Value::Num(-0.0), Value::Num(1.0)])
+            .expect("row end selector should resolve");
+        assert_eq!(row_end, vec![Value::Num(21.0)]);
+
+        let col_end = expand_cell_indices(&cell, &[Value::Num(1.0), Value::Num(-0.0)])
+            .expect("col end selector should resolve");
+        assert_eq!(col_end, vec![Value::Num(12.0)]);
     }
 }

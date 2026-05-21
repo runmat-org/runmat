@@ -3744,6 +3744,21 @@ fn feval_expand_cell_indices_end_plus_offset_errors() {
 }
 
 #[test]
+fn feval_expand_cell_indices_support_2d_end_selectors() {
+    let program = r#"
+        function y = f(a,b)
+            y = a + b;
+        end
+        C = {1, 2; 3, 4};
+        r = feval(@f, C{end,1}, C{1,end});
+    "#;
+    let vars = execute_semantic_source(program);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+}
+
+#[test]
 fn feval_expand_cell_fractional_index_errors() {
     let program = "C = {10, 20}; r = feval(@max, C{1.5}, 0);";
     let err = execute_semantic_source_result(program).err().unwrap();
