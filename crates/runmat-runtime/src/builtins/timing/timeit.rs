@@ -190,7 +190,7 @@ fn compute_median(mut samples: Vec<f64>) -> f64 {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct TimeitCallable {
     handle: Value,
     num_outputs: Option<usize>,
@@ -216,6 +216,15 @@ fn prepare_callable(
     func: Value,
     num_outputs: Option<usize>,
 ) -> Result<TimeitCallable, crate::RuntimeError> {
+    fn normalize_name(name: &str) -> Result<String, crate::RuntimeError> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            Err(timeit_error("timeit: empty function handle string"))
+        } else {
+            Ok(trimmed.to_string())
+        }
+    }
+
     fn canonicalize_text_handle(handle: String) -> Value {
         let name = handle.strip_prefix('@').unwrap_or(handle.as_str());
         semantic_handle_for_name(name).unwrap_or(Value::String(handle))
@@ -251,24 +260,36 @@ fn prepare_callable(
                 ))
             }
         }
-        Value::FunctionHandle(name) => Ok(TimeitCallable {
-            handle: semantic_handle_for_name(&name)
-                .unwrap_or_else(|| Value::String(format!("@{name}"))),
-            num_outputs,
-        }),
-        Value::ExternalFunctionHandle(name) => Ok(TimeitCallable {
-            handle: if crate::is_well_formed_qualified_name(&name) {
-                semantic_handle_for_name(&name)
-                    .unwrap_or_else(|| Value::ExternalFunctionHandle(name))
-            } else {
-                Value::ExternalFunctionHandle(name)
-            },
-            num_outputs,
-        }),
-        Value::SemanticFunctionHandle { name, function } => Ok(TimeitCallable {
-            handle: Value::SemanticFunctionHandle { name, function },
-            num_outputs,
-        }),
+        Value::FunctionHandle(name) => {
+            let normalized = normalize_name(&name)?;
+            Ok(TimeitCallable {
+                handle: semantic_handle_for_name(&normalized)
+                    .unwrap_or_else(|| Value::String(format!("@{normalized}"))),
+                num_outputs,
+            })
+        }
+        Value::ExternalFunctionHandle(name) => {
+            let normalized = normalize_name(&name)?;
+            Ok(TimeitCallable {
+                handle: if crate::is_well_formed_qualified_name(&normalized) {
+                    semantic_handle_for_name(&normalized)
+                        .unwrap_or_else(|| Value::ExternalFunctionHandle(normalized))
+                } else {
+                    Value::ExternalFunctionHandle(normalized)
+                },
+                num_outputs,
+            })
+        }
+        Value::SemanticFunctionHandle { name, function } => {
+            let normalized = normalize_name(&name)?;
+            Ok(TimeitCallable {
+                handle: Value::SemanticFunctionHandle {
+                    name: normalized,
+                    function,
+                },
+                num_outputs,
+            })
+        }
         Value::Closure(mut closure) => Ok(TimeitCallable {
             handle: {
                 if closure.semantic_function.is_none() {
@@ -401,6 +422,40 @@ pub(crate) mod tests {
             Value::ExternalFunctionHandle("pkg.callback".to_string())
         );
         assert_eq!(callable.num_outputs, Some(2));
+    }
+
+    #[test]
+    fn timeit_rejects_empty_function_handle_name_value() {
+        let err = prepare_callable(Value::FunctionHandle("   ".to_string()), None)
+            .expect_err("timeit should reject empty function-handle payload name");
+        assert_timeit_error_contains(err, "empty function handle");
+    }
+
+    #[test]
+    fn timeit_rejects_empty_external_function_handle_name_value() {
+        let err = prepare_callable(Value::ExternalFunctionHandle("   ".to_string()), None)
+            .expect_err("timeit should reject empty external function-handle payload name");
+        assert_timeit_error_contains(err, "empty function handle");
+    }
+
+    #[test]
+    fn timeit_trims_function_handle_name_for_semantic_resolution() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "__timeit_helper_counter_default").then_some(188)
+            })));
+        let callable = prepare_callable(
+            Value::FunctionHandle("  __timeit_helper_counter_default  ".to_string()),
+            None,
+        )
+        .expect("timeit should normalize function-handle payload name");
+        assert_eq!(
+            callable.handle,
+            Value::SemanticFunctionHandle {
+                name: "__timeit_helper_counter_default".to_string(),
+                function: 188,
+            }
+        );
     }
 
     #[test]

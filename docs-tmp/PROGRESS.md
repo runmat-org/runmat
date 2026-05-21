@@ -5285,6 +5285,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: normalize timeit handle-name invariants
+  - Runtime `timeit` callable preparation in [timeit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/timing/timeit.rs) now normalizes handle payload names through a shared non-empty trim boundary for `FunctionHandle`, `ExternalFunctionHandle`, and `SemanticFunctionHandle`.
+  - Empty/whitespace payload names now fail early with `timeit: empty function handle string`, removing residual name-shaped callback ambiguity at the `timeit` callback ABI boundary.
+  - Added ratchets:
+    - `timeit_rejects_empty_function_handle_name_value`
+    - `timeit_rejects_empty_external_function_handle_name_value`
+    - `timeit_trims_function_handle_name_for_semantic_resolution`
+  - Validation:
+    - `cargo test -p runmat-runtime timeit_rejects_empty_function_handle_name_value -- --nocapture`
+    - `cargo test -p runmat-runtime timeit_rejects_empty_external_function_handle_name_value -- --nocapture`
+    - `cargo test -p runmat-runtime timeit_trims_function_handle_name_for_semantic_resolution -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

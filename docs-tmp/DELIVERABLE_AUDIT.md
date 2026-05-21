@@ -115,6 +115,13 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `callback_handle_canonicalizer_trims_text_handle_when_resolved`
       - `callback_handle_canonicalizer_trims_string_array_text_handle_when_resolved`
       - `callback_handle_canonicalizer_trims_char_text_handle_when_resolved`
+  - runtime `timeit` callback preparation now enforces normalized non-empty handle-name payloads at callable materialization time in [timeit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/timing/timeit.rs):
+    - `prepare_callable(...)` now trims/validates `FunctionHandle`, `ExternalFunctionHandle`, and `SemanticFunctionHandle` names through a shared non-empty boundary before semantic prebinding/fallback.
+    - whitespace-only handle payload names now fail early with stable `timeit: empty function handle string` contracts instead of name-shaped callback fallback behavior.
+    - direct ratchets:
+      - `timeit_rejects_empty_function_handle_name_value`
+      - `timeit_rejects_empty_external_function_handle_name_value`
+      - `timeit_trims_function_handle_name_for_semantic_resolution`
   - VM source-level `isfield` string-array semantics now have direct contract coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) (`struct_isfield_string_array_names`), asserting matrix-shaped logical result semantics (`shape [2,2]`, column-major logical data `[1,0,0,1]`) instead of a placeholder scalar proxy.
   - VM cell aggregate member-assignment now carries stable identifier coverage for RHS shape mismatch in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs): `RunMat:CellMemberRhsShapeMismatch` (`assign_cell_member_rejects_shape_mismatch_cell_rhs`).
   - VM static-property missing-name semantic coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) now asserts stable `RunMat:UndefinedVariable` identifier (`unqualified_static_property_without_imports_errors`) instead of message-text proxy checks.
