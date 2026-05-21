@@ -799,8 +799,54 @@ impl BytecodeCompiler {
                             pc += 1;
                         }
                     }
+                    Instr::CallFunctionExpandMultiOutput {
+                        identity,
+                        fallback_policy,
+                        specs,
+                        out_count,
+                    } => {
+                        if *out_count > 1 {
+                            match instructions.get(pc + 1) {
+                                Some(Instr::Unpack(count)) if count == out_count => {}
+                                _ => {
+                                    return Err(execution_error(
+                                        "Named expanded multi-output JIT calls require a following Unpack",
+                                    ))
+                                }
+                            }
+                        }
+
+                        let results = if specs.iter().any(|spec| spec.is_expand) {
+                            let args =
+                                Self::pop_expanded_call_arg_entries(&mut local_stack, specs)?;
+                            Self::compile_named_function_expand_multi_call_jit(
+                                builder,
+                                ctx,
+                                identity,
+                                *fallback_policy,
+                                &args,
+                                specs,
+                                *out_count,
+                            )?
+                        } else {
+                            let args = Self::pop_non_expanding_call_args(&mut local_stack, specs)?;
+                            Self::compile_named_function_multi_call_jit(
+                                builder,
+                                ctx,
+                                identity,
+                                *fallback_policy,
+                                &args,
+                                *out_count,
+                            )?
+                        };
+                        for result in results {
+                            local_stack.push(result);
+                        }
+                        if *out_count > 1 {
+                            pc += 1;
+                        }
+                    }
                     Instr::CallBuiltinExpandMultiOutput(_, _, _)
-                    | Instr::CallFunctionExpandMultiOutput { .. }
                     | Instr::CallMethodOrMemberIndexExpandMultiOutput { .. } => {
                         return Self::unsupported_expanded_call_jit();
                     }
@@ -965,6 +1011,34 @@ impl BytecodeCompiler {
             ctx.runmat_call_semantic_function_outputs_id,
             function.0,
             args,
+            out_count,
+        )
+    }
+
+    fn compile_named_function_expand_multi_call_jit(
+        builder: &mut FunctionBuilder,
+        ctx: &mut CompileContext<'_>,
+        identity: &runmat_hir::CallableIdentity,
+        fallback_policy: runmat_hir::CallableFallbackPolicy,
+        args: &[StackEntry],
+        specs: &[ArgSpec],
+        out_count: usize,
+    ) -> Result<Vec<Value>> {
+        let Some(function) =
+            Self::resolve_named_multi_call_target(identity, fallback_policy, ctx.semantic_registry)
+        else {
+            return Err(execution_error(
+                "Named expanded multi-output function calls without semantic identities are not supported in JIT; use interpreter",
+            ));
+        };
+
+        Self::call_semantic_function_expanded_values_jit(
+            builder,
+            ctx.module,
+            ctx.runmat_call_semantic_function_expanded_values_id,
+            function.0,
+            args,
+            specs,
             out_count,
         )
     }
@@ -2297,6 +2371,12 @@ mod tests {
         assert_eq!(
             source
                 .matches(&["Self::", "compile_named_function_multi_call_jit("].concat())
+                .count(),
+            2
+        );
+        assert_eq!(
+            source
+                .matches(&["Self::", "compile_named_function_expand_multi_call_jit("].concat())
                 .count(),
             1
         );

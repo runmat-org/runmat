@@ -3846,6 +3846,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- (pending commit) Plan 3/7 Turbine named expanded-call semantic bridge
+  - Added Turbine JIT lowering for `Instr::CallFunctionExpandMultiOutput` in [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs) when the callable identity is semantic-resolvable under fallback policy:
+    - non-expanding specs path reuses `compile_named_function_multi_call_jit(...)`
+    - expanding specs path now routes through `compile_named_function_expand_multi_call_jit(...)` and typed semantic expanded host callback execution.
+  - Multi-output shape contract is now explicit for this path in JIT (`out_count > 1` requires a following `Unpack(count == out_count)`), matching the existing semantic expanded-call JIT contract style.
+  - Expanded-call blocker remains explicit for builtin-expanded and method/member-expanded opcodes that still require additional non-scalar/object ABI work.
+  - Validation:
+    - `cargo test -p runmat-turbine --lib -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
