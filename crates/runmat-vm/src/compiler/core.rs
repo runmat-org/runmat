@@ -1612,8 +1612,8 @@ impl Compiler {
         match indexing.kind {
             IndexKind::Paren => self.compile_mir_slice_index(indexing)?,
             IndexKind::Brace => {
-                let (end_offsets, end_exprs) =
-                    self.compile_mir_cell_index_components_any_context(indexing)?;
+                let (end_offsets, end_exprs) = self
+                    .compile_mir_cell_index_components(indexing, indexing.result_context.clone())?;
                 self.emit(Instr::IndexCell {
                     num_indices: indexing.components.len(),
                     end_offsets,
@@ -1705,8 +1705,10 @@ impl Compiler {
                 Ok(())
             }
             IndexKind::Brace => {
-                let (end_offsets, end_exprs) =
-                    self.compile_mir_cell_index_components_any_context(indexing)?;
+                let (end_offsets, end_exprs) = self.compile_mir_cell_index_components(
+                    indexing,
+                    IndexResultContext::AssignmentTarget,
+                )?;
                 self.emit(Instr::LoadVar(tmp));
                 self.emit(if delete {
                     Instr::StoreIndexCellDelete {
@@ -2295,43 +2297,6 @@ impl Compiler {
                 .compile_error("MIR cell index lowering received mismatched index result context")
                 .with_identifier(IDENT_MIR_CELL_INDEX_CONTEXT_INVALID));
         }
-        let mut end_offsets = Vec::new();
-        let mut end_exprs = Vec::new();
-        let mut index_position = 0usize;
-        for component in &indexing.components {
-            match component {
-                MirIndexComponent::Expr(operand) => {
-                    self.compile_mir_operand(operand)?;
-                    if let Some(expr) = self.mir_operand_end_expr(operand) {
-                        if let Some(offset) = Self::mir_cell_end_offset_from_expr(&expr) {
-                            end_offsets.push((index_position, offset));
-                        } else {
-                            end_exprs.push((index_position, expr));
-                        }
-                    }
-                    index_position += 1;
-                }
-                MirIndexComponent::End { offset, .. } => {
-                    self.emit(Instr::LoadConst(encode_cell_end_offset(*offset)));
-                    end_offsets.push((index_position, *offset));
-                    index_position += 1;
-                }
-                _ => {
-                    return Err(self
-                        .compile_error(
-                            "MIR cell index lowering expects expression selectors or end-relative selectors",
-                        )
-                        .with_identifier(IDENT_MIR_CELL_INDEX_PLAN_INVALID))
-                }
-            }
-        }
-        Ok((end_offsets, end_exprs))
-    }
-
-    fn compile_mir_cell_index_components_any_context(
-        &mut self,
-        indexing: &MirIndexing,
-    ) -> Result<(Vec<(usize, isize)>, Vec<(usize, EndExpr)>), CompileError> {
         let mut end_offsets = Vec::new();
         let mut end_exprs = Vec::new();
         let mut index_position = 0usize;

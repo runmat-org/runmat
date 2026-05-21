@@ -42,6 +42,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Brace index context invariants now apply on helper read/store-back lowering paths
+  - `scope: in-scope`
+  - `blocker: brace index lowering in helper paths (`compile_mir_index_after_base` and member-chain store-back via `compile_mir_store_indexed_value_from_temp`) bypassed `IndexResultContext` validation (`any_context`), so malformed MIR brace index contexts could flow through assignment/read helper bytecode paths without compile-time rejection.`
+  - Tightened helper-path brace index validation in [core.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/compiler/core.rs):
+    - `compile_mir_index_after_base(...)` now validates brace index components against the actual MIR result context via `compile_mir_cell_index_components(...)`.
+    - brace index store-back lowering now validates against `IndexResultContext::AssignmentTarget` instead of bypassing context checks.
+  - Added ratchet in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_rejects_member_store_back_brace_index_with_read_context_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm primary_compile_rejects_member_store_back_brace_index_with_read_context_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Expr-slice range end-expression selectors now enforce exact-integer index semantics
   - `scope: in-scope`
   - `blocker: expr-slice range end-expression resolution still applied `floor()` coercion (`resolve_range_end_index(...)`), allowing fractional end-expression selectors to be silently truncated instead of honoring the typed index invariant used by other selector operands.`
