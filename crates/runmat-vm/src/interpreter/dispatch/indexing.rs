@@ -930,6 +930,23 @@ pub async fn dispatch_indexing(
                             .await?,
                     );
                 }
+                Value::StringArray(mut sa) => {
+                    if delete {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedSliceDeletion",
+                            "Slice deletion currently supports cell arrays only",
+                        ));
+                    }
+                    let selectors: Vec<SliceSelector> =
+                        indices.iter().copied().map(SliceSelector::Scalar).collect();
+                    let plan = build_index_plan(&selectors, indices.len(), &sa.shape)?;
+                    if !plan.indices.is_empty() {
+                        let rhs_view =
+                            idx_write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)?;
+                        idx_write_slice::scatter_string_with_plan(&mut sa, &plan, &rhs_view)?;
+                    }
+                    stack.push(Value::StringArray(sa));
+                }
                 Value::Cell(ca) => stack.push(crate::ops::cells::assign_cell_paren_with_policy(
                     ca, &indices, &rhs, delete,
                 )?),

@@ -12,6 +12,20 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM string-array scalar paren assignment ratchet
+  - `scope: in-scope`
+  - Closed an assignment-place execution gap for string-array scalar paren stores:
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) `Instr::StoreIndex` now supports `Value::StringArray` bases by routing scalar selectors through index-plan + typed string RHS view/scatter operations, instead of falling through `RunMat:IndexAssignmentUnsupportedBase`.
+    - delete semantics remain explicit and unchanged (`RunMat:UnsupportedSliceDeletion` for string-array deletion paths).
+  - Added VM end-to-end ratchet in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):
+    - `semantic_string_array_scalar_index_assignment_executes`
+  - Validation:
+    - `cargo test -p runmat-vm semantic_string_array_scalar_index_assignment_executes -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM cell-index integer normalization ratchet
   - `scope: in-scope`
   - Closed a remaining non-tensor selector normalization seam in cell index conversion:

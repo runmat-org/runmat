@@ -201,6 +201,18 @@ fn semantic_scalar_value_index_assignment_executes() {
 }
 
 #[test]
+fn semantic_string_array_scalar_index_assignment_executes() {
+    let bytecode = compile_semantic_source(r#"S = ["a" "b"]; S(2) = "z"; T = S;"#).unwrap();
+    let vars = test_helpers::interpret(&bytecode).unwrap();
+    let updated = vars.last().expect("expected final variable");
+    let Value::StringArray(sa) = updated else {
+        panic!("expected string array assignment result, got {updated:?}");
+    };
+    assert_eq!(sa.shape, vec![1, 2]);
+    assert_eq!(sa.data, vec!["a".to_string(), "z".to_string()]);
+}
+
+#[test]
 fn complex_literal_matrix_executes() {
     let input = "A = [1+2i 3-4j];";
     let vars = execute_semantic_source(input);
