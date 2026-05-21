@@ -12,6 +12,22 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Expr-slice range end-expression selectors now enforce exact-integer index semantics
+  - `scope: in-scope`
+  - `blocker: expr-slice range end-expression resolution still applied `floor()` coercion (`resolve_range_end_index(...)`), allowing fractional end-expression selectors to be silently truncated instead of honoring the typed index invariant used by other selector operands.`
+  - Tightened end-expression range selector normalization in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - `resolve_range_end_index(...)` now requires exact integer values via `exact_index_from_f64(...)`.
+    - fractional range end-expression selectors now fail with stable `RunMat:UnsupportedIndexType` instead of truncating.
+  - Added source-level ratchets in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/indexing.rs):
+    - `fractional_range_end_expression_rejects_non_integer_selector`
+    - `fractional_range_end_expression_with_step_rejects_non_integer_selector`
+  - Validation:
+    - `cargo test -p runmat-vm fractional_range_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Static call callee name-shape invariants now fail at VM compile boundaries
   - `scope: in-scope`
   - `blocker: static-call lowering still allowed malformed non-builtin callable identities (for example single-segment external names or mismatched imported `DefPath` shapes) to pass compile and defer failure to runtime, leaving a callable ABI normalization seam.`

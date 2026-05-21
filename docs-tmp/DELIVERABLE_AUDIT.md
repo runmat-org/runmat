@@ -248,6 +248,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - non-object expr-slice range scalar decoding now enforces typed numeric-scalar operands for range start/step values and validates step-metadata arity before stack decode:
     - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now rejects inconsistent `range_dims`/`range_has_step` metadata as `RunMat:InvalidRangeSelectorPlan` and rejects non-numeric range start/step operands as `RunMat:UnsupportedIndexType` via shared `range_selector_scalar_to_f64(...)`.
     - `IndexSliceExpr` no longer silently coerces malformed range start/step operands to `1.0`.
+    - range end-expression selector resolution now also enforces exact integer values in `resolve_range_end_index(...)` (no `floor()` truncation of fractional end-expression results), preserving typed `RunMat:UnsupportedIndexType` failures for non-integer range end selectors.
     - scalar `StoreIndex` now rejects non-positive indices directly as `RunMat:IndexOutOfBounds` instead of clamping them to zero before assignment dispatch.
     - brace cell scalar index decoding now reuses shared `index_scalar_from_value` normalization (`resolve_cell_indices`), so scalar tensor cell indices follow the same integer/in-bounds contracts as other scalar index paths.
     - expr-slice range plan lowering now rejects fractional range start/step selector operands directly in `build_expr_index_plan(...)` (no implicit `as i64` truncation of selector values), keeping non-integer range selector failures on the typed `RunMat:UnsupportedIndexType` boundary.
@@ -263,6 +264,8 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `cell_brace_scalar_tensor_index_reads_value`
       - `fractional_range_start_index_rejects_non_integer_selector`
       - `fractional_range_step_index_rejects_non_integer_selector`
+      - `fractional_range_end_expression_rejects_non_integer_selector`
+      - `fractional_range_end_expression_with_step_rejects_non_integer_selector`
       - `positive_range_index_rejects_upper_out_of_bounds_element`
       - `positive_range_index_rejects_lower_out_of_bounds_element`
   - callable method-identity runtime policy now separates semantic resolver lookup from VM named fallback:
