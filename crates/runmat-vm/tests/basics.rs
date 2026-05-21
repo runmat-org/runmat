@@ -647,6 +647,24 @@ fn object_range_end_indexing_accepts_mixed_string_selector_payload() {
 }
 
 #[test]
+fn object_range_end_assignment_accepts_mixed_string_selector_payload() {
+    let input = r#"
+        __register_test_classes();
+        o = new_object('OverIdx');
+        o(1:(end*1 - 1/2), "key") = 7;
+        r = o.last;
+        ok = (r == 7);
+    "#;
+    let vars = execute_semantic_source(input);
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
+}
+
+#[test]
 fn fft_end_arithmetic_supports_pow_round_floor_fix_and_leftdiv() {
     let input = r#"
         x = [1 2 3 4 5 6 7 8];
