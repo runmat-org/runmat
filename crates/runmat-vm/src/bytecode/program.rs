@@ -323,9 +323,22 @@ impl Bytecode {
 
     #[cfg(feature = "native-accel")]
     pub fn runtime_fusion_groups(&self) -> Vec<FusionGroup> {
-        if !self.fusion_groups.is_empty() {
+        let semantic_metadata_present = self.semantic_fusion_metadata.mir_fusion_signal_count > 0
+            || self.semantic_fusion_metadata.mir_fusion_candidate_group_count > 0
+            || !self
+                .semantic_fusion_metadata
+                .mir_fusion_candidate_groups
+                .is_empty()
+            || self.semantic_fusion_metadata.semantic_instruction_window_count > 0
+            || !self
+                .semantic_fusion_metadata
+                .semantic_instruction_windows
+                .is_empty();
+
+        if !semantic_metadata_present {
             return self.fusion_groups.clone();
         }
+
         if self
             .semantic_fusion_metadata
             .mir_fusion_candidate_group_count
@@ -435,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_fusion_groups_prefer_existing_bytecode_groups() {
+    fn runtime_fusion_groups_use_semantic_windows_when_metadata_is_present() {
         let mut bytecode = Bytecode::empty();
         bytecode.fusion_groups = vec![runmat_accelerate::fusion::FusionGroup {
             id: 7,
@@ -458,10 +471,32 @@ mod tests {
 
         let groups = bytecode.runtime_fusion_groups();
         assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].id, 7);
-        assert_eq!(groups[0].nodes, vec![1]);
-        assert_eq!(groups[0].span.start, 5);
-        assert_eq!(groups[0].span.end, 5);
+        assert_eq!(groups[0].id, 0);
+        assert!(groups[0].nodes.is_empty());
+        assert_eq!(groups[0].span.start, 10);
+        assert_eq!(groups[0].span.end, 20);
+    }
+
+    #[test]
+    fn runtime_fusion_groups_ignore_stale_compile_groups_when_semantic_candidates_are_empty() {
+        let mut bytecode = Bytecode::empty();
+        bytecode.fusion_groups = vec![runmat_accelerate::fusion::FusionGroup {
+            id: 7,
+            kind: runmat_accelerate::fusion::FusionKind::ElementwiseChain,
+            nodes: vec![1],
+            shape: runmat_accelerate::graph::ShapeInfo::Unknown,
+            span: InstrSpan { start: 5, end: 5 },
+            pattern: None,
+            stack_layout: None,
+        }];
+        bytecode.semantic_fusion_metadata.mir_fusion_signal_count = 2;
+        bytecode.semantic_fusion_metadata.mir_fusion_candidate_group_count = 0;
+
+        let groups = bytecode.runtime_fusion_groups();
+        assert!(
+            groups.is_empty(),
+            "semantic metadata should gate runtime fusion groups when no candidates exist"
+        );
     }
 
     #[test]
