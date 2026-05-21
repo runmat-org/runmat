@@ -5345,6 +5345,16 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm feval_expand_cell_indices_support_2d_end_selectors -- --nocapture`
     - `cargo test -p runmat-vm feval_expand_cell_indices_support_end_offsets -- --nocapture`
 
+- RM-378: normalize 2-D cell end+offset failure identifiers
+  - Dimension-aware selector parsing in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now maps unresolved NaN-shaped end selectors to `RunMat:CellIndexOutOfBounds` on length-aware paths, aligning 2-D `C{end+1, ...}` error semantics with existing 1-D brace-expansion contracts.
+  - Added contracts:
+    - `feval_expand_cell_indices_support_2d_end_offsets`
+    - `feval_expand_cell_indices_2d_end_plus_offset_errors`
+  - Validation:
+    - `cargo test -p runmat-vm feval_expand_cell_indices_support_2d_end -- --nocapture`
+    - `cargo test -p runmat-vm feval_expand_cell_indices_2d_end_plus_offset_errors -- --nocapture`
+    - `cargo fmt --all --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

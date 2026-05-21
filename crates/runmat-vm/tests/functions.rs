@@ -3759,6 +3759,28 @@ fn feval_expand_cell_indices_support_2d_end_selectors() {
 }
 
 #[test]
+fn feval_expand_cell_indices_support_2d_end_offsets() {
+    let program = r#"
+        function y = f(a,b)
+            y = a + b;
+        end
+        C = {1, 2; 3, 4};
+        r = feval(@f, C{end-1,1}, C{1,end-1});
+    "#;
+    let vars = execute_semantic_source(program);
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 2.0).abs() < 1e-9)));
+}
+
+#[test]
+fn feval_expand_cell_indices_2d_end_plus_offset_errors() {
+    let program = "C = {1, 2; 3, 4}; r = feval(@max, C{end+1,1}, 0);";
+    let err = execute_semantic_source_result(program).err().unwrap();
+    assert_eq!(err.identifier(), Some("RunMat:CellIndexOutOfBounds"));
+}
+
+#[test]
 fn feval_expand_cell_fractional_index_errors() {
     let program = "C = {10, 20}; r = feval(@max, C{1.5}, 0);";
     let err = execute_semantic_source_result(program).err().unwrap();

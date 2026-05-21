@@ -76,10 +76,16 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
             if let Some(idx) = resolve_cell_end_relative_index(*n, len)? {
                 return Ok(idx);
             }
+            if n.is_nan() {
+                return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+            }
         }
         Value::Tensor(t) if t.data.len() == 1 && t.shape.iter().product::<usize>() == 1 => {
             if let Some(idx) = resolve_cell_end_relative_index(t.data[0], len)? {
                 return Ok(idx);
+            }
+            if t.data[0].is_nan() {
+                return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
             }
         }
         _ => {}
