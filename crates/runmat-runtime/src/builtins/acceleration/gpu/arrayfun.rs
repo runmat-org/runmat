@@ -1238,6 +1238,29 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn arrayfun_malformed_external_handle_errors_as_undefined_when_unresolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_| None)));
+        let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
+
+        let err = call(
+            Value::ExternalFunctionHandle("pkg..callback".to_string()),
+            vec![Value::Tensor(tensor)],
+        )
+        .expect_err("malformed unresolved external callback should error");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:UndefinedFunction"),
+            "unexpected error: {}",
+            err.message()
+        );
+        assert!(
+            err.message().contains("pkg..callback"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
     fn arrayfun_type_tracks_function_returns() {
         let func = Type::Function {
             params: vec![Type::Num],

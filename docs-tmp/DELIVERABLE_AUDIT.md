@@ -256,6 +256,9 @@ This audit maps the active objective to concrete repository evidence and marks e
   - VM source-level unresolved callback contracts now also cover `arrayfun` parity with `cellfun` for external callback identities:
     - `unresolved_external_arrayfun_callback_fails_without_legacy_fallback` -> `RunMat:UndefinedFunction`
     - `unresolved_external_arrayfun_str2func_callback_fails_without_legacy_fallback` -> `RunMat:UndefinedFunction`
+  - runtime callback builtin boundaries now also ratchet malformed qualified external-handle identifiers (`pkg..callback`) for both cell and array callback lanes:
+    - `cellfun_malformed_external_handle_errors_as_undefined_when_unresolved` -> `RunMat:UndefinedFunction`
+    - `arrayfun_malformed_external_handle_errors_as_undefined_when_unresolved` -> `RunMat:UndefinedFunction`
 - Gap:
   - designed gaps still open (selector-plan normalization and callable/assignment ABI cleanup have narrowed with compile/runtime invariant identifiers/ratchets). Struct/object aggregate-literal work remains a forward design track rather than an active migration blocker because current parser/HIR/MIR surfaces only tensor/cell aggregate forms. Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 

@@ -937,6 +937,29 @@ pub(crate) mod tests {
         );
     }
 
+    #[test]
+    fn cellfun_malformed_external_handle_errors_as_undefined_when_unresolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_| None)));
+        let cell = crate::make_cell(vec![Value::Num(2.0)], 1, 1).expect("cell");
+
+        let err = cellfun_builtin(
+            Value::ExternalFunctionHandle("pkg..callback".to_string()),
+            vec![cell],
+        )
+        .expect_err("malformed unresolved external callback should error");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:UndefinedFunction"),
+            "unexpected error: {}",
+            err.message()
+        );
+        assert!(
+            err.message().contains("pkg..callback"),
+            "unexpected error: {err:?}"
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cellfun_uniform_false_returns_cells() {

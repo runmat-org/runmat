@@ -68,6 +68,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Runtime malformed external-handle callback identifier-contract ratchet (`cellfun`/`arrayfun`)
+  - `scope: in-scope`
+  - `blocker: callable fallback policy cleanup had unresolved external-handle contracts for well-formed qualified names, but malformed qualified external-handle names were not explicitly pinned at runtime callback builtin boundaries.`
+  - Added runtime callback ratchets:
+    - [cellfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/cells/core/cellfun.rs):
+      - `cellfun_malformed_external_handle_errors_as_undefined_when_unresolved`
+    - [arrayfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs):
+      - `arrayfun_malformed_external_handle_errors_as_undefined_when_unresolved`
+  - Both assert stable unresolved identifier `RunMat:UndefinedFunction` and preserve malformed callback names in diagnostics (`pkg..callback`) rather than silently normalizing or taking builtin fallback paths.
+  - Validation:
+    - `cargo test -p runmat-runtime cellfun_malformed_external_handle_errors_as_undefined_when_unresolved -- --nocapture`
+    - `cargo test -p runmat-runtime arrayfun_malformed_external_handle_errors_as_undefined_when_unresolved -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM source-level callable identifier-contract ratchet follow-through
   - `scope: in-scope`
   - `blocker: closure/runtime callable identifier normalization had VM unit coverage, but source-level contracts for classref non-static method calls and event-target validation boundaries were not yet ratcheted in end-to-end semantic execution tests.`
