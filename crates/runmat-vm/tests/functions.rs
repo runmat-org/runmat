@@ -548,6 +548,34 @@ fn unresolved_external_cellfun_str2func_callback_fails_without_legacy_fallback()
 }
 
 #[test]
+fn unresolved_external_arrayfun_callback_fails_without_legacy_fallback() {
+    let err = execute_semantic_source_result(
+        "xs = [1, 2]; ys = arrayfun(@definitely_missing_callback, xs);",
+    )
+    .expect_err("unresolved external arrayfun callback should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_external_arrayfun_str2func_callback_fails_without_legacy_fallback() {
+    let err = execute_semantic_source_result(
+        "xs = [1, 2]; h = str2func('definitely_missing_callback'); ys = arrayfun(h, xs);",
+    )
+    .expect_err("unresolved external arrayfun str2func callback should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn function_handle_selector_colon_errors_with_identifier_contract() {
     let err = execute_semantic_source_result("f = @sin; y = f(:);")
         .expect_err("function-handle colon selector should fail");

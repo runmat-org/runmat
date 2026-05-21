@@ -54,6 +54,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- VM source-level unresolved `arrayfun` callback identifier-contract ratchet
+  - `scope: in-scope`
+  - `blocker: unresolved external callback behavior was ratcheted at runtime and via VM source tests for `cellfun`, but matching source-level `arrayfun` callback boundaries were not explicitly pinned in semantic execution tests.`
+  - Added VM source-level unresolved callback contracts in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `unresolved_external_arrayfun_callback_fails_without_legacy_fallback`
+    - `unresolved_external_arrayfun_str2func_callback_fails_without_legacy_fallback`
+  - Both assert stable unresolved identifier `RunMat:UndefinedFunction` for external callback identities not present in the semantic registry.
+  - Validation:
+    - `cargo test -p runmat-vm unresolved_external_arrayfun_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM source-level callable identifier-contract ratchet follow-through
   - `scope: in-scope`
   - `blocker: closure/runtime callable identifier normalization had VM unit coverage, but source-level contracts for classref non-static method calls and event-target validation boundaries were not yet ratcheted in end-to-end semantic execution tests.`
