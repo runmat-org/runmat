@@ -12,6 +12,25 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Indexed-base member slice store-back now executes through semantic paths instead of cell-slice failure contracts
+  - `scope: in-scope`
+  - `blocker: indexed-base member slice assignment paths (for example, \`s(2).a(idx)=...\`, \`s(2).a(mask)=...\`) were lowering through \`StoreSlice*\` but executing against a singleton cell-wrapper member gather, producing runtime failures (\`RunMat:IndexOutOfBounds\`, \`RunMat:IndexShape\`) instead of mutating the selected struct field tensor.`
+  - Updated singleton cell-member gather semantics in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs):
+    - `gather_cell_member(...)` now unwraps 1x1 cell member access to the member value directly instead of always producing a 1x1 cell wrapper.
+    - this keeps struct-array emulation chains (`s(2).a(...)`) on tensor slice assignment semantics once a scalar struct element has been selected.
+  - Promoted indexed-base member slice ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `semantic_indexed_base_member_vector_store_back_lowers_to_slice_instruction`
+    - `semantic_indexed_base_member_logical_store_back_lowers_to_slice_instruction`
+    - both now assert successful runtime mutation results (99.0 / 0.0) instead of stable-failure identifier contracts.
+  - Validation:
+    - `cargo test -p runmat-vm semantic_indexed_base_member_ -- --nocapture`
+    - `cargo test -p runmat-vm semantic_indexed_member_ -- --nocapture`
+    - `cargo test -p runmat-vm semantic_indexed_cell_member_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Multi-assign indexed output targets now enforce assignment-context invariants at compile boundaries
   - `scope: in-scope`
   - `blocker: multi-assign output store-back lowering accepted top-level indexed output targets with non-assignment index result contexts, allowing malformed MIR assignment-place metadata to flow into assignment bytecode paths without explicit compile rejection.`

@@ -196,6 +196,13 @@ pub fn gather_cell_paren_linear_indices(
 }
 
 pub fn gather_cell_member(ca: &CellArray, field: &str) -> Result<Value, RuntimeError> {
+    if ca.data.len() == 1 {
+        return Ok(match &*ca.data[0] {
+            Value::Struct(st) => st.fields.get(field).cloned().unwrap_or(Value::Num(0.0)),
+            other => other.clone(),
+        });
+    }
+
     let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
     for value in &ca.data {
         match &**value {

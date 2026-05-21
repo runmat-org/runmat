@@ -1186,9 +1186,8 @@ fn semantic_indexed_member_logical_store_back_lowers_to_slice_instruction() {
 }
 
 #[test]
-fn semantic_indexed_base_member_vector_store_back_uses_slice_and_errors_with_stable_identifier() {
-    let source =
-        "s = struct('a', {[10 20 30 40], [1 2 3 4]}); idx = [2 4]; s(2).a(idx) = 99; y = s(2).a(4);";
+fn semantic_indexed_base_member_vector_store_back_lowers_to_slice_instruction() {
+    let source = "s = struct('a', {[10 20 30 40], [1 2 3 4]}); idx = [2 4]; s(2).a(idx) = 99; t = s(2); y = getfield(t, 'a'); z = y(4);";
     let bytecode =
         compile_semantic_source(source).expect("compile indexed-base member vector store");
     assert!(
@@ -1201,19 +1200,15 @@ fn semantic_indexed_base_member_vector_store_back_uses_slice_and_errors_with_sta
         )),
         "indexed-base member vector assignment should lower through StoreSlice*"
     );
-    let err = interpret(&bytecode).expect_err("indexed-base member vector store should fail");
-    assert_eq!(
-        err.identifier(),
-        Some("RunMat:IndexOutOfBounds"),
-        "unexpected error: {}",
-        err.message()
-    );
+    let vars = interpret(&bytecode).expect("execute indexed-base member vector store");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
 }
 
 #[test]
-fn semantic_indexed_base_member_logical_store_back_uses_slice_and_errors_with_stable_identifier() {
-    let source =
-        "s = struct('a', {[1 2 3 4], [5 6 7 8]}); mask = logical([1 0 1 0]); s(2).a(mask) = 0; y = s(2).a(3);";
+fn semantic_indexed_base_member_logical_store_back_lowers_to_slice_instruction() {
+    let source = "s = struct('a', {[1 2 3 4], [5 6 7 8]}); mask = logical([1 0 1 0]); s(2).a(mask) = 0; t = s(2); y = getfield(t, 'a'); z = y(3);";
     let bytecode =
         compile_semantic_source(source).expect("compile indexed-base member logical store");
     assert!(
@@ -1226,13 +1221,10 @@ fn semantic_indexed_base_member_logical_store_back_uses_slice_and_errors_with_st
         )),
         "indexed-base member logical assignment should lower through StoreSlice*"
     );
-    let err = interpret(&bytecode).expect_err("indexed-base member logical store should fail");
-    assert_eq!(
-        err.identifier(),
-        Some("RunMat:IndexShape"),
-        "unexpected error: {}",
-        err.message()
-    );
+    let vars = interpret(&bytecode).expect("execute indexed-base member logical store");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 0.0).abs() < 1e-9)));
 }
 
 #[test]
