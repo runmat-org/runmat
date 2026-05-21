@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime event-listener closure callback prebinding to semantic identity
+  - `scope: in-scope`
+  - `blocker: listener callback prebinding still left closure callbacks without embedded semantic ids (`Closure.semantic_function == None`) on notify-time name-resolution paths even when resolver identity was known at registration.`
+  - Tightened listener callback canonicalization in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `canonicalize_listener_callback(...)` now upgrades `Value::Closure` callbacks with resolver-known `function_name` to embedded semantic identity (`semantic_function = Some(id)`) while preserving captures.
+  - Added ratchet:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+      - `addlistener_closure_prefers_embedded_semantic_identity_when_resolved`
+  - Validation:
+    - `cargo test -p runmat-runtime addlistener_closure_prefers_embedded_semantic_identity_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime addlistener_string_handle_prefers_semantic_identity_when_resolved -- --nocapture`
+    - `cargo test -p runmat-runtime notify_semantic_function_handle_uses_semantic_identity -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime event-listener text-handle callback prebinding to semantic identity
   - `scope: in-scope`
   - `blocker: listener callback prebinding covered function-handle values but still left `@name` callback text handles (`String`/row `CharArray`) name-shaped at registration, keeping repeated semantic resolver lookups on notify dispatch.`

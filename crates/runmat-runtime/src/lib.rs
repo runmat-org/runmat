@@ -567,6 +567,16 @@ fn canonicalize_listener_callback(callback: Value) -> Value {
             }
             Value::ExternalFunctionHandle(name)
         }
+        Value::Closure(mut closure) => {
+            if closure.semantic_function.is_none() {
+                if let Some(function) =
+                    crate::user_functions::resolve_semantic_function_by_name(&closure.function_name)
+                {
+                    closure.semantic_function = Some(function);
+                }
+            }
+            Value::Closure(closure)
+        }
         other => other,
     }
 }
@@ -2759,6 +2769,34 @@ mod tests {
             &*listener.callback,
             Value::SemanticFunctionHandle { name, function }
                 if name == "event_callback" && *function == 64
+        ));
+    }
+
+    #[test]
+    fn addlistener_closure_prefers_embedded_semantic_identity_when_resolved() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "event_callback").then_some(65)
+            })));
+        let target = block_on(new_handle_object_builtin("SemanticEventTarget".to_string()))
+            .expect("handle target");
+        let callback = Value::Closure(runmat_builtins::Closure {
+            function_name: "event_callback".to_string(),
+            semantic_function: None,
+            captures: vec![Value::Num(9.0)],
+        });
+        let listener = block_on(addlistener_builtin(target, "Changed".to_string(), callback))
+            .expect("listener registered");
+        let Value::Listener(listener) = listener else {
+            panic!("expected listener value");
+        };
+        assert!(matches!(
+            &*listener.callback,
+            Value::Closure(runmat_builtins::Closure {
+                function_name,
+                semantic_function: Some(65),
+                captures,
+            }) if function_name == "event_callback" && captures == &vec![Value::Num(9.0)]
         ));
     }
 
