@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime `feval` object payload cell-build error normalization
+  - `scope: in-scope`
+  - `blocker: runtime `feval` object/handle-object dispatch still stringified object-index payload cell construction failures (`map_err(|err| format!(...))`), which could erase typed identifier contracts at the runtime callable boundary.`
+  - Tightened runtime `feval` payload construction in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - added shared `build_shape_checked_cell(...)` mapper and bound cell-construction failures to `RunMat:ShapeMismatch`.
+    - `feval_builtin(...)` object/handle-object branch now uses the typed helper for `"feval object index payload"` construction.
+  - Added ratchet:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+      - `shape_checked_cell_builder_maps_shape_identifier`
+  - Validation:
+    - `cargo test -p runmat-runtime shape_checked_cell_builder_maps_shape_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime feval_object_receiver_routes_to_subsref_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM object descriptor cell-build error normalization to typed identifier
   - `scope: in-scope`
   - `blocker: object descriptor helper paths in VM call sharing still converted cell-build failures to string-shaped runtime errors (`map_err(|e| format!(...))`), which can erase typed identifier contracts at descriptor boundaries.`

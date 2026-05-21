@@ -100,6 +100,19 @@ fn is_undefined_function_error(err: &RuntimeError) -> bool {
     err.identifier() == Some("RunMat:UndefinedFunction")
 }
 
+fn build_shape_checked_cell(
+    values: Vec<Value>,
+    rows: usize,
+    cols: usize,
+    context: &str,
+) -> Result<runmat_builtins::CellArray, RuntimeError> {
+    runmat_builtins::CellArray::new(values, rows, cols).map_err(|err| {
+        build_runtime_error(format!("{context}: {err}"))
+            .with_identifier("RunMat:ShapeMismatch")
+            .build()
+    })
+}
+
 fn object_receiver_class_name(receiver: &Value) -> Option<String> {
     match receiver {
         Value::Object(obj) => Some(obj.class_name.clone()),
@@ -1455,10 +1468,12 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             call_by_name(&c.function_name, &args, requested_outputs).await
         }
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
-            let payload = Value::Cell(
-                runmat_builtins::CellArray::new(rest.clone(), 1, rest.len())
-                    .map_err(|err| format!("feval object index payload: {err}"))?,
-            );
+            let payload = Value::Cell(build_shape_checked_cell(
+                rest.clone(),
+                1,
+                rest.len(),
+                "feval object index payload",
+            )?);
             subsref_dispatch(receiver, OBJECT_INDEX_PAREN.to_string(), payload).await
         }
         other => Err(
@@ -2689,6 +2704,13 @@ mod tests {
             err.identifier(),
             Some("RunMat:FevalFunctionValueUnsupported")
         );
+    }
+
+    #[test]
+    fn shape_checked_cell_builder_maps_shape_identifier() {
+        let err = super::build_shape_checked_cell(vec![Value::Num(1.0)], 2, 2, "test")
+            .expect_err("expected shape mismatch");
+        assert_eq!(err.identifier(), Some("RunMat:ShapeMismatch"));
     }
 
     #[test]
