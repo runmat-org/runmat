@@ -140,6 +140,7 @@ pub enum Instr {
     IndexCell {
         num_indices: usize,
         end_offsets: Vec<(usize, isize)>,
+        end_exprs: Vec<(usize, EndExpr)>,
     },
 
     // Expands cell contents into a comma-separated list with fixed output arity.
@@ -147,12 +148,14 @@ pub enum Instr {
         num_indices: usize,
         out_count: usize,
         end_offsets: Vec<(usize, isize)>,
+        end_exprs: Vec<(usize, EndExpr)>,
     },
 
     // Expands cell contents into a first-class comma-separated list value.
     IndexCellList {
         num_indices: usize,
         end_offsets: Vec<(usize, isize)>,
+        end_exprs: Vec<(usize, EndExpr)>,
     },
 
     // Indexed assignment updates the base value and pushes the updated base.
@@ -160,11 +163,13 @@ pub enum Instr {
     StoreIndexCell {
         num_indices: usize,
         end_offsets: Vec<(usize, isize)>,
+        end_exprs: Vec<(usize, EndExpr)>,
     },
     StoreIndexDelete(usize),
     StoreIndexCellDelete {
         num_indices: usize,
         end_offsets: Vec<(usize, isize)>,
+        end_exprs: Vec<(usize, EndExpr)>,
     },
 
     // Slice assignment with compiler-encoded colon and plain `end` masks.

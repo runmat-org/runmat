@@ -4031,13 +4031,15 @@ mod tests {
                 instr,
                 Instr::IndexCell {
                     num_indices: 1,
-                    end_offsets
+                    end_offsets,
+                    ..
                 } if end_offsets == &vec![(0, 0)]
             ) || matches!(
                 instr,
                 Instr::IndexCellList {
                     num_indices: 1,
-                    end_offsets
+                    end_offsets,
+                    ..
                 } if end_offsets == &vec![(0, 0)]
             )
         }));
@@ -4065,7 +4067,8 @@ mod tests {
             instr,
             Instr::StoreIndexCell {
                 num_indices: 1,
-                end_offsets
+                end_offsets,
+                ..
             } if end_offsets == &vec![(0, 0)]
         )));
 
@@ -4099,10 +4102,12 @@ mod tests {
                 Instr::IndexCell {
                     num_indices: 1,
                     end_offsets,
+                    ..
                 }
                 | Instr::IndexCellList {
                     num_indices: 1,
                     end_offsets,
+                    ..
                 } => Some(end_offsets.clone()),
                 _ => None,
             })
@@ -4149,6 +4154,7 @@ mod tests {
                 Instr::StoreIndexCell {
                     num_indices: 1,
                     end_offsets,
+                    ..
                 } => Some(end_offsets.clone()),
                 _ => None,
             })
@@ -4158,6 +4164,92 @@ mod tests {
             "expected semantic function end-1 metadata offset; actual offsets: {store_offsets:?}"
         );
 
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let x_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "x")
+            .expect("x export");
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[x_export.slot.0], Value::Num(9.0));
+    }
+
+    #[test]
+    fn primary_compile_supports_general_cell_end_expression_reads() {
+        let ast = runmat_parser::parse("c = {10, 20, 30, 40}; x = c{end/2};").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        assert!(bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                Instr::IndexCell {
+                    num_indices: 1,
+                    end_exprs,
+                    ..
+                } if end_exprs.iter().any(|(pos, expr)| {
+                    *pos == 0
+                        && matches!(
+                            expr,
+                            crate::bytecode::EndExpr::Div(left, right)
+                                if matches!(left.as_ref(), crate::bytecode::EndExpr::End)
+                                    && matches!(right.as_ref(), crate::bytecode::EndExpr::Const(v) if (*v - 2.0).abs() < f64::EPSILON)
+                        )
+                })
+            ) || matches!(
+                instr,
+                Instr::IndexCellList {
+                    num_indices: 1,
+                    end_exprs,
+                    ..
+                } if end_exprs.iter().any(|(pos, expr)| {
+                    *pos == 0
+                        && matches!(
+                            expr,
+                            crate::bytecode::EndExpr::Div(left, right)
+                                if matches!(left.as_ref(), crate::bytecode::EndExpr::End)
+                                    && matches!(right.as_ref(), crate::bytecode::EndExpr::Const(v) if (*v - 2.0).abs() < f64::EPSILON)
+                        )
+                })
+            )
+        }));
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let x_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "x")
+            .expect("x export");
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[x_export.slot.0], Value::Num(20.0));
+    }
+
+    #[test]
+    fn primary_compile_supports_general_cell_end_expression_stores() {
+        let ast = runmat_parser::parse("c = {1, 2, 3, 4}; c{floor(end/2)} = 9; x = c{2};")
+            .expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        assert!(bytecode.instructions.iter().any(|instr| {
+            matches!(
+                instr,
+                Instr::StoreIndexCell {
+                    num_indices: 1,
+                    end_exprs,
+                    ..
+                } if end_exprs.iter().any(|(pos, expr)| {
+                    *pos == 0
+                        && matches!(
+                            expr,
+                            crate::bytecode::EndExpr::ResolvedCall { args, .. } if args.len() == 1
+                        )
+                })
+            )
+        }));
         let layout = bytecode.layout.as_ref().expect("layout");
         let x_export = layout.entrypoints[&entrypoint]
             .exports

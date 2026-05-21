@@ -1107,19 +1107,21 @@ impl Compiler {
         output_count: usize,
     ) -> Result<(), CompileError> {
         self.compile_mir_operand(base)?;
-        let (index_count, expand_all, end_offsets) =
+        let (index_count, expand_all, end_offsets, end_exprs) =
             self.compile_mir_cell_selector_operands(indexing)?;
         if expand_all {
             self.emit(Instr::IndexCellExpand {
                 num_indices: 0,
                 out_count: output_count,
                 end_offsets,
+                end_exprs,
             });
         } else {
             self.emit(Instr::IndexCellExpand {
                 num_indices: index_count,
                 out_count: output_count,
                 end_offsets,
+                end_exprs,
             });
         }
         Ok(())
@@ -1131,11 +1133,12 @@ impl Compiler {
         indexing: &MirIndexing,
     ) -> Result<(), CompileError> {
         self.compile_mir_operand(base)?;
-        let (index_count, expand_all, end_offsets) =
+        let (index_count, expand_all, end_offsets, end_exprs) =
             self.compile_mir_cell_selector_operands(indexing)?;
         self.emit(Instr::IndexCellList {
             num_indices: if expand_all { 0 } else { index_count },
             end_offsets,
+            end_exprs,
         });
         Ok(())
     }
@@ -1143,10 +1146,11 @@ impl Compiler {
     fn compile_mir_cell_selector_operands(
         &mut self,
         indexing: &MirIndexing,
-    ) -> Result<(usize, bool, Vec<(usize, isize)>), CompileError> {
+    ) -> Result<(usize, bool, Vec<(usize, isize)>, Vec<(usize, EndExpr)>), CompileError> {
         let expand_all = indexing.cell_expand_all;
         let mut index_count = 0usize;
         let mut end_offsets = Vec::new();
+        let mut end_exprs = Vec::new();
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Colon => {
@@ -1157,6 +1161,13 @@ impl Compiler {
                 }
                 MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
+                    if let Some(expr) = self.mir_operand_end_expr(operand) {
+                        if let Some(offset) = Self::mir_cell_end_offset_from_expr(&expr) {
+                            end_offsets.push((index_count, offset));
+                        } else {
+                            end_exprs.push((index_count, expr));
+                        }
+                    }
                     index_count += 1;
                 }
                 MirIndexComponent::End { offset, .. } => {
@@ -1179,7 +1190,7 @@ impl Compiler {
                 .with_identifier(IDENT_MIR_CELL_EXPAND_PLAN_INVALID),
             );
         }
-        Ok((index_count, expand_all, end_offsets))
+        Ok((index_count, expand_all, end_offsets, end_exprs))
     }
 
     fn compile_mir_call_for_multi_assign(
@@ -1479,7 +1490,7 @@ impl Compiler {
                 }
             },
             IndexKind::Brace => {
-                let end_offsets = self.compile_mir_cell_index_components(
+                let (end_offsets, end_exprs) = self.compile_mir_cell_index_components(
                     indexing,
                     IndexResultContext::AssignmentTarget,
                 )?;
@@ -1488,11 +1499,13 @@ impl Compiler {
                     Instr::StoreIndexCellDelete {
                         num_indices: indexing.components.len(),
                         end_offsets: end_offsets.clone(),
+                        end_exprs: end_exprs.clone(),
                     }
                 } else {
                     Instr::StoreIndexCell {
                         num_indices: indexing.components.len(),
                         end_offsets,
+                        end_exprs,
                     }
                 });
             }
@@ -1561,10 +1574,12 @@ impl Compiler {
         match indexing.kind {
             IndexKind::Paren => self.compile_mir_slice_index(indexing)?,
             IndexKind::Brace => {
-                let end_offsets = self.compile_mir_cell_index_components_any_context(indexing)?;
+                let (end_offsets, end_exprs) =
+                    self.compile_mir_cell_index_components_any_context(indexing)?;
                 self.emit(Instr::IndexCell {
                     num_indices: indexing.components.len(),
                     end_offsets,
+                    end_exprs,
                 });
             }
         }
@@ -1652,17 +1667,20 @@ impl Compiler {
                 Ok(())
             }
             IndexKind::Brace => {
-                let end_offsets = self.compile_mir_cell_index_components_any_context(indexing)?;
+                let (end_offsets, end_exprs) =
+                    self.compile_mir_cell_index_components_any_context(indexing)?;
                 self.emit(Instr::LoadVar(tmp));
                 self.emit(if delete {
                     Instr::StoreIndexCellDelete {
                         num_indices: indexing.components.len(),
                         end_offsets: end_offsets.clone(),
+                        end_exprs: end_exprs.clone(),
                     }
                 } else {
                     Instr::StoreIndexCell {
                         num_indices: indexing.components.len(),
                         end_offsets,
+                        end_exprs,
                     }
                 });
                 Ok(())
@@ -2223,11 +2241,12 @@ impl Compiler {
         match indexing.kind {
             IndexKind::Paren => self.compile_mir_slice_index(indexing)?,
             IndexKind::Brace => {
-                let end_offsets = self
+                let (end_offsets, end_exprs) = self
                     .compile_mir_cell_index_components(indexing, indexing.result_context.clone())?;
                 self.emit(Instr::IndexCell {
                     num_indices: indexing.components.len(),
                     end_offsets,
+                    end_exprs,
                 });
             }
         };
@@ -2238,18 +2257,26 @@ impl Compiler {
         &mut self,
         indexing: &MirIndexing,
         expected_context: IndexResultContext,
-    ) -> Result<Vec<(usize, isize)>, CompileError> {
+    ) -> Result<(Vec<(usize, isize)>, Vec<(usize, EndExpr)>), CompileError> {
         if !mir_indexing_context_matches(indexing.result_context.clone(), expected_context) {
             return Err(self
                 .compile_error("MIR cell index lowering received mismatched index result context")
                 .with_identifier(IDENT_MIR_CELL_INDEX_CONTEXT_INVALID));
         }
         let mut end_offsets = Vec::new();
+        let mut end_exprs = Vec::new();
         let mut index_position = 0usize;
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
+                    if let Some(expr) = self.mir_operand_end_expr(operand) {
+                        if let Some(offset) = Self::mir_cell_end_offset_from_expr(&expr) {
+                            end_offsets.push((index_position, offset));
+                        } else {
+                            end_exprs.push((index_position, expr));
+                        }
+                    }
                     index_position += 1;
                 }
                 MirIndexComponent::End { offset, .. } => {
@@ -2266,19 +2293,27 @@ impl Compiler {
                 }
             }
         }
-        Ok(end_offsets)
+        Ok((end_offsets, end_exprs))
     }
 
     fn compile_mir_cell_index_components_any_context(
         &mut self,
         indexing: &MirIndexing,
-    ) -> Result<Vec<(usize, isize)>, CompileError> {
+    ) -> Result<(Vec<(usize, isize)>, Vec<(usize, EndExpr)>), CompileError> {
         let mut end_offsets = Vec::new();
+        let mut end_exprs = Vec::new();
         let mut index_position = 0usize;
         for component in &indexing.components {
             match component {
                 MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
+                    if let Some(expr) = self.mir_operand_end_expr(operand) {
+                        if let Some(offset) = Self::mir_cell_end_offset_from_expr(&expr) {
+                            end_offsets.push((index_position, offset));
+                        } else {
+                            end_exprs.push((index_position, expr));
+                        }
+                    }
                     index_position += 1;
                 }
                 MirIndexComponent::End { offset, .. } => {
@@ -2295,7 +2330,7 @@ impl Compiler {
                 }
             }
         }
-        Ok(end_offsets)
+        Ok((end_offsets, end_exprs))
     }
 
     fn compile_mir_slice_index(&mut self, indexing: &MirIndexing) -> Result<(), CompileError> {

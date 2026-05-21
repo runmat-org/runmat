@@ -142,6 +142,45 @@ fn apply_cell_end_offsets_for_base(
     Ok(adjusted)
 }
 
+async fn apply_cell_end_exprs_for_base(
+    base: &Value,
+    raw_indices: &[Value],
+    end_exprs: &[(usize, EndExpr)],
+    vars: &mut [Value],
+) -> Result<Vec<Value>, RuntimeError> {
+    if end_exprs.is_empty() {
+        return Ok(raw_indices.to_vec());
+    }
+    let Value::Cell(ca) = base else {
+        return Ok(raw_indices.to_vec());
+    };
+    let mut adjusted = raw_indices.to_vec();
+    for (position, end_expr) in end_exprs {
+        if *position >= adjusted.len() {
+            return Err(crate::interpreter::errors::mex(
+                "CellIndexOutOfBounds",
+                "Cell end selector position is out of bounds",
+            ));
+        }
+        let dim_len = if adjusted.len() == 1 {
+            ca.rows * ca.cols
+        } else if *position == 0 {
+            ca.rows
+        } else {
+            ca.cols
+        };
+        let resolved = resolve_range_end_index(dim_len, end_expr, vars).await?;
+        if resolved < 1 || (resolved as usize) > dim_len {
+            return Err(crate::interpreter::errors::mex(
+                "CellIndexOutOfBounds",
+                "Cell index out of bounds",
+            ));
+        }
+        adjusted[*position] = Value::Num(resolved as f64);
+    }
+    Ok(adjusted)
+}
+
 fn gather_cell_with_plan(
     ca: &CellArray,
     plan: &crate::indexing::plan::IndexPlan,
@@ -307,12 +346,17 @@ async fn execute_brace_operation_from_stack(
     stack: &mut Vec<Value>,
     num_indices: usize,
     end_offsets: &[(usize, isize)],
+    end_exprs: &[(usize, EndExpr)],
+    vars: &mut [Value],
     operation: BraceIndexOperation,
     expectation: BraceOutcomeExpectation,
 ) -> Result<(), RuntimeError> {
     let raw_indices = pop_index_values(stack, num_indices)?;
     let base = pop_index_base(stack)?;
-    let adjusted_indices = apply_cell_end_offsets_for_base(&base, &raw_indices, end_offsets)?;
+    let adjusted_end_exprs =
+        apply_cell_end_exprs_for_base(&base, &raw_indices, end_exprs, vars).await?;
+    let adjusted_indices =
+        apply_cell_end_offsets_for_base(&base, &adjusted_end_exprs, end_offsets)?;
     let outcome = execute_brace_operation(base, &adjusted_indices, operation).await?;
     match (outcome, expectation) {
         (BraceIndexOutcome::Value(value), BraceOutcomeExpectation::SingleValue { .. }) => {
@@ -606,11 +650,14 @@ pub async fn dispatch_indexing(
         crate::bytecode::Instr::IndexCell {
             num_indices,
             end_offsets,
+            end_exprs,
         } => {
             execute_brace_operation_from_stack(
                 stack,
                 *num_indices,
                 end_offsets,
+                end_exprs,
+                vars,
                 BraceIndexOperation::ReadSingle,
                 BraceOutcomeExpectation::SingleValue {
                     invalid_message: "IndexCell expected a single value outcome",
@@ -623,11 +670,14 @@ pub async fn dispatch_indexing(
             num_indices,
             out_count,
             end_offsets,
+            end_exprs,
         } => {
             execute_brace_operation_from_stack(
                 stack,
                 *num_indices,
                 end_offsets,
+                end_exprs,
+                vars,
                 BraceIndexOperation::Expand {
                     out_count: *out_count,
                 },
@@ -641,11 +691,14 @@ pub async fn dispatch_indexing(
         crate::bytecode::Instr::IndexCellList {
             num_indices,
             end_offsets,
+            end_exprs,
         } => {
             execute_brace_operation_from_stack(
                 stack,
                 *num_indices,
                 end_offsets,
+                end_exprs,
+                vars,
                 BraceIndexOperation::List,
                 BraceOutcomeExpectation::SingleValue {
                     invalid_message: "IndexCellList expected a single list value",
@@ -657,10 +710,12 @@ pub async fn dispatch_indexing(
         crate::bytecode::Instr::StoreIndexCell {
             num_indices,
             end_offsets,
+            end_exprs,
         }
         | crate::bytecode::Instr::StoreIndexCellDelete {
             num_indices,
             end_offsets,
+            end_exprs,
         } => {
             let delete = matches!(instr, crate::bytecode::Instr::StoreIndexCellDelete { .. });
             if delete {
@@ -677,6 +732,8 @@ pub async fn dispatch_indexing(
                 stack,
                 *num_indices,
                 end_offsets,
+                end_exprs,
+                vars,
                 BraceIndexOperation::Store { rhs },
                 BraceOutcomeExpectation::SingleValue {
                     invalid_message: "StoreIndexCell expected a single base value",
