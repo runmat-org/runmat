@@ -12,6 +12,26 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime `feval` now resolves name-only closures through semantic resolver before name fallback
+  - `scope: in-scope`
+  - `blocker: non-semantic closures (`Value::Closure` with `semantic_function = None`) still dispatched through pure name-shaped `call_by_name(...)`, even when the active semantic resolver could provide a stable function identity.`
+  - Tightened closure dispatch in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - for non-semantic closures, `feval_builtin(...)` now attempts `resolve_semantic_function_by_name(...)` + `SemanticCallableRequest::semantic(...)` dispatch first.
+    - when semantic invoker is unavailable, behavior falls back to existing name dispatch (`call_by_name(...)`) to preserve compatibility.
+    - internal `call_method` closure fast path remains prioritized.
+  - Added ratchets:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+      - `feval_name_only_closure_uses_semantic_resolver`
+      - `feval_name_only_closure_falls_back_when_semantic_invoker_unavailable`
+  - Validation:
+    - `cargo test -p runmat-runtime feval_name_only_closure_uses_semantic_resolver -- --nocapture`
+    - `cargo test -p runmat-runtime feval_name_only_closure_falls_back_when_semantic_invoker_unavailable -- --nocapture`
+    - `cargo test -p runmat-runtime feval_name_only_handle_uses_semantic_resolver -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `feval` closure dispatch now fast-paths internal `call_method` closure shape
   - `scope: in-scope`
   - `blocker: `getmethod`-produced closures (`function_name == "call_method"`) still executed through generic name-shaped closure dispatch in `feval` (`call_by_name(...)`), leaving an avoidable internal dynamic-name service seam on object method-handle invocation paths.`

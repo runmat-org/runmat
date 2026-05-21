@@ -1471,6 +1471,20 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
 
             let mut args = c.captures.clone();
             args.extend(rest);
+            if let Some(function) =
+                crate::user_functions::resolve_semantic_function_by_name(&c.function_name)
+            {
+                let request = crate::user_functions::SemanticCallableRequest::semantic(
+                    function,
+                    args.clone(),
+                    requested_outputs,
+                );
+                if let Some(result) =
+                    crate::user_functions::try_call_semantic_descriptor(request).await
+                {
+                    return result;
+                }
+            }
             call_by_name(&c.function_name, &args, requested_outputs).await
         }
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
@@ -1954,6 +1968,51 @@ mod tests {
         ))
         .expect("resolved name-only handle feval succeeds");
         assert_eq!(result, Value::Num(11.0));
+    }
+
+    #[test]
+    fn feval_name_only_closure_uses_semantic_resolver() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "resolved_target").then_some(145)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
+            Arc::new(|function, args, requested_outputs| {
+                assert_eq!(function, 145);
+                assert_eq!(requested_outputs, 1);
+                assert_eq!(args, &[Value::Num(9.0), Value::Num(4.0)]);
+                Box::pin(async { Ok(Value::Num(13.0)) })
+            }),
+        ));
+
+        let closure = Value::Closure(runmat_builtins::Closure {
+            function_name: "resolved_target".to_string(),
+            semantic_function: None,
+            captures: vec![Value::Num(9.0)],
+        });
+
+        let result = block_on(feval_builtin(closure, vec![Value::Num(4.0)]))
+            .expect("resolved name-only closure feval succeeds");
+        assert_eq!(result, Value::Num(13.0));
+    }
+
+    #[test]
+    fn feval_name_only_closure_falls_back_when_semantic_invoker_unavailable() {
+        let _resolver_guard =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "sin").then_some(245)
+            })));
+        let _invoker_guard = crate::user_functions::install_semantic_function_invoker(None);
+
+        let closure = Value::Closure(runmat_builtins::Closure {
+            function_name: "sin".to_string(),
+            semantic_function: None,
+            captures: Vec::new(),
+        });
+
+        let result =
+            block_on(feval_builtin(closure, vec![Value::Num(0.0)])).expect("sin fallback works");
+        assert_eq!(result, Value::Num(0.0));
     }
 
     #[test]
