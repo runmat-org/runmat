@@ -378,6 +378,15 @@ async fn execute_brace_operation(
             Ok(BraceIndexOutcome::Expanded(values))
         }
         BraceIndexOperation::List => {
+            if !matches!(
+                base,
+                Value::Cell(_) | Value::Object(_) | Value::HandleObject(_)
+            ) {
+                return Err(crate::interpreter::errors::mex(
+                    "CellIndexingOnNonCell",
+                    "Cell indexing on non-cell",
+                ));
+            }
             let values = expand_brace_values(base, raw_indices, None).await?;
             let value = if values.len() == 1 {
                 values.into_iter().next().unwrap_or(Value::Num(0.0))

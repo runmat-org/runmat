@@ -4567,11 +4567,26 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
 
 - RM-378: ratchet non-cell brace selector identifier contracts
   - Added source-level semantic VM identifier coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) for brace selectors on non-cell values:
-    - `brace_read_on_noncell_errors_with_identifier_contract` now pins `x = 10{1};` to `RunMat:CellExpansionOnNonCell` (current brace-read lowering boundary).
+    - `brace_read_on_noncell_errors_with_identifier_contract` now pins `x = 10{1};` to `RunMat:CellIndexingOnNonCell` (plain brace-read selector boundary).
     - `brace_assignment_on_noncell_errors_with_identifier_contract` pins `x{1} = ...` to `RunMat:CellAssignmentOnNonCell`.
   - This closes a remaining error-surface ratchet gap on brace selector misuse outside cell/object protocols.
   - Validation:
     - `cargo test -p runmat-vm brace_read_on_noncell_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm brace_assignment_on_noncell_errors_with_identifier_contract -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
+- RM-378: normalize brace-list noncell identifier boundary
+  - Tightened brace read semantics in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - `BraceIndexOperation::List` now rejects non-cell/non-object bases with `RunMat:CellIndexingOnNonCell` before expansion dispatch.
+    - Explicit expansion paths (`IndexCellExpand`/call-argument expansion) still use `RunMat:CellExpansionOnNonCell`, preserving expansion-only diagnostics while aligning plain brace expressions to indexing diagnostics.
+  - Updated source-level contract in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `brace_read_on_noncell_errors_with_identifier_contract` now ratchets `RunMat:CellIndexingOnNonCell` for `x = 10{1};`.
+  - Validation:
+    - `cargo test -p runmat-vm brace_read_on_noncell_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm function_handle_ -- --nocapture`
     - `cargo test -p runmat-vm brace_assignment_on_noncell_errors_with_identifier_contract -- --nocapture`
     - `cargo fmt --all --check`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`

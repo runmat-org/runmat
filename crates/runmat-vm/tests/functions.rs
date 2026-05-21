@@ -641,7 +641,7 @@ fn brace_read_on_noncell_errors_with_identifier_contract() {
         .expect_err("brace read on non-cell should fail");
     assert_eq!(
         err.identifier(),
-        Some("RunMat:CellExpansionOnNonCell"),
+        Some("RunMat:CellIndexingOnNonCell"),
         "unexpected error: {}",
         err.message()
     );
