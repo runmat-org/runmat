@@ -55,7 +55,7 @@ pub(crate) enum BrentStepKind {
 
 /// Find a zero of a scalar function on a sign-changing bracket using Brent's method.
 ///
-/// `bracket` must satisfy `fa * fb <= 0` (otherwise the contract is violated and
+/// `bracket` must satisfy `fa * fb < 0` unless either endpoint is already zero
 /// the function returns an error).  The function evaluation counter
 /// (`initial_evals`) tracks calls performed by the caller while constructing the
 /// bracket; the returned tuple's second element is the total invocations.
@@ -65,11 +65,17 @@ pub(crate) async fn brent_zero(
     bracket: BrentZeroBracket,
     params: BrentParams,
 ) -> BuiltinResult<f64> {
-    if bracket.fa == 0.0 || bracket.a == bracket.b {
+    if bracket.fa == 0.0 {
         return Ok(bracket.a);
     }
     if bracket.fb == 0.0 {
         return Ok(bracket.b);
+    }
+    if bracket.fa * bracket.fb >= 0.0 {
+        return Err(optim_error(
+            name,
+            format!("{name}: invalid bracket; endpoint function values must have opposite signs"),
+        ));
     }
 
     let mut a = bracket.a;
@@ -199,8 +205,10 @@ pub(crate) async fn brent_min(
         ));
     }
     let (mut a, mut b) = (a.min(b), a.max(b));
-    if (b - a).abs() <= f64::EPSILON * (a.abs() + b.abs()) {
-        let x = 0.5 * (a + b);
+    let width = b - a;
+    let scale = a.abs().max(b.abs()).max(1.0);
+    if width.abs() <= f64::EPSILON * scale {
+        let x = a + width * 0.5;
         let fx = call_scalar_function(name, function, x).await?;
         if let Some(observer) = observer.as_deref_mut() {
             observer.on_iteration(0, 1, x, fx, BrentStepKind::Initial);
@@ -350,6 +358,28 @@ mod tests {
     fn interpolation_acceptance_uses_signed_q() {
         assert!(!interpolation_step_accepted(1.0, -2.0, 1.0, 0.1, 10.0));
         assert!(interpolation_step_accepted(1.0, -2.0, -1.0, 0.1, 10.0));
+    }
+
+    #[test]
+    fn brent_zero_rejects_nonzero_collapsed_bracket() {
+        let err = futures::executor::block_on(brent_zero(
+            "fzero",
+            &Value::FunctionHandle("sin".into()),
+            BrentZeroBracket {
+                a: 1.0,
+                b: 1.0,
+                fa: 1.0,
+                fb: 1.0,
+                evals: 0,
+            },
+            BrentParams {
+                tol_x: 1.0e-6,
+                max_iter: 10,
+                max_fun_evals: 10,
+            },
+        ))
+        .unwrap_err();
+        assert!(err.message().contains("invalid bracket"));
     }
 
     #[test]
