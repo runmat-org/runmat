@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Runtime `call_method` identifier-contract normalization ratchet
+  - `scope: in-scope`
+  - Closed a callable-dispatch boundary gap where `call_method(...)` still emitted message-only errors for invalid receiver/name shapes:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now rejects empty/whitespace method names with stable identifier `RunMat:CallMethodNameInvalid`.
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now reports non-object receivers with stable identifier `RunMat:InvalidObjectDispatch` instead of a raw string-only error.
+  - Added runtime ratchets in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `call_method_rejects_non_object_receiver_with_identifier`
+    - `call_method_rejects_empty_method_name_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-runtime call_method_ -- --nocapture`
+    - `cargo test -p runmat-vm unresolved_qualified_direct_call_ -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM unresolved qualified external handle direct-call contract ratchet
   - `scope: in-scope`
   - Closed a callable ABI coverage gap around unresolved qualified external function-handle direct calls:

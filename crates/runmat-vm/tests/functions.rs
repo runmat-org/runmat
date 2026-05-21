@@ -140,8 +140,8 @@ fn unresolved_qualified_external_handle_expand_zero_output_feval_uses_typed_inst
         runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
             if *out_count == 0 && specs.len() == 1 && specs[0].is_expand && specs[0].expand_all
     )));
-    let err =
-        interpret(&bytecode).expect_err("unresolved qualified expanded zero-output feval should fail");
+    let err = interpret(&bytecode)
+        .expect_err("unresolved qualified expanded zero-output feval should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -412,8 +412,8 @@ fn unresolved_qualified_direct_call_multi_output_uses_external_boundary_typed_in
             && *arg_count == 1
             && *out_count == 2
     )));
-    let err =
-        interpret(&bytecode).expect_err("unresolved qualified multi-output direct call should fail");
+    let err = interpret(&bytecode)
+        .expect_err("unresolved qualified multi-output direct call should fail");
     assert_eq!(
         err.identifier(),
         Some("RunMat:UndefinedFunction"),
@@ -2092,8 +2092,7 @@ fn unresolved_function_expand_zero_output_uses_typed_instruction_and_errors() {
             && specs[0].expand_all
     )));
 
-    let err =
-        interpret(&bytecode).expect_err("unresolved expanded zero-output call should fail");
+    let err = interpret(&bytecode).expect_err("unresolved expanded zero-output call should fail");
     assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
 }
 

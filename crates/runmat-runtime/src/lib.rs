@@ -378,6 +378,13 @@ async fn call_method_builtin(
     method: String,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    if method.trim().is_empty() {
+        return Err(
+            build_runtime_error("call_method method name must not be empty")
+                .with_identifier("RunMat:CallMethodNameInvalid")
+                .build(),
+        );
+    }
     match base {
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
             let class_name = object_receiver_class_name(&receiver).ok_or_else(|| {
@@ -404,9 +411,11 @@ async fn call_method_builtin(
             let (identity, fallback_policy) = callable_identity_for_handle_name(&method);
             dispatch_callable_with_policy(identity, fallback_policy, args, requested_outputs).await
         }
-        other => {
-            Err((format!("call_method unsupported on {other:?} for method '{method}'")).into())
-        }
+        other => Err(build_runtime_error(format!(
+            "call_method unsupported on {other:?} for method '{method}'"
+        ))
+        .with_identifier("RunMat:InvalidObjectDispatch")
+        .build()),
     }
 }
 
@@ -2318,6 +2327,28 @@ mod tests {
                 panic!("expected output list from multi-output call_method fallback, got {other:?}")
             }
         }
+    }
+
+    #[test]
+    fn call_method_rejects_non_object_receiver_with_identifier() {
+        let err = block_on(call_method_builtin(
+            Value::Num(1.0),
+            "origin".to_string(),
+            Vec::new(),
+        ))
+        .expect_err("non-object receiver should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidObjectDispatch"));
+    }
+
+    #[test]
+    fn call_method_rejects_empty_method_name_with_identifier() {
+        let err = block_on(call_method_builtin(
+            Value::Object(runmat_builtins::ObjectInstance::new("Point".to_string())),
+            "  ".to_string(),
+            Vec::new(),
+        ))
+        .expect_err("empty method name should fail");
+        assert_eq!(err.identifier(), Some("RunMat:CallMethodNameInvalid"));
     }
 
     #[test]
