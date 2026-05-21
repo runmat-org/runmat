@@ -3899,6 +3899,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- (pending commit) Plan 3/7 Turbine host-call failure propagation guard
+  - Tightened Turbine JIT host-call error handling in [compiler.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/compiler.rs):
+    - typed host-call helpers no longer synthesize zero-filled outputs on nonzero host status.
+    - host-call failure branches now return a nonzero JIT function status immediately.
+  - Tightened Turbine execute path fallback in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/src/lib.rs):
+    - nonzero JIT status is treated as execution failure.
+    - `execute_or_compile(...)` now falls back to interpreter execution when cached or newly compiled JIT execution fails, avoiding silent success on host-call failures.
+  - Added regression in [jit.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-turbine/tests/jit.rs):
+    - `test_jit_method_member_expand_missing_struct_member_does_not_succeed_with_zero_fill`.
+  - Validation:
+    - `cargo test -p runmat-turbine test_jit_method_member_expand_unresolved_struct_member_stays_on_jit_path -- --nocapture`
+    - `cargo test -p runmat-turbine test_jit_method_member_expand_missing_struct_member_does_not_succeed_with_zero_fill -- --nocapture`
+    - `cargo test -p runmat-turbine --lib compiler::tests::expanded_call_abi_blocker_stays_explicit -- --nocapture`
+    - `cargo test -p runmat-turbine --lib --tests -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - (pending commit) Remaining-partials validation cadence refresh (post Turbine expanded-call slices)
   - Re-ran agreed workspace validation gates after Turbine expanded-call bridge updates:
     - `cargo fmt --all --check`

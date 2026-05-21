@@ -1218,8 +1218,7 @@ impl BytecodeCompiler {
             .brif(is_error, error_block, &[], success_block, &[]);
 
         builder.switch_to_block(error_block);
-        let error_result = builder.ins().f64const(0.0);
-        builder.ins().jump(after_block, &[error_result]);
+        builder.ins().return_(&[status]);
 
         builder.switch_to_block(success_block);
         let success_result = builder
@@ -1308,10 +1307,7 @@ impl BytecodeCompiler {
             .brif(is_error, error_block, &[], success_block, &[]);
 
         builder.switch_to_block(error_block);
-        let error_results: Vec<_> = (0..out_count)
-            .map(|_| builder.ins().f64const(0.0))
-            .collect();
-        builder.ins().jump(after_block, &error_results);
+        builder.ins().return_(&[status]);
 
         builder.switch_to_block(success_block);
         let mut success_results = Vec::with_capacity(out_count);
@@ -1743,10 +1739,7 @@ impl BytecodeCompiler {
             .ins()
             .brif(is_error, error_block, &[], success_block, &[]);
         builder.switch_to_block(error_block);
-        let error_results: Vec<_> = (0..out_count)
-            .map(|_| builder.ins().f64const(0.0))
-            .collect();
-        builder.ins().jump(after_block, &error_results);
+        builder.ins().return_(&[status]);
         builder.switch_to_block(success_block);
         let mut success_results = Vec::with_capacity(out_count);
         for i in 0..out_count {

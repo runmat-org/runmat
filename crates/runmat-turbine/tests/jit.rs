@@ -1540,6 +1540,53 @@ fn test_jit_method_member_expand_unresolved_struct_member_stays_on_jit_path() {
 }
 
 #[test]
+fn test_jit_method_member_expand_missing_struct_member_does_not_succeed_with_zero_fill() {
+    if !TurbineEngine::is_jit_supported() {
+        return;
+    }
+
+    let mut engine = TurbineEngine::new().expect("Failed to create engine");
+    let bytecode = Bytecode::with_instructions(
+        vec![
+            Instr::LoadVar(0),
+            Instr::CallMethodOrMemberIndexExpandMultiOutput {
+                identity: ::runmat_hir::CallableIdentity::DynamicName(::runmat_hir::SymbolName(
+                    "missing_field".to_string(),
+                )),
+                fallback_policy: ::runmat_hir::CallableFallbackPolicy::ObjectDispatch,
+                specs: vec![ArgSpec {
+                    is_expand: false,
+                    num_indices: 0,
+                    expand_all: false,
+                }],
+                out_count: 1,
+            },
+            Instr::StoreVar(1),
+        ],
+        2,
+    );
+
+    let hash = engine.calculate_bytecode_hash(&bytecode);
+    for _ in 0..15 {
+        engine.should_compile(hash);
+    }
+
+    let mut st = StructValue::new();
+    st.insert("a", Value::Num(9.0));
+    let mut vars = vec![Value::Struct(st), Value::Num(123.0)];
+    let result = engine.execute_or_compile(&bytecode, &mut vars);
+    assert!(
+        result.is_err(),
+        "missing method/member target should not be converted into successful zero-filled JIT outputs"
+    );
+    assert_eq!(
+        vars[1],
+        Value::Num(123.0),
+        "failed call should not overwrite output slot with synthetic JIT zeros"
+    );
+}
+
+#[test]
 fn test_jit_function_variable_preservation() {
     // Test: Variables should be preserved across JIT/interpreter transitions
     let mut engine = TurbineEngine::new().expect("Failed to create engine");

@@ -646,6 +646,12 @@ impl TurbineEngine {
             }
         }
 
+        if result != 0 {
+            return Err(execution_error(format!(
+                "JIT execution failed with status code {result}"
+            )));
+        }
+
         debug!("JIT function execution completed with result: {result}");
         Ok(result)
     }
@@ -668,9 +674,14 @@ impl TurbineEngine {
 
         // If function is compiled, execute it with function definitions
         if self.cache.contains(hash) {
-            return self
-                .execute_compiled_with_function_products(hash, vars, &semantic_registry)
-                .map(|result| (result, true));
+            match self.execute_compiled_with_function_products(hash, vars, &semantic_registry) {
+                Ok(result) => return Ok((result, true)),
+                Err(err) => {
+                    warn!(
+                        "JIT execution failed for cached function, falling back to interpreter: {err}"
+                    );
+                }
+            }
         }
 
         // Check if we should compile this function
@@ -678,9 +689,18 @@ impl TurbineEngine {
             match self.compile_bytecode(bytecode) {
                 Ok(_) => {
                     info!("Bytecode compiled successfully, executing JIT version");
-                    return self
-                        .execute_compiled_with_function_products(hash, vars, &semantic_registry)
-                        .map(|result| (result, true));
+                    match self.execute_compiled_with_function_products(
+                        hash,
+                        vars,
+                        &semantic_registry,
+                    ) {
+                        Ok(result) => return Ok((result, true)),
+                        Err(err) => {
+                            warn!(
+                                "JIT execution failed after compilation, falling back to interpreter: {err}"
+                            );
+                        }
+                    }
                 }
                 Err(e) => {
                     warn!("JIT compilation failed, falling back to interpreter: {e}");
