@@ -4565,6 +4565,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: ratchet non-cell brace selector identifier contracts
+  - Added source-level semantic VM identifier coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) for brace selectors on non-cell values:
+    - `brace_read_on_noncell_errors_with_identifier_contract` now pins `x = 10{1};` to `RunMat:CellExpansionOnNonCell` (current brace-read lowering boundary).
+    - `brace_assignment_on_noncell_errors_with_identifier_contract` pins `x{1} = ...` to `RunMat:CellAssignmentOnNonCell`.
+  - This closes a remaining error-surface ratchet gap on brace selector misuse outside cell/object protocols.
+  - Validation:
+    - `cargo test -p runmat-vm brace_read_on_noncell_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm brace_assignment_on_noncell_errors_with_identifier_contract -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

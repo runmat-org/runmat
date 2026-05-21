@@ -636,6 +636,30 @@ fn function_handle_brace_assignment_selector_errors_with_identifier_contract() {
 }
 
 #[test]
+fn brace_read_on_noncell_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("x = 10{1};")
+        .expect_err("brace read on non-cell should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:CellExpansionOnNonCell"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn brace_assignment_on_noncell_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("x = 10; x{1} = 2;")
+        .expect_err("brace assignment on non-cell should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:CellAssignmentOnNonCell"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn nargin_nargout_in_user_functions() {
     // Single-output: nargin/nargout should reflect call site
     let program = r#"
