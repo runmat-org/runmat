@@ -5155,6 +5155,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: align runtime unresolved callable diagnostics to typed identity fallback semantics
+  - Runtime unresolved callable error construction in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now always emits typed callable-identity diagnostics when policy denies VM name fallback (`Undefined function for callable identity ...`) instead of display-name fallback text.
+  - Added runtime ratchet `unresolved_method_callable_reports_typed_identity` to pin unresolved method-identity diagnostics to typed identity and prevent regression to `"Undefined function 'name'"` fallback text.
+  - Validation:
+    - `cargo test -p runmat-runtime unresolved_ -- --nocapture`
+    - `cargo test -p runmat-runtime feval_qualified_at_handle_errors_as_unresolved_external -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

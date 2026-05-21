@@ -63,35 +63,8 @@ fn current_requested_outputs() -> usize {
     crate::output_count::current_output_count().unwrap_or(1)
 }
 
-fn strict_callable_display_name(identity: &runmat_hir::CallableIdentity) -> Option<String> {
-    match identity {
-        runmat_hir::CallableIdentity::SemanticFunction(_)
-        | runmat_hir::CallableIdentity::AnonymousFunction(_) => None,
-        runmat_hir::CallableIdentity::Builtin(runmat_hir::BuiltinId(name))
-        | runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(name))
-        | runmat_hir::CallableIdentity::DynamicName(runmat_hir::SymbolName(name)) => {
-            (!name.is_empty()).then_some(name.clone())
-        }
-        runmat_hir::CallableIdentity::Imported(path) => path.module.display_name(),
-        runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(segments)) => {
-            if segments.is_empty() || segments.iter().any(|segment| segment.0.is_empty()) {
-                return None;
-            }
-            Some(
-                segments
-                    .iter()
-                    .map(|segment| segment.0.as_str())
-                    .collect::<Vec<_>>()
-                    .join("."),
-            )
-        }
-    }
-}
-
 fn undefined_callable_error(identity: &runmat_hir::CallableIdentity) -> RuntimeError {
-    let detail = strict_callable_display_name(identity)
-        .map(|name| format!("Undefined function '{name}'"))
-        .unwrap_or_else(|| format!("Undefined function for callable identity {identity:?}"));
+    let detail = format!("Undefined function for callable identity {identity:?}");
     build_runtime_error(detail)
         .with_identifier("RunMat:UndefinedFunction")
         .build()
@@ -2291,6 +2264,30 @@ mod tests {
             err.message()
                 .contains("ExternalName(QualifiedName([SymbolName(\"pkg\"), SymbolName(\"\"), SymbolName(\"remote\")]))"),
             "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn unresolved_method_callable_reports_typed_identity() {
+        let err = block_on(dispatch_callable_with_policy(
+            runmat_hir::CallableIdentity::Method(runmat_hir::MethodId(
+                "missing_method".to_string(),
+            )),
+            runmat_hir::CallableFallbackPolicy::RuntimeNameResolution,
+            vec![],
+            1,
+        ))
+        .expect_err("method callable identity should fail unresolved");
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedFunction"));
+        assert!(
+            err.message()
+                .contains("Method(MethodId(\"missing_method\"))"),
+            "unexpected error: {err:?}"
+        );
+        assert!(
+            !err.message()
+                .contains("Undefined function 'missing_method'"),
+            "method identity should not use fallback display-name text: {err:?}"
         );
     }
 
