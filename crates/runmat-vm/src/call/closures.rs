@@ -147,6 +147,13 @@ async fn call_member_index_on_object_like(
         Err(err) => return Err(err),
     }
 
+    if name == runmat_runtime::OBJECT_INDEX_PAREN || name == runmat_runtime::OBJECT_INDEX_BRACE {
+        return Err(mex(
+            "MissingSubsref",
+            "class does not define subsref for indexing operation",
+        ));
+    }
+
     call_getfield_with_indices(receiver, name, args, requested_outputs).await
 }
 

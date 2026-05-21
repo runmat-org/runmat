@@ -1566,6 +1566,33 @@ fn subsasgn_missing_protocol_errors_with_identifier_contract() {
 }
 
 #[test]
+fn object_paren_index_missing_subsref_errors_with_identifier_contract() {
+    let err =
+        execute_semantic_source_result("__register_test_classes(); p = new_object('Point'); p(1);")
+            .expect_err("object paren indexing without subsref should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:MissingSubsref"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn object_paren_assign_missing_subsasgn_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result(
+        "__register_test_classes(); p = new_object('Point'); p(1) = 2;",
+    )
+    .expect_err("object paren assignment without subsasgn should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:MissingSubsasgn"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn import_precedence_specific_over_wildcard_and_locals() {
     // Specific imports should take precedence over wildcard imports; locals should shadow both
     let program = r#"

@@ -1344,6 +1344,13 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             }
             call_by_name(&c.function_name, &args, requested_outputs).await
         }
+        receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
+            let payload = Value::Cell(
+                runmat_builtins::CellArray::new(rest.clone(), 1, rest.len())
+                    .map_err(|err| format!("feval object index payload: {err}"))?,
+            );
+            subsref_dispatch(receiver, OBJECT_INDEX_PAREN.to_string(), payload).await
+        }
         other => Err((format!("feval: unsupported function value {other:?}")).into()),
     }
 }
@@ -2407,6 +2414,18 @@ mod tests {
         ))
         .expect_err("missing subsasgn protocol should fail");
         assert_eq!(err.identifier(), Some("RunMat:MissingSubsasgn"));
+    }
+
+    #[test]
+    fn feval_object_receiver_routes_to_subsref_identifier() {
+        let err = block_on(feval_builtin(
+            Value::Object(runmat_builtins::ObjectInstance::new(
+                "NoSubsrefProtocolClass".to_string(),
+            )),
+            vec![Value::Num(1.0)],
+        ))
+        .expect_err("feval(object, ...) should route through subsref dispatch");
+        assert_eq!(err.identifier(), Some("RunMat:MissingSubsref"));
     }
 
     #[test]

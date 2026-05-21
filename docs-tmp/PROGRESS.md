@@ -21,6 +21,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) now has explicit identifier ratchets for missing object protocol methods through global dispatch:
       - missing `subsref` implementation -> `RunMat:MissingSubsref`
       - missing `subsasgn` implementation -> `RunMat:MissingSubsasgn`
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) `feval(object, ...)` now routes object/handle-object receivers through `subsref` `"()"` descriptor dispatch instead of failing as unsupported callable values, so zero-output/read-call lowering on object values preserves MATLAB-style indexing contracts.
   - Added runtime ratchets in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
     - `call_method_rejects_non_object_receiver_with_identifier`
     - `call_method_rejects_empty_method_name_with_identifier`
@@ -28,6 +29,7 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `subsasgn_rejects_non_object_receiver_with_identifier`
     - `subsref_missing_protocol_errors_with_identifier`
     - `subsasgn_missing_protocol_errors_with_identifier`
+    - `feval_object_receiver_routes_to_subsref_identifier`
   - Added VM end-to-end ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `object_getmethod_instance_method_handle_direct_call_executes`
     - `call_method_empty_name_errors_with_identifier_contract`
@@ -36,6 +38,8 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `subsasgn_nonobject_receiver_errors_with_identifier_contract`
     - `subsref_missing_protocol_errors_with_identifier_contract`
     - `subsasgn_missing_protocol_errors_with_identifier_contract`
+    - `object_paren_index_missing_subsref_errors_with_identifier_contract`
+    - `object_paren_assign_missing_subsasgn_errors_with_identifier_contract`
   - Validation:
     - `cargo test -p runmat-runtime call_method_ -- --nocapture`
     - `cargo test -p runmat-runtime subsref_rejects_non_object_receiver_with_identifier -- --nocapture`
@@ -47,8 +51,11 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm subsasgn_nonobject_receiver_errors_with_identifier_contract -- --nocapture`
     - `cargo test -p runmat-runtime subsref_missing_protocol_errors_with_identifier -- --nocapture`
     - `cargo test -p runmat-runtime subsasgn_missing_protocol_errors_with_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime feval_object_receiver_routes_to_subsref_identifier -- --nocapture`
     - `cargo test -p runmat-vm subsref_missing_protocol_errors_with_identifier_contract -- --nocapture`
     - `cargo test -p runmat-vm subsasgn_missing_protocol_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm object_paren_index_missing_subsref_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm object_paren_assign_missing_subsasgn_errors_with_identifier_contract -- --nocapture`
     - `cargo test -p runmat-vm unresolved_qualified_direct_call_ -- --nocapture`
     - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
     - `cargo fmt --all --check`
