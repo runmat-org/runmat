@@ -7,64 +7,7 @@ pub(crate) fn optim_error(name: &str, message: impl Into<String>) -> RuntimeErro
 }
 
 fn canonicalize_callback_handle(handle: &Value) -> Value {
-    fn resolve_text_handle(text: &str) -> Option<Value> {
-        let name = text.strip_prefix('@')?;
-        if name.is_empty() {
-            return None;
-        }
-        let function = crate::user_functions::resolve_semantic_function_by_name(name)?;
-        Some(Value::SemanticFunctionHandle {
-            name: name.to_string(),
-            function,
-        })
-    }
-
-    match handle {
-        Value::String(text) => resolve_text_handle(text).unwrap_or_else(|| handle.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => {
-            resolve_text_handle(&array.data[0]).unwrap_or_else(|| handle.clone())
-        }
-        Value::CharArray(chars) if chars.rows == 1 => {
-            let text: String = chars.data.iter().collect();
-            resolve_text_handle(&text).unwrap_or_else(|| handle.clone())
-        }
-        Value::FunctionHandle(name) => {
-            if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(name) {
-                Value::SemanticFunctionHandle {
-                    name: name.clone(),
-                    function,
-                }
-            } else {
-                handle.clone()
-            }
-        }
-        Value::ExternalFunctionHandle(name) => {
-            if crate::is_well_formed_qualified_name(name) {
-                if let Some(function) =
-                    crate::user_functions::resolve_semantic_function_by_name(name)
-                {
-                    return Value::SemanticFunctionHandle {
-                        name: name.clone(),
-                        function,
-                    };
-                }
-            }
-            handle.clone()
-        }
-        Value::Closure(closure) => {
-            if closure.semantic_function.is_none() {
-                if let Some(function) =
-                    crate::user_functions::resolve_semantic_function_by_name(&closure.function_name)
-                {
-                    let mut bound = closure.clone();
-                    bound.semantic_function = Some(function);
-                    return Value::Closure(bound);
-                }
-            }
-            handle.clone()
-        }
-        _ => handle.clone(),
-    }
+    crate::canonicalize_callback_handle_for_semantic_resolution(handle.clone())
 }
 
 pub(crate) async fn call_function(handle: &Value, args: Vec<Value>) -> BuiltinResult<Value> {

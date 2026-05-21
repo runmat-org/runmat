@@ -553,7 +553,7 @@ fn events() -> &'static Mutex<EventRegistry> {
     EVENT_REGISTRY.get_or_init(|| Mutex::new(EventRegistry::default()))
 }
 
-fn canonicalize_listener_callback(callback: Value) -> Value {
+pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Value) -> Value {
     fn resolve_text_handle(text: &str) -> Option<Value> {
         let name = text.strip_prefix('@')?;
         if name.is_empty() {
@@ -606,6 +606,10 @@ fn canonicalize_listener_callback(callback: Value) -> Value {
         }
         other => other,
     }
+}
+
+fn canonicalize_listener_callback(callback: Value) -> Value {
+    canonicalize_callback_handle_for_semantic_resolution(callback)
 }
 
 #[runmat_macros::runtime_builtin(name = "addlistener", builtin_path = "crate")]

@@ -4534,6 +4534,20 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: unify callback canonicalization boundary
+  - Reduced callable ABI drift between runtime callback lanes by centralizing semantic-handle prebinding in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - Added shared `canonicalize_callback_handle_for_semantic_resolution(...)` covering text `@handle`, function/external handle, and closure-name semantic prebinding rules.
+    - `addlistener` callback normalization now calls the shared helper through `canonicalize_listener_callback(...)` (behavior preserved).
+  - Updated optimization/ODE callback path in [common.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/math/optim/common.rs):
+    - `canonicalize_callback_handle(...)` now delegates to the shared runtime helper instead of maintaining a duplicate implementation.
+  - This keeps `timeit`, `optim`/ODE, and listener callback lanes aligned on one semantic identity normalization boundary, reducing remaining name-shaped callback variance in runtime ABI surfaces.
+  - Validation:
+    - `cargo test -p runmat-runtime callback_handle_canonicalizer_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
