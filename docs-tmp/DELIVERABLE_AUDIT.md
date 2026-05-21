@@ -656,7 +656,7 @@ Highest-impact unresolved areas:
 
 1. In-scope blockers (must be zero for this goal):
    - Objective section `### 3` remains `partial` (non-builtin migration gaps still tracked there).
-2. Validation closeout blocker (must be met for this goal):
-   - Validation cadence is green for current slices, but full objective closeout still requires a consolidated end-to-end gate run tied explicitly to all remaining in-scope `partial` sections.
+2. Validation closeout status:
+   - Consolidated remaining-partials gate refresh completed on 2026-05-20 across core compile artifacts, CLI/LSP source-context lowering, runtime random/sorting identifier contracts, fusion planner metadata, and baseline workspace gates (`fmt`, semicolon suppression, workspace check, diff check).
 3. Builtin completeness backlog (non-blocking for this goal unless explicitly linked as an in-scope blocker):
    - Builtin parity/completeness ratchets are tracked evidence, but do not block this goal by themselves.

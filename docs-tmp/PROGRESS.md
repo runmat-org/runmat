@@ -12,6 +12,24 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Remaining-partials consolidated validation gate refresh (post callable-contract slices)
+  - `scope: in-scope`
+  - `blocker: deliverable audit still listed a validation-closeout blocker requiring one consolidated end-to-end gate run tied to remaining in-scope partial surfaces.`
+  - Re-ran consolidated partial-surface gate commands:
+    - `cargo test -p runmat-core compile_input_records_mir_analysis_facts -- --nocapture`
+    - `cargo test -p runmat --lib emit_bytecode_uses_source_context_project_symbols -- --nocapture`
+    - `cargo test -p runmat-lsp diagnostics_include_shape_lints -- --nocapture`
+    - `cargo test -p runmat-runtime exprnd_rejects_negative_mu -- --nocapture`
+    - `cargo test -p runmat-runtime normrnd_rejects_negative_sigma -- --nocapture`
+    - `cargo test -p runmat-runtime unifrnd_rejects_a_ge_b -- --nocapture`
+    - `cargo test -p runmat-runtime sorting_sets:: -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions compile_fusion_plan_exposes_semantic_planner_metadata -- --nocapture`
+    - `cargo test -p runmat-core --test fusion_regressions runtime_fusion_snapshot_exposes_semantic_planner_metadata -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM source-level callable identifier-contract ratchet follow-through
   - `scope: in-scope`
   - `blocker: closure/runtime callable identifier normalization had VM unit coverage, but source-level contracts for classref non-static method calls and event-target validation boundaries were not yet ratcheted in end-to-end semantic execution tests.`
