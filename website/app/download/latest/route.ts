@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-type ReleaseChannel = "dev" | "prod";
-type Platform =
+export type ReleaseChannel = "dev" | "prod";
+export type Platform =
   | "darwin-aarch64"
   | "darwin-x86_64"
   | "linux-x86_64"
@@ -24,10 +24,7 @@ type DownloadManifest = {
   downloads: Partial<Record<Platform, DownloadEntry>>;
 };
 
-const DOWNLOAD_HOSTS: Record<ReleaseChannel, string> = {
-  dev: "https://updates.runmat.dev",
-  prod: "https://updates.runmat.com",
-};
+const PROD_DOWNLOAD_HOST = "https://updates.runmat.com";
 
 const VALID_PLATFORMS = new Set<Platform>([
   "darwin-aarch64",
@@ -61,51 +58,80 @@ export async function GET(request: NextRequest) {
 }
 
 function resolveChannel(request: NextRequest): ReleaseChannel {
-  const host = (
-    request.headers.get("x-forwarded-host") ??
-    request.headers.get("host") ??
-    ""
-  ).toLowerCase();
+  return resolveChannelFromHost(
+    request.nextUrl.host,
+    request.nextUrl.searchParams.get("channel")
+  );
+}
 
-  const requestedChannel = request.nextUrl.searchParams.get("channel");
+export function resolveChannelFromHost(
+  host: string,
+  requestedChannel?: string | null,
+  env: Record<string, string | undefined> = process.env
+): ReleaseChannel {
+  const configuredChannel = env["RUNMAT_DOWNLOAD_CHANNEL"];
+  if (configuredChannel === "dev" || configuredChannel === "prod") {
+    return configuredChannel;
+  }
+
+  const normalizedHost = normalizeHost(host);
   if (
     (requestedChannel === "dev" || requestedChannel === "prod") &&
-    allowsChannelOverride(host)
+    allowsChannelOverride(normalizedHost, env)
   ) {
     return requestedChannel;
   }
 
-  return host === "runmat.com" || host === "www.runmat.com" ? "prod" : "dev";
+  return isProductionHost(normalizedHost, env) ? "prod" : "dev";
 }
 
-function allowsChannelOverride(host: string) {
+function allowsChannelOverride(host: string, env: Record<string, string | undefined>) {
   return (
-    host.startsWith("localhost") ||
-    host.startsWith("127.0.0.1") ||
-    host.endsWith(".vercel.app") ||
-    host === "runmat.dev" ||
-    host.endsWith(".runmat.dev")
+    !isProductionHost(host, env) &&
+    (host.startsWith("localhost") ||
+      host.startsWith("127.0.0.1") ||
+      getChannelOverrideHosts(env).has(host))
   );
 }
 
 function resolvePlatform(request: NextRequest): Platform | null {
-  const explicitPlatform = request.nextUrl.searchParams.get("platform");
+  return resolvePlatformFromInputs({
+    explicitPlatform: request.nextUrl.searchParams.get("platform"),
+    secChUaPlatform: request.headers.get("sec-ch-ua-platform"),
+    secChUaArch: request.headers.get("sec-ch-ua-arch"),
+    userAgent: request.headers.get("user-agent"),
+  });
+}
+
+export function resolvePlatformFromInputs({
+  explicitPlatform,
+  secChUaPlatform,
+  secChUaArch,
+  userAgent: rawUserAgent,
+}: {
+  explicitPlatform?: string | null;
+  secChUaPlatform?: string | null;
+  secChUaArch?: string | null;
+  userAgent?: string | null;
+}): Platform | null {
   if (isPlatform(explicitPlatform)) {
     return explicitPlatform;
   }
 
-  const uaPlatform = normalizeHeader(request.headers.get("sec-ch-ua-platform"));
-  const uaArch = normalizeHeader(request.headers.get("sec-ch-ua-arch"));
+  const uaPlatform = normalizeHeader(secChUaPlatform ?? null);
+  const uaArch = normalizeHeader(secChUaArch ?? null);
 
   if (uaPlatform.includes("windows")) return "windows-x86_64";
   // ARM Linux installers are not published yet; send those users to the chooser.
   if (uaPlatform.includes("linux")) return uaArch.includes("arm") ? null : "linux-x86_64";
   if (uaPlatform.includes("mac")) return resolveMacPlatform(uaArch);
 
-  const userAgent = request.headers.get("user-agent")?.toLowerCase() ?? "";
+  const userAgent = rawUserAgent?.toLowerCase() ?? "";
   if (userAgent.includes("windows")) return "windows-x86_64";
   // ARM Linux installers are not published yet; send those users to the chooser.
-  if (userAgent.includes("linux")) return userAgent.includes("aarch64") || userAgent.includes("arm64") ? null : "linux-x86_64";
+  if (userAgent.includes("linux")) {
+    return userAgent.includes("aarch64") || userAgent.includes("arm64") ? null : "linux-x86_64";
+  }
   if (userAgent.includes("mac os x") || userAgent.includes("macintosh")) {
     return resolveMacPlatform(uaArch) ?? resolveMacPlatformFromUserAgent(userAgent);
   }
@@ -131,7 +157,7 @@ function resolveMacPlatformFromUserAgent(userAgent: string): Platform {
 }
 
 async function fetchDownloadManifest(channel: ReleaseChannel): Promise<DownloadManifest> {
-  const baseUrl = DOWNLOAD_HOSTS[channel];
+  const baseUrl = getDownloadHost(channel);
   const response = await fetch(`${baseUrl}/${channel}/downloads/latest.json`, {
     cache: "no-store",
     headers: {
@@ -172,15 +198,70 @@ function normalizeHeader(value: string | null) {
   return (value ?? "").replaceAll('"', "").toLowerCase();
 }
 
-function isPlatform(value: string | null): value is Platform {
+function isPlatform(value: string | null | undefined): value is Platform {
   return Boolean(value && VALID_PLATFORMS.has(value as Platform));
 }
 
-function isSafeDownloadUrl(url: string, channel: ReleaseChannel) {
+export function isSafeDownloadUrl(
+  url: string,
+  channel: ReleaseChannel,
+  env: Record<string, string | undefined> = process.env
+) {
   try {
     const parsed = new URL(url);
-    return parsed.origin === DOWNLOAD_HOSTS[channel];
+    return parsed.origin === getDownloadHost(channel, env);
   } catch {
     return false;
+  }
+}
+
+function getDownloadHost(channel: ReleaseChannel, env: Record<string, string | undefined> = process.env) {
+  const configuredHost =
+    channel === "prod"
+      ? env["RUNMAT_DOWNLOAD_PROD_ORIGIN"]
+      : env["RUNMAT_DOWNLOAD_DEV_ORIGIN"];
+  const fallbackHost = channel === "prod" ? PROD_DOWNLOAD_HOST : null;
+  const host = configuredHost ?? fallbackHost;
+  if (!host) {
+    throw new Error(`Missing ${channel} download origin`);
+  }
+  return new URL(host).origin;
+}
+
+function isProductionHost(host: string, env: Record<string, string | undefined>) {
+  return getProductionHosts(env).has(host);
+}
+
+function getProductionHosts(env: Record<string, string | undefined>) {
+  const hosts = new Set(["runmat.com", "www.runmat.com"]);
+  for (const value of [env["RUNMAT_DOWNLOAD_PROD_HOSTS"]]) {
+    for (const host of parseHostList(value)) {
+      hosts.add(host);
+    }
+  }
+  return hosts;
+}
+
+function getChannelOverrideHosts(env: Record<string, string | undefined>) {
+  return new Set(parseHostList(env["RUNMAT_DOWNLOAD_CHANNEL_OVERRIDE_HOSTS"]));
+}
+
+function parseHostList(value: string | undefined) {
+  return (value ?? "")
+    .split(",")
+    .map((host) => normalizeHost(host))
+    .filter(Boolean);
+}
+
+function normalizeHost(value: string | null | undefined) {
+  const trimmed = (value ?? "").trim().toLowerCase();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    return new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`).hostname;
+  } catch {
+    return trimmed.split(":")[0] ?? "";
   }
 }
