@@ -1281,10 +1281,11 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
             if let Some(name) = s.strip_prefix('@') {
                 call_by_name(name, &rest, requested_outputs).await
             } else {
-                Err(
-                    (format!("feval: expected function handle string starting with '@', got {s}"))
-                        .into(),
-                )
+                Err(build_runtime_error(format!(
+                    "feval: expected function handle string starting with '@', got {s}"
+                ))
+                .with_identifier("RunMat:FevalHandleStringInvalid")
+                .build())
             }
         }
         // Also accept character row vector handles like '@max'
@@ -1294,13 +1295,18 @@ async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
                 if let Some(name) = s.strip_prefix('@') {
                     call_by_name(name, &rest, requested_outputs).await
                 } else {
-                    Err((format!(
+                    Err(build_runtime_error(format!(
                         "feval: expected function handle string starting with '@', got {s}"
                     ))
-                    .into())
+                    .with_identifier("RunMat:FevalHandleStringInvalid")
+                    .build())
                 }
             } else {
-                Err(("feval: function handle char array must be a row vector".to_string()).into())
+                Err(
+                    build_runtime_error("feval: function handle char array must be a row vector")
+                        .with_identifier("RunMat:FevalHandleShapeInvalid")
+                        .build(),
+                )
             }
         }
         Value::FunctionHandle(name) => call_by_name(&name, &rest, requested_outputs).await,
@@ -1410,7 +1416,11 @@ fn func2str_builtin(value: Value) -> crate::BuiltinResult<Value> {
         | Value::ExternalFunctionHandle(name)
         | Value::SemanticFunctionHandle { name, .. } => Ok(Value::String(name)),
         Value::Closure(closure) => Ok(Value::String(closure.function_name)),
-        other => Err((format!("func2str: expected function handle, got {other:?}")).into()),
+        other => Err(build_runtime_error(format!(
+            "func2str: expected function handle, got {other:?}"
+        ))
+        .with_identifier("RunMat:Func2StrHandleTypeInvalid")
+        .build()),
     }
 }
 
@@ -1836,6 +1846,38 @@ mod tests {
     }
 
     #[test]
+    fn feval_rejects_string_without_at_with_identifier() {
+        let err = block_on(feval_builtin(
+            Value::String("sin".to_string()),
+            vec![Value::Num(0.0)],
+        ))
+        .expect_err("feval string handle without @ should fail");
+        assert_eq!(err.identifier(), Some("RunMat:FevalHandleStringInvalid"));
+    }
+
+    #[test]
+    fn feval_rejects_char_handle_without_at_with_identifier() {
+        let err = block_on(feval_builtin(
+            Value::CharArray(runmat_builtins::CharArray::new_row("sin")),
+            vec![Value::Num(0.0)],
+        ))
+        .expect_err("feval char handle without @ should fail");
+        assert_eq!(err.identifier(), Some("RunMat:FevalHandleStringInvalid"));
+    }
+
+    #[test]
+    fn feval_rejects_non_row_char_handle_with_identifier() {
+        let chars = runmat_builtins::CharArray::new(vec!['@', 's'], 2, 1)
+            .expect("char array construction should succeed");
+        let err = block_on(feval_builtin(
+            Value::CharArray(chars),
+            vec![Value::Num(0.0)],
+        ))
+        .expect_err("feval non-row char handle should fail");
+        assert_eq!(err.identifier(), Some("RunMat:FevalHandleShapeInvalid"));
+    }
+
+    #[test]
     fn str2func_returns_semantic_handle_when_resolver_can_resolve() {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
@@ -1877,6 +1919,13 @@ mod tests {
         let value = str2func_builtin(Value::String("Point..origin".to_string()))
             .expect("str2func should succeed");
         assert_eq!(value, Value::FunctionHandle("Point..origin".to_string()));
+    }
+
+    #[test]
+    fn func2str_rejects_non_handle_with_identifier() {
+        let err =
+            func2str_builtin(Value::Num(1.0)).expect_err("func2str non-handle input should fail");
+        assert_eq!(err.identifier(), Some("RunMat:Func2StrHandleTypeInvalid"));
     }
 
     #[test]

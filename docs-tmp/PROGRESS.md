@@ -36,6 +36,35 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Runtime/VM `feval`/`func2str` handle-validation identifier-contract normalization ratchet
+  - `scope: in-scope`
+  - `blocker: callable descriptor closure still had message-only `feval`/`func2str` handle-validation errors, leaving callback ABI boundaries without stable identifier contracts.`
+  - Closed handle-validation identifier gaps:
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) `feval` now emits:
+      - `RunMat:FevalHandleStringInvalid` for string/char handle values that do not start with `'@'`
+      - `RunMat:FevalHandleShapeInvalid` for non-row char-array handle values
+    - [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs) `func2str` now emits:
+      - `RunMat:Func2StrHandleTypeInvalid` for non-handle inputs
+  - Added runtime identifier ratchets in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `feval_rejects_string_without_at_with_identifier`
+    - `feval_rejects_char_handle_without_at_with_identifier`
+    - `feval_rejects_non_row_char_handle_with_identifier`
+    - `func2str_rejects_non_handle_with_identifier`
+  - Added VM end-to-end source-level identifier ratchets in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/closures.rs):
+    - `feval_string_without_at_errors_with_identifier_contract`
+    - `feval_nonrow_char_handle_errors_with_identifier_contract`
+    - `func2str_non_handle_errors_with_identifier_contract`
+  - Validation:
+    - `cargo test -p runmat-runtime feval_rejects_ -- --nocapture`
+    - `cargo test -p runmat-runtime func2str_rejects_non_handle_with_identifier -- --nocapture`
+    - `cargo test -p runmat-vm feval_string_without_at_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm feval_nonrow_char_handle_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm func2str_non_handle_errors_with_identifier_contract -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `call_method` identifier-contract normalization ratchet
   - `scope: in-scope`
   - Closed callable/object-dispatch boundary gaps where `call_method(...)`, `subsref(...)`, and `subsasgn(...)` still emitted message-only errors for invalid receiver/name shapes, and ratcheted missing object protocol dispatch contracts:
