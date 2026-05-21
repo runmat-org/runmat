@@ -991,6 +991,15 @@ pub async fn dispatch_indexing(
                     );
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
                 }
+                Value::FunctionHandle(_)
+                | Value::ExternalFunctionHandle(_)
+                | Value::SemanticFunctionHandle { .. }
+                | Value::Closure(_) => {
+                    return Err(crate::interpreter::errors::mex(
+                        "UnsupportedFunctionHandleSelector",
+                        "Function handle call does not support assignment selector syntax",
+                    ));
+                }
                 Value::Tensor(t) => stack
                     .push(idx_write_linear::assign_tensor_scalar(t, &indices, &rhs, delete).await?),
                 Value::ComplexTensor(t) => stack.push(
@@ -1334,6 +1343,15 @@ pub async fn dispatch_indexing(
                         rhs,
                     )?;
                     stack.push(call_object_index_descriptor_method(descriptor).await?);
+                }
+                Value::FunctionHandle(_)
+                | Value::ExternalFunctionHandle(_)
+                | Value::SemanticFunctionHandle { .. }
+                | Value::Closure(_) => {
+                    return Err(crate::interpreter::errors::mex(
+                        "UnsupportedFunctionHandleSelector",
+                        "Function handle call does not support assignment selector syntax",
+                    ));
                 }
                 Value::Tensor(t) => {
                     let selectors =

@@ -4548,6 +4548,22 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: tighten function-handle assignment selector contract
+  - Reduced callable/assignment ABI ambiguity for paren-assignment against function-handle values in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs):
+    - `StoreIndex` and `StoreSlice` now reject `FunctionHandle`/`ExternalFunctionHandle`/`SemanticFunctionHandle`/`Closure` assignment-selector paths with stable identifier `RunMat:UnsupportedFunctionHandleSelector`.
+    - This removes the previous generic fallback identifiers (`RunMat:IndexAssignmentUnsupportedBase` / `RunMat:SliceNonTensor`) for function-handle assignment selectors and aligns misuse behavior to the dedicated function-handle selector contract.
+  - Added source-level semantic VM ratchets in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
+    - `function_handle_scalar_assignment_selector_errors_with_identifier_contract`
+    - `function_handle_slice_assignment_selector_errors_with_identifier_contract`
+  - Validation:
+    - `cargo test -p runmat-vm function_handle_selector_colon_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm function_handle_scalar_assignment_selector_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm function_handle_slice_assignment_selector_errors_with_identifier_contract -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

@@ -588,6 +588,30 @@ fn function_handle_selector_colon_errors_with_identifier_contract() {
 }
 
 #[test]
+fn function_handle_scalar_assignment_selector_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("f = @sin; f(1) = 2;")
+        .expect_err("function-handle scalar assignment selector should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UnsupportedFunctionHandleSelector"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn function_handle_slice_assignment_selector_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("f = @sin; f(:) = 2;")
+        .expect_err("function-handle slice assignment selector should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UnsupportedFunctionHandleSelector"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn nargin_nargout_in_user_functions() {
     // Single-output: nargin/nargout should reflect call site
     let program = r#"
