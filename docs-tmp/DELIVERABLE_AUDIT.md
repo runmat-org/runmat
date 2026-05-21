@@ -127,6 +127,12 @@ This audit maps the active objective to concrete repository evidence and marks e
     - direct ratchet:
       - `timeit_callable_invoke_honors_multi_requested_outputs`
     - builtin contract docs in [timeit.json](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/builtins-json/timeit.json) now match runtime behavior (`numOutputs` is honored and callback outputs are discarded).
+  - cell brace-expansion selector decoding now aligns scalar tensor selector semantics with direct brace indexing in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs):
+    - `parse_cell_index_value(...)` now accepts scalar tensor selectors (`shape product == 1`) on 2-D row/column expansion selectors.
+    - this removes an ABI mismatch where direct brace indexing accepted scalar tensor selectors (`resolve_cell_indices`) but expansion selector paths rejected the same shape.
+    - direct ratchets:
+      - `expand_cell_indices_accepts_scalar_tensor_subscripts_for_2d_cells`
+      - `expand_cell_indices_rejects_nonscalar_tensor_subscripts_for_2d_cells`
   - VM source-level `isfield` string-array semantics now have direct contract coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) (`struct_isfield_string_array_names`), asserting matrix-shaped logical result semantics (`shape [2,2]`, column-major logical data `[1,0,0,1]`) instead of a placeholder scalar proxy.
   - VM cell aggregate member-assignment now carries stable identifier coverage for RHS shape mismatch in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs): `RunMat:CellMemberRhsShapeMismatch` (`assign_cell_member_rejects_shape_mismatch_cell_rhs`).
   - VM static-property missing-name semantic coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) now asserts stable `RunMat:UndefinedVariable` identifier (`unqualified_static_property_without_imports_errors`) instead of message-text proxy checks.

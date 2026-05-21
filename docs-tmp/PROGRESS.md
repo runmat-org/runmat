@@ -5317,6 +5317,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: unify cell tensor scalar selector behavior
+  - Cell brace-expansion selector decoding in [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now accepts scalar tensor selectors (`1x1` tensor payloads) on 2-D row/column brace-expansion paths via `parse_cell_index_value(...)`, matching the existing scalar-tensor selector contract already enforced on direct brace indexing (`resolve_cell_indices(...)`).
+  - This closes a selector-plan normalization seam where direct brace indexing and brace-expansion interpreted scalar tensor selectors differently for 2-D cell subscripts.
+  - Added ratchets:
+    - `expand_cell_indices_accepts_scalar_tensor_subscripts_for_2d_cells`
+    - `expand_cell_indices_rejects_nonscalar_tensor_subscripts_for_2d_cells`
+  - Validation:
+    - `cargo test -p runmat-vm expand_cell_indices_accepts_scalar_tensor_subscripts_for_2d_cells -- --nocapture`
+    - `cargo test -p runmat-vm expand_cell_indices_rejects_nonscalar_tensor_subscripts_for_2d_cells -- --nocapture`
+    - `cargo test -p runmat-vm resolve_cell_indices_accepts_scalar_tensor_values -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

@@ -55,6 +55,10 @@ fn parse_cell_index_value(value: &Value) -> Result<usize, RuntimeError> {
         Value::Num(n) => exact_index_from_f64(*n)
             .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?,
         Value::Int(i) => i.to_i64(),
+        Value::Tensor(t) if t.data.len() == 1 && t.shape.iter().product::<usize>() == 1 => {
+            exact_index_from_f64(t.data[0])
+                .ok_or_else(|| mex("CellIndexType", "Unsupported cell index type"))?
+        }
         other => {
             let n: f64 = other
                 .try_into()
@@ -589,7 +593,7 @@ fn assign_cell_paren_from_cell(
 #[cfg(test)]
 mod tests {
     use super::{assign_cell_member, expand_cell_indices, map_cell_shape_error};
-    use runmat_builtins::{CellArray, StructValue, Value};
+    use runmat_builtins::{CellArray, StructValue, Tensor, Value};
 
     #[test]
     fn assign_cell_member_rejects_shape_mismatch_cell_rhs() {
@@ -625,9 +629,48 @@ mod tests {
     #[test]
     fn expand_cell_indices_rejects_fractional_tensor_indices() {
         let cell = CellArray::new(vec![Value::Num(10.0), Value::Num(20.0)], 1, 2).expect("cell");
-        let tensor = runmat_builtins::Tensor::new(vec![1.0, 1.25], vec![1, 2]).expect("tensor");
+        let tensor = Tensor::new(vec![1.0, 1.25], vec![1, 2]).expect("tensor");
         let err = expand_cell_indices(&cell, &[Value::Tensor(tensor)])
             .expect_err("fractional tensor index should fail");
+        assert_eq!(err.identifier(), Some("RunMat:CellIndexType"));
+    }
+
+    #[test]
+    fn expand_cell_indices_accepts_scalar_tensor_subscripts_for_2d_cells() {
+        let cell = CellArray::new(
+            vec![
+                Value::Num(11.0),
+                Value::Num(12.0),
+                Value::Num(21.0),
+                Value::Num(22.0),
+            ],
+            2,
+            2,
+        )
+        .expect("2d cell");
+        let row = Tensor::new(vec![2.0], vec![1, 1]).expect("row scalar tensor");
+        let col = Tensor::new(vec![1.0], vec![1, 1]).expect("col scalar tensor");
+        let values = expand_cell_indices(&cell, &[Value::Tensor(row), Value::Tensor(col)])
+            .expect("scalar tensor selectors should index 2d cell expansion");
+        assert_eq!(values, vec![Value::Num(21.0)]);
+    }
+
+    #[test]
+    fn expand_cell_indices_rejects_nonscalar_tensor_subscripts_for_2d_cells() {
+        let cell = CellArray::new(
+            vec![
+                Value::Num(11.0),
+                Value::Num(12.0),
+                Value::Num(21.0),
+                Value::Num(22.0),
+            ],
+            2,
+            2,
+        )
+        .expect("2d cell");
+        let row = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("non-scalar row tensor");
+        let err = expand_cell_indices(&cell, &[Value::Tensor(row), Value::Num(1.0)])
+            .expect_err("non-scalar tensor row selector should fail");
         assert_eq!(err.identifier(), Some("RunMat:CellIndexType"));
     }
 }
