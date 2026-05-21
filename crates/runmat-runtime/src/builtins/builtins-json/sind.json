@@ -36,8 +36,8 @@
   "behaviors": [
     "Operates element-wise on scalars, vectors, matrices, and N-D tensors.",
     "Integer and logical inputs are promoted to double precision before evaluation.",
-    "Returns exactly 0 at multiples of 180 and exactly ±1 at multiples of 90.",
-    "Returns exactly ±0.5 at multiples of 30 and 150.",
+    "Returns exactly 0 at multiples of 180 and exactly ±1 at the odd multiples of 90 (±90 + 360k).",
+    "Returns exactly ±0.5 at angles congruent to ±30 or ±150 modulo 360.",
     "Complex inputs delegate to the analytic extension of `sin` after scaling by `pi/180`; exact-value treatment for complex operands is deferred.",
     "Output shape matches the input shape; non-finite inputs propagate as `NaN`.",
     "String inputs are unsupported and raise a builtin-scoped error."
