@@ -4432,6 +4432,29 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo test -p runmat-vm --test functions semantic_indexed_dynamic_member_read_executes -- --nocapture`
     - `cargo test -p runmat-vm --test functions indexed_cell_content_delete_executes_with_semantic_store_back -- --nocapture`
 
+- RM-378: cover runtime fusion-group fallback (`7dfcf6cf`)
+  - Added VM bytecode unit coverage in [program.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/program.rs):
+    - `runtime_fusion_groups_fallback_to_existing_bytecode_groups_without_semantic_metadata`
+  - This ratchets runtime fallback behavior so existing bytecode fusion groups are preserved when semantic window metadata is absent.
+  - Validation:
+    - `cargo test -p runmat-vm runtime_fusion_groups_ -- --nocapture`
+
+- RM-378: request value output for visible expr statements (`dcbf9a1e`)
+  - Updated semantic lowering in [ctx.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-hir/src/lowering/ctx.rs):
+    - `AstStmt::ExprStmt` now requests `RequestedOutputCount::One` when unsuppressed and `RequestedOutputCount::Zero` only when semicolon-suppressed.
+  - This closes the visible-expression output seam that misclassified forms like `y(1)` / `m(1)` into unsupported dynamic-call behavior instead of value-producing indexing semantics.
+  - Validation:
+    - `cargo test -p runmat-core --test fusion_regressions -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+
+- Validation cadence refresh (post RM-378 expression-output + fusion fallback slices)
+  - Re-ran agreed workspace gates on current `v2-compiler-semantics` head:
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+  - Result: all gates green on 2026-05-21.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

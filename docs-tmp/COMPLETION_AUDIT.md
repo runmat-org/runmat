@@ -119,6 +119,9 @@ Date: 2026-05-21
 - Incremental update: scalar value paren assignment now runs through typed StoreIndex assignment machinery by normalizing `Value::Num`/`Value::Int`/`Value::Bool` bases to singleton tensors before linear assignment, closing the prior unsupported-base runtime seam (`RunMat:IndexAssignmentUnsupportedBase`) for `x(1)=...`; ratcheted by `semantic_scalar_value_index_assignment_executes`.
 - Incremental update: cell selector conversion now enforces positive-integer index semantics in `resolve_cell_indices(...)` (no lossy `as usize` truncation), with fractional selectors rejected as `RunMat:CellIndexType` and zero selectors rejected as `RunMat:CellIndexOutOfBounds` (`resolve_cell_indices_rejects_fractional_values`, `resolve_cell_indices_rejects_zero_values`).
 - Incremental update: object expr-slice read dispatch now routes object/handle-object bases through structured object descriptor execution (`subsref_paren_from_expr_slice`) rather than tensor-only slice planning, and expr-slice descriptor serialization now carries encoded `end_numeric_exprs` payloads for numeric selector slots tied to end arithmetic; ratcheted by `object_paren_expr_selector_values_encode_numeric_end_expressions` and end-to-end semantic coverage `object_range_end_indexing_accepts_mixed_string_selector_payload` (closing prior `RunMat:SliceNonTensor` object read failures for mixed range/string selector payloads).
+- Incremental update: semantic lowering now requests one output for unsuppressed expression statements (`AstStmt::ExprStmt`), preserving value-producing expression semantics in statement context and closing misclassification seams for forms like `y(1)`/`m(1)` (`RM-378: request value output for visible expr statements`, commit `dcbf9a1e`).
+- Incremental update: runtime fusion-group behavior now has explicit fallback coverage preserving existing bytecode fusion groups when semantic-window metadata is absent (`runtime_fusion_groups_fallback_to_existing_bytecode_groups_without_semantic_metadata`, `RM-378: cover runtime fusion-group fallback`, commit `7dfcf6cf`).
+- Incremental update: `runmat-core` fusion regression suite is green after the above slices (`cargo test -p runmat-core --test fusion_regressions -- --nocapture`, 7/7 passed on 2026-05-21), including prior failing readback paths for `atan2` vector indexing and `mod`/`rem` index reads.
 
 4. Manifest-driven composition and entrypoints
 - Artifact: `docs-tmp/DELIVERABLE_AUDIT.md` section `### 4` (`met`).
@@ -148,6 +151,11 @@ Date: 2026-05-21
   - `cargo check --workspace`
   - `git diff --check`
 - Latest result: all green on 2026-05-21.
+  - Refresh evidence after latest RM-378 slices:
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
 
 ## Missing / Incomplete Requirements
 
