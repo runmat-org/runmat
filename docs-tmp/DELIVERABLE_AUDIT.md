@@ -192,9 +192,12 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `linear_indices_reject_fractional_tensor_indices`
       - `scalar_end_div_indexing_rejects_fractional_result`
       - `primary_compile_rejects_fractional_cell_end_expression_read_index`
-  - object expr-slice selector normalization now preserves mixed selector payload types in object protocol descriptor serialization:
+  - object paren selector normalization now preserves mixed selector payload types and aligns expr/non-expr selector boundaries in object protocol descriptor serialization:
     - [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs) now accepts non-numeric selector payload values (`string`, `char`, `cell`, `logical`) in `build_object_paren_expr_selector_values(...)` for non-range selector dimensions, instead of rejecting mixed selector plans when any dimension uses range/end descriptors.
+    - non-expr object paren selector serialization (`build_object_paren_selector_values`) now uses the same selector-type normalization boundary as expr-slice serialization.
     - call-layer ratchets now assert mixed selector preservation and unsupported-type rejection boundaries:
+      - `object_paren_selector_values_accept_string_selector`
+      - `object_paren_selector_values_reject_unsupported_selector_type`
       - `object_paren_expr_selector_values_accept_string_selector_in_mixed_plan`
       - `object_paren_expr_selector_values_accept_cell_selector_in_mixed_plan`
       - `object_paren_expr_selector_values_reject_unsupported_numeric_selector_type` (unsupported `Struct` payload)

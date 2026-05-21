@@ -648,7 +648,7 @@ pub(crate) fn build_object_paren_selector_values(
                 "MissingNumericIndex",
                 "missing numeric index",
             ))?;
-        values.push(selector.clone());
+        values.push(normalize_object_numeric_selector(selector)?);
         numeric_iter += 1;
     }
     if numeric_iter != numeric.len() {
@@ -1016,6 +1016,29 @@ mod tests {
             build_object_paren_selector_values(2, 0b01, 0, &[Value::Num(2.0), Value::Num(3.0)])
                 .expect_err("extra selector should fail");
         assert_eq!(extra.identifier(), Some("RunMat:UnexpectedNumericIndex"));
+    }
+
+    #[test]
+    fn object_paren_selector_values_accept_string_selector() {
+        let selectors =
+            build_object_paren_selector_values(1, 0, 0, &[Value::String("key".to_string())])
+                .expect("string selector should serialize");
+        assert_eq!(selectors, vec![Value::String("key".to_string())]);
+    }
+
+    #[test]
+    fn object_paren_selector_values_reject_unsupported_selector_type() {
+        let err = build_object_paren_selector_values(
+            1,
+            0,
+            0,
+            &[Value::Struct(runmat_builtins::StructValue::new())],
+        )
+        .expect_err("unsupported selector should fail");
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:ObjectSelectorTypeUnsupported")
+        );
     }
 
     #[test]

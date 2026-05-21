@@ -12,12 +12,14 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
-- VM object expr-selector normalization ratchet
+- VM object selector normalization ratchet
   - `scope: in-scope`
-  - Closed a non-tensor/object-protocol selector-plan normalization gap in object `IndexSliceExpr` descriptor serialization:
-    - [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs) now preserves mixed non-numeric selector values (`string`, `char`, `cell`, `logical`) when any selector dimension lowers through range/end expression descriptors.
-    - this removes the prior false rejection path that raised `RunMat:ObjectSelectorTypeUnsupported` for valid mixed selector payloads in object expr-slice contexts.
+  - Closed non-tensor/object-protocol selector-plan normalization gaps across both object paren descriptor paths:
+    - [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs) now preserves mixed non-numeric selector values (`string`, `char`, `cell`, `logical`) when any selector dimension lowers through range/end expression descriptors (`build_object_paren_expr_selector_values`).
+    - the same selector-type normalization boundary now applies to non-expr object paren selector serialization (`build_object_paren_selector_values`), keeping selector acceptance/rejection consistent between expr and non-expr object slice paths.
   - Added/updated call-layer ratchets in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
+    - `object_paren_selector_values_accept_string_selector`
+    - `object_paren_selector_values_reject_unsupported_selector_type`
     - `object_paren_expr_selector_values_accept_string_selector_in_mixed_plan`
     - `object_paren_expr_selector_values_accept_cell_selector_in_mixed_plan`
     - `object_paren_expr_selector_values_reject_unsupported_numeric_selector_type` now asserts rejection on truly unsupported selector values (`Struct`) rather than string selectors.
