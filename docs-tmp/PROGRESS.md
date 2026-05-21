@@ -3880,6 +3880,14 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- (pending commit) Remaining-partials validation cadence refresh (post Turbine expanded-call slices)
+  - Re-ran agreed workspace validation gates after Turbine expanded-call bridge updates:
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+  - Result: all gates green on current `v2-compiler-semantics` head.
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
