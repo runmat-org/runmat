@@ -79,6 +79,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - VM source-level brace selector misuse now also has explicit non-cell identifier contracts in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `brace_read_on_noncell_errors_with_identifier_contract` pins `x = 10{1};` to `RunMat:CellIndexingOnNonCell` (plain brace-read selector boundary).
     - `brace_assignment_on_noncell_errors_with_identifier_contract` pins `x{1} = ...` to `RunMat:CellAssignmentOnNonCell`.
+    - `brace_expansion_on_noncell_errors_with_identifier_contract` pins call-argument expansion misuse (`sin(10{:})`) to `RunMat:InvalidExpandAllTarget` (pre-dispatch expand-all target validation boundary).
   - VM brace-list dispatch in [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now normalizes plain brace-expression non-cell failures to `RunMat:CellIndexingOnNonCell`, while expansion-only paths keep `RunMat:CellExpansionOnNonCell`.
   - runtime semantic callback request ABI now removes dead placeholder policy surface:
     - [user_functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/user_functions.rs) dropped `SemanticCallableKind`/`kind` from `SemanticCallableRequest`, leaving only enforced fields (identity/fallback/args/requested outputs).

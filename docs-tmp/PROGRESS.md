@@ -4584,8 +4584,10 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - Explicit expansion paths (`IndexCellExpand`/call-argument expansion) still use `RunMat:CellExpansionOnNonCell`, preserving expansion-only diagnostics while aligning plain brace expressions to indexing diagnostics.
   - Updated source-level contract in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `brace_read_on_noncell_errors_with_identifier_contract` now ratchets `RunMat:CellIndexingOnNonCell` for `x = 10{1};`.
+    - `brace_expansion_on_noncell_errors_with_identifier_contract` ratchets expansion-context failure (`sin(10{:})`) to `RunMat:InvalidExpandAllTarget` (expand-all target validation boundary).
   - Validation:
     - `cargo test -p runmat-vm brace_read_on_noncell_errors_with_identifier_contract -- --nocapture`
+    - `cargo test -p runmat-vm brace_expansion_on_noncell_errors_with_identifier_contract -- --nocapture`
     - `cargo test -p runmat-vm function_handle_ -- --nocapture`
     - `cargo test -p runmat-vm brace_assignment_on_noncell_errors_with_identifier_contract -- --nocapture`
     - `cargo fmt --all --check`

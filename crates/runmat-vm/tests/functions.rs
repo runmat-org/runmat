@@ -660,6 +660,18 @@ fn brace_assignment_on_noncell_errors_with_identifier_contract() {
 }
 
 #[test]
+fn brace_expansion_on_noncell_errors_with_identifier_contract() {
+    let err = execute_semantic_source_result("y = sin(10{:});")
+        .expect_err("brace expansion on non-cell should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:InvalidExpandAllTarget"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn nargin_nargout_in_user_functions() {
     // Single-output: nargin/nargout should reflect call site
     let program = r#"
