@@ -158,6 +158,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- Runtime event-callback target identifier-contract normalization ratchet
+  - `scope: in-scope`
+  - `blocker: event callback entrypoints (`addlistener`/`notify`) still emitted message-only invalid-target errors, leaving callback ABI boundaries partially untyped.`
+  - Closed target-validation identifier gaps in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `addlistener` invalid target now emits `RunMat:AddListenerTargetInvalid`
+    - `notify` invalid target now emits `RunMat:NotifyTargetInvalid`
+  - Added runtime ratchets in [lib.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/lib.rs):
+    - `addlistener_rejects_non_object_target_with_identifier`
+    - `notify_rejects_non_object_target_with_identifier`
+  - Validation:
+    - `cargo test -p runmat-runtime addlistener_rejects_non_object_target_with_identifier -- --nocapture`
+    - `cargo test -p runmat-runtime notify_rejects_non_object_target_with_identifier -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `call_method` identifier-contract normalization ratchet
   - `scope: in-scope`
   - Closed callable/object-dispatch boundary gaps where `call_method(...)`, `subsref(...)`, and `subsasgn(...)` still emitted message-only errors for invalid receiver/name shapes, and ratcheted missing object protocol dispatch contracts:

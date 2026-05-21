@@ -539,7 +539,13 @@ async fn addlistener_builtin(
     let key_ptr: usize = match &target {
         Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
         Value::Object(o) => o as *const _ as usize,
-        _ => return Err(("addlistener: target must be handle or object".to_string()).into()),
+        _ => {
+            return Err(
+                build_runtime_error("addlistener: target must be handle or object")
+                    .with_identifier("RunMat:AddListenerTargetInvalid")
+                    .build(),
+            )
+        }
     };
     let mut reg = events().lock().unwrap();
     let id = {
@@ -578,7 +584,13 @@ async fn notify_builtin(
     let key_ptr: usize = match &target {
         Value::HandleObject(h) => (unsafe { h.target.as_raw() }) as usize,
         Value::Object(o) => o as *const _ as usize,
-        _ => return Err(("notify: target must be handle or object".to_string()).into()),
+        _ => {
+            return Err(
+                build_runtime_error("notify: target must be handle or object")
+                    .with_identifier("RunMat:NotifyTargetInvalid")
+                    .build(),
+            )
+        }
     };
     let mut to_call: Vec<runmat_builtins::Listener> = Vec::new();
     {
@@ -2588,6 +2600,28 @@ mod tests {
             err.identifier(),
             Some("RunMat:FevalFunctionValueUnsupported")
         );
+    }
+
+    #[test]
+    fn addlistener_rejects_non_object_target_with_identifier() {
+        let err = block_on(addlistener_builtin(
+            Value::Num(1.0),
+            "Changed".to_string(),
+            Value::FunctionHandle("sin".to_string()),
+        ))
+        .expect_err("addlistener should reject non-object target");
+        assert_eq!(err.identifier(), Some("RunMat:AddListenerTargetInvalid"));
+    }
+
+    #[test]
+    fn notify_rejects_non_object_target_with_identifier() {
+        let err = block_on(notify_builtin(
+            Value::Num(1.0),
+            "Changed".to_string(),
+            Vec::new(),
+        ))
+        .expect_err("notify should reject non-object target");
+        assert_eq!(err.identifier(), Some("RunMat:NotifyTargetInvalid"));
     }
 
     #[test]
