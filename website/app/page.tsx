@@ -211,7 +211,7 @@ const features = [
 
 const surfaces = [
   {
-    title: "Start in the desktop app",
+    title: "Download the desktop app",
     cta: <DetectedDownloadLabel />,
     href: "/download/latest",
     mediaLabel: "Desktop app media",
@@ -223,7 +223,7 @@ const surfaces = [
     mediaLabel: "Browser sandbox media",
   },
   {
-    title: "Use the CLI",
+    title: "Install the CLI",
     cta: "curl -fsSL runmat.com/install | sh",
     href: "/docs/cli",
     mediaLabel: "CLI media",
