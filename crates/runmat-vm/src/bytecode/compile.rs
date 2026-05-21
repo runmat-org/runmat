@@ -4400,6 +4400,35 @@ mod tests {
     }
 
     #[test]
+    fn primary_compile_linear_cell_growth_from_0_by_5_normalizes_to_row_vector() {
+        let ast = runmat_parser::parse("c = cell(0,5); c{3} = 2; v = c{3};").expect("parse");
+        let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
+        let mir = lower_assembly(&hir.assembly).expect("lower MIR");
+        let entrypoint = hir.assembly.entrypoints[0].id;
+        let bytecode = compile(&hir.assembly, &mir, entrypoint).expect("compile");
+        let layout = bytecode.layout.as_ref().expect("layout");
+        let c_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "c")
+            .expect("c export");
+        let v_export = layout.entrypoints[&entrypoint]
+            .exports
+            .iter()
+            .find(|export| export.name == "v")
+            .expect("v export");
+        let vars = block_on(crate::interpret(&bytecode)).expect("interpret");
+        assert_eq!(vars[v_export.slot.0], Value::Num(2.0));
+        match &vars[c_export.slot.0] {
+            Value::Cell(ca) => {
+                assert_eq!(ca.rows, 1);
+                assert_eq!(ca.cols, 3);
+            }
+            other => panic!("expected cell export, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn primary_compile_rejects_cell_brace_end_plus_one_growth_for_matrix_linear_assignment() {
         let ast = runmat_parser::parse("c = {1, 2; 3, 4}; c{end+1} = 9;").expect("parse");
         let hir = lower(&ast, &LoweringContext::empty()).expect("lower HIR");
