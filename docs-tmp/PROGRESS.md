@@ -77,12 +77,19 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/closures.rs)
       - `str2func_qualified_external_callback_errors_without_legacy_fallback`
       - `str2func_qualified_external_direct_call_errors_without_legacy_fallback`
+  - Added qualified external-name direct-call opcode+identifier ratchets across output and expansion shapes:
+    - [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs)
+      - `unresolved_qualified_direct_call_zero_output_uses_external_boundary_typed_instruction`
+      - `unresolved_qualified_direct_call_multi_output_uses_external_boundary_typed_instruction`
+      - `unresolved_qualified_direct_call_expand_zero_output_uses_external_boundary_typed_instruction`
+      - `unresolved_qualified_direct_call_expand_multi_output_uses_external_boundary_typed_instruction`
   - Validation:
     - `cargo test -p runmat-vm unresolved_function_expand_single_output_uses_typed_instruction -- --nocapture`
     - `cargo test -p runmat-vm unresolved_function_single_output_uses_typed_instruction -- --nocapture`
     - `cargo test -p runmat-vm unresolved_function_zero_output_uses_typed_instruction_and_errors -- --nocapture`
     - `cargo test -p runmat-vm unresolved_function_expand_zero_output_uses_typed_instruction_and_errors -- --nocapture`
     - `cargo test -p runmat-vm str2func_qualified_external_ -- --nocapture`
+    - `cargo test -p runmat-vm unresolved_qualified_direct_call_ -- --nocapture`
 
 - Validation cadence checkpoint refresh
   - `scope: in-scope`
