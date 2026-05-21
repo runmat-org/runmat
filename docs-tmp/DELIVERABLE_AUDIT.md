@@ -322,6 +322,12 @@ This audit maps the active objective to concrete repository evidence and marks e
     - interpreter ratchets:
       - `resolve_cell_indices_rejects_fractional_values`
       - `resolve_cell_indices_rejects_zero_values`
+  - logical paren-slice assignment now executes through the typed slice-assignment product path instead of early base-type rejection:
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) `Instr::StoreSlice` now handles `Value::LogicalArray` by round-tripping through tensor slice assign/delete planning and reconstructing logical outputs (`Value::Bool`/`Value::LogicalArray`).
+    - logical slice RHS contract ratchets in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs):
+      - `logical_linear_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier` (`RunMat:InvalidSliceAssignmentRhs`)
+      - `logical_nd_slice_assignment_with_string_rhs_reports_invalid_rhs_identifier` (`RunMat:InvalidSliceAssignmentRhs`)
+      - `logical_slice_assignment_executes_and_coerces_numeric_rhs`
   - non-object expr-slice range metadata now has explicit selector-plan invariants in [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs):
     - `build_expr_index_plan(...)` now pre-validates range selector metadata consistency/arity, duplicate dimensions, out-of-bounds dimensions, and conflicts against colon/end masks.
     - malformed metadata now fails with stable identifiers:
