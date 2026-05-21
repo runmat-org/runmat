@@ -65,3 +65,43 @@ fn degree_radian_conversion_builtins_dispatch() {
         other => panic!("expected scalar result, got {other:?}"),
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn degree_trig_builtins_return_matlab_exact_values() {
+    let sin_zero = runmat_runtime::call_builtin("sind", &[Value::Num(180.0)]).unwrap();
+    match sin_zero {
+        Value::Num(value) => assert_eq!(value, 0.0),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+
+    let sin_half = runmat_runtime::call_builtin("sind", &[Value::Num(30.0)]).unwrap();
+    match sin_half {
+        Value::Num(value) => assert_eq!(value, 0.5),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+
+    let cos_zero = runmat_runtime::call_builtin("cosd", &[Value::Num(90.0)]).unwrap();
+    match cos_zero {
+        Value::Num(value) => assert_eq!(value, 0.0),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+
+    let tan_one = runmat_runtime::call_builtin("tand", &[Value::Num(45.0)]).unwrap();
+    match tan_one {
+        Value::Num(value) => assert_eq!(value, 1.0),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+
+    let tan_pos_inf = runmat_runtime::call_builtin("tand", &[Value::Num(90.0)]).unwrap();
+    match tan_pos_inf {
+        Value::Num(value) => assert!(value.is_infinite() && value.is_sign_positive()),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+
+    let tan_neg_inf = runmat_runtime::call_builtin("tand", &[Value::Num(-90.0)]).unwrap();
+    match tan_neg_inf {
+        Value::Num(value) => assert!(value.is_infinite() && value.is_sign_negative()),
+        other => panic!("expected scalar result, got {other:?}"),
+    }
+}
