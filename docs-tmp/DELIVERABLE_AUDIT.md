@@ -169,6 +169,12 @@ This audit maps the active objective to concrete repository evidence and marks e
     - `primary_compile_rejects_missing_mir_function_handle_runtime_name_with_identifier`
     - `primary_compile_rejects_scalar_plan_with_range_expr_component_with_identifier`
     - `primary_compile_rejects_slice_plan_with_range_expr_component_with_identifier`
+  - brace-content cell assignment now ratchets MATLAB-style subscript growth semantics:
+    - [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now expands 2-D cell arrays for out-of-bounds brace subscript stores and fills intervening cells with empty numeric arrays (`0x0 double`) instead of rejecting with `CellSubscriptOutOfBounds`.
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now allows brace-store `end+1` growth for subscript dimensions, not just linear vector selectors.
+    - compile/runtime ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+      - `primary_compile_supports_cell_brace_subscript_growth_with_empty_fillers`
+      - `primary_compile_supports_cell_brace_end_plus_one_subscript_growth`
 - Gap:
   - designed gaps still open (aggregate edge behavior and selector-plan normalization have both narrowed with early aggregate-shape semantic invariant checks plus compile-stage selector-plan invariant identifiers/ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 

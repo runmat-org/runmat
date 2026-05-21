@@ -12,6 +12,23 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM brace-assignment subscript growth semantics ratchet
+  - `scope: in-scope`
+  - Closed a remaining MATLAB cell semantics gap for brace-content assignment growth:
+    - [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now expands 2-D cell arrays for brace assignments outside current bounds (`C{r,c}=...`) and fills intervening cells with `0x0 double` values.
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now allows `end+1` growth in brace-store paths for subscript dimensions (not only linear vector selectors).
+    - compile/runtime ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+      - `primary_compile_supports_cell_brace_subscript_growth_with_empty_fillers`
+      - `primary_compile_supports_cell_brace_end_plus_one_subscript_growth`
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_supports_cell_brace_subscript_growth_with_empty_fillers -- --nocapture`
+    - `cargo test -p runmat-vm --lib primary_compile_supports_cell_brace_end_plus_one_subscript_growth -- --nocapture`
+    - `cargo test -p runmat-vm --lib -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime callable-request ABI placeholder removal
   - `scope: in-scope`
   - Removed dead policy placeholder surface from runtime semantic callback request ABI:
