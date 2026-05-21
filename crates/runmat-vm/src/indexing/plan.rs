@@ -425,32 +425,21 @@ where
                         }
                     }
                     Value::Tensor(idx_t) => {
-                        let dim_len = *full_shape.get(d).unwrap_or(&1);
                         let len = idx_t.shape.iter().product::<usize>();
-                        if len == dim_len {
-                            let mut vv = Vec::new();
-                            for (i, &val) in idx_t.data.iter().enumerate() {
-                                if val != 0.0 {
-                                    vv.push(i + 1);
-                                }
+                        let mut vv = Vec::with_capacity(len);
+                        for &val in &idx_t.data {
+                            let idx = exact_index_from_f64(val).ok_or_else(|| {
+                                mex(
+                                    "UnsupportedIndexType",
+                                    "Index values must be positive integers or logical values",
+                                )
+                            })?;
+                            if idx < 1 {
+                                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                             }
-                            selectors.push(ExprSel::Indices(vv));
-                        } else {
-                            let mut vv = Vec::with_capacity(len);
-                            for &val in &idx_t.data {
-                                let idx = exact_index_from_f64(val).ok_or_else(|| {
-                                    mex(
-                                        "UnsupportedIndexType",
-                                        "Index values must be positive integers or logical values",
-                                    )
-                                })?;
-                                if idx < 1 {
-                                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                                }
-                                vv.push(idx as usize);
-                            }
-                            selectors.push(ExprSel::Indices(vv));
+                            vv.push(idx as usize);
                         }
+                        selectors.push(ExprSel::Indices(vv));
                     }
                     _ => return Err(mex("UnsupportedIndexType", "Unsupported index type")),
                 }
@@ -623,7 +612,7 @@ mod tests {
     use super::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
     use crate::bytecode::EndExpr;
     use crate::indexing::selectors::build_slice_selectors;
-    use runmat_builtins::{Tensor, Value};
+    use runmat_builtins::{LogicalArray, Tensor, Value};
 
     #[test]
     fn plain_and_expr_linear_range_plans_match() {
@@ -835,6 +824,74 @@ mod tests {
             .await
             .expect_err("inconsistent range metadata should fail");
             assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+        })
+    }
+
+    #[test]
+    fn expr_plan_tensor_selector_length_match_uses_numeric_indices() {
+        futures::executor::block_on(async {
+            let shape = vec![3, 2];
+            let numeric = vec![Value::Tensor(
+                Tensor::new(vec![2.0, 1.0, 3.0], vec![1, 3]).expect("selector tensor"),
+            )];
+            let plain_selectors = build_slice_selectors(2, 0b10, 0, &numeric, &shape)
+                .await
+                .unwrap();
+            let plain = build_index_plan(&plain_selectors, 2, &shape).unwrap();
+            let expr = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 2,
+                    colon_mask: 0b10,
+                    end_mask: 0,
+                    range_dims: &[],
+                    range_params: &[],
+                    range_start_exprs: &[],
+                    range_step_exprs: &[],
+                    range_end_exprs: &[],
+                    numeric: &numeric,
+                    shape: &shape,
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .unwrap();
+            assert_eq!(plain.indices, expr.indices);
+            assert_eq!(plain.output_shape, expr.output_shape);
+            assert_eq!(plain.selection_lengths, expr.selection_lengths);
+        })
+    }
+
+    #[test]
+    fn expr_plan_logical_selector_remains_logical_mask() {
+        futures::executor::block_on(async {
+            let shape = vec![3, 2];
+            let numeric = vec![Value::LogicalArray(
+                LogicalArray::new(vec![0, 1, 1], vec![1, 3]).expect("logical selector"),
+            )];
+            let plain_selectors = build_slice_selectors(2, 0b10, 0, &numeric, &shape)
+                .await
+                .unwrap();
+            let plain = build_index_plan(&plain_selectors, 2, &shape).unwrap();
+            let expr = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 2,
+                    colon_mask: 0b10,
+                    end_mask: 0,
+                    range_dims: &[],
+                    range_params: &[],
+                    range_start_exprs: &[],
+                    range_step_exprs: &[],
+                    range_end_exprs: &[],
+                    numeric: &numeric,
+                    shape: &shape,
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .unwrap();
+            assert_eq!(plain.indices, expr.indices);
+            assert_eq!(plain.output_shape, expr.output_shape);
+            assert_eq!(plain.selection_lengths, expr.selection_lengths);
         })
     }
 }

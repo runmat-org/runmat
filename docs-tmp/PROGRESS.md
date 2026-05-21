@@ -12,6 +12,24 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- Expr-slice selector normalization now aligns tensor-vs-logical semantics with shared selector materialization
+  - `scope: in-scope`
+  - `blocker: expr-slice selector planning in `build_expr_index_plan(...)` still treated `Value::Tensor` as a logical mask when tensor length matched dimension length, diverging from shared selector normalization where tensor selectors are always numeric indices and logical masks are `Value::LogicalArray`.`
+  - Tightened expr-slice selector normalization in [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs):
+    - removed shape-based tensor-as-logical heuristic from `Value::Tensor` selector path.
+    - tensor selectors now consistently decode as positive-integer numeric indices.
+    - logical-mask selector semantics remain on `Value::LogicalArray` path.
+  - Added ratchets:
+    - `expr_plan_tensor_selector_length_match_uses_numeric_indices`
+    - `expr_plan_logical_selector_remains_logical_mask`
+  - Validation:
+    - `cargo test -p runmat-vm expr_plan_tensor_selector_length_match_uses_numeric_indices -- --nocapture`
+    - `cargo test -p runmat-vm expr_plan_logical_selector_remains_logical_mask -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `cellfun`/`arrayfun` now prebind resolver-known name-only closures to semantic IDs
   - `scope: in-scope`
   - `blocker: callback parsing in `cellfun`/`arrayfun` still accepted `Value::Closure` callbacks with `semantic_function = None` as raw name-shaped closures, missing an early semantic-binding step already present for text and external-handle callback forms.`
