@@ -550,11 +550,9 @@ fn fft_end_arithmetic_out_of_bounds_raises_error() {
     let bytecode =
         compile_semantic_source(input).expect("compile semantic end arithmetic oob script");
     let err = interpret(&bytecode).expect_err("end+1 should be out-of-bounds");
-    assert!(
-        matches!(
-            err.identifier(),
-            Some("RunMat:IndexOutOfBounds") | Some("RunMat:SubscriptOutOfBounds")
-        ),
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:IndexOutOfBounds"),
         "unexpected identifier: {:?} ({err:?})",
         err.identifier()
     );

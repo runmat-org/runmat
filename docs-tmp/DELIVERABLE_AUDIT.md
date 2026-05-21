@@ -539,7 +539,7 @@ This audit maps the active objective to concrete repository evidence and marks e
   - VM semantic coverage now asserts this identifier contract in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - `classes_static_and_inheritance`
     - `classes_property_access_attributes`
-  - VM basics indexing error coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs) no longer relies on message substring checks for key semantic failure paths; `fft_end_arithmetic_out_of_bounds_raises_error` and `scalar_slice_with_nonnumeric_selector_errors` now assert stable identifier contracts (`RunMat:IndexOutOfBounds`/`RunMat:SubscriptOutOfBounds` and `RunMat:UnsupportedIndexType`/`RunMat:SliceNonTensor`).
+  - VM basics indexing error coverage in [basics.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/basics.rs) no longer relies on message substring checks for key semantic failure paths; `fft_end_arithmetic_out_of_bounds_raises_error` and `scalar_slice_with_nonnumeric_selector_errors` now assert strict identifier contracts (`RunMat:IndexOutOfBounds` and `RunMat:UnsupportedIndexType`).
   - VM control-flow and indexing-property coverage now similarly ratchets identifier contracts for indexing/object-overload failures in [control_flow.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/control_flow.rs) and [indexing_properties.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/indexing_properties.rs):
     - `index_step_zero_mex` -> `RunMat:IndexStepZero`
     - `unsupported_cell_index_type_mex` -> `RunMat:CellIndexType`
