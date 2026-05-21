@@ -176,10 +176,14 @@ pub fn build_index_plan(
         }
         let zero_based: Vec<u32> = indices.iter().map(|&i| (i - 1) as u32).collect();
         let count = zero_based.len();
+        let base_is_row_vector = base_shape.first().copied().unwrap_or(1) == 1
+            && base_shape.get(1).copied().unwrap_or(1) > 1;
         let shape = match list {
+            SliceSelector::Colon => vec![count, 1],
             SliceSelector::LinearIndices { output_shape, .. } => output_shape,
             _ if count == 0 => vec![0, 1],
             _ if count <= 1 => vec![1, 1],
+            _ if base_is_row_vector => vec![1, count],
             _ => vec![count, 1],
         };
         return Ok(IndexPlan::new(
@@ -455,6 +459,10 @@ where
     let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(spec.dims);
     let mut selection_lengths: Vec<usize> = Vec::with_capacity(spec.dims);
     let mut scalar_mask: Vec<bool> = Vec::with_capacity(spec.dims);
+    let base_is_row_vector = spec.dims == 1
+        && spec.shape.first().copied().unwrap_or(1) == 1
+        && spec.shape.get(1).copied().unwrap_or(1) > 1;
+    let linear_selector_is_colon = matches!(selectors.first(), Some(ExprSel::Colon));
     for (d, sel) in selectors.iter().enumerate().take(spec.dims) {
         let dim_len = full_shape[d] as i64;
         let idxs: Vec<usize> = match sel {
@@ -510,7 +518,15 @@ where
     let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
     if total_out == 0 {
         let output_shape = if spec.dims == 1 {
-            linear_output_shape.clone().unwrap_or_else(|| vec![0, 1])
+            if let Some(shape) = linear_output_shape.clone() {
+                shape
+            } else if linear_selector_is_colon {
+                vec![0, 1]
+            } else if base_is_row_vector {
+                vec![1, 0]
+            } else {
+                vec![0, 1]
+            }
         } else {
             let mut dims_out: Vec<(usize, usize, bool)> = selection_lengths
                 .iter()
@@ -575,6 +591,10 @@ where
             shape
         } else if total_out <= 1 {
             vec![1, 1]
+        } else if linear_selector_is_colon {
+            vec![total_out, 1]
+        } else if base_is_row_vector {
+            vec![1, total_out]
         } else {
             vec![total_out, 1]
         }

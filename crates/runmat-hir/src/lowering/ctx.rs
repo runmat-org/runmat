@@ -1604,18 +1604,13 @@ impl SemanticCtx {
             return None;
         }
 
-        let builtin = runmat_builtins::builtin_function_by_name(name)?;
-        let fixed_inputs = if builtin_has_variadic_tail(builtin) {
-            return None;
-        } else {
-            builtin.param_types.len()
-        };
-        if fixed_inputs <= arg_count {
+        // Builtin signature metadata currently includes optional/overloaded forms that are not
+        // safe to treat as fixed-arity expansion requests (for example `sum(A(:))`). Keep
+        // builtin expansion inference explicit to known variadic/min-input builtins above.
+        if runmat_builtins::builtin_function_by_name(name).is_some() {
             return None;
         }
-        let requested = fixed_inputs - arg_count + 1;
-        self.call_argument_can_supply_outputs(args.last()?, requested)
-            .then_some(requested)
+        None
     }
 
     fn call_argument_can_supply_outputs(&self, arg: &AstExpr, requested: usize) -> bool {
@@ -2236,13 +2231,6 @@ fn is_builtin(name: &str) -> bool {
         .iter()
         .any(|builtin| builtin.name == name)
         || runmat_builtins::builtin_semantics_for_name(name).is_some()
-}
-
-fn builtin_has_variadic_tail(builtin: &runmat_builtins::BuiltinFunction) -> bool {
-    matches!(
-        builtin.param_types.last(),
-        Some(runmat_builtins::Type::Cell { length: None, .. })
-    )
 }
 
 fn variadic_builtin_min_inputs(name: &str) -> Option<usize> {

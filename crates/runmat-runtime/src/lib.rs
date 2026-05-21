@@ -1003,6 +1003,14 @@ async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
         properties: overidx_props,
         methods: overidx_methods,
     });
+
+    // Class without indexing protocol methods, used by negative subsref/subsasgn contracts.
+    runmat_builtins::register_class(ClassDef {
+        name: "NoIdx".to_string(),
+        parent: None,
+        properties: std::collections::HashMap::new(),
+        methods: std::collections::HashMap::new(),
+    });
     Ok(Value::Num(1.0))
 }
 

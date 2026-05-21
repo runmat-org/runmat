@@ -205,7 +205,7 @@ pub async fn build_slice_selectors(
     if dims == 1 {
         let total_len = total_len_from_shape(base_shape);
         if (colon_mask & 1u32) != 0 {
-            selectors.push(SliceSelector::Indices((1..=total_len).collect()));
+            selectors.push(SliceSelector::Colon);
             return Ok(selectors);
         }
         if (end_mask & 1u32) != 0 {
