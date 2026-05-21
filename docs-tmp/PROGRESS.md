@@ -5036,6 +5036,18 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: complete unresolved non-qualified `str2func` expanded-feval failure lanes
+  - Extended unresolved non-qualified `str2func('definitely_missing_callback')` expanded-`feval` contracts in [closures.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/closures.rs):
+    - `str2func_unresolved_external_expand_zero_output_callback_errors_without_legacy_fallback`
+    - `str2func_unresolved_external_expand_multi_output_callback_errors_without_legacy_fallback`
+  - Together with existing expanded single-output coverage (`str2func_unresolved_external_expand_callback_errors_without_legacy_fallback`), unresolved non-qualified expanded-`feval` callback behavior now has output-count `0/1/2` failure identifier coverage.
+  - All lanes are pinned to stable `RunMat:UndefinedFunction`, narrowing remaining callable ABI execution uncertainty for unresolved non-qualified text-handle callbacks.
+  - Validation:
+    - `cargo test -p runmat-vm --test closures str2func_unresolved_external_expand_zero_output_callback_errors_without_legacy_fallback -- --nocapture`
+    - `cargo test -p runmat-vm --test closures str2func_unresolved_external_expand_multi_output_callback_errors_without_legacy_fallback -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
