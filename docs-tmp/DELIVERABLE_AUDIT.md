@@ -175,6 +175,14 @@ This audit maps the active objective to concrete repository evidence and marks e
     - compile/runtime ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
       - `primary_compile_supports_cell_brace_subscript_growth_with_empty_fillers`
       - `primary_compile_supports_cell_brace_end_plus_one_subscript_growth`
+  - linear brace-content growth now ratchets MATLAB-style expansion consistency for vector-shaped/empty cell arrays:
+    - [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now supports non-contiguous linear growth (`C{5}=...`, `C{end+3}=...`) with empty fillers for intervening cells.
+    - empty-shape linear growth now normalizes to row-vector semantics (`5x0`/`0x5` + `C{3}=...` -> `1x3`) instead of preserving ambiguous legacy orientation.
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now allows store-context end selectors beyond current extent for growth (read contexts remain strict bounds-checked).
+    - compile/runtime ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+      - `primary_compile_supports_cell_brace_linear_gap_growth_for_vectors`
+      - `primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors`
+      - `primary_compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector`
 - Gap:
   - designed gaps still open (aggregate edge behavior and selector-plan normalization have both narrowed with early aggregate-shape semantic invariant checks plus compile-stage selector-plan invariant identifiers/ratchets). Async/future/spawn runtime behavior is now explicit as a lazy future-descriptor lane with spawn/await boundary materialization, but broader cancellation/suspension model work remains out of scope for this slice.
 

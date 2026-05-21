@@ -12,6 +12,26 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM linear brace-growth semantics generalization ratchet
+  - `scope: in-scope`
+  - Closed remaining linear brace-growth edge contracts for cell content assignment:
+    - [cells.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/ops/cells.rs) now supports non-contiguous vector linear growth (`C{5}=...`, `C{end+k}=...`) with empty-cell fillers (`0x0 double`) for intervening slots.
+    - Empty-shape linear growth now normalizes to row-vector expansion for `5x0` and `0x5` inputs (`C{3}=...` -> `1x3`), matching MATLAB R2019a behavior for curly-brace expansion consistency.
+    - [indexing.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/interpreter/dispatch/indexing.rs) now allows store-context end-expression/end-offset selectors to resolve beyond current extent for growth paths, while read paths remain bounds-checked.
+  - Added compile/runtime ratchets in [compile.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/bytecode/compile.rs):
+    - `primary_compile_supports_cell_brace_linear_gap_growth_for_vectors`
+    - `primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors`
+    - `primary_compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector`
+  - Validation:
+    - `cargo test -p runmat-vm --lib primary_compile_supports_cell_brace_linear_gap_growth_for_vectors -- --nocapture`
+    - `cargo test -p runmat-vm --lib primary_compile_supports_cell_brace_linear_end_plus_k_growth_for_vectors -- --nocapture`
+    - `cargo test -p runmat-vm --lib primary_compile_linear_cell_growth_from_5_by_0_normalizes_to_row_vector -- --nocapture`
+    - `cargo test -p runmat-vm --lib -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - VM brace-assignment subscript growth semantics ratchet
   - `scope: in-scope`
   - Closed a remaining MATLAB cell semantics gap for brace-content assignment growth:
