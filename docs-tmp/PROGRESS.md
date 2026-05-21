@@ -42,7 +42,9 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - switched expr-range selector lookup to validated dimension-to-position mapping, removing implicit first-match behavior for malformed duplicate metadata.
   - Added ratchets in [plan.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/indexing/plan.rs):
     - `expr_plan_rejects_range_dim_conflicting_with_colon_mask`
+    - `expr_plan_rejects_range_dim_conflicting_with_end_mask`
     - `expr_plan_rejects_duplicate_range_dims`
+    - `expr_plan_rejects_out_of_bounds_range_dim`
     - `expr_plan_rejects_inconsistent_range_metadata_lengths`
   - Validation:
     - `cargo test -p runmat-vm --lib expr_plan_rejects_ -- --nocapture`

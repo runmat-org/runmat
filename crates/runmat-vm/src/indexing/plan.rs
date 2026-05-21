@@ -735,6 +735,30 @@ mod tests {
     }
 
     #[test]
+    fn expr_plan_rejects_range_dim_conflicting_with_end_mask() {
+        futures::executor::block_on(async {
+            let err = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 2,
+                    colon_mask: 0,
+                    end_mask: 0b10,
+                    range_dims: &[1],
+                    range_params: &[(1.0, 1.0)],
+                    range_start_exprs: &[None],
+                    range_step_exprs: &[None],
+                    range_end_exprs: &[EndExpr::End],
+                    numeric: &[Value::Num(1.0)],
+                    shape: &[3, 3],
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .expect_err("range/end conflict should fail");
+            assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+        })
+    }
+
+    #[test]
     fn expr_plan_rejects_duplicate_range_dims() {
         futures::executor::block_on(async {
             let err = build_expr_index_plan(
@@ -755,6 +779,30 @@ mod tests {
             .await
             .expect_err("duplicate range dims should fail");
             assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorPlan"));
+        })
+    }
+
+    #[test]
+    fn expr_plan_rejects_out_of_bounds_range_dim() {
+        futures::executor::block_on(async {
+            let err = build_expr_index_plan(
+                ExprPlanSpec {
+                    dims: 2,
+                    colon_mask: 0,
+                    end_mask: 0,
+                    range_dims: &[2],
+                    range_params: &[(1.0, 1.0)],
+                    range_start_exprs: &[None],
+                    range_step_exprs: &[None],
+                    range_end_exprs: &[EndExpr::End],
+                    numeric: &[Value::Num(1.0), Value::Num(1.0)],
+                    shape: &[3, 3],
+                },
+                |_dim_len, _expr| async move { unreachable!() },
+            )
+            .await
+            .expect_err("out-of-bounds range dim should fail");
+            assert_eq!(err.identifier(), Some("RunMat:InvalidRangeSelectorDim"));
         })
     }
 

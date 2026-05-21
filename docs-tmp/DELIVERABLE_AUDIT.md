@@ -244,7 +244,9 @@ This audit maps the active objective to concrete repository evidence and marks e
       - `RunMat:InvalidRangeSelectorDim` for out-of-bounds range dimensions
     - direct ratchets:
       - `expr_plan_rejects_range_dim_conflicting_with_colon_mask`
+      - `expr_plan_rejects_range_dim_conflicting_with_end_mask`
       - `expr_plan_rejects_duplicate_range_dims`
+      - `expr_plan_rejects_out_of_bounds_range_dim`
       - `expr_plan_rejects_inconsistent_range_metadata_lengths`
   - VM source-level callable identifier contracts now explicitly cover classref and event-target boundaries in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs):
     - classref non-static call boundary: `classref_nonstatic_method_call_errors_with_identifier_contract` -> `RunMat:MethodNotStatic`
