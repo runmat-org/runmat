@@ -465,6 +465,27 @@ mod tests {
     }
 
     #[test]
+    fn runtime_fusion_groups_fallback_to_existing_bytecode_groups_without_semantic_metadata() {
+        let mut bytecode = Bytecode::empty();
+        bytecode.fusion_groups = vec![runmat_accelerate::fusion::FusionGroup {
+            id: 7,
+            kind: runmat_accelerate::fusion::FusionKind::ElementwiseChain,
+            nodes: vec![1],
+            shape: runmat_accelerate::graph::ShapeInfo::Unknown,
+            span: InstrSpan { start: 5, end: 5 },
+            pattern: None,
+            stack_layout: None,
+        }];
+
+        let groups = bytecode.runtime_fusion_groups();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, 7);
+        assert_eq!(groups[0].nodes, vec![1]);
+        assert_eq!(groups[0].span.start, 5);
+        assert_eq!(groups[0].span.end, 5);
+    }
+
+    #[test]
     fn runtime_accel_graph_materializes_when_semantic_groups_exist_and_compile_graph_is_missing() {
         let mut bytecode = Bytecode::empty();
         bytecode.instructions = vec![crate::Instr::Add];
