@@ -65,7 +65,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.9,
     },
     {
-      url: `${baseUrl}/agent`,
+      url: `${baseUrl}/matlab-ai-agent`,
       lastModified: currentDate,
       changeFrequency: 'weekly',
       priority: 0.9,

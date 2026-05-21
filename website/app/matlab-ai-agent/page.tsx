@@ -189,26 +189,26 @@ const jsonLd = {
     },
     {
       "@type": "WebPage",
-      "@id": "https://runmat.com/agent#webpage",
-      url: "https://runmat.com/agent",
+      "@id": "https://runmat.com/matlab-ai-agent#webpage",
+      url: "https://runmat.com/matlab-ai-agent",
       name: "MATLAB Copilot Alternative — AI Agent for Engineering Math | RunMat",
       description:
-        "RunMat's built-in AI agent runs MATLAB code on GPU, reads your workspace and figures, and proposes the next iteration. The Copilot alternative engineers run instead of stitching ChatGPT, MCP, and a MATLAB license together.",
+        "RunMat's built-in AI agent runs MATLAB-syntax code on GPU, reads your workspace and figures, and proposes the next iteration. The Copilot alternative engineers run instead of stitching ChatGPT, MCP, and a MATLAB license together.",
       inLanguage: "en",
       datePublished: "2026-05-18T00:00:00Z",
       dateModified: "2026-05-18T00:00:00Z",
-      breadcrumb: { "@id": "https://runmat.com/agent#breadcrumb" },
+      breadcrumb: { "@id": "https://runmat.com/matlab-ai-agent#breadcrumb" },
       author: { "@id": "https://runmat.com/#organization" },
       publisher: { "@id": "https://runmat.com/#organization" },
-      video: { "@id": "https://runmat.com/agent#hero-video" },
+      video: { "@id": "https://runmat.com/matlab-ai-agent#hero-video" },
       mainEntity: [
-        { "@id": "https://runmat.com/agent#faq" },
-        { "@id": "https://runmat.com/agent#software" },
+        { "@id": "https://runmat.com/matlab-ai-agent#faq" },
+        { "@id": "https://runmat.com/matlab-ai-agent#software" },
       ],
     },
     {
       "@type": "VideoObject",
-      "@id": "https://runmat.com/agent#hero-video",
+      "@id": "https://runmat.com/matlab-ai-agent#hero-video",
       name: "RunMat AI agent for MATLAB — writes and runs code in the browser",
       description:
         "RunMat's built-in AI agent writes MATLAB-syntax code, runs it on GPU, and reads the figures it produces. A MATLAB Copilot alternative that works in the browser with no license required.",
@@ -219,20 +219,20 @@ const jsonLd = {
     },
     {
       "@type": "BreadcrumbList",
-      "@id": "https://runmat.com/agent#breadcrumb",
+      "@id": "https://runmat.com/matlab-ai-agent#breadcrumb",
       itemListElement: [
         { "@type": "ListItem", position: 1, name: "Home", item: "https://runmat.com" },
         {
           "@type": "ListItem",
           position: 2,
           name: "Agent",
-          item: "https://runmat.com/agent",
+          item: "https://runmat.com/matlab-ai-agent",
         },
       ],
     },
     {
       "@type": "SoftwareApplication",
-      "@id": "https://runmat.com/agent#software",
+      "@id": "https://runmat.com/matlab-ai-agent#software",
       name: "RunMat Agent",
       description:
         "AI agent built into the RunMat runtime. Runs MATLAB-syntax code on the GPU, reads lints and editor diagnostics before running, materializes workspace variables, captures figure snapshots, and lands every change as a reviewable diff. Model-agnostic. Runs in the browser or as a desktop app.",
@@ -255,12 +255,12 @@ const jsonLd = {
       url: "https://runmat.com/sandbox",
       author: { "@id": "https://runmat.com/#organization" },
       publisher: { "@id": "https://runmat.com/#organization" },
-      mainEntityOfPage: { "@id": "https://runmat.com/agent#webpage" },
+      mainEntityOfPage: { "@id": "https://runmat.com/matlab-ai-agent#webpage" },
     },
     {
       "@type": "FAQPage",
-      "@id": "https://runmat.com/agent#faq",
-      mainEntityOfPage: { "@id": "https://runmat.com/agent#webpage" },
+      "@id": "https://runmat.com/matlab-ai-agent#faq",
+      mainEntityOfPage: { "@id": "https://runmat.com/matlab-ai-agent#webpage" },
       mainEntity: faqItems.map(item => ({
         "@type": "Question",
         name: item.question,
@@ -277,7 +277,7 @@ export const metadata: Metadata = {
   title: "MATLAB Copilot Alternative — AI Agent for Engineering Math | RunMat",
   description:
     "RunMat's built-in AI agent runs MATLAB-syntax code with GPU acceleration when available, reads your workspace and figures, and proposes the next iteration. The Copilot alternative engineers run instead of stitching ChatGPT, MCP, and a MATLAB license together.",
-  alternates: { canonical: "https://runmat.com/agent" },
+  alternates: { canonical: "https://runmat.com/matlab-ai-agent" },
   keywords: [
     "matlab copilot",
     "matlab copilot alternative",
@@ -304,7 +304,7 @@ export const metadata: Metadata = {
     title: "MATLAB Copilot Alternative — AI Agent for Engineering Math | RunMat",
     description:
       "RunMat's built-in AI agent runs MATLAB-syntax code with GPU acceleration when available, reads your workspace and figures, and proposes the next iteration. Run it instead of stitching ChatGPT, MCP, and a MATLAB license together.",
-    url: "/agent",
+    url: "/matlab-ai-agent",
     siteName: "RunMat",
     type: "website",
     videos: [
@@ -436,7 +436,7 @@ export default function AgentPage() {
                 Build a 3D simulation from a paragraph of physics
               </h3>
               <p className="text-[0.938rem] text-foreground leading-relaxed mb-5 flex-1">
-                Describe the system. The agent writes the script and renders the figure. Sandbox sessions are full of wave propagation, electric fields, and thermal diffusion plots.
+                Describe the system. The agent can draft the script, run it, and help refine the figure. Sandbox sessions are full of wave propagation, electric fields, and thermal diffusion plots.
               </p>
               <div className="rounded-md border border-border/60 bg-foreground/5 px-4 py-3 font-mono text-[0.8125rem] text-foreground/80 leading-relaxed">
                 <span className="select-none text-foreground/40 mr-2">›</span>
@@ -476,7 +476,7 @@ export default function AgentPage() {
               </p>
               <div className="rounded-md border border-border/60 bg-foreground/5 px-4 py-3 font-mono text-[0.8125rem] text-foreground/80 leading-relaxed">
                 <span className="select-none text-foreground/40 mr-2">›</span>
-                Explore steel beam thicknesses for a 1 kN/m distributed load on a 2 m span. Compare stress and weight, then return the best-performing option with the final code.
+                Use a simple beam-stress formula to compare steel beam thicknesses for a 1 kN/m load over a 2 m span. Plot stress versus weight and return the code behind the best option.
               </div>
             </div>
           </div>
@@ -526,7 +526,7 @@ export default function AgentPage() {
                 </span>
                 <p className="text-base font-medium text-foreground">Uses static and runtime feedback</p>
                 <p className="text-[0.938rem] text-foreground mt-1">
-                  Lints, shape checks, errors, variables, and runtime output all stay in the same loop. The agent can use feedback before and after execution instead of waiting for pasted context.
+                  RunMat can surface lints, shape issues, and semantic feedback before execution, then use errors, variables, figures, and runtime output after the script runs.
                 </p>
               </div>
               <div className="rounded-lg border border-border bg-muted/40 p-6">
@@ -769,8 +769,8 @@ export default function AgentPage() {
               <CardContent className="p-6 space-y-4">
                 <h3 className="text-lg font-semibold text-foreground">MATLAB Copilot</h3>
                 <div className="space-y-3 text-sm">
-                  <p className="text-green-600 dark:text-green-400">Good for: MATLAB-aware chat, code generation, and explanations inside MATLAB.</p>
-                  <p className="text-red-600 dark:text-red-400">Stops short at: RunMat&apos;s reviewable project diffs, open runtime, and no-license workflow.</p>
+                  <p className="text-green-600 dark:text-green-400">Best at: MATLAB-aware chat, code generation, and explanations inside MATLAB.</p>
+                  <p className="text-red-600 dark:text-red-400">Missing: RunMat&apos;s reviewable project diffs, open runtime, and no-license workflow.</p>
                 </div>
               </CardContent>
             </Card>
@@ -778,8 +778,8 @@ export default function AgentPage() {
               <CardContent className="p-6 space-y-4">
                 <h3 className="text-lg font-semibold text-foreground">ChatGPT, Claude, Gemini</h3>
                 <div className="space-y-3 text-sm">
-                  <p className="text-green-600 dark:text-green-400">Good for: strong reasoning and useful MATLAB-syntax code suggestions.</p>
-                  <p className="text-red-600 dark:text-red-400">Stops short at: running the code, seeing variables and plots, and keeping edits tied to the project.</p>
+                  <p className="text-green-600 dark:text-green-400">Best at: strong reasoning and useful MATLAB-syntax code suggestions.</p>
+                  <p className="text-red-600 dark:text-red-400">Missing: running the code, seeing variables and plots, and keeping edits tied to the project.</p>
                 </div>
               </CardContent>
             </Card>
@@ -787,8 +787,8 @@ export default function AgentPage() {
               <CardContent className="p-6 space-y-4">
                 <h3 className="text-lg font-semibold text-foreground">Cursor and other AI IDEs</h3>
                 <div className="space-y-3 text-sm">
-                  <p className="text-green-600 dark:text-green-400">Good for: editing files, refactoring code, and working through software projects.</p>
-                  <p className="text-red-600 dark:text-red-400">Stops short at: treating MATLAB-syntax execution, tensors, figures, and runtime output as first-class context.</p>
+                  <p className="text-green-600 dark:text-green-400">Best at: editing files, refactoring code, and working through software projects.</p>
+                  <p className="text-red-600 dark:text-red-400">Missing: treating MATLAB-syntax execution, tensors, figures, and runtime output as first-class context.</p>
                 </div>
               </CardContent>
             </Card>
@@ -796,8 +796,8 @@ export default function AgentPage() {
               <CardContent className="p-6 space-y-4">
                 <h3 className="text-lg font-semibold text-foreground">Spreadsheet + ChatGPT stitching</h3>
                 <div className="space-y-3 text-sm">
-                  <p className="text-green-600 dark:text-green-400">Good for: quick models with familiar tools you already have open.</p>
-                  <p className="text-red-600 dark:text-red-400">Stops short at: a continuous loop between data, code, plots, runtime output, and reviewable history.</p>
+                  <p className="text-green-600 dark:text-green-400">Best at: quick models with familiar tools you already have open.</p>
+                  <p className="text-red-600 dark:text-red-400">Missing: a continuous loop between data, code, plots, runtime output, and reviewable history.</p>
                 </div>
               </CardContent>
             </Card>

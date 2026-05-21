@@ -370,7 +370,7 @@ plot(x, y);
 ```
 This code runs unchanged in MATLAB, Octave, and RunMat. The colon operator creates the vector, and `plot` produces the figure. RunMat and MATLAB display it interactively; Octave uses its GUI or gnuplot.
 
-For scripts that call functions RunMat does not yet ship, [the RunMat agent](/agent) can rewrite around the gap, run the script, and return the change as a reviewable diff -- so .m files that would otherwise stop on a missing built-in keep moving.
+For scripts that call functions RunMat does not yet ship, [the RunMat agent](/matlab-ai-agent) can rewrite around the gap, run the script, and return the change as a reviewable diff -- so .m files that would otherwise stop on a missing built-in keep moving.
 
 ### Python (NumPy & Matplotlib)
 ```python

@@ -300,7 +300,7 @@ export default function HomePage() {
           </div>
           <div className="flex justify-center mt-2">
             <Link
-              href="/agent"
+              href="/matlab-ai-agent"
               className="text-[0.938rem] text-foreground underline hover:text-foreground/80"
               data-ph-capture-attribute-destination="agent-page"
               data-ph-capture-attribute-source="homepage-agent-section"
