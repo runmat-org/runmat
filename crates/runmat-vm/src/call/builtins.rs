@@ -4,6 +4,14 @@ use runmat_builtins::Value;
 use runmat_hir::{QualifiedName, SymbolName};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 
+#[cfg(feature = "native-accel")]
+fn map_prepare_builtin_args_error(err: impl std::fmt::Display) -> RuntimeError {
+    mex(
+        "AccelerationOperationFailed",
+        &format!("prepare builtin args: {err}"),
+    )
+}
+
 #[derive(Clone, Copy)]
 enum VmIntrinsicCounterBuiltin {
     Nargin,
@@ -40,9 +48,9 @@ impl VmIntrinsicExceptionBuiltin {
 
 #[cfg(feature = "native-accel")]
 pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
-    Ok(runmat_accelerate::prepare_builtin_args(name, args)
+    runmat_accelerate::prepare_builtin_args(name, args)
         .await
-        .map_err(|e| e.to_string())?)
+        .map_err(map_prepare_builtin_args_error)
 }
 
 #[cfg(not(feature = "native-accel"))]
@@ -234,5 +242,14 @@ mod tests {
         .expect("rethrow should preserve prior exception");
         assert_eq!(err.identifier(), Some("RunMat:Original"));
         assert_eq!(err.message(), "boom");
+    }
+
+    #[cfg(feature = "native-accel")]
+    #[test]
+    fn prepare_builtin_args_error_maps_to_accel_identifier() {
+        let err = super::map_prepare_builtin_args_error("boom");
+        assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
+        assert!(err.message().contains("prepare builtin args"));
+        assert!(err.message().contains("boom"));
     }
 }

@@ -175,6 +175,21 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- VM accel builtin-arg-prep identifier-contract normalization ratchet
+  - `scope: in-scope`
+  - `blocker: accelerated builtin-argument preparation in VM call dispatch still stringified provider errors without stable identifiers, weakening accel/fusion error contracts on callable boundaries.`
+  - Closed accel-prep identifier gap in [builtins.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/builtins.rs):
+    - native-accel `prepare_builtin_args(...)` failures now map to `RunMat:AccelerationOperationFailed` via typed `mex(...)` conversion instead of message-only `to_string()` errors.
+  - Added VM unit ratchet in [builtins.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/builtins.rs):
+    - `prepare_builtin_args_error_maps_to_accel_identifier`
+  - Validation:
+    - `cargo test -p runmat-vm --lib prepare_builtin_args_error_maps_to_accel_identifier -- --nocapture`
+    - `cargo test -p runmat-vm --lib call::builtins::tests:: -- --nocapture`
+    - `cargo fmt --all --check`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `git diff --check`
+
 - Runtime `call_method` identifier-contract normalization ratchet
   - `scope: in-scope`
   - Closed callable/object-dispatch boundary gaps where `call_method(...)`, `subsref(...)`, and `subsasgn(...)` still emitted message-only errors for invalid receiver/name shapes, and ratcheted missing object protocol dispatch contracts:
