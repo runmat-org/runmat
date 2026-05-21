@@ -656,6 +656,29 @@ fn validate_object_range_selector_plan(
     Ok(range_pos_by_dim)
 }
 
+fn validate_object_end_numeric_selector_plan(
+    slot_count: usize,
+    end_numeric_exprs: &[(usize, EndExpr)],
+) -> Result<Vec<Option<&EndExpr>>, RuntimeError> {
+    let mut end_expr_by_slot = vec![None; slot_count];
+    for (position, expr) in end_numeric_exprs {
+        if *position >= slot_count {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "object end-selector position is out of bounds",
+            ));
+        }
+        if end_expr_by_slot[*position].is_some() {
+            return Err(crate::interpreter::errors::mex(
+                "InvalidEndSelectorPlan",
+                "object end-selector position appears more than once",
+            ));
+        }
+        end_expr_by_slot[*position] = Some(expr);
+    }
+    Ok(end_expr_by_slot)
+}
+
 pub(crate) fn build_object_paren_selector_values(
     dims: usize,
     colon_mask: u32,
@@ -713,6 +736,15 @@ pub(crate) fn build_object_paren_expr_selector_values(
         range_step_exprs,
         range_end_exprs,
     )?;
+    let slot_count = (0..dims)
+        .filter(|&d| {
+            let is_colon = (colon_mask & (1u32 << d)) != 0;
+            let is_end = (end_mask & (1u32 << d)) != 0;
+            !is_colon && !is_end && range_pos_by_dim[d].is_none()
+        })
+        .count();
+    let end_expr_by_slot =
+        validate_object_end_numeric_selector_plan(slot_count, end_numeric_exprs)?;
     let mut values = Vec::with_capacity(dims);
     let mut num_iter = 0usize;
     for d in 0..dims {
@@ -742,7 +774,7 @@ pub(crate) fn build_object_paren_expr_selector_values(
             values.push(build_end_range_descriptor(st, sp, off)?);
             continue;
         }
-        if let Some((_, expr)) = end_numeric_exprs.iter().find(|(pos, _)| *pos == num_iter) {
+        if let Some(expr) = end_expr_by_slot[num_iter] {
             values.push(encode_end_expr_value(expr)?);
             num_iter += 1;
             continue;
@@ -1305,6 +1337,54 @@ mod tests {
             }
             other => panic!("expected encoded end expression cell, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_duplicate_numeric_end_expr_positions() {
+        let err = build_object_paren_expr_selector_values(
+            1,
+            0,
+            0,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[
+                (
+                    0,
+                    EndExpr::Div(Box::new(EndExpr::End), Box::new(EndExpr::Const(2.0))),
+                ),
+                (
+                    0,
+                    EndExpr::Sub(Box::new(EndExpr::End), Box::new(EndExpr::Const(1.0))),
+                ),
+            ],
+            &[Value::Num(0.0)],
+        )
+        .expect_err("duplicate numeric end-expression positions should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
+    }
+
+    #[test]
+    fn object_paren_expr_selector_values_reject_out_of_bounds_numeric_end_expr_positions() {
+        let err = build_object_paren_expr_selector_values(
+            1,
+            0,
+            0,
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[(
+                1,
+                EndExpr::Div(Box::new(EndExpr::End), Box::new(EndExpr::Const(2.0))),
+            )],
+            &[Value::Num(0.0)],
+        )
+        .expect_err("out-of-bounds numeric end-expression position should fail");
+        assert_eq!(err.identifier(), Some("RunMat:InvalidEndSelectorPlan"));
     }
 
     #[test]

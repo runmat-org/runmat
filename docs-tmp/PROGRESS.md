@@ -12,6 +12,21 @@
 
 Broad consumer migration and compatibility-surface cleanup, while keeping semantic pipeline validation green.
 
+- VM object expr-slice numeric-end selector-plan invariant ratchet
+  - `scope: in-scope`
+  - Closed a remaining non-tensor selector-plan normalization hole in object expr-slice descriptor serialization:
+    - [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs) now validates `end_numeric_exprs` metadata positions against concrete non-colon/non-end/non-range selector slots before descriptor materialization.
+    - duplicate or out-of-bounds numeric end-expression selector positions now fail fast with stable identifier `RunMat:InvalidEndSelectorPlan` instead of being silently ignored/overwritten in mixed selector plans.
+  - Added call-layer invariant ratchets in [shared.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/src/call/shared.rs):
+    - `object_paren_expr_selector_values_reject_duplicate_numeric_end_expr_positions`
+    - `object_paren_expr_selector_values_reject_out_of_bounds_numeric_end_expr_positions`
+  - Validation:
+    - `cargo test -p runmat-vm --lib object_paren_expr_selector_values_reject_ -- --nocapture`
+    - `cargo test -p runmat-core --test semicolon_suppression -- --nocapture`
+    - `cargo check --workspace`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 - VM object selector normalization ratchet
   - `scope: in-scope`
   - Closed non-tensor/object-protocol selector-plan normalization gaps across both object paren descriptor paths:
