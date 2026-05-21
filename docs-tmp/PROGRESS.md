@@ -4773,6 +4773,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: complete nested qualified unresolved expanded-call output-shape opcode matrix
+  - Extended nested qualified external-boundary unresolved call coverage in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) by adding expanded-arg zero/single-output variants:
+    - `unresolved_nested_qualified_direct_call_expand_zero_output_uses_external_boundary_typed_instruction`
+    - `unresolved_nested_qualified_direct_call_expand_single_output_uses_external_boundary_typed_instruction`
+  - Together with existing nested expanded multi-output coverage, `pkg.sub.remote(C{:})` is now ratcheted across all output counts (0/1/2) on typed `CallFunctionExpandMultiOutput` lowering plus stable `RunMat:UndefinedFunction` failures.
+  - This closes the remaining nested-qualified unresolved callable ABI output-shape gap in the expanded-call lane.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions unresolved_nested_qualified_direct_call_ -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

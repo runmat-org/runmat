@@ -592,6 +592,76 @@ fn unresolved_nested_qualified_direct_call_multi_output_uses_external_boundary_t
 }
 
 #[test]
+fn unresolved_nested_qualified_direct_call_expand_zero_output_uses_external_boundary_typed_instruction(
+) {
+    let source = "C = deal(1,2); pkg.sub.remote(C{:});";
+    let bytecode = compile_semantic_source(source)
+        .expect("nested qualified expanded zero-output direct call source should compile");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionExpandMultiOutput {
+            identity: runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(path)),
+            fallback_policy,
+            specs,
+            out_count,
+            ..
+        } if path == &vec![
+                runmat_hir::SymbolName("pkg".to_string()),
+                runmat_hir::SymbolName("sub".to_string()),
+                runmat_hir::SymbolName("remote".to_string()),
+            ]
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
+            && *out_count == 0
+            && specs.len() == 1
+            && specs[0].is_expand
+            && specs[0].expand_all
+    )));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved nested qualified expanded zero-output direct call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
+fn unresolved_nested_qualified_direct_call_expand_single_output_uses_external_boundary_typed_instruction(
+) {
+    let source = "C = deal(1,2); a = pkg.sub.remote(C{:});";
+    let bytecode = compile_semantic_source(source)
+        .expect("nested qualified expanded single-output direct call source should compile");
+    assert!(bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::CallFunctionExpandMultiOutput {
+            identity: runmat_hir::CallableIdentity::ExternalName(runmat_hir::QualifiedName(path)),
+            fallback_policy,
+            specs,
+            out_count,
+            ..
+        } if path == &vec![
+                runmat_hir::SymbolName("pkg".to_string()),
+                runmat_hir::SymbolName("sub".to_string()),
+                runmat_hir::SymbolName("remote".to_string()),
+            ]
+            && *fallback_policy == runmat_hir::CallableFallbackPolicy::ExternalBoundary
+            && *out_count == 1
+            && specs.len() == 1
+            && specs[0].is_expand
+            && specs[0].expand_all
+    )));
+    let err = interpret(&bytecode)
+        .expect_err("unresolved nested qualified expanded single-output direct call should fail");
+    assert_eq!(
+        err.identifier(),
+        Some("RunMat:UndefinedFunction"),
+        "unexpected error: {}",
+        err.message()
+    );
+}
+
+#[test]
 fn unresolved_nested_qualified_direct_call_expand_multi_output_uses_external_boundary_typed_instruction(
 ) {
     let source = "C = deal(1,2); [a,b] = pkg.sub.remote(C{:});";
