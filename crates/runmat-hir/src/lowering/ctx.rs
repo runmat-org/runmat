@@ -863,10 +863,17 @@ impl SemanticCtx {
     ) -> Result<Option<SemanticHirStmt>, SemanticError> {
         let span = stmt.span();
         let kind = match stmt {
-            AstStmt::ExprStmt(expr, suppressed, _) => HirStmtKind::ExprStmt(
-                self.lower_expr_semantic_requested(expr, RequestedOutputCount::Zero)?,
-                *suppressed,
-            ),
+            AstStmt::ExprStmt(expr, suppressed, _) => {
+                let requested_outputs = if *suppressed {
+                    RequestedOutputCount::Zero
+                } else {
+                    RequestedOutputCount::One
+                };
+                HirStmtKind::ExprStmt(
+                    self.lower_expr_semantic_requested(expr, requested_outputs)?,
+                    *suppressed,
+                )
+            }
             AstStmt::Assign(name, expr, suppressed, _) => {
                 let binding = self.binding_for_write(name, span);
                 let place = HirPlace::Binding(binding);
