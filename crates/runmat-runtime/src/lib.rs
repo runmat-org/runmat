@@ -1675,9 +1675,7 @@ async fn getmethod_builtin(obj: Value, name: String) -> crate::BuiltinResult<Val
                 captures: vec![Value::Object(o), Value::String(method_name.to_string())],
             }))
         }
-        Value::ClassRef(cls) => {
-            str2func_builtin(Value::String(format!("@{cls}.{method_name}")))
-        }
+        Value::ClassRef(cls) => str2func_builtin(Value::String(format!("@{cls}.{method_name}"))),
         other => Err(
             build_runtime_error(format!("getmethod unsupported on {other:?}"))
                 .with_identifier("RunMat:GetMethodReceiverUnsupported")
@@ -1873,7 +1871,10 @@ mod tests {
     fn getmethod_rejects_unsupported_receiver_with_identifier() {
         let err = block_on(getmethod_builtin(Value::Num(1.0), "origin".to_string()))
             .expect_err("unsupported receiver should be rejected");
-        assert_eq!(err.identifier(), Some("RunMat:GetMethodReceiverUnsupported"));
+        assert_eq!(
+            err.identifier(),
+            Some("RunMat:GetMethodReceiverUnsupported")
+        );
     }
 
     #[test]
