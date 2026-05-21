@@ -203,6 +203,13 @@ fn unresolved_qualified_external_handle_direct_call_uses_external_handle_instruc
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
     ));
+    assert!(
+        bytecode
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, runmat_vm::Instr::Index(1))),
+        "single-output direct handle call should lower through Index(1)"
+    );
     let err =
         interpret(&bytecode).expect_err("unresolved qualified direct handle call should fail");
     assert_eq!(
@@ -241,6 +248,9 @@ fn unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_inst
         .expect("qualified external handle multi-output direct call compiles");
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateExternalFunctionHandle(name) if name == "pkg.remote_inc")
+    ));
+    assert!(bytecode.instructions.iter().any(
+        |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
     ));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified multi-output direct handle call should fail");

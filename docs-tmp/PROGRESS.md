@@ -4747,6 +4747,17 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo check --workspace`
     - `git diff --check`
 
+- RM-378: tighten existing unresolved qualified-handle direct-call opcode assertions
+  - Hardened existing unresolved qualified external-handle direct-call tests in [functions.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-vm/tests/functions.rs) to assert bytecode shape explicitly instead of relying only on runtime failure surfaces:
+    - `unresolved_qualified_external_handle_direct_call_uses_external_handle_instruction` now also asserts single-output direct handle invocation lowers through `Index(1)`.
+    - `unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_instruction` now also asserts `[a,b] = h(1)` lowers through `CallFevalMulti(1,2)`.
+  - This removes remaining proxy-style coverage from those preexisting callable ABI tests and keeps the direct-handle single-output vs multi-output opcode boundary explicitly ratcheted.
+  - Validation:
+    - `cargo test -p runmat-vm --test functions unresolved_qualified_external_handle_direct_call_uses_external_handle_instruction -- --nocapture`
+    - `cargo test -p runmat-vm --test functions unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_instruction -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.
