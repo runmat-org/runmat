@@ -5179,6 +5179,23 @@ Broad consumer migration and compatibility-surface cleanup, while keeping semant
     - `cargo fmt --all --check`
     - `git diff --check`
 
+- RM-378: normalize unresolved external callback diagnostics in cellfun/arrayfun to typed callable identity
+  - External callback unresolved branches in:
+    - [cellfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/cells/core/cellfun.rs)
+    - [arrayfun.rs](/Users/nallana/Source/runmat-acc-2/runmat/crates/runmat-runtime/src/builtins/acceleration/gpu/arrayfun.rs)
+    now emit typed callable-identity diagnostics (`Undefined function for callable identity ...`) for well-formed external callback identities after semantic-descriptor resolution misses, instead of name-shaped `"Undefined function 'pkg.callback'"` text.
+  - Added ratchet assertions in:
+    - `cellfun_external_handle_errors_as_undefined_when_unresolved`
+    - `arrayfun_external_handle_errors_as_undefined_when_unresolved`
+    to require typed identity messaging for well-formed external handles while keeping malformed-handle identifier behavior unchanged.
+  - Validation:
+    - `cargo test -p runmat-runtime cellfun_external_handle_errors_as_undefined_when_unresolved -- --nocapture`
+    - `cargo test -p runmat-runtime arrayfun_external_handle_errors_as_undefined_when_unresolved -- --nocapture`
+    - `cargo test -p runmat-runtime cellfun_malformed_external_handle_errors_as_undefined_when_unresolved -- --nocapture`
+    - `cargo test -p runmat-runtime arrayfun_malformed_external_handle_errors_as_undefined_when_unresolved -- --nocapture`
+    - `cargo fmt --all --check`
+    - `git diff --check`
+
 ## Next Resolution Items
 
 - Keep legacy assertion/reference cleanup on maintenance watch for non-targeted surfaces; core/config/vm/cli targeted migration surfaces are now on typed/exact contracts.

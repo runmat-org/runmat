@@ -552,8 +552,9 @@ impl Callable {
                 call_builtin_async(name, args).await
             }
             Callable::ExternalName { name } => {
+                let identity = crate::external_callable_identity_for_name(name);
                 let request = user_functions::SemanticCallableRequest::resolved(
-                    crate::external_callable_identity_for_name(name),
+                    identity.clone(),
                     runmat_hir::CallableFallbackPolicy::ExternalBoundary,
                     args.to_vec(),
                     1,
@@ -562,7 +563,7 @@ impl Callable {
                     return result;
                 }
                 Err(cellfun_error_with_identifier(
-                    format!("Undefined function '{name}'"),
+                    format!("Undefined function for callable identity {identity:?}"),
                     "RunMat:UndefinedFunction",
                 ))
             }
@@ -1059,6 +1060,14 @@ pub(crate) mod tests {
             Some("RunMat:UndefinedFunction"),
             "unexpected error: {}",
             err.message()
+        );
+        assert!(
+            err.message().contains("ExternalName(QualifiedName"),
+            "unexpected error: {err:?}"
+        );
+        assert!(
+            !err.message().contains("Undefined function 'pkg.callback'"),
+            "well-formed external callback should report typed identity: {err:?}"
         );
     }
 
