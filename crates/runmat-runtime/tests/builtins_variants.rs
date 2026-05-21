@@ -105,3 +105,22 @@ fn degree_trig_builtins_return_matlab_exact_values() {
         other => panic!("expected scalar result, got {other:?}"),
     }
 }
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn mode_builtin_dispatches_for_majority_and_ties() {
+    let majority =
+        runmat_builtins::Tensor::new(vec![1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0], vec![7, 1]).unwrap();
+    let result = runmat_runtime::call_builtin("mode", &[Value::Tensor(majority)]).unwrap();
+    assert_eq!(result, Value::Num(3.0));
+
+    let ties = runmat_builtins::Tensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![1, 4]).unwrap();
+    let tied_result = runmat_runtime::call_builtin("mode", &[Value::Tensor(ties)]).unwrap();
+    assert_eq!(tied_result, Value::Num(1.0));
+
+    let across =
+        runmat_builtins::Tensor::new(vec![1.0, 2.0, 3.0, 2.0, 3.0, 2.0], vec![2, 3]).unwrap();
+    let all_result =
+        runmat_runtime::call_builtin("mode", &[Value::Tensor(across), Value::from("all")]).unwrap();
+    assert_eq!(all_result, Value::Num(2.0));
+}

@@ -1,4 +1,5 @@
 use crate::builtins::array::type_resolvers::{row_vector_type, size_vector_len};
+use crate::builtins::math::reduction::type_resolvers::reduce_numeric_type;
 use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use runmat_builtins::{ResolveContext, Type};
 
@@ -8,6 +9,15 @@ pub fn cov_type(args: &[Type], _context: &ResolveContext) -> Type {
 
 pub fn corrcoef_type(args: &[Type], _context: &ResolveContext) -> Type {
     square_summary_type(args)
+}
+
+/// Type resolver for `mode`. Mirrors the reduction-style shape inference used by
+/// `mean` / `median` / `var`: the leading output (`M`) keeps the input's element
+/// type and reduces the requested dimension (or the first non-singleton dim by
+/// default). The frequency (`F`) output mirrors `M`'s shape, while the cell
+/// array (`C`) is described separately at the type level.
+pub fn mode_type(args: &[Type], context: &ResolveContext) -> Type {
+    reduce_numeric_type(args, context)
 }
 
 pub fn histcounts_type(args: &[Type], ctx: &ResolveContext) -> Type {
